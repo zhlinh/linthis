@@ -1,11 +1,20 @@
 # Rust
-/target/
+target/
 debug/
 release/
 *.rs.bk
 *.rlib
 *.prof*
-Cargo.lock
+
+# Python (for maturin builds)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+dist/
+*.egg-info/
+*.whl
 
 # IDE
 .idea/
@@ -23,3 +32,12 @@ Thumbs.db
 # Test artifacts
 *.tmp
 *.swp
+
+# Archives
+*.zip
+*.tar.gz
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
