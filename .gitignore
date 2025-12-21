@@ -1,0 +1,25 @@
+# Rust
+/target/
+debug/
+release/
+*.rs.bk
+*.rlib
+*.prof*
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and env
+*.log
+.env*
+
+# Test artifacts
+*.tmp
+*.swp

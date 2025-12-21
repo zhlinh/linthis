@@ -1,0 +1,63 @@
+# Linthis Default Configuration
+# This file contains built-in defaults that are applied when no user/project config exists.
+
+# Maximum cyclomatic complexity threshold
+max_complexity = 20
+
+# Default exclusion patterns
+exclude = [
+    ".git/**",
+    ".hg/**",
+    ".svn/**",
+    "node_modules/**",
+    "target/**",
+    "vendor/**",
+    "build/**",
+    "dist/**",
+    "__pycache__/**",
+    "*.pyc",
+    "*.pyo",
+    ".venv/**",
+    "venv/**",
+    ".idea/**",
+    ".vscode/**",
+    "*.min.js",
+    "*.min.css",
+]
+
+# Output settings
+[output]
+format = "human"  # human, json, github-actions
+color = "auto"    # auto, always, never
+
+# Parallel processing
+[parallel]
+enabled = true
+jobs = 0  # 0 = auto-detect CPU count
+
+# Python settings (uses ruff for both linting and formatting)
+[python]
+# Ruff is used for both linting and formatting (10-100x faster than flake8+black)
+linter = "ruff"
+formatter = "ruff"
+line_length = 120
+target_version = "py38"
+
+# Rust settings
+[rust]
+linter = "clippy"
+formatter = "rustfmt"
+
+# TypeScript/JavaScript settings
+[typescript]
+linter = "eslint"
+formatter = "prettier"
+
+# Go settings
+[go]
+linter = "go vet"
+formatter = "gofmt"
+
+# C/C++ settings
+[cpp]
+formatter = "clang-format"
