@@ -1,0 +1,4 @@
+# Test rustfmt configuration
+edition = "2021"
+max_width = 100
+tab_spaces = 4

@@ -13,8 +13,13 @@
 use crate::checkers::Checker;
 use crate::utils::types::{LintIssue, Severity};
 use crate::{Language, Result};
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+/// Cache for clippy results per project root
+static CLIPPY_CACHE: Mutex<Option<HashMap<PathBuf, Vec<LintIssue>>>> = Mutex::new(None);
 
 /// Rust checker using cargo clippy.
 pub struct RustChecker;
@@ -24,13 +29,49 @@ impl RustChecker {
         Self
     }
 
+    /// Find the Cargo.toml for a given file path
+    fn find_cargo_root(path: &Path) -> Option<PathBuf> {
+        let mut current = if path.is_file() {
+            path.parent()?.to_path_buf()
+        } else {
+            path.to_path_buf()
+        };
+
+        loop {
+            let cargo_toml = current.join("Cargo.toml");
+            if cargo_toml.exists() {
+                return Some(current);
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Run cargo clippy on a project and cache the results
+    fn run_cargo_clippy(project_root: &Path) -> Result<Vec<LintIssue>> {
+        let output = Command::new("cargo")
+            .args(["clippy", "--message-format=short", "--", "-D", "warnings"])
+            .current_dir(project_root)
+            .output()
+            .map_err(|e| {
+                crate::LintisError::Checker(format!("Failed to run cargo clippy: {}", e))
+            })?;
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let issues = Self::parse_clippy_output(&stderr, project_root);
+
+        Ok(issues)
+    }
+
     /// Parse clippy output and extract issues.
-    fn parse_clippy_output(&self, output: &str, file_path: &Path) -> Vec<LintIssue> {
+    fn parse_clippy_output(output: &str, project_root: &Path) -> Vec<LintIssue> {
         let mut issues = Vec::new();
 
-        // Clippy output format: file:line:column: severity: message
+        // Clippy short format: file:line:col: severity: message
         for line in output.lines() {
-            if let Some(issue) = self.parse_clippy_line(line, file_path) {
+            if let Some(issue) = Self::parse_clippy_line(line, project_root) {
                 issues.push(issue);
             }
         }
@@ -38,8 +79,8 @@ impl RustChecker {
         issues
     }
 
-    fn parse_clippy_line(&self, line: &str, default_path: &Path) -> Option<LintIssue> {
-        // Simple parsing - clippy outputs: path:line:col: severity: message
+    fn parse_clippy_line(line: &str, project_root: &Path) -> Option<LintIssue> {
+        // Short format: path:line:col: severity: message
         // Example: src/main.rs:10:5: warning: unused variable `x`
         if !line.contains(": warning:") && !line.contains(": error:") {
             return None;
@@ -50,7 +91,8 @@ impl RustChecker {
             return None;
         }
 
-        let file_path = std::path::PathBuf::from(parts[0]);
+        let relative_path = PathBuf::from(parts[0]);
+        let file_path = project_root.join(relative_path);
         let line_num = parts[1].trim().parse::<usize>().ok()?;
         let col = parts[2].trim().parse::<usize>().ok();
 
@@ -65,23 +107,32 @@ impl RustChecker {
             return None;
         };
 
-        let mut issue = LintIssue::new(
-            if file_path.exists() {
-                file_path
-            } else {
-                default_path.to_path_buf()
-            },
-            line_num,
-            message,
-            severity,
-        )
-        .with_source("clippy".to_string());
+        let mut issue = LintIssue::new(file_path, line_num, message, severity)
+            .with_source("clippy".to_string());
 
         if let Some(c) = col {
             issue = issue.with_column(c);
         }
 
         Some(issue)
+    }
+
+    /// Get cached issues for a project, running clippy if not cached
+    fn get_cached_issues(project_root: &Path) -> Result<Vec<LintIssue>> {
+        let mut cache = CLIPPY_CACHE.lock().unwrap();
+        if cache.is_none() {
+            *cache = Some(HashMap::new());
+        }
+
+        let cache_map = cache.as_mut().unwrap();
+        if let Some(issues) = cache_map.get(project_root) {
+            return Ok(issues.clone());
+        }
+
+        // Run clippy and cache results
+        let issues = Self::run_cargo_clippy(project_root)?;
+        cache_map.insert(project_root.to_path_buf(), issues.clone());
+        Ok(issues)
     }
 }
 
@@ -101,32 +152,47 @@ impl Checker for RustChecker {
     }
 
     fn check(&self, path: &Path) -> Result<Vec<LintIssue>> {
-        // For single files, we use rustc with clippy lints
-        // For full projects, we'd use cargo clippy
-        let output = Command::new("rustc")
-            .args([
-                "--edition=2021",
-                "-W",
-                "clippy::all",
-                "--emit=metadata",
-                "-o",
-                "/dev/null",
-            ])
-            .arg(path)
-            .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run rustc: {}", e)))?;
+        // Find the Cargo project root
+        let project_root = match Self::find_cargo_root(path) {
+            Some(root) => root,
+            None => {
+                // Not a Cargo project, skip
+                return Ok(Vec::new());
+            }
+        };
 
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let issues = self.parse_clippy_output(&stderr, path);
+        // Get all issues for this project (cached)
+        let all_issues = Self::get_cached_issues(&project_root)?;
 
-        Ok(issues)
+        // Normalize paths for comparison
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+        // Filter issues for this specific file
+        let file_issues: Vec<LintIssue> = all_issues
+            .into_iter()
+            .filter(|issue| {
+                let issue_canonical = issue
+                    .file_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| issue.file_path.clone());
+                issue_canonical == canonical_path
+            })
+            .collect();
+
+        Ok(file_issues)
     }
 
     fn is_available(&self) -> bool {
-        Command::new("rustc")
-            .arg("--version")
+        Command::new("cargo")
+            .args(["clippy", "--version"])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
     }
+}
+
+/// Clear the clippy cache (useful for testing or forcing re-run)
+pub fn clear_clippy_cache() {
+    let mut cache = CLIPPY_CACHE.lock().unwrap();
+    *cache = None;
 }

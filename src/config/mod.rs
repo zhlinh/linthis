@@ -52,6 +52,38 @@ pub struct Config {
     /// Language-specific overrides
     #[serde(default)]
     pub language_overrides: Option<LanguageOverrides>,
+
+    /// Plugin configuration
+    #[serde(default)]
+    pub plugin: Option<PluginConfig>,
+}
+
+/// Plugin configuration section
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PluginConfig {
+    /// List of plugin sources in priority order (later overrides earlier)
+    #[serde(default)]
+    pub sources: Vec<PluginSourceConfig>,
+}
+
+/// Plugin source configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSourceConfig {
+    /// Plugin name (required for registry lookup or display)
+    pub name: String,
+    /// Git repository URL (optional if name is in registry)
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Git ref (tag, branch, commit hash)
+    #[serde(default, rename = "ref")]
+    pub git_ref: Option<String>,
+    /// Whether this plugin is enabled (default: true)
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 /// Source path configuration (CodeCC compatibility)
@@ -221,6 +253,27 @@ impl Config {
         if other.language_overrides.is_some() {
             self.language_overrides = other.language_overrides;
         }
+        if other.plugin.is_some() {
+            self.plugin = other.plugin;
+        }
+    }
+
+    /// Get plugin sources from config, converting to PluginSource type
+    pub fn get_plugin_sources(&self) -> Vec<crate::plugin::PluginSource> {
+        self.plugin
+            .as_ref()
+            .map(|p| {
+                p.sources
+                    .iter()
+                    .map(|s| crate::plugin::PluginSource {
+                        name: s.name.clone(),
+                        url: s.url.clone(),
+                        git_ref: s.git_ref.clone(),
+                        enabled: s.enabled,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Load and merge configuration from all sources with proper precedence.

@@ -1,0 +1,6 @@
+# Test ruff configuration
+line-length = 100
+
+[lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]

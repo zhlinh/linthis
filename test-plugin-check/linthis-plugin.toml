@@ -1,0 +1,17 @@
+[plugin]
+name = 'test-plugin-check'
+version = '0.1.0'
+description = 'test-plugin-check configuration plugin for linthis'
+linthis_version = '>=0.2.0'
+languages = [
+    'rust',
+    'python',
+    'typescript',
+]
+license = 'MIT'
+
+[[plugin.authors]]
+name = 'Your Name'
+email = 'you@example.com'
+
+[configs]
