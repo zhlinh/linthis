@@ -1,6 +1,6 @@
 [package]
 name = "linthis"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = ["zhlinh"]
 description = "A fast, cross-platform multi-language linter and formatter"
