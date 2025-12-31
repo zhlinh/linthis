@@ -1,0 +1,2 @@
+# Test clippy configuration
+avoid-breaking-exported-api = true

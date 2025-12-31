@@ -25,6 +25,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 toml = "0.5"
+toml_edit = "0.22"  # For preserving TOML format when editing config files
 
 # File system
 walkdir = "2.3"
@@ -47,6 +48,15 @@ lazy_static = "1.4"
 # Logging
 log = "0.4"
 env_logger = "0.10"
+
+# Platform directories (for plugin cache)
+directories = "5.0"
+
+# Date/time (for plugin metadata)
+chrono = { version = "0.4", features = ["serde"] }
+
+# File locking (for cache operations)
+fs2 = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

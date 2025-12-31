@@ -122,7 +122,10 @@ impl PythonChecker {
         }
 
         // Get the letter prefix (could be 1-2 chars like "UP", "PL", etc.)
-        let prefix: String = code.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+        let prefix: String = code
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .collect();
 
         match prefix.as_str() {
             // Errors
@@ -130,11 +133,11 @@ impl PythonChecker {
             // Warnings
             "W" | "N" | "B" | "S" | "A" | "PL" | "PLW" | "PLR" | "PLE" | "C90" => Severity::Warning,
             // Info (conventions, refactoring suggestions)
-            "C" | "R" | "I" | "D" | "UP" | "YTT" | "ANN" | "BLE" | "FBT" | "COM" | "DTZ"
-            | "EM" | "EXE" | "FA" | "ISC" | "ICN" | "LOG" | "G" | "INP" | "PIE" | "T20" | "PYI"
-            | "PT" | "Q" | "RSE" | "RET" | "SLF" | "SLOT" | "SIM" | "TID" | "TCH" | "INT"
-            | "ARG" | "PTH" | "TD" | "FIX" | "ERA" | "PD" | "PGH" | "TRY" | "FLY" | "NPY"
-            | "AIR" | "PERF" | "FURB" | "RUF" => Severity::Info,
+            "C" | "R" | "I" | "D" | "UP" | "YTT" | "ANN" | "BLE" | "FBT" | "COM" | "DTZ" | "EM"
+            | "EXE" | "FA" | "ISC" | "ICN" | "LOG" | "G" | "INP" | "PIE" | "T20" | "PYI" | "PT"
+            | "Q" | "RSE" | "RET" | "SLF" | "SLOT" | "SIM" | "TID" | "TCH" | "INT" | "ARG"
+            | "PTH" | "TD" | "FIX" | "ERA" | "PD" | "PGH" | "TRY" | "FLY" | "NPY" | "AIR"
+            | "PERF" | "FURB" | "RUF" => Severity::Info,
             // Default to Info for unknown codes
             _ => Severity::Info,
         }
@@ -234,7 +237,10 @@ mod tests {
         assert_eq!(issue.column, Some(8));
         assert_eq!(issue.severity, Severity::Error);
         assert_eq!(issue.source, Some("ruff".to_string()));
-        assert_eq!(issue.suggestion, Some("Remove unused import: `os`".to_string()));
+        assert_eq!(
+            issue.suggestion,
+            Some("Remove unused import: `os`".to_string())
+        );
     }
 
     #[test]

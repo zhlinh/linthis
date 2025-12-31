@@ -14,12 +14,18 @@ pub mod benchmark;
 pub mod checkers;
 pub mod config;
 pub mod formatters;
+pub mod plugin;
 pub mod presets;
 pub mod utils;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Instant;
 use thiserror::Error;
+
+/// Track which tool warnings have been shown (to avoid duplicate warnings)
+static WARNED_TOOLS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 use checkers::{
     Checker, CppChecker, GoChecker, JavaChecker, PythonChecker, RustChecker, TypeScriptChecker,
@@ -218,6 +224,110 @@ fn get_formatter(lang: Language) -> Option<Box<dyn Formatter>> {
     }
 }
 
+/// Get installation instructions for a language's linter (platform-specific)
+fn get_checker_install_hint(lang: Language) -> String {
+    match lang {
+        Language::Rust => "Install: rustup component add clippy".to_string(),
+        Language::Python => "Install: pip install ruff".to_string(),
+        Language::Go => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install golangci-lint\n         Or: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest".to_string()
+            } else if cfg!(target_os = "windows") {
+                "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: choco install golangci-lint".to_string()
+            } else {
+                "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: sudo apt install golangci-lint (Ubuntu/Debian)".to_string()
+            }
+        }
+        Language::TypeScript | Language::JavaScript => "Install: npm install -g eslint".to_string(),
+        Language::Java => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install checkstyle".to_string()
+            } else if cfg!(target_os = "windows") {
+                "Install: choco install checkstyle\n         Or download from: https://checkstyle.org/".to_string()
+            } else {
+                "Install: sudo apt install checkstyle (Ubuntu/Debian)\n         Or download from: https://checkstyle.org/".to_string()
+            }
+        }
+        Language::Cpp | Language::ObjectiveC => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install llvm (for clang-tidy)\n         Or: pip install cpplint"
+                    .to_string()
+            } else if cfg!(target_os = "windows") {
+                "Install: choco install llvm (for clang-tidy)\n         Or: pip install cpplint"
+                    .to_string()
+            } else {
+                "Install: sudo apt install clang-tidy (Ubuntu/Debian)\n         Or: pip install cpplint".to_string()
+            }
+        }
+    }
+}
+
+/// Get installation instructions for a language's formatter (platform-specific)
+fn get_formatter_install_hint(lang: Language) -> String {
+    match lang {
+        Language::Rust => "Install: rustup component add rustfmt".to_string(),
+        Language::Python => "Install: pip install ruff".to_string(),
+        Language::Go => "Install: Go formatter (gofmt) is included with Go".to_string(),
+        Language::TypeScript | Language::JavaScript => {
+            "Install: npm install -g prettier".to_string()
+        }
+        Language::Java => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install google-java-format".to_string()
+            } else if cfg!(target_os = "windows") {
+                "Install: Download from https://github.com/google/google-java-format/releases"
+                    .to_string()
+            } else {
+                "Install: Download from https://github.com/google/google-java-format/releases\n         Or use your package manager".to_string()
+            }
+        }
+        Language::Cpp | Language::ObjectiveC => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install clang-format\n         Or: brew install llvm".to_string()
+            } else if cfg!(target_os = "windows") {
+                "Install: choco install llvm (includes clang-format)".to_string()
+            } else {
+                "Install: sudo apt install clang-format (Ubuntu/Debian)".to_string()
+            }
+        }
+    }
+}
+
+/// Warn about missing tool (once per tool)
+fn warn_missing_tool(tool_type: &str, lang: Language, is_checker: bool) {
+    let tool_key = format!("{}-{}", tool_type, lang.name());
+    if should_warn_tool(&tool_key) {
+        let hint = if is_checker {
+            get_checker_install_hint(lang)
+        } else {
+            get_formatter_install_hint(lang)
+        };
+        eprintln!(
+            "\x1b[33mWarning\x1b[0m: No {} {} available for {} files",
+            lang.name(),
+            tool_type,
+            lang.name()
+        );
+        eprintln!("  {}", hint);
+        eprintln!();
+    }
+}
+
+/// Check if we've already warned about a tool
+fn should_warn_tool(tool_name: &str) -> bool {
+    let mut warned = WARNED_TOOLS.lock().unwrap();
+    if warned.is_none() {
+        *warned = Some(HashSet::new());
+    }
+    let set = warned.as_mut().unwrap();
+    if set.contains(tool_name) {
+        false
+    } else {
+        set.insert(tool_name.to_string());
+        true
+    }
+}
+
 /// Run checker on a file and return issues.
 fn run_checker_on_file(file: &Path, lang: Language, verbose: bool) -> Vec<utils::types::LintIssue> {
     let mut issues = Vec::new();
@@ -233,12 +343,9 @@ fn run_checker_on_file(file: &Path, lang: Language, verbose: bool) -> Vec<utils:
                     }
                 }
             }
-        } else if verbose {
-            eprintln!(
-                "Checker '{}' not available for {}",
-                checker.name(),
-                file.display()
-            );
+        } else {
+            // Show warning once per tool (not per file)
+            warn_missing_tool("linter", lang, true);
         }
     }
     issues
@@ -295,8 +402,6 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // For RunMode::Both: lint → format → lint (only files with issues)
     if options.mode == RunMode::Both {
-        use std::collections::HashSet;
-
         // Step 1: First lint pass (before formatting)
         if options.verbose {
             eprintln!("Step 1: Checking for issues...");
@@ -319,7 +424,10 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
         // Step 2: Format files (only files with issues to save time)
         if options.verbose {
-            eprintln!("Step 2: Formatting {} files with issues...", files_with_issues.len());
+            eprintln!(
+                "Step 2: Formatting {} files with issues...",
+                files_with_issues.len()
+            );
         }
         let mut formatted_files: HashSet<PathBuf> = HashSet::new();
         let files_to_format: Vec<_> = file_langs
@@ -347,19 +455,18 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                             }
                         }
                     }
-                } else if options.verbose {
-                    eprintln!(
-                        "Formatter '{}' not available for {}",
-                        formatter.name(),
-                        file.display()
-                    );
+                } else {
+                    warn_missing_tool("formatter", *lang, false);
                 }
             }
         }
 
         // Step 3: Second lint pass (only re-check files that were formatted)
         if options.verbose {
-            eprintln!("Step 3: Rechecking {} formatted files...", formatted_files.len());
+            eprintln!(
+                "Step 3: Rechecking {} formatted files...",
+                formatted_files.len()
+            );
         }
 
         // Helper to normalize paths for comparison
@@ -433,12 +540,8 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                                 }
                             }
                         }
-                    } else if options.verbose {
-                        eprintln!(
-                            "Formatter '{}' not available for {}",
-                            formatter.name(),
-                            file.display()
-                        );
+                    } else {
+                        warn_missing_tool("formatter", *lang, false);
                     }
                 }
             }

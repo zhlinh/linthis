@@ -1,0 +1,20 @@
+# Test plugin manifest for integration tests
+
+[plugin]
+name = "test-plugin"
+version = "1.0.0"
+description = "Test plugin for linthis integration tests"
+linthis_version = ">=0.1.0"
+languages = ["rust", "python"]
+license = "MIT"
+
+[[plugin.authors]]
+name = "Test Author"
+email = "test@example.com"
+
+[configs.rust]
+clippy = "rust/clippy.toml"
+rustfmt = "rust/rustfmt.toml"
+
+[configs.python]
+ruff = "python/ruff.toml"

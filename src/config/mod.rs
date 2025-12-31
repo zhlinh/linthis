@@ -18,6 +18,8 @@
 //! 3. User config (~/.linthis/config.toml)
 //! 4. Built-in defaults (lowest)
 
+pub mod cli;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -29,9 +31,13 @@ pub struct Config {
     #[serde(default)]
     pub languages: HashSet<String>,
 
-    /// Paths/patterns to exclude (glob patterns)
+    /// Paths/patterns to include (glob patterns)
     #[serde(default)]
-    pub exclude: Vec<String>,
+    pub includes: Vec<String>,
+
+    /// Paths/patterns to exclude (glob patterns)
+    #[serde(default, alias = "exclude")]
+    pub excludes: Vec<String>,
 
     /// Maximum cyclomatic complexity allowed
     #[serde(default)]
@@ -49,9 +55,41 @@ pub struct Config {
     #[serde(default)]
     pub source: Option<SourceConfig>,
 
-    /// Language-specific overrides
+    /// Language-specific overrides (flattened to root level)
+    #[serde(default, flatten)]
+    pub language_overrides: LanguageOverrides,
+
+    /// Plugin configuration
+    #[serde(default, alias = "plugin")]
+    pub plugins: Option<PluginConfig>,
+}
+
+/// Plugin configuration section
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PluginConfig {
+    /// List of plugin sources in priority order (later overrides earlier)
     #[serde(default)]
-    pub language_overrides: Option<LanguageOverrides>,
+    pub sources: Vec<PluginSourceConfig>,
+}
+
+/// Plugin source configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSourceConfig {
+    /// Plugin name (required for registry lookup or display)
+    pub name: String,
+    /// Git repository URL (optional if name is in registry)
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Git ref (tag, branch, commit hash)
+    #[serde(default, rename = "ref")]
+    pub git_ref: Option<String>,
+    /// Whether this plugin is enabled (default: true)
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 /// Source path configuration (CodeCC compatibility)
@@ -100,14 +138,35 @@ pub struct LanguageOverrides {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LanguageConfig {
     /// Additional exclusion patterns for this language
-    #[serde(default)]
-    pub exclude: Vec<String>,
+    #[serde(default, alias = "exclude")]
+    pub excludes: Vec<String>,
     /// Enable/disable this language
     #[serde(default)]
     pub enabled: Option<bool>,
     /// Max complexity override
     #[serde(default)]
     pub max_complexity: Option<u32>,
+}
+
+impl LanguageOverrides {
+    /// Merge another LanguageOverrides into this one
+    pub fn merge(&mut self, other: LanguageOverrides) {
+        macro_rules! merge_lang {
+            ($field:ident) => {
+                if other.$field.is_some() {
+                    self.$field = other.$field;
+                }
+            };
+        }
+
+        merge_lang!(rust);
+        merge_lang!(python);
+        merge_lang!(typescript);
+        merge_lang!(javascript);
+        merge_lang!(go);
+        merge_lang!(java);
+        merge_lang!(cpp);
+    }
 }
 
 impl Config {
@@ -202,8 +261,11 @@ impl Config {
             self.languages = other.languages;
         }
 
+        // Merge include patterns (append, don't replace)
+        self.includes.extend(other.includes);
+
         // Merge exclude patterns (append, don't replace)
-        self.exclude.extend(other.exclude);
+        self.excludes.extend(other.excludes);
 
         // Override scalar values
         if other.max_complexity.is_some() {
@@ -218,9 +280,31 @@ impl Config {
         if other.source.is_some() {
             self.source = other.source;
         }
-        if other.language_overrides.is_some() {
-            self.language_overrides = other.language_overrides;
+
+        // Merge language overrides
+        self.language_overrides.merge(other.language_overrides);
+
+        if other.plugins.is_some() {
+            self.plugins = other.plugins;
         }
+    }
+
+    /// Get plugin sources from config, converting to PluginSource type
+    pub fn get_plugin_sources(&self) -> Vec<crate::plugin::PluginSource> {
+        self.plugins
+            .as_ref()
+            .map(|p| {
+                p.sources
+                    .iter()
+                    .map(|s| crate::plugin::PluginSource {
+                        name: s.name.clone(),
+                        url: s.url.clone(),
+                        git_ref: s.git_ref.clone(),
+                        enabled: s.enabled,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Load and merge configuration from all sources with proper precedence.
@@ -243,14 +327,17 @@ impl Config {
 
     /// Generate a default configuration file content
     pub fn generate_default_toml() -> String {
-        r#"# Lintis Configuration
-# See https://github.com/your-org/linthis for documentation
+        r#"# Linthis Configuration
+# See https://github.com/zhlinh/linthis for documentation
 
 # Languages to check (empty = auto-detect all supported languages)
 # languages = ["rust", "python", "typescript"]
 
+# Files or directories to include (glob patterns)
+# includes = ["src/**", "lib/**"]
+
 # Patterns to exclude (in addition to defaults)
-exclude = []
+excludes = []
 
 # Maximum cyclomatic complexity allowed
 max_complexity = 20
@@ -258,12 +345,19 @@ max_complexity = 20
 # Format preset: "google", "standard", or "airbnb"
 # preset = "google"
 
+# Plugin configuration
+# [plugins]
+# sources = [
+#     { name = "official" },
+#     { name = "myplugin", url = "https://github.com/zhlinh/linthis-plugin.git", ref = "main" }
+# ]
+
 # Language-specific overrides
-# [language_overrides.rust]
+# [rust]
 # max_complexity = 15
 
-# [language_overrides.python]
-# exclude = ["*_test.py"]
+# [python]
+# excludes = ["*_test.py"]
 "#
         .to_string()
     }
@@ -297,13 +391,13 @@ mod tests {
     fn test_config_merge() {
         let mut base = Config {
             max_complexity: Some(20),
-            exclude: vec!["*.log".to_string()],
+            excludes: vec!["*.log".to_string()],
             ..Default::default()
         };
 
         let override_config = Config {
             max_complexity: Some(15),
-            exclude: vec!["*.tmp".to_string()],
+            excludes: vec!["*.tmp".to_string()],
             preset: Some("google".to_string()),
             ..Default::default()
         };
@@ -311,7 +405,7 @@ mod tests {
         base.merge(override_config);
 
         assert_eq!(base.max_complexity, Some(15));
-        assert_eq!(base.exclude, vec!["*.log".to_string(), "*.tmp".to_string()]);
+        assert_eq!(base.excludes, vec!["*.log".to_string(), "*.tmp".to_string()]);
         assert_eq!(base.preset, Some("google".to_string()));
     }
 
@@ -319,5 +413,75 @@ mod tests {
     fn test_built_in_defaults() {
         let defaults = Config::built_in_defaults();
         assert_eq!(defaults.max_complexity, Some(20));
+    }
+
+    #[test]
+    fn test_backward_compatibility() {
+        // Test that old field names (exclude, plugin) still work via serde aliases
+        let toml_with_old_names = r#"
+            exclude = ["*.log", "target/**"]
+
+            [plugin]
+            sources = [
+                { name = "test", enabled = true }
+            ]
+        "#;
+
+        let config: Config = toml::from_str(toml_with_old_names).unwrap();
+        assert_eq!(config.excludes, vec!["*.log".to_string(), "target/**".to_string()]);
+        assert!(config.plugins.is_some());
+        assert_eq!(config.plugins.as_ref().unwrap().sources.len(), 1);
+        assert_eq!(config.plugins.as_ref().unwrap().sources[0].name, "test");
+    }
+
+    #[test]
+    fn test_new_field_names() {
+        // Test that new field names (includes, excludes, plugins) work
+        let toml_with_new_names = r#"
+            includes = ["src/**", "lib/**"]
+            excludes = ["*.log", "target/**"]
+
+            [plugins]
+            sources = [
+                { name = "test", enabled = true }
+            ]
+        "#;
+
+        let config: Config = toml::from_str(toml_with_new_names).unwrap();
+        assert_eq!(config.includes, vec!["src/**".to_string(), "lib/**".to_string()]);
+        assert_eq!(config.excludes, vec!["*.log".to_string(), "target/**".to_string()]);
+        assert!(config.plugins.is_some());
+        assert_eq!(config.plugins.as_ref().unwrap().sources.len(), 1);
+    }
+
+    #[test]
+    fn test_language_overrides_simplified_syntax() {
+        // Test that simplified language syntax [rust] works (instead of [language_overrides.rust])
+        let toml_with_simplified = r#"
+            max_complexity = 20
+
+            [rust]
+            max_complexity = 15
+            excludes = ["target/**"]
+
+            [python]
+            max_complexity = 10
+            excludes = ["*_test.py"]
+        "#;
+
+        let config: Config = toml::from_str(toml_with_simplified).unwrap();
+        assert_eq!(config.max_complexity, Some(20));
+
+        // Check Rust overrides
+        assert!(config.language_overrides.rust.is_some());
+        let rust_config = config.language_overrides.rust.as_ref().unwrap();
+        assert_eq!(rust_config.max_complexity, Some(15));
+        assert_eq!(rust_config.excludes, vec!["target/**".to_string()]);
+
+        // Check Python overrides
+        assert!(config.language_overrides.python.is_some());
+        let python_config = config.language_overrides.python.as_ref().unwrap();
+        assert_eq!(python_config.max_complexity, Some(10));
+        assert_eq!(python_config.excludes, vec!["*_test.py".to_string()]);
     }
 }
