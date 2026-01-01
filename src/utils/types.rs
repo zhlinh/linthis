@@ -135,6 +135,16 @@ impl FormatResult {
     }
 }
 
+/// Run mode indicator for output messages
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunModeKind {
+    #[default]
+    Both,
+    CheckOnly,
+    FormatOnly,
+}
+
 /// Aggregated result of a linthis run
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RunResult {
@@ -156,6 +166,8 @@ pub struct RunResult {
     pub duration_ms: u64,
     /// Exit code: 0 = success, 1 = issues found, 2 = error
     pub exit_code: i32,
+    /// Run mode for appropriate output messages
+    pub run_mode: RunModeKind,
 }
 
 impl RunResult {

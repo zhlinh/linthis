@@ -58,9 +58,11 @@ pub const DEFAULT_EXCLUDES: &[&str] = &[
     "*.generated.*",
     "*.min.js",
     "*.min.css",
-    // Package managers
+    // Package managers (iOS)
     "Pods/**",
+    "**/Pods/**",
     "Carthage/**",
+    "**/Carthage/**",
 ];
 
 /// Get list of staged files from git.

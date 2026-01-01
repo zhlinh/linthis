@@ -99,6 +99,8 @@ pub fn format_issue_github_actions(issue: &LintIssue) -> String {
 
 /// Format the run result summary for human-readable output.
 pub fn format_summary_human(result: &RunResult) -> String {
+    use crate::utils::types::RunModeKind;
+
     let issue_count = result.issues.len();
     let error_count = result
         .issues
@@ -112,7 +114,12 @@ pub fn format_summary_human(result: &RunResult) -> String {
         .count();
 
     if issue_count == 0 && result.files_formatted == 0 && result.issues_fixed == 0 {
-        return format!("{}", "All checks passed".green().bold());
+        let msg = match result.run_mode {
+            RunModeKind::FormatOnly => "All formats passed",
+            RunModeKind::CheckOnly => "All checks passed",
+            RunModeKind::Both => "All checks and formats passed",
+        };
+        return format!("{}", msg.green().bold());
     }
 
     let mut summary = String::new();
@@ -166,7 +173,12 @@ pub fn format_summary_human(result: &RunResult) -> String {
         if !summary.is_empty() {
             summary.push('\n');
         }
-        summary.push_str(&format!("{}", "All checks passed".green().bold()));
+        let msg = match result.run_mode {
+            RunModeKind::FormatOnly => "All formats passed",
+            RunModeKind::CheckOnly => "All checks passed",
+            RunModeKind::Both => "All checks and formats passed",
+        };
+        summary.push_str(&format!("{}", msg.green().bold()));
     }
 
     // Show duration

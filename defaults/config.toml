@@ -23,6 +23,7 @@ exclude = [
     ".vscode/**",
     "*.min.js",
     "*.min.css",
+    "**/Pods/**",
 ]
 
 # Output settings
@@ -60,4 +61,28 @@ formatter = "gofmt"
 
 # C/C++ settings
 [cpp]
+# Linter: "clang-tidy" (preferred, more powerful) or "cpplint" (fallback)
+linter = "clang-tidy"
+# Formatter: clang-format for code style, clang-tidy --fix for lint fixes
 formatter = "clang-format"
+# Style for clang-format (google, llvm, chromium, mozilla, webkit)
+style = "google"
+# Enable clang-tidy --fix during format phase (fixes C-style casts, nullptr, etc.)
+clang_tidy_fix = true
+# Enable cpplint fixer during format phase (fixes header guards, TODOs, etc.)
+cpplint_fix = true
+# Directory containing compile_commands.json (optional, auto-detected if not set)
+# Auto-detection searches up to 6 levels: cmake*/, build*/, out*/, *_build/, *-build/
+# and platform dirs: android/, ios/, arm*/, x86*/, debug/, release/, static/, shared/
+# compile_commands_dir = "cmake_build/debug/Android/static/arm64-v8a"
+
+# Cpplint fixer settings
+[cpp.cpplint_fix]
+# Header guard mode: "fix_name" (default) or "pragma_once"
+header_guard_mode = "fix_name"
+# Username for TODO comments (default: git user.name or $USER)
+# todo_username = "your_username"
+# Copyright template (optional, with {year} placeholder)
+# copyright_template = "// Copyright {year} Your Company. All rights reserved."
+# Header guard prefix (optional)
+# header_guard_prefix = "MYPROJECT_"

@@ -13,6 +13,7 @@
 pub mod benchmark;
 pub mod checkers;
 pub mod config;
+pub mod fixers;
 pub mod formatters;
 pub mod plugin;
 pub mod presets;
@@ -362,8 +363,17 @@ fn print_progress(msg: &str, quiet: bool) {
 
 /// Main entry point for running linthis.
 pub fn run(options: &RunOptions) -> Result<RunResult> {
+    use utils::types::RunModeKind;
+
     let start = Instant::now();
     let mut result = RunResult::new();
+
+    // Set run mode for appropriate output messages
+    result.run_mode = match options.mode {
+        RunMode::Both => RunModeKind::Both,
+        RunMode::CheckOnly => RunModeKind::CheckOnly,
+        RunMode::FormatOnly => RunModeKind::FormatOnly,
+    };
 
     // Print starting message
     if !options.quiet {
