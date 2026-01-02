@@ -59,7 +59,8 @@ pub enum LintisError {
 pub type Result<T> = std::result::Result<T, LintisError>;
 
 /// Supported programming languages
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Language {
     Cpp,
     ObjectiveC,
@@ -74,7 +75,9 @@ pub enum Language {
 impl Language {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
-            "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "hxx" => Some(Language::Cpp),
+            // Note: .h files need special handling via from_path() for smart detection
+            "c" | "cc" | "cpp" | "cxx" | "hpp" | "hxx" => Some(Language::Cpp),
+            "h" => None, // Handle .h files specially in from_path()
             "m" | "mm" => Some(Language::ObjectiveC),
             "java" => Some(Language::Java),
             "py" | "pyw" => Some(Language::Python),
@@ -87,9 +90,90 @@ impl Language {
     }
 
     pub fn from_path(path: &Path) -> Option<Self> {
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .and_then(Self::from_extension)
+        let ext = path.extension().and_then(|e| e.to_str())?;
+
+        // Special handling for .h files - smart detection
+        if ext.eq_ignore_ascii_case("h") {
+            return Some(Self::detect_header_language(path));
+        }
+
+        Self::from_extension(ext)
+    }
+
+    /// Smart detection for .h header files to determine if it's C++/C or Objective-C
+    fn detect_header_language(path: &Path) -> Self {
+        // 1. Check for corresponding .m/.mm file (same name) -> Objective-C
+        // 2. Check for corresponding .cpp/.cc/.cxx file (same name) -> C++
+        if let Some(parent) = path.parent() {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                // Check for Objective-C implementation files
+                for ext in &["m", "mm"] {
+                    let impl_path = parent.join(format!("{}.{}", stem, ext));
+                    if impl_path.exists() {
+                        return Language::ObjectiveC;
+                    }
+                }
+                // Check for C++ implementation files
+                for ext in &["cpp", "cc", "cxx", "c"] {
+                    let impl_path = parent.join(format!("{}.{}", stem, ext));
+                    if impl_path.exists() {
+                        return Language::Cpp;
+                    }
+                }
+            }
+        }
+
+        // 3. Check file content for language-specific patterns
+        if let Ok(content) = std::fs::read_to_string(path) {
+            // Read first 4KB for performance
+            let sample: String = content.chars().take(4096).collect();
+
+            // Objective-C patterns
+            let objc_patterns = [
+                "#import",
+                "@interface",
+                "@protocol",
+                "@property",
+                "@class",
+                "NS_ASSUME_NONNULL_BEGIN",
+            ];
+            for pattern in objc_patterns {
+                if sample.contains(pattern) {
+                    return Language::ObjectiveC;
+                }
+            }
+
+            // C++ patterns
+            let cpp_patterns = ["namespace ", "template<", "template <"];
+            for pattern in cpp_patterns {
+                if sample.contains(pattern) {
+                    return Language::Cpp;
+                }
+            }
+        }
+
+        // 4. Check directory for other files to infer language
+        if let Some(parent) = path.parent() {
+            if let Ok(entries) = std::fs::read_dir(parent) {
+                let mut has_objc = false;
+                let mut has_cpp = false;
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
+                        match ext {
+                            "m" | "mm" => has_objc = true,
+                            "cpp" | "cc" | "cxx" => has_cpp = true,
+                            _ => {}
+                        }
+                    }
+                }
+                if has_objc && !has_cpp {
+                    return Language::ObjectiveC;
+                }
+            }
+        }
+
+        // 5. Default to C++
+        Language::Cpp
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
@@ -173,6 +257,8 @@ pub struct RunOptions {
     pub verbose: bool,
     /// Quiet mode (no progress output)
     pub quiet: bool,
+    /// Active plugins (name only, for display)
+    pub plugins: Vec<String>,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -184,6 +270,7 @@ impl std::fmt::Debug for RunOptions {
             .field("exclude_patterns", &self.exclude_patterns)
             .field("verbose", &self.verbose)
             .field("quiet", &self.quiet)
+            .field("plugins", &self.plugins)
             .finish()
     }
 }
@@ -197,6 +284,7 @@ impl Default for RunOptions {
             exclude_patterns: Vec::new(),
             verbose: false,
             quiet: false,
+            plugins: Vec::new(),
         }
     }
 }
@@ -336,7 +424,11 @@ fn run_checker_on_file(file: &Path, lang: Language, verbose: bool) -> Vec<utils:
         if checker.is_available() {
             match checker.check(file) {
                 Ok(file_issues) => {
-                    issues.extend(file_issues);
+                    // Set language for each issue
+                    for mut issue in file_issues {
+                        issue.language = Some(lang);
+                        issues.push(issue);
+                    }
                 }
                 Err(e) => {
                     if verbose {
@@ -374,6 +466,11 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         RunMode::CheckOnly => RunModeKind::CheckOnly,
         RunMode::FormatOnly => RunModeKind::FormatOnly,
     };
+
+    // Print plugins in use
+    if !options.quiet && !options.plugins.is_empty() {
+        eprintln!("📦 Plugins: {}", options.plugins.join(", "));
+    }
 
     // Print starting message
     if !options.quiet {

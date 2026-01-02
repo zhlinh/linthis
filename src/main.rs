@@ -63,7 +63,7 @@ struct Cli {
     #[arg(long)]
     config: Option<std::path::PathBuf>,
 
-    /// Initialize a new .linthis.toml configuration file
+    /// Initialize a new .linthis/config.toml configuration file
     #[arg(long)]
     init: bool,
 
@@ -78,6 +78,18 @@ struct Cli {
     /// Output format: human, json, github-actions
     #[arg(short, long, default_value = "human")]
     output: String,
+
+    /// Disable auto-saving results to .linthis/result/
+    #[arg(long)]
+    no_save_result: bool,
+
+    /// Save results to custom file path (instead of default .linthis/result/)
+    #[arg(long, value_name = "FILE")]
+    output_file: Option<PathBuf>,
+
+    /// Maximum number of result files to keep (default: 10, 0 = unlimited)
+    #[arg(long, default_value = "10")]
+    keep_results: usize,
 
     /// Verbose output
     #[arg(short, long)]
@@ -156,17 +168,29 @@ enum PluginCommands {
         /// Plugin name
         name: String,
     },
-    /// List cached plugins
+    /// List configured or cached plugins
     List {
         /// Show detailed information
         #[arg(short, long)]
         verbose: bool,
+        /// List global plugins (~/.linthis/config.toml)
+        #[arg(short, long)]
+        global: bool,
+        /// List cached (downloaded) plugins instead of configured
+        #[arg(short, long)]
+        cached: bool,
     },
     /// Clean cached plugins
     Clean {
         /// Remove all cached plugins
         #[arg(long)]
         all: bool,
+    },
+    /// Sync (download/update) configured plugins to latest version
+    Sync {
+        /// Sync global plugins (~/.linthis/config.toml)
+        #[arg(short, long)]
+        global: bool,
     },
     /// Validate a plugin manifest
     Validate {
@@ -193,6 +217,17 @@ enum PluginCommands {
         /// Remove from global configuration
         #[arg(short, long)]
         global: bool,
+    },
+    /// Apply (copy) plugin configs to current project
+    Apply {
+        /// Plugin alias to apply configs from
+        alias: Option<String>,
+        /// Apply configs from global plugins
+        #[arg(short, long)]
+        global: bool,
+        /// Languages to apply configs for (e.g., cpp, oc, swift)
+        #[arg(short, long)]
+        language: Option<Vec<String>>,
     },
 }
 
@@ -2299,7 +2334,7 @@ linthis --plugin https://github.com/your-org/{name}.git
 
 ### Via Configuration File
 
-Add to your `.linthis.toml`:
+Add to your `.linthis/config.toml`:
 
 ```toml
 [plugin]
@@ -2322,7 +2357,7 @@ sources = [
 To override specific settings, you can:
 
 1. **Layer plugins**: Add your overrides in a second plugin that loads after this one
-2. **Local overrides**: Settings in your project's `.linthis.toml` override plugin settings
+2. **Local overrides**: Settings in your project's `.linthis/config.toml` override plugin settings
 3. **Fork and modify**: Fork this repository and customize the configs
 
 ## Configuration Priority
@@ -2332,7 +2367,7 @@ Settings are applied in this order (later overrides earlier):
 1. Built-in defaults
 2. Plugin configs (in order listed in `sources`)
 3. User config (`~/.linthis/config.toml`)
-4. Project config (`.linthis.toml`)
+4. Project config (`.linthis/config.toml`)
 5. CLI flags
 
 ## Contributing
@@ -2353,7 +2388,7 @@ MIT License - See LICENSE file for details.
 /// Handle plugin subcommands
 fn handle_plugin_command(action: PluginCommands) -> ExitCode {
     use linthis::plugin::{
-        cache::{format_size, PluginCache},
+        cache::PluginCache,
         manifest::PluginManifest,
     };
 
@@ -2519,41 +2554,115 @@ fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             ExitCode::SUCCESS
         }
 
-        PluginCommands::List { verbose } => {
-            let cache = match PluginCache::new() {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("{}: {}", "Error".red(), e);
-                    return ExitCode::from(1);
+        PluginCommands::List {
+            verbose,
+            global,
+            cached,
+        } => {
+            // List cached (downloaded) plugins
+            if cached {
+                use linthis::plugin::cache::format_size;
+
+                let cache = match PluginCache::new() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
+                };
+
+                match cache.list_cached() {
+                    Ok(plugins) => {
+                        if plugins.is_empty() {
+                            println!("No cached plugins found.");
+                            println!("\nCache: {}", cache.cache_dir().display());
+                            return ExitCode::SUCCESS;
+                        }
+
+                        println!("{}", "Cached plugins:".bold());
+                        for plugin in &plugins {
+                            if verbose {
+                                println!(
+                                    "  {} {} ({})",
+                                    "•".cyan(),
+                                    plugin.name.bold(),
+                                    plugin.url
+                                );
+                                println!("    Path: {}", plugin.cache_path.display());
+                                println!("    Cached: {}", plugin.cached_at.format("%Y-%m-%d %H:%M"));
+                                println!(
+                                    "    Updated: {}",
+                                    plugin.last_updated.format("%Y-%m-%d %H:%M")
+                                );
+                            } else {
+                                println!("  {} {}", "•".cyan(), plugin.name);
+                            }
+                        }
+
+                        // Show total cache size
+                        if let Ok(size) = cache.cache_size() {
+                            println!("\nTotal cache size: {}", format_size(size));
+                        }
+                        println!("Cache: {}", cache.cache_dir().display());
+                    }
+                    Err(e) => {
+                        eprintln!("{}: Failed to list cached plugins: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
+                }
+
+                return ExitCode::SUCCESS;
+            }
+
+            // List configured plugins
+            use linthis::plugin::PluginConfigManager;
+
+            let manager = if global {
+                match PluginConfigManager::global() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
+                }
+            } else {
+                match PluginConfigManager::project() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
                 }
             };
 
-            match cache.list_cached() {
+            let config_type = if global { "global" } else { "project" };
+
+            match manager.list_plugins() {
                 Ok(plugins) => {
                     if plugins.is_empty() {
-                        println!("No cached plugins found.");
+                        println!("No {} plugins configured.", config_type);
+                        println!("\nConfig: {}", manager.config_path().display());
                         return ExitCode::SUCCESS;
                     }
 
-                    println!("{}", "Cached plugins:".bold());
-                    for plugin in &plugins {
+                    println!(
+                        "{} ({}):",
+                        "Configured plugins".bold(),
+                        config_type
+                    );
+                    for (name, url, git_ref) in &plugins {
                         if verbose {
-                            println!("  {} {} ({})", "•".cyan(), plugin.name.bold(), plugin.url);
-                            println!("    Path: {}", plugin.cache_path.display());
-                            println!("    Cached: {}", plugin.cached_at.format("%Y-%m-%d %H:%M"));
-                            println!(
-                                "    Updated: {}",
-                                plugin.last_updated.format("%Y-%m-%d %H:%M")
-                            );
+                            if let Some(r) = git_ref {
+                                println!("  {} {} ({}, ref: {})", "•".cyan(), name.bold(), url, r);
+                            } else {
+                                println!("  {} {} ({})", "•".cyan(), name.bold(), url);
+                            }
                         } else {
-                            println!("  {} {}", "•".cyan(), plugin.name);
+                            println!("  {} {}", "•".cyan(), name);
                         }
                     }
 
-                    // Show total cache size
-                    if let Ok(size) = cache.cache_size() {
-                        println!("\nTotal cache size: {}", format_size(size));
-                    }
+                    println!("\nConfig: {}", manager.config_path().display());
                 }
                 Err(e) => {
                     eprintln!("{}: Failed to list plugins: {}", "Error".red(), e);
@@ -2590,6 +2699,146 @@ fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             }
 
             ExitCode::SUCCESS
+        }
+
+        PluginCommands::Sync { global } => {
+            use linthis::plugin::{fetcher::PluginFetcher, PluginConfigManager, PluginSource};
+
+            let manager = if global {
+                match PluginConfigManager::global() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
+                }
+            } else {
+                match PluginConfigManager::project() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
+                }
+            };
+
+            let config_type = if global { "global" } else { "project" };
+
+            let plugins = match manager.list_plugins() {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}: Failed to read config: {}", "Error".red(), e);
+                    return ExitCode::from(1);
+                }
+            };
+
+            if plugins.is_empty() {
+                println!("No {} plugins configured to sync.", config_type);
+                println!("\nConfig: {}", manager.config_path().display());
+                return ExitCode::SUCCESS;
+            }
+
+            println!(
+                "{} {} plugin(s) from {} config...\n",
+                "Syncing".cyan(),
+                plugins.len(),
+                config_type
+            );
+
+            let cache = match PluginCache::new() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("{}: {}", "Error".red(), e);
+                    return ExitCode::from(1);
+                }
+            };
+
+            let fetcher = PluginFetcher::new();
+            let mut success_count = 0;
+            let mut fail_count = 0;
+            let mut updated_count = 0;
+
+            for (name, url, git_ref) in &plugins {
+                let source = PluginSource {
+                    name: name.clone(),
+                    url: Some(url.clone()),
+                    git_ref: git_ref.clone(),
+                    enabled: true,
+                };
+
+                // Get old hash before sync (if cached)
+                let cache_path = cache.url_to_cache_path(url);
+                let old_hash = fetcher.get_local_commit_hash(&cache_path);
+
+                print!("  {} {}... ", "↓".cyan(), name);
+                // Always sync to latest (force = true)
+                match fetcher.fetch(&source, &cache, true) {
+                    Ok(cached_plugin) => {
+                        let new_hash = cached_plugin.commit_hash.as_ref();
+                        let was_updated = match (&old_hash, new_hash) {
+                            (Some(old), Some(new)) => old != new,
+                            (None, Some(_)) => true, // newly cloned
+                            _ => false,
+                        };
+
+                        let hash_info = new_hash
+                            .map(|h| &h[..7.min(h.len())])
+                            .unwrap_or("unknown");
+
+                        if was_updated {
+                            if old_hash.is_some() {
+                                let old_short = old_hash.as_ref()
+                                    .map(|h| &h[..7.min(h.len())])
+                                    .unwrap_or("unknown");
+                                println!("{} {} -> {}", "✓".green(), old_short, hash_info);
+                            } else {
+                                println!("{} @ {}", "✓".green(), hash_info);
+                            }
+                            updated_count += 1;
+                        } else {
+                            println!("{} @ {} (up to date)", "✓".green(), hash_info);
+                        }
+                        success_count += 1;
+                    }
+                    Err(e) => {
+                        println!("{}", "✗".red());
+                        eprintln!("    Error: {}", e);
+                        fail_count += 1;
+                    }
+                }
+            }
+
+            println!();
+            if fail_count == 0 {
+                if updated_count > 0 {
+                    println!(
+                        "{} Synced {} plugin(s), {} updated",
+                        "✓".green(),
+                        success_count,
+                        updated_count
+                    );
+                } else {
+                    println!(
+                        "{} All {} plugin(s) up to date",
+                        "✓".green(),
+                        success_count
+                    );
+                }
+            } else {
+                println!(
+                    "{} Synced {}/{} plugin(s), {} failed",
+                    "⚠".yellow(),
+                    success_count,
+                    plugins.len(),
+                    fail_count
+                );
+            }
+
+            if fail_count > 0 {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }
         }
 
         PluginCommands::Validate { path } => {
@@ -2744,6 +2993,140 @@ fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                 }
             }
         }
+
+        PluginCommands::Apply { alias, global, language } => {
+            use linthis::plugin::{loader::PluginLoader, PluginConfigManager, PluginSource};
+
+            let manager = if global {
+                match PluginConfigManager::global() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
+                }
+            } else {
+                match PluginConfigManager::project() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
+                }
+            };
+
+            let config_type = if global { "global" } else { "project" };
+
+            // Get plugins to apply
+            let plugins = match manager.list_plugins() {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}: Failed to read config: {}", "Error".red(), e);
+                    return ExitCode::from(1);
+                }
+            };
+
+            // Filter by alias if specified
+            let plugins: Vec<_> = if let Some(ref alias_filter) = alias {
+                plugins.into_iter().filter(|(name, _, _)| name == alias_filter).collect()
+            } else {
+                plugins
+            };
+
+            if plugins.is_empty() {
+                if let Some(ref a) = alias {
+                    eprintln!("{}: Plugin '{}' not found in {} config", "Error".red(), a, config_type);
+                } else {
+                    println!("No plugins configured in {} config.", config_type);
+                }
+                return ExitCode::from(1);
+            }
+
+            let loader = match PluginLoader::new() {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("{}: {}", "Error".red(), e);
+                    return ExitCode::from(1);
+                }
+            };
+
+            let mut applied_count = 0;
+            let project_root = std::env::current_dir().unwrap_or_default();
+
+            for (name, url, git_ref) in &plugins {
+                let source = PluginSource {
+                    name: name.clone(),
+                    url: Some(url.clone()),
+                    git_ref: git_ref.clone(),
+                    enabled: true,
+                };
+
+                match loader.load_configs(&[source], false) {
+                    Ok(configs) => {
+                        // Filter by language if specified
+                        let configs: Vec<_> = if let Some(ref langs) = language {
+                            configs.into_iter().filter(|c| langs.contains(&c.language)).collect()
+                        } else {
+                            configs
+                        };
+
+                        if configs.is_empty() {
+                            continue;
+                        }
+
+                        println!("\n{} Applying configs from '{}':", "→".cyan(), name);
+                        for config in &configs {
+                            if let Some(filename) = config.config_path.file_name() {
+                                let target = project_root.join(filename);
+                                if target.exists() {
+                                    println!(
+                                        "  {} {}/{}: {} (skipped, exists)",
+                                        "⊘".yellow(),
+                                        config.language,
+                                        config.tool,
+                                        filename.to_string_lossy()
+                                    );
+                                } else {
+                                    match std::fs::copy(&config.config_path, &target) {
+                                        Ok(_) => {
+                                            println!(
+                                                "  {} {}/{}: {}",
+                                                "✓".green(),
+                                                config.language,
+                                                config.tool,
+                                                filename.to_string_lossy()
+                                            );
+                                            applied_count += 1;
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "  {} {}: {}",
+                                                "✗".red(),
+                                                filename.to_string_lossy(),
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}: Failed to load plugin '{}': {}", "Warning".yellow(), name, e);
+                    }
+                }
+            }
+
+            println!();
+            if applied_count > 0 {
+                println!("{} Applied {} config file(s)", "✓".green(), applied_count);
+                println!("\n{}: Add these to .gitignore if you don't want to commit them", "Tip".cyan());
+            } else {
+                println!("{} No new configs applied (all already exist)", "ℹ".blue());
+            }
+
+            ExitCode::SUCCESS
+        }
     }
 }
 
@@ -2789,7 +3172,7 @@ fn handle_init_command(global: bool, hook: Option<HookTool>, interactive: bool, 
         };
         home.join(".linthis").join("config.toml")
     } else {
-        // Project config path: .linthis.toml in current directory
+        // Project config path: .linthis/config.toml in current directory
         Config::project_config_path(&std::env::current_dir().unwrap_or_default())
     };
 
@@ -3298,6 +3681,12 @@ fn run_benchmark(cli: &Cli) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Strip ANSI escape codes from a string for plain text output
+fn strip_ansi_codes(s: &str) -> String {
+    let ansi_regex = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    ansi_regex.replace_all(s, "").to_string()
+}
+
 fn main() -> ExitCode {
     env_logger::init();
 
@@ -3318,51 +3707,162 @@ fn main() -> ExitCode {
         return handle_init_command(global, hook, interactive, force);
     }
 
-    // Handle --plugin flag (fetch/use plugin)
-    if let Some(ref plugin_name) = cli.plugin {
-        use linthis::plugin::{PluginLoader, PluginSource};
+    // Track loaded plugins for display
+    let mut loaded_plugins: Vec<String> = Vec::new();
 
-        let source = PluginSource::new(plugin_name);
-        let loader = match PluginLoader::with_verbose(cli.verbose) {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!(
-                    "{}: Failed to initialize plugin loader: {}",
-                    "Error".red(),
-                    e
-                );
-                return ExitCode::from(1);
-            }
-        };
+    // Load plugins: from --plugin flag, or from config files (project first, then global)
+    {
+        use linthis::plugin::{PluginConfigManager, PluginLoader, PluginSource};
 
-        match loader.load_configs(&[source], cli.plugin_update) {
-            Ok(configs) => {
-                if cli.verbose {
-                    eprintln!(
-                        "Loaded {} config(s) from plugin '{}'",
-                        configs.len(),
-                        plugin_name
-                    );
-                    for config in &configs {
-                        eprintln!(
-                            "  - {}/{}: {}",
-                            config.language,
-                            config.tool,
-                            config.config_path.display()
-                        );
+        let plugins_to_load: Vec<(String, PluginSource)> = if let Some(ref plugin_name) = cli.plugin {
+            // Use explicitly specified plugin
+            vec![(plugin_name.clone(), PluginSource::new(plugin_name))]
+        } else {
+            // Try to load from config files: project first, then global
+            let mut plugins = Vec::new();
+
+            // Check project config first
+            if let Ok(project_manager) = PluginConfigManager::project() {
+                if let Ok(project_plugins) = project_manager.list_plugins() {
+                    for (name, url, git_ref) in project_plugins {
+                        let source = if let Some(ref r) = git_ref {
+                            PluginSource::new(&url).with_ref(r)
+                        } else {
+                            PluginSource::new(&url)
+                        };
+                        plugins.push((name, source));
                     }
                 }
-                // Note: Actual config application would integrate with the linter/formatter runners
-                // For now, we just log the loaded configs
             }
-            Err(e) => {
-                eprintln!(
-                    "{}: Failed to load plugin '{}': {}",
-                    "Warning".yellow(),
-                    plugin_name,
-                    e
-                );
-                // Continue with defaults - don't fail the entire run
+
+            // If no project plugins, check global config
+            if plugins.is_empty() {
+                if let Ok(global_manager) = PluginConfigManager::global() {
+                    if let Ok(global_plugins) = global_manager.list_plugins() {
+                        for (name, url, git_ref) in global_plugins {
+                            let source = if let Some(ref r) = git_ref {
+                                PluginSource::new(&url).with_ref(r)
+                            } else {
+                                PluginSource::new(&url)
+                            };
+                            plugins.push((name, source));
+                        }
+                    }
+                }
+            }
+
+            plugins
+        };
+
+        if !plugins_to_load.is_empty() {
+            let loader = match PluginLoader::with_verbose(cli.verbose) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!(
+                        "{}: Failed to initialize plugin loader: {}",
+                        "Error".red(),
+                        e
+                    );
+                    return ExitCode::from(1);
+                }
+            };
+
+            for (plugin_name, source) in plugins_to_load {
+                match loader.load_configs(&[source], cli.plugin_update) {
+                    Ok(configs) => {
+                        loaded_plugins.push(plugin_name.clone());
+                        if cli.verbose {
+                            eprintln!(
+                                "Loaded {} config(s) from plugin '{}'",
+                                configs.len(),
+                                plugin_name
+                            );
+                        }
+                        // Apply plugin configs by copying to current directory
+                        // Group configs by filename, language-specific configs override generic ones
+                        use std::collections::HashMap;
+                        let mut config_by_file: HashMap<String, &linthis::plugin::loader::LoadedConfig> = HashMap::new();
+
+                        // Sort configs so that language-specific ones (oc, swift) come after generic ones (cpp)
+                        // This ensures more specific configs override generic ones when filenames match
+                        let mut sorted_configs: Vec<_> = configs.iter().collect();
+                        sorted_configs.sort_by_key(|c| {
+                            // Lower priority = generic languages that should be overridden
+                            // Higher priority = specific languages that should take precedence
+                            match c.language.as_str() {
+                                "cpp" => 0,  // Generic C/C++, lowest priority
+                                "oc" => 1,   // Objective-C overrides cpp
+                                _ => 0,      // Default priority
+                            }
+                        });
+
+                        for config in sorted_configs {
+                            if let Some(filename) = config.config_path.file_name() {
+                                let filename_str = filename.to_string_lossy().to_string();
+                                // Language-specific configs (oc, swift, etc.) override generic configs (cpp)
+                                // Later entries override earlier ones
+                                config_by_file.insert(filename_str, config);
+                            }
+                        }
+
+                        // Auto-apply plugin configs to .linthis/configs/
+                        // This keeps project root clean while still providing configs to linters
+                        let linthis_dir = std::env::current_dir()
+                            .unwrap_or_default()
+                            .join(".linthis");
+                        let config_dir = linthis_dir.join("configs");
+
+                        if std::fs::create_dir_all(&config_dir).is_ok() {
+                            for (filename, config) in &config_by_file {
+                                let target = config_dir.join(filename);
+                                // Always update to latest plugin config
+                                if std::fs::copy(&config.config_path, &target).is_ok() {
+                                    if cli.verbose {
+                                        eprintln!(
+                                            "  - {}/{}: {} -> .linthis/configs/{}",
+                                            config.language,
+                                            config.tool,
+                                            config.config_path.file_name().unwrap_or_default().to_string_lossy(),
+                                            filename
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Create symlinks in project root for tools that require it
+                            // (e.g., cpplint searches for CPPLINT.cfg in parent directories)
+                            let symlink_configs = ["CPPLINT.cfg"];
+                            let project_root = std::env::current_dir().unwrap_or_default();
+
+                            for filename in symlink_configs {
+                                let source = config_dir.join(filename);
+                                let target = project_root.join(filename);
+
+                                // Only create if source exists and target doesn't
+                                if source.exists() && !target.exists() {
+                                    #[cfg(unix)]
+                                    {
+                                        let _ = std::os::unix::fs::symlink(&source, &target);
+                                    }
+                                    #[cfg(not(unix))]
+                                    {
+                                        // On Windows, copy instead of symlink
+                                        let _ = std::fs::copy(&source, &target);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{}: Failed to load plugin '{}': {}",
+                            "Warning".yellow(),
+                            plugin_name,
+                            e
+                        );
+                        // Continue with defaults - don't fail the entire run
+                    }
+                }
             }
         }
     }
@@ -3532,6 +4032,7 @@ fn main() -> ExitCode {
         exclude_patterns,
         verbose: cli.verbose,
         quiet: cli.quiet,
+        plugins: loaded_plugins,
     };
 
     // Parse output format
@@ -3550,10 +4051,113 @@ fn main() -> ExitCode {
     match run(&options) {
         Ok(result) => {
             // Output results
+            let output = format_result(&result, output_format);
+
+            // Print to console
             if !cli.quiet || result.exit_code != 0 {
-                let output = format_result(&result, output_format);
                 if !output.is_empty() {
                     println!("{}", output);
+                }
+            }
+
+            // Save to file by default (unless --no-save-result is specified)
+            if !cli.no_save_result || cli.output_file.is_some() {
+                use chrono::Local;
+                use std::fs::{self, File};
+                use std::io::Write;
+
+                // Determine actual output path
+                let output_file = if let Some(ref custom_path) = cli.output_file {
+                    // Use specified path, create parent directory if needed
+                    if let Some(parent) = custom_path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                    }
+                    custom_path.clone()
+                } else {
+                    // Use default path: .linthis/result/result-{timestamp}.txt
+                    let result_dir = PathBuf::from(".linthis").join("result");
+                    if let Err(e) = fs::create_dir_all(&result_dir) {
+                        eprintln!(
+                            "{}: Failed to create {}: {}",
+                            "Warning".yellow(),
+                            result_dir.display(),
+                            e
+                        );
+                        return ExitCode::from(result.exit_code as u8);
+                    }
+                    let timestamp = Local::now().format("%Y%m%d-%H%M%S");
+                    result_dir.join(format!("result-{}.txt", timestamp))
+                };
+
+                // Strip ANSI color codes for file output
+                let plain_output = strip_ansi_codes(&output);
+
+                match File::create(&output_file) {
+                    Ok(mut file) => {
+                        if let Err(e) = writeln!(file, "{}", plain_output) {
+                            eprintln!(
+                                "{}: Failed to write to {}: {}",
+                                "Warning".yellow(),
+                                output_file.display(),
+                                e
+                            );
+                        } else if !cli.quiet {
+                            eprintln!(
+                                "{} Results saved to {}",
+                                "✓".green(),
+                                output_file.display()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{}: Failed to create {}: {}",
+                            "Warning".yellow(),
+                            output_file.display(),
+                            e
+                        );
+                    }
+                }
+
+                // Clean up old result files if using default directory and keep_results > 0
+                if !cli.no_save_result && cli.output_file.is_none() && cli.keep_results > 0 {
+                    let result_dir = PathBuf::from(".linthis").join("result");
+                    if let Ok(entries) = fs::read_dir(&result_dir) {
+                        let mut result_files: Vec<_> = entries
+                            .filter_map(|e| e.ok())
+                            .filter(|e| {
+                                e.file_name()
+                                    .to_string_lossy()
+                                    .starts_with("result-")
+                                    && e.path().extension().map_or(false, |ext| ext == "txt")
+                            })
+                            .collect();
+
+                        // Sort by modification time, newest first
+                        result_files.sort_by(|a, b| {
+                            let a_time = a.metadata().and_then(|m| m.modified()).ok();
+                            let b_time = b.metadata().and_then(|m| m.modified()).ok();
+                            b_time.cmp(&a_time)
+                        });
+
+                        // Remove files beyond keep_results limit
+                        let files_to_remove = result_files.iter().skip(cli.keep_results);
+                        let mut removed_count = 0;
+                        for entry in files_to_remove {
+                            if fs::remove_file(entry.path()).is_ok() {
+                                removed_count += 1;
+                            }
+                        }
+                        if removed_count > 0 && cli.verbose {
+                            eprintln!(
+                                "{} Cleaned up {} old result file(s)",
+                                "✓".green(),
+                                removed_count
+                            );
+                        }
+                    }
                 }
             }
 

@@ -40,6 +40,9 @@ pub struct CachedPlugin {
     pub url: String,
     /// Git ref that was checked out
     pub git_ref: Option<String>,
+    /// Actual commit hash of the cached version
+    #[serde(default)]
+    pub commit_hash: Option<String>,
     /// Timestamp when cached
     pub cached_at: DateTime<Utc>,
     /// Timestamp of last update check
@@ -166,6 +169,7 @@ impl PluginCache {
                     name: manifest.plugin.name,
                     url: metadata.as_ref().map(|m| m.url.clone()).unwrap_or_default(),
                     git_ref: metadata.as_ref().and_then(|m| m.git_ref.clone()),
+                    commit_hash: metadata.as_ref().and_then(|m| m.commit_hash.clone()),
                     cached_at: metadata
                         .as_ref()
                         .map(|m| m.cached_at)

@@ -10,18 +10,18 @@ use super::Config;
 
 /// Get config file path based on global flag
 fn get_config_path(global: bool) -> crate::Result<PathBuf> {
-    if global {
+    let config_dir = if global {
         let home = dirs::home_dir().ok_or_else(|| {
             crate::LintisError::Config("Cannot find home directory".to_string())
         })?;
-        let config_dir = home.join(".linthis");
-        fs::create_dir_all(&config_dir).map_err(|e| {
-            crate::LintisError::Config(format!("Failed to create config directory: {}", e))
-        })?;
-        Ok(config_dir.join("config.toml"))
+        home.join(".linthis")
     } else {
-        Ok(PathBuf::from(".linthis.toml"))
-    }
+        PathBuf::from(".linthis")
+    };
+    fs::create_dir_all(&config_dir).map_err(|e| {
+        crate::LintisError::Config(format!("Failed to create config directory: {}", e))
+    })?;
+    Ok(config_dir.join("config.toml"))
 }
 
 /// Ensure config file exists, create if not
@@ -491,7 +491,9 @@ mod tests {
     #[test]
     fn test_config_add_includes() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join(".linthis.toml");
+        let config_dir = dir.path().join(".linthis");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("config.toml");
 
         // Create empty config
         fs::write(&config_path, "").unwrap();
@@ -515,7 +517,9 @@ mod tests {
     #[test]
     fn test_config_add_dedup() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join(".linthis.toml");
+        let config_dir = dir.path().join(".linthis");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("config.toml");
 
         fs::write(&config_path, "").unwrap();
 
@@ -542,7 +546,9 @@ mod tests {
     #[test]
     fn test_config_set_max_complexity() {
         let dir = tempdir().unwrap();
-        let config_path = dir.path().join(".linthis.toml");
+        let config_dir = dir.path().join(".linthis");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("config.toml");
 
         fs::write(&config_path, "").unwrap();
 

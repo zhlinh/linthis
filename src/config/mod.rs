@@ -14,7 +14,7 @@
 //! (higher precedence overrides lower):
 //!
 //! 1. CLI arguments (highest)
-//! 2. Project config (.linthis.toml in project root)
+//! 2. Project config (.linthis/config.toml in project root)
 //! 3. User config (~/.linthis/config.toml)
 //! 4. Built-in defaults (lowest)
 
@@ -207,41 +207,23 @@ impl Config {
     /// Load user-level configuration from ~/.linthis/config.toml
     pub fn load_user_config() -> Option<Self> {
         let home = dirs::home_dir()?;
-        let config_paths = [
-            home.join(".linthis").join("config.toml"),
-            home.join(".linthis").join("config.yml"),
-            home.join(".linthis.toml"),
-        ];
-
-        for path in &config_paths {
-            if path.exists() {
-                if let Ok(config) = Self::load(path) {
-                    return Some(config);
-                }
-            }
+        let config_path = home.join(".linthis").join("config.toml");
+        if config_path.exists() {
+            Self::load(&config_path).ok()
+        } else {
+            None
         }
-
-        None
     }
 
     /// Load project-level configuration from the given directory
+    /// Searches for .linthis/config.toml in the start directory and parent directories
     pub fn load_project_config(start_dir: &Path) -> Option<Self> {
-        let config_names = [
-            ".linthis.toml",
-            ".linthis.yml",
-            ".linthis.yaml",
-            "linthis.toml",
-            ".code.yml", // CodeCC compatibility
-        ];
-
         let mut current = start_dir.to_path_buf();
         loop {
-            for name in &config_names {
-                let config_path = current.join(name);
-                if config_path.exists() {
-                    if let Ok(config) = Self::load(&config_path) {
-                        return Some(config);
-                    }
+            let config_path = current.join(".linthis").join("config.toml");
+            if config_path.exists() {
+                if let Ok(config) = Self::load(&config_path) {
+                    return Some(config);
                 }
             }
 
@@ -364,7 +346,7 @@ max_complexity = 20
 
     /// Get the path for a new project config file
     pub fn project_config_path(project_dir: &Path) -> PathBuf {
-        project_dir.join(".linthis.toml")
+        project_dir.join(".linthis").join("config.toml")
     }
 }
 

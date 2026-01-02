@@ -94,12 +94,16 @@ impl PluginFetcher {
             self.clone_plugin(url, &cache_path, source.git_ref.as_deref())?;
         }
 
+        // Get current commit hash
+        let commit_hash = self.get_local_commit_hash(&cache_path);
+
         // Create/update cache metadata
         let now = Utc::now();
         let plugin = CachedPlugin {
             name: source.name.clone(),
             url: url.clone(),
             git_ref: source.git_ref.clone(),
+            commit_hash,
             cached_at: now,
             last_updated: now,
             cache_path,
@@ -269,6 +273,66 @@ impl PluginFetcher {
         match output {
             Ok(output) => output.status.success(),
             Err(_) => false,
+        }
+    }
+
+    /// Get the current local commit hash from a cached repository
+    pub fn get_local_commit_hash(&self, cache_path: &Path) -> Option<String> {
+        let output = Command::new("git")
+            .current_dir(cache_path)
+            .arg("rev-parse")
+            .arg("HEAD")
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !hash.is_empty() {
+                return Some(hash);
+            }
+        }
+        None
+    }
+
+    /// Get the remote HEAD commit hash for a repository
+    pub fn get_remote_commit_hash(&self, url: &str, git_ref: Option<&str>) -> Option<String> {
+        let ref_name = git_ref.unwrap_or("HEAD");
+
+        let output = Command::new("git")
+            .arg("ls-remote")
+            .arg(url)
+            .arg(ref_name)
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // Format: "hash\trefs/heads/branch" or "hash\tHEAD"
+            if let Some(hash) = stdout.split_whitespace().next() {
+                if hash.len() >= 7 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Some(hash.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// Check if a cached plugin has updates available
+    pub fn check_for_updates(&self, source: &PluginSource, cache: &PluginCache) -> Option<(String, String)> {
+        let url = source.url.as_ref()?;
+        let cache_path = cache.url_to_cache_path(url);
+
+        if !cache_path.exists() {
+            return None;
+        }
+
+        let local_hash = self.get_local_commit_hash(&cache_path)?;
+        let remote_hash = self.get_remote_commit_hash(url, source.git_ref.as_deref())?;
+
+        if local_hash != remote_hash {
+            Some((local_hash, remote_hash))
+        } else {
+            None
         }
     }
 }

@@ -211,21 +211,31 @@ pub fn format_result_human(result: &RunResult) -> String {
         .filter(|i| i.severity == Severity::Warning)
         .collect();
 
-    // Output errors with [E1], [E2], etc.
+    // Output errors with [E1][lang], [E2][lang], etc.
     for (idx, issue) in errors.iter().enumerate() {
+        let lang_tag = issue
+            .language
+            .map(|l| format!("[{}]", l.name()))
+            .unwrap_or_default();
         output.push_str(&format!(
-            "{} {}",
+            "{}{} {}",
             format!("[E{}]", idx + 1).red().bold(),
+            lang_tag.red(),
             format_issue_human(issue)
         ));
         output.push('\n');
     }
 
-    // Output warnings with [W1], [W2], etc.
+    // Output warnings with [W1][lang], [W2][lang], etc.
     for (idx, issue) in warnings.iter().enumerate() {
+        let lang_tag = issue
+            .language
+            .map(|l| format!("[{}]", l.name()))
+            .unwrap_or_default();
         output.push_str(&format!(
-            "{} {}",
+            "{}{} {}",
             format!("[W{}]", idx + 1).yellow().bold(),
+            lang_tag.yellow(),
             format_issue_human(issue)
         ));
         output.push('\n');

@@ -20,27 +20,28 @@ use anyhow::{anyhow, Context, Result};
 use std::path::PathBuf;
 use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table};
 
-/// Manages plugin configuration in .linthis.toml files
+/// Manages plugin configuration in .linthis/config.toml files
 pub struct PluginConfigManager {
     config_path: PathBuf,
 }
 
 impl PluginConfigManager {
-    /// Create a manager for project-level configuration (.linthis.toml in current directory)
+    /// Create a manager for project-level configuration (.linthis/config.toml in current directory)
     pub fn project() -> Result<Self> {
         let config_path = std::env::current_dir()
             .context("Failed to get current directory")?
-            .join(".linthis.toml");
+            .join(".linthis")
+            .join("config.toml");
         Ok(Self { config_path })
     }
 
     /// Create a manager for global configuration (~/.linthis/config.toml)
     pub fn global() -> Result<Self> {
-        let config_dir = directories::ProjectDirs::from("", "", "linthis")
-            .ok_or_else(|| anyhow!("Cannot determine config directory"))?
-            .config_dir()
-            .to_path_buf();
-
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+            .map_err(|_| anyhow!("Cannot determine home directory"))?;
+        let config_dir = home.join(".linthis");
         let config_path = config_dir.join("config.toml");
         Ok(Self { config_path })
     }
@@ -243,7 +244,9 @@ mod tests {
 
     fn create_temp_manager() -> (PluginConfigManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join(".linthis.toml");
+        let config_dir = temp_dir.path().join(".linthis");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("config.toml");
         let manager = PluginConfigManager { config_path };
         (manager, temp_dir)
     }

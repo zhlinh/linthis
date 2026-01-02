@@ -10,6 +10,7 @@
 
 //! Core types for linthis results and configuration.
 
+use crate::Language;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -51,6 +52,8 @@ pub struct LintIssue {
     pub suggestion: Option<String>,
     /// Which linter produced this issue
     pub source: Option<String>,
+    /// Programming language of the file
+    pub language: Option<Language>,
 }
 
 impl LintIssue {
@@ -64,6 +67,7 @@ impl LintIssue {
             message,
             suggestion: None,
             source: None,
+            language: None,
         }
     }
 
@@ -84,6 +88,11 @@ impl LintIssue {
 
     pub fn with_source(mut self, source: String) -> Self {
         self.source = Some(source);
+        self
+    }
+
+    pub fn with_language(mut self, language: Language) -> Self {
+        self.language = Some(language);
         self
     }
 }

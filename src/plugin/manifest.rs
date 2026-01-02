@@ -83,10 +83,71 @@ impl PluginManifest {
 
     /// Parse manifest from TOML content
     pub fn parse(content: &str, path: &Path) -> Result<Self> {
-        toml::from_str(content).map_err(|e| PluginError::InvalidManifest {
+        // First try standard format
+        if let Ok(manifest) = toml::from_str::<PluginManifest>(content) {
+            if !manifest.configs.is_empty() {
+                return Ok(manifest);
+            }
+        }
+
+        // Try to parse extended format with ["language.xxx"] sections
+        Self::parse_extended_format(content, path)
+    }
+
+    /// Parse extended manifest format with ["language.xxx".tools.yyy] sections
+    fn parse_extended_format(content: &str, path: &Path) -> Result<Self> {
+        let value: toml::Value = toml::from_str(content).map_err(|e| PluginError::InvalidManifest {
             path: path.to_path_buf(),
             message: e.to_string(),
-        })
+        })?;
+
+        // Parse plugin metadata
+        let plugin_table = value.get("plugin").ok_or_else(|| PluginError::InvalidManifest {
+            path: path.to_path_buf(),
+            message: "Missing [plugin] section".to_string(),
+        })?;
+
+        let plugin: PluginMetadata = plugin_table
+            .clone()
+            .try_into()
+            .map_err(|e: toml::de::Error| PluginError::InvalidManifest {
+                path: path.to_path_buf(),
+                message: format!("Invalid plugin metadata: {}", e),
+            })?;
+
+        // Parse ["language.xxx"] sections
+        let mut configs: HashMap<String, HashMap<String, String>> = HashMap::new();
+
+        if let Some(table) = value.as_table() {
+            for (key, section) in table {
+                // Match keys like "language.cpp", "language.python", etc.
+                if let Some(lang) = key.strip_prefix("language.") {
+                    if let Some(tools_section) = section.get("tools") {
+                        if let Some(tools_table) = tools_section.as_table() {
+                            let lang_configs = configs.entry(lang.to_string()).or_default();
+
+                            for (tool_name, tool_config) in tools_table {
+                                // Get files array
+                                if let Some(files) = tool_config.get("files") {
+                                    if let Some(files_array) = files.as_array() {
+                                        // Use first file as the config path
+                                        if let Some(first_file) = files_array.first() {
+                                            if let Some(file_path) = first_file.as_str() {
+                                                // Prepend language directory to path
+                                                let full_path = format!("{}/{}", lang, file_path);
+                                                lang_configs.insert(tool_name.clone(), full_path);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Self { plugin, configs })
     }
 
     /// Validate manifest contents
