@@ -125,28 +125,44 @@ impl Language {
 
         // 3. Check file content for language-specific patterns
         if let Ok(content) = std::fs::read_to_string(path) {
-            // Read first 4KB for performance
-            let sample: String = content.chars().take(4096).collect();
-
-            // Objective-C patterns
+            // Objective-C patterns (comprehensive list matching formatter)
             let objc_patterns = [
                 "#import",
                 "@interface",
+                "@implementation",
                 "@protocol",
                 "@property",
+                "@synthesize",
+                "@dynamic",
+                "@selector",
                 "@class",
+                "@end",
                 "NS_ASSUME_NONNULL_BEGIN",
+                "NS_ENUM",
+                "NS_OPTIONS",
+                "nullable",
+                "nonnull",
+                "+ (",  // OC class method
+                "- (",  // OC instance method
+                " @\"", // OC string literal: @"string"
+                " @[",  // OC array literal: @[@"a", @"b"]
             ];
             for pattern in objc_patterns {
-                if sample.contains(pattern) {
+                if content.contains(pattern) {
                     return Language::ObjectiveC;
                 }
+            }
+
+            // Check for Foundation types: NS followed by uppercase letter
+            // (e.g., NSString, NSArray, NSDictionary, NSURL, NSError)
+            if Self::contains_ns_type(&content) {
+                return Language::ObjectiveC;
             }
 
             // C++ patterns
             let cpp_patterns = ["namespace ", "template<", "template <"];
             for pattern in cpp_patterns {
-                if sample.contains(pattern) {
+                if content.contains(pattern) {
                     return Language::Cpp;
                 }
             }
@@ -174,6 +190,34 @@ impl Language {
 
         // 5. Default to C++
         Language::Cpp
+    }
+
+    /// Check if content contains Foundation types (NS followed by uppercase letter).
+    /// Examples: NSString, NSArray, NSDictionary, NSObject, NSURL, etc.
+    fn contains_ns_type(content: &str) -> bool {
+        let bytes = content.as_bytes();
+        let len = bytes.len();
+
+        // Look for "NS" followed by an uppercase letter A-Z
+        for i in 0..len.saturating_sub(2) {
+            if bytes[i] == b'N' && bytes[i + 1] == b'S' {
+                let next_char = bytes[i + 2];
+                // Check if next char is uppercase A-Z (ASCII 65-90)
+                if (b'A'..=b'Z').contains(&next_char) {
+                    // Make sure it's not part of a longer identifier before "NS"
+                    // (i.e., NS should be at word boundary)
+                    if i == 0 || !Self::is_identifier_char(bytes[i - 1]) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if a byte is a valid identifier character (alphanumeric or underscore)
+    fn is_identifier_char(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || b == b'_'
     }
 
     pub fn from_name(name: &str) -> Option<Self> {

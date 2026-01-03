@@ -23,49 +23,107 @@ pub struct SourceFixer;
 impl SourceFixer {
     /// Fix comment spacing: "//comment" -> "// comment", "///comment" -> "/// comment"
     /// clang-format doesn't fix non-ASCII (e.g., Chinese) comments
+    /// NOTE: This only modifies actual comments, not `//` inside string literals
+    /// Uses the same detection logic as cpplint's IsCppString function
     pub fn fix_comment_spacing(path: &Path) -> Result<()> {
         let content = fs::read_to_string(path)
             .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
 
-        let mut result = String::with_capacity(content.len());
-        let mut chars = content.chars().peekable();
+        let mut modified = false;
+        let mut result_lines = Vec::new();
 
-        while let Some(c) = chars.next() {
-            result.push(c);
-
-            // Check for // followed by non-space character
-            if c == '/' {
-                if let Some(&next) = chars.peek() {
-                    if next == '/' {
-                        result.push(chars.next().unwrap()); // consume second /
-
-                        // Consume all consecutive slashes (///, ////, etc.)
-                        while let Some(&slash) = chars.peek() {
-                            if slash == '/' {
-                                result.push(chars.next().unwrap());
-                            } else {
-                                break;
-                            }
-                        }
-
-                        // Check if next char after slashes needs a space
-                        if let Some(&after_slashes) = chars.peek() {
-                            if after_slashes != ' ' && after_slashes != '\n' && after_slashes != '\r' {
-                                result.push(' ');
-                            }
-                        }
-                    }
-                }
+        for line in content.lines() {
+            let fixed_line = Self::fix_comment_spacing_line(line);
+            if fixed_line != line {
+                modified = true;
             }
+            result_lines.push(fixed_line);
         }
 
-        // Only write if changed
-        if result != content {
+        if modified {
+            let mut result = result_lines.join("\n");
+            // Preserve trailing newline if original had one
+            if content.ends_with('\n') {
+                result.push('\n');
+            }
             fs::write(path, result)
                 .map_err(|e| crate::LintisError::Formatter(format!("Failed to write file: {}", e)))?;
         }
 
         Ok(())
+    }
+
+    /// Fix comment spacing for a single line
+    fn fix_comment_spacing_line(line: &str) -> String {
+        // Find the real comment position (not inside a string)
+        let Some(comment_pos) = Self::find_real_comment_pos(line) else {
+            return line.to_string();
+        };
+
+        let before_comment = &line[..comment_pos];
+        let comment_part = &line[comment_pos..];
+
+        // Count consecutive slashes
+        let slash_count = comment_part.chars().take_while(|&c| c == '/').count();
+        let after_slashes = &comment_part[slash_count..];
+
+        // Check if space is needed
+        if !after_slashes.is_empty() {
+            let first_char = after_slashes.chars().next().unwrap();
+            if first_char != ' ' && first_char != '\n' && first_char != '\r' {
+                // Need to add space
+                return format!(
+                    "{}{} {}",
+                    before_comment,
+                    "/".repeat(slash_count),
+                    after_slashes
+                );
+            }
+        }
+
+        line.to_string()
+    }
+
+    /// Find the position of the first real // comment (not inside a string)
+    fn find_real_comment_pos(line: &str) -> Option<usize> {
+        let mut search_start = 0;
+
+        loop {
+            // Find next // starting from search_start
+            let rest = &line[search_start..];
+            let Some(rel_pos) = rest.find("//") else {
+                return None;
+            };
+
+            let abs_pos = search_start + rel_pos;
+            let before_comment = &line[..abs_pos];
+
+            // Check if this // is inside a string
+            if !Self::is_in_cpp_string(before_comment) {
+                // This is a real comment
+                return Some(abs_pos);
+            }
+
+            // This // is inside a string, continue searching after it
+            search_start = abs_pos + 2;
+        }
+    }
+
+    /// Check if the line ends inside a string constant (cpplint's IsCppString logic)
+    /// This checks if appending a character would place it inside a string.
+    fn is_in_cpp_string(line: &str) -> bool {
+        // Replace \\ with XX to handle escaped backslashes
+        let line = line.replace("\\\\", "XX");
+
+        // Count quotes: total " minus escaped \" minus '"' (quote in char literal)
+        let total_quotes = line.matches('"').count();
+        let escaped_quotes = line.matches("\\\"").count();
+        let char_literal_quotes = line.matches("'\"'").count();
+
+        let effective_quotes = total_quotes - escaped_quotes - char_literal_quotes;
+
+        // If odd number of quotes, we're inside a string
+        (effective_quotes & 1) == 1
     }
 
     /// Fix TODO comments using git blame for author
@@ -483,6 +541,78 @@ mod tests {
         let file = create_temp_file("//\ncode();\n");
         SourceFixer::fix_comment_spacing(file.path()).unwrap();
         assert_eq!(read_temp_file(&file), "//\ncode();\n");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_preserves_url() {
+        // URLs like https:// should NOT be modified
+        let file = create_temp_file("return @\"https://example.com\";\n");
+        SourceFixer::fix_comment_spacing(file.path()).unwrap();
+        assert_eq!(read_temp_file(&file), "return @\"https://example.com\";\n");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_preserves_multiple_urls() {
+        let content = r#"NSString *url1 = @"https://tmga.qq.com";
+NSString *url2 = @"http://example.com/path";
+NSString *url3 = @"file:///local/path";
+"#;
+        let file = create_temp_file(content);
+        SourceFixer::fix_comment_spacing(file.path()).unwrap();
+        assert_eq!(read_temp_file(&file), content);
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_url_and_comment() {
+        // Should preserve URL but fix comment
+        let file = create_temp_file("NSString *url = @\"https://example.com\"; //comment\n");
+        SourceFixer::fix_comment_spacing(file.path()).unwrap();
+        assert_eq!(read_temp_file(&file), "NSString *url = @\"https://example.com\"; // comment\n");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_string_with_slashes() {
+        // // inside a string should NOT be modified
+        let file = create_temp_file("char *path = \"path//to//file\";\n");
+        SourceFixer::fix_comment_spacing(file.path()).unwrap();
+        assert_eq!(read_temp_file(&file), "char *path = \"path//to//file\";\n");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_escaped_quote() {
+        // Handle escaped quotes correctly
+        let file = create_temp_file("char *s = \"he said \\\"hello//world\\\"\";\n");
+        SourceFixer::fix_comment_spacing(file.path()).unwrap();
+        assert_eq!(read_temp_file(&file), "char *s = \"he said \\\"hello//world\\\"\";\n");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_char_literal() {
+        // Don't get confused by single quotes
+        let file = create_temp_file("char c = '/'; //comment\n");
+        SourceFixer::fix_comment_spacing(file.path()).unwrap();
+        assert_eq!(read_temp_file(&file), "char c = '/'; // comment\n");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_quote_in_char_literal() {
+        // '"' should not affect string detection
+        let file = create_temp_file("char c = '\"'; //comment\n");
+        SourceFixer::fix_comment_spacing(file.path()).unwrap();
+        assert_eq!(read_temp_file(&file), "char c = '\"'; // comment\n");
+    }
+
+    #[test]
+    fn test_is_in_cpp_string() {
+        // Test the IsCppString logic
+        assert!(!SourceFixer::is_in_cpp_string("int x = 1;"));
+        assert!(SourceFixer::is_in_cpp_string("char *s = \"hello"));
+        assert!(!SourceFixer::is_in_cpp_string("char *s = \"hello\""));
+        assert!(SourceFixer::is_in_cpp_string("char *s = \"hello\\\""));
+        assert!(!SourceFixer::is_in_cpp_string("char *s = \"hello\\\"\""));
+        assert!(!SourceFixer::is_in_cpp_string("char c = '\"';"));
+        assert!(SourceFixer::is_in_cpp_string("char *s = \"a\\\\"));
+        assert!(!SourceFixer::is_in_cpp_string("char *s = \"a\\\\\""));
     }
 
     // ==================== fix_lone_semicolon tests ====================

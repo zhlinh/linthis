@@ -285,12 +285,11 @@ impl Formatter for CppFormatter {
             .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
 
         // Step 1: Run cpplint fixer (fixes header guards, TODOs, copyright)
-        // Note: Skip cpplint for Objective-C files because:
-        // 1. cpplint is designed for C++, not ObjC
-        // 2. cpplint's C-style cast detection misinterprets OC method signatures
-        //    e.g., `+ (UIImage *)method` is wrongly treated as a C-style cast
-        if self.use_cpplint_fix && language != "oc" {
+        // For OC files, we still run the fixer but it will skip unsafe categories
+        // (like readability/casting which misinterprets OC method signatures)
+        if self.use_cpplint_fix {
             if let Ok(mut fixer) = self.cpplint_fixer.lock() {
+                fixer.set_is_objc(language == "oc");
                 let _ = fixer.fix_file(path); // Ignore errors, continue with other fixes
             }
         }
@@ -397,17 +396,35 @@ impl CppFormatter {
     /// Detect language from file extension and content.
     /// For .h files, checks content for OC syntax to determine if it's OC or C++.
     fn detect_language(path: &Path) -> &'static str {
+        let debug = std::env::var("LINTHIS_DEBUG").is_ok();
+
         match path.extension().and_then(|e| e.to_str()) {
-            Some("m") | Some("mm") | Some("M") | Some("MM") => "oc",
+            Some("m") | Some("mm") | Some("M") | Some("MM") => {
+                if debug {
+                    eprintln!("[cpp-formatter] {} detected as OC (by extension)", path.display());
+                }
+                "oc"
+            }
             Some("h") | Some("H") => {
                 // For header files, check content for OC-specific syntax
                 if Self::contains_objc_syntax(path) {
+                    if debug {
+                        eprintln!("[cpp-formatter] {} detected as OC (by content)", path.display());
+                    }
                     "oc"
                 } else {
+                    if debug {
+                        eprintln!("[cpp-formatter] {} detected as C++ (no OC syntax found)", path.display());
+                    }
                     "cpp"
                 }
             }
-            _ => "cpp",
+            _ => {
+                if debug {
+                    eprintln!("[cpp-formatter] {} detected as C++ (by extension)", path.display());
+                }
+                "cpp"
+            }
         }
     }
 
