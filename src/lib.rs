@@ -128,6 +128,7 @@ impl Language {
             // Objective-C patterns (comprehensive list matching formatter)
             let objc_patterns = [
                 "#import",
+                "@import",  // OC module import: @import UIKit;
                 "@interface",
                 "@implementation",
                 "@protocol",

@@ -437,6 +437,7 @@ impl CppFormatter {
 
         // OC-specific patterns (exact string matches)
         let oc_patterns = [
+            "@import",  // OC module import: @import UIKit;
             "@interface",
             "@implementation",
             "@protocol",
