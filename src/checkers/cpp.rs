@@ -71,9 +71,10 @@ impl CppChecker {
 
         // OC default: disable checks not applicable to Objective-C
         // -whitespace/parens: OC uses @property (attr) syntax which has space before (
+        // -whitespace/operators: OC uses getter=xxx syntax which cpplint misinterprets
         let mut oc_config = CpplintConfig {
             linelength: Some(150),
-            filter: Some("-build/c++11,-build/c++14,-build/header_guard,-build/include,-legal/copyright,-readability/casting,-runtime/references,-runtime/int,-whitespace/parens,-whitespace/braces,-whitespace/blank_line,-readability/braces,-whitespace/empty_if_body".to_string()),
+            filter: Some("-build/c++11,-build/c++14,-build/header_guard,-build/include,-legal/copyright,-readability/casting,-runtime/references,-runtime/int,-whitespace/parens,-whitespace/braces,-whitespace/blank_line,-readability/braces,-whitespace/empty_if_body,-whitespace/operators".to_string()),
         };
 
         let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

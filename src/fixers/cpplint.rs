@@ -103,13 +103,24 @@ impl CpplintFixer {
     }
 
     /// Run cpplint and get errors
-    fn run_cpplint(path: &Path) -> Vec<CpplintError> {
+    fn run_cpplint(path: &Path, is_objc: bool) -> Vec<CpplintError> {
         if !Self::has_cpplint() {
             eprintln!("[cpplint-fixer] cpplint not found in PATH");
             return Vec::new();
         }
 
-        let output = Command::new("cpplint").arg(path).output();
+        let mut cmd = Command::new("cpplint");
+
+        // Add extensions for Objective-C files
+        if is_objc {
+            cmd.arg("--extensions=m,mm,h");
+            cmd.arg("--linelength=150");
+        } else {
+            cmd.arg("--linelength=120");
+        }
+
+        cmd.arg(path);
+        let output = cmd.output();
 
         let output = match output {
             Ok(o) => o,
@@ -200,8 +211,8 @@ impl CpplintFixer {
 
         let debug = std::env::var("LINTHIS_DEBUG").is_ok();
 
-        // Run cpplint to get errors
-        let errors = Self::run_cpplint(path);
+        // Run cpplint to get errors (pass is_objc flag for correct options)
+        let errors = Self::run_cpplint(path, self.is_objc);
         if errors.is_empty() {
             if debug {
                 eprintln!("[cpplint-fixer] No errors found for {}", path.display());
@@ -274,6 +285,35 @@ impl CpplintFixer {
                     if self.fix_comment_spacing(&mut lines, error) {
                         if debug {
                             eprintln!("[cpplint-fixer] Fixed comment spacing at line {}", error.line);
+                        }
+                        modified = true;
+                    }
+                }
+                "whitespace/semicolon" => {
+                    if self.fix_empty_semicolon(&mut lines, error) {
+                        if debug {
+                            eprintln!("[cpplint-fixer] Fixed empty semicolon at line {}", error.line);
+                        }
+                        modified = true;
+                    }
+                }
+                "whitespace/comma" => {
+                    if self.fix_comma_spacing(&mut lines, error) {
+                        if debug {
+                            eprintln!("[cpplint-fixer] Fixed comma spacing at line {}", error.line);
+                        }
+                        modified = true;
+                    }
+                }
+                "whitespace/operators" => {
+                    // Skip for OC files - @property (getter=xxx) syntax is valid OC
+                    if self.is_objc {
+                        if debug {
+                            eprintln!("[cpplint-fixer] Skipping whitespace/operators for OC file");
+                        }
+                    } else if self.fix_operator_spacing(&mut lines, error) {
+                        if debug {
+                            eprintln!("[cpplint-fixer] Fixed operator spacing at line {}", error.line);
                         }
                         modified = true;
                     }
@@ -734,6 +774,108 @@ impl CpplintFixer {
                     lines[line_idx] = re.replace(line, replacement.as_str()).to_string();
                     return true;
                 }
+            }
+        }
+
+        false
+    }
+
+    /// Fix empty semicolon: replace lone `;` with `{}`
+    /// Example: "    ;  // comment" -> "    {}  // comment"
+    fn fix_empty_semicolon(&self, lines: &mut [String], error: &CpplintError) -> bool {
+        if !error.message.contains("Line contains only semicolon") {
+            return false;
+        }
+
+        let line_idx = error.line.saturating_sub(1);
+        if line_idx >= lines.len() {
+            return false;
+        }
+
+        let line = &lines[line_idx];
+
+        // Find the position of the lone semicolon (only whitespace before it)
+        // Pattern: start with whitespace, then a semicolon, optionally followed by comment or whitespace
+        if let Some(re) = Regex::new(r"^(\s*);(\s*(?://.*)?)?$").ok() {
+            if let Some(caps) = re.captures(line) {
+                let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                let suffix = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                lines[line_idx] = format!("{}{}{}",indent, "{}", suffix);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Fix comma spacing: add space after comma
+    /// Example: "foo(a,b)" -> "foo(a, b)"
+    /// Skips #pragma mark lines
+    fn fix_comma_spacing(&self, lines: &mut [String], error: &CpplintError) -> bool {
+        if !error.message.contains("Missing space after ,") {
+            return false;
+        }
+
+        let line_idx = error.line.saturating_sub(1);
+        if line_idx >= lines.len() {
+            return false;
+        }
+
+        let line = &lines[line_idx];
+
+        // Skip #pragma mark lines - they contain descriptive text where comma is part of content
+        if line.trim_start().starts_with("#pragma mark") {
+            return false;
+        }
+
+        // Add space after comma (but not if already followed by space or end of string)
+        // Be careful not to modify strings - use simple approach for now
+        let mut result = String::with_capacity(line.len() + 10);
+        let mut chars = line.chars().peekable();
+        let mut modified = false;
+
+        while let Some(c) = chars.next() {
+            result.push(c);
+            if c == ',' {
+                if let Some(&next) = chars.peek() {
+                    if next != ' ' && next != '\n' && next != '\r' {
+                        result.push(' ');
+                        modified = true;
+                    }
+                }
+            }
+        }
+
+        if modified {
+            lines[line_idx] = result;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Fix operator spacing: add spaces around =
+    /// Example: "int x=1" -> "int x = 1"
+    fn fix_operator_spacing(&self, lines: &mut [String], error: &CpplintError) -> bool {
+        if !error.message.contains("Missing spaces around =") {
+            return false;
+        }
+
+        let line_idx = error.line.saturating_sub(1);
+        if line_idx >= lines.len() {
+            return false;
+        }
+
+        let line = &lines[line_idx];
+
+        // Use regex to find = without proper spacing
+        // Match: not preceded by space + = + not followed by space or =
+        // But avoid ==, !=, <=, >=, +=, -=, etc.
+        if let Some(re) = Regex::new(r"([^\s=!<>+\-*/%&|^])=([^=\s])").ok() {
+            let result = re.replace_all(line, "$1 = $2").to_string();
+            if result != *line {
+                lines[line_idx] = result;
+                return true;
             }
         }
 
