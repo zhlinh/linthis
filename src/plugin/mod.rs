@@ -136,3 +136,154 @@ pub use fetcher::PluginFetcher;
 pub use loader::PluginLoader;
 pub use manifest::PluginManifest;
 pub use registry::PluginRegistry;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== PluginSource::new tests ====================
+
+    #[test]
+    fn test_plugin_source_new_from_registry_name() {
+        let source = PluginSource::new("official");
+        assert_eq!(source.name, "official");
+        assert!(source.url.is_none());
+        assert!(source.git_ref.is_none());
+        assert!(source.enabled);
+    }
+
+    #[test]
+    fn test_plugin_source_new_from_https_url() {
+        let source = PluginSource::new("https://github.com/zhlinh/linthis-plugin.git");
+        assert_eq!(source.name, "linthis-plugin");
+        assert_eq!(source.url, Some("https://github.com/zhlinh/linthis-plugin.git".to_string()));
+        assert!(source.git_ref.is_none());
+        assert!(source.enabled);
+    }
+
+    #[test]
+    fn test_plugin_source_new_from_https_url_no_git_suffix() {
+        let source = PluginSource::new("https://github.com/zhlinh/linthis-plugin");
+        assert_eq!(source.name, "linthis-plugin");
+        assert_eq!(source.url, Some("https://github.com/zhlinh/linthis-plugin".to_string()));
+    }
+
+    #[test]
+    fn test_plugin_source_new_from_ssh_url() {
+        let source = PluginSource::new("git@github.com:zhlinh/linthis-plugin.git");
+        assert_eq!(source.name, "linthis-plugin");
+        assert_eq!(source.url, Some("git@github.com:zhlinh/linthis-plugin.git".to_string()));
+    }
+
+    // ==================== PluginSource::with_ref tests ====================
+
+    #[test]
+    fn test_plugin_source_with_ref() {
+        let source = PluginSource::new("official").with_ref("v1.0.0");
+        assert_eq!(source.name, "official");
+        assert_eq!(source.git_ref, Some("v1.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_plugin_source_with_ref_branch() {
+        let source = PluginSource::new("https://github.com/zhlinh/linthis-plugin.git")
+            .with_ref("main");
+        assert_eq!(source.git_ref, Some("main".to_string()));
+    }
+
+    #[test]
+    fn test_plugin_source_with_ref_commit_hash() {
+        let source = PluginSource::new("official").with_ref("abc1234def5678");
+        assert_eq!(source.git_ref, Some("abc1234def5678".to_string()));
+    }
+
+    // ==================== PluginSource::name_from_url tests ====================
+
+    #[test]
+    fn test_name_from_url_github_https() {
+        let name = PluginSource::name_from_url("https://github.com/zhlinh/linthis-plugin.git");
+        assert_eq!(name, "linthis-plugin");
+    }
+
+    #[test]
+    fn test_name_from_url_github_ssh() {
+        let name = PluginSource::name_from_url("git@github.com:zhlinh/linthis-plugin.git");
+        assert_eq!(name, "linthis-plugin");
+    }
+
+    #[test]
+    fn test_name_from_url_no_git_suffix() {
+        let name = PluginSource::name_from_url("https://gitlab.com/org/my-plugin");
+        assert_eq!(name, "my-plugin");
+    }
+
+    #[test]
+    fn test_name_from_url_simple_path() {
+        let name = PluginSource::name_from_url("https://example.com/plugin.git");
+        assert_eq!(name, "plugin");
+    }
+
+    // ==================== PluginError tests ====================
+
+    #[test]
+    fn test_plugin_error_display_git_not_installed() {
+        let err = PluginError::GitNotInstalled;
+        let msg = format!("{}", err);
+        assert!(msg.contains("Git is not installed"));
+    }
+
+    #[test]
+    fn test_plugin_error_display_clone_failed() {
+        let err = PluginError::CloneFailed {
+            url: "https://github.com/test/test.git".to_string(),
+            message: "Connection refused".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("Failed to clone"));
+        assert!(msg.contains("Connection refused"));
+    }
+
+    #[test]
+    fn test_plugin_error_display_not_cached() {
+        let err = PluginError::NotCached {
+            name: "test-plugin".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("not found in cache"));
+        assert!(msg.contains("test-plugin"));
+    }
+
+    #[test]
+    fn test_plugin_error_display_incompatible_version() {
+        let err = PluginError::IncompatibleVersion {
+            name: "test-plugin".to_string(),
+            required: ">=1.0".to_string(),
+            current: "0.5".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("test-plugin"));
+        assert!(msg.contains(">=1.0"));
+        assert!(msg.contains("0.5"));
+    }
+
+    #[test]
+    fn test_plugin_error_display_unknown_plugin() {
+        let err = PluginError::UnknownPlugin {
+            name: "my-plugin".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("Unknown plugin"));
+        assert!(msg.contains("my-plugin"));
+    }
+
+    #[test]
+    fn test_plugin_error_display_invalid_manifest() {
+        let err = PluginError::InvalidManifest {
+            path: PathBuf::from("/path/to/manifest.toml"),
+            message: "missing field 'name'".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("Invalid plugin manifest"));
+        assert!(msg.contains("manifest.toml"));
+    }
+}

@@ -75,6 +75,10 @@ cpplint_fix = true
 # Auto-detection searches up to 6 levels: cmake*/, build*/, out*/, *_build/, *-build/
 # and platform dirs: android/, ios/, arm*/, x86*/, debug/, release/, static/, shared/
 # compile_commands_dir = "cmake_build/debug/Android/static/arm64-v8a"
+# Cpplint line length (default: 80, common values: 100, 120)
+linelength = 120
+# Cpplint filter rules (comma-separated, -category to disable, +category to enable)
+# cpplint_filter = "-build/c++11,-build/c++14"
 
 # Cpplint fixer settings
 [cpp.cpplint_fix]
@@ -86,3 +90,10 @@ header_guard_mode = "fix_name"
 # copyright_template = "// Copyright {year} Your Company. All rights reserved."
 # Header guard prefix (optional)
 # header_guard_prefix = "MYPROJECT_"
+
+# Objective-C settings (different from C++)
+[oc]
+# Cpplint line length for OC
+linelength = 120
+# Cpplint filter rules - disable checks not applicable to Objective-C
+cpplint_filter = "-build/c++11,-build/c++14,-build/header_guard,-build/include,-legal/copyright,-readability/casting,-runtime/references,-runtime/int,-whitespace/braces,-whitespace/blank_line,-readability/braces,-whitespace/empty_if_body"

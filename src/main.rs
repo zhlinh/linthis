@@ -3778,80 +3778,41 @@ fn main() -> ExitCode {
                                 plugin_name
                             );
                         }
-                        // Apply plugin configs by copying to current directory
-                        // Group configs by filename, language-specific configs override generic ones
-                        use std::collections::HashMap;
-                        let mut config_by_file: HashMap<String, &linthis::plugin::loader::LoadedConfig> = HashMap::new();
-
-                        // Sort configs so that language-specific ones (oc, swift) come after generic ones (cpp)
-                        // This ensures more specific configs override generic ones when filenames match
-                        let mut sorted_configs: Vec<_> = configs.iter().collect();
-                        sorted_configs.sort_by_key(|c| {
-                            // Lower priority = generic languages that should be overridden
-                            // Higher priority = specific languages that should take precedence
-                            match c.language.as_str() {
-                                "cpp" => 0,  // Generic C/C++, lowest priority
-                                "oc" => 1,   // Objective-C overrides cpp
-                                _ => 0,      // Default priority
-                            }
-                        });
-
-                        for config in sorted_configs {
-                            if let Some(filename) = config.config_path.file_name() {
-                                let filename_str = filename.to_string_lossy().to_string();
-                                // Language-specific configs (oc, swift, etc.) override generic configs (cpp)
-                                // Later entries override earlier ones
-                                config_by_file.insert(filename_str, config);
-                            }
-                        }
-
-                        // Auto-apply plugin configs to .linthis/configs/
-                        // This keeps project root clean while still providing configs to linters
+                        // Auto-apply plugin configs to .linthis/configs/{language}/
+                        // Each language gets its own subdirectory to avoid conflicts
+                        // (e.g., cpp/.clang-format vs oc/.clang-format)
                         let linthis_dir = std::env::current_dir()
                             .unwrap_or_default()
                             .join(".linthis");
                         let config_dir = linthis_dir.join("configs");
 
-                        if std::fs::create_dir_all(&config_dir).is_ok() {
-                            for (filename, config) in &config_by_file {
-                                let target = config_dir.join(filename);
-                                // Always update to latest plugin config
-                                if std::fs::copy(&config.config_path, &target).is_ok() {
-                                    if cli.verbose {
-                                        eprintln!(
-                                            "  - {}/{}: {} -> .linthis/configs/{}",
-                                            config.language,
-                                            config.tool,
-                                            config.config_path.file_name().unwrap_or_default().to_string_lossy(),
-                                            filename
-                                        );
-                                    }
-                                }
-                            }
-
-                            // Create symlinks in project root for tools that require it
-                            // (e.g., cpplint searches for CPPLINT.cfg in parent directories)
-                            let symlink_configs = ["CPPLINT.cfg"];
-                            let project_root = std::env::current_dir().unwrap_or_default();
-
-                            for filename in symlink_configs {
-                                let source = config_dir.join(filename);
-                                let target = project_root.join(filename);
-
-                                // Only create if source exists and target doesn't
-                                if source.exists() && !target.exists() {
-                                    #[cfg(unix)]
-                                    {
-                                        let _ = std::os::unix::fs::symlink(&source, &target);
-                                    }
-                                    #[cfg(not(unix))]
-                                    {
-                                        // On Windows, copy instead of symlink
-                                        let _ = std::fs::copy(&source, &target);
+                        for config in &configs {
+                            if let Some(filename) = config.config_path.file_name() {
+                                // Create language-specific subdirectory
+                                let lang_dir = config_dir.join(&config.language);
+                                if std::fs::create_dir_all(&lang_dir).is_ok() {
+                                    let target = lang_dir.join(filename);
+                                    // Always update to latest plugin config
+                                    if std::fs::copy(&config.config_path, &target).is_ok() {
+                                        if cli.verbose {
+                                            eprintln!(
+                                                "  - {}/{}: {} -> .linthis/configs/{}/{}",
+                                                config.language,
+                                                config.tool,
+                                                filename.to_string_lossy(),
+                                                config.language,
+                                                filename.to_string_lossy()
+                                            );
+                                        }
                                     }
                                 }
                             }
                         }
+
+                        // NOTE: We no longer create symlinks for CPPLINT.cfg in project root.
+                        // linthis now passes cpplint config via command line args (--linelength, --filter)
+                        // which allows per-language (cpp vs oc) configuration.
+                        // Root symlinks would override this with a single cpp config for all files.
                     }
                     Err(e) => {
                         eprintln!(
@@ -4023,6 +3984,20 @@ fn main() -> ExitCode {
     }
 
     exclude_patterns.extend(cli.exclude.unwrap_or_default());
+
+    // Add excludes from project config file
+    let project_root = linthis::utils::get_project_root();
+    if let Some(project_config) = linthis::config::Config::load_project_config(&project_root) {
+        if !project_config.excludes.is_empty() {
+            if cli.verbose {
+                eprintln!(
+                    "Loaded {} exclude patterns from config",
+                    project_config.excludes.len()
+                );
+            }
+            exclude_patterns.extend(project_config.excludes);
+        }
+    }
 
     // Build options
     let options = RunOptions {

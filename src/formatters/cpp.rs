@@ -11,6 +11,7 @@
 //! C/C++ language formatter using clang-format, clang-tidy --fix, and cpplint fixer.
 
 use crate::fixers::cpplint::{CpplintFixer, CpplintFixerConfig, HeaderGuardMode};
+use crate::fixers::source::SourceFixer;
 use crate::formatters::Formatter;
 use crate::utils::types::FormatResult;
 use crate::{Language, Result};
@@ -97,6 +98,41 @@ impl CppFormatter {
 
         loop {
             let config_path = current.join(".clang-tidy");
+            if config_path.exists() {
+                return Some(config_path);
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Find .clang-format config file for a specific language.
+    /// First checks .linthis/configs/{language}/.clang-format, then walks up directories.
+    fn find_clang_format_config(start_path: &Path, language: &str) -> Option<PathBuf> {
+        // First, check .linthis/configs/{language}/.clang-format
+        let mut current = if start_path.is_file() {
+            start_path.parent()?.to_path_buf()
+        } else {
+            start_path.to_path_buf()
+        };
+
+        // Walk up to find .linthis directory
+        let mut search_dir = current.clone();
+        loop {
+            let linthis_config = search_dir.join(".linthis").join("configs").join(language).join(".clang-format");
+            if linthis_config.exists() {
+                return Some(linthis_config);
+            }
+            if !search_dir.pop() {
+                break;
+            }
+        }
+
+        // Fall back to traditional .clang-format search in parent directories
+        loop {
+            let config_path = current.join(".clang-format");
             if config_path.exists() {
                 return Some(config_path);
             }
@@ -241,30 +277,44 @@ impl Formatter for CppFormatter {
     }
 
     fn format(&self, path: &Path) -> Result<FormatResult> {
+        // Detect language from file extension
+        let language = Self::detect_language(path);
+
         // Read original content for comparison
         let original = fs::read_to_string(path)
             .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
 
         // Step 1: Run cpplint fixer (fixes header guards, TODOs, copyright)
-        if self.use_cpplint_fix {
+        // Note: Skip cpplint for Objective-C files because:
+        // 1. cpplint is designed for C++, not ObjC
+        // 2. cpplint's C-style cast detection misinterprets OC method signatures
+        //    e.g., `+ (UIImage *)method` is wrongly treated as a C-style cast
+        if self.use_cpplint_fix && language != "oc" {
             if let Ok(mut fixer) = self.cpplint_fixer.lock() {
                 let _ = fixer.fix_file(path); // Ignore errors, continue with other fixes
             }
         }
 
         // Step 2: Run clang-tidy --fix (fixes code issues like C-style casts)
-        if self.use_clang_tidy_fix {
+        // Skip for Objective-C files as clang-tidy doesn't handle OC properly
+        if self.use_clang_tidy_fix && language != "oc" {
             let _ = self.run_clang_tidy_fix(path); // Ignore errors, clang-format will still run
         }
 
         // Step 3: Run clang-format (-i modifies in place)
-        let output = Command::new("clang-format")
-            .args(["-i", "-style=Google"])
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::Formatter(format!("Failed to run clang-format: {}", e))
-            })?;
+        let mut cmd = Command::new("clang-format");
+        cmd.arg("-i");
+
+        // Use language-specific config if found, otherwise fall back to Google style
+        if let Some(config_path) = Self::find_clang_format_config(path, language) {
+            cmd.arg(format!("-style=file:{}", config_path.display()));
+        } else {
+            cmd.arg("-style=Google");
+        }
+
+        let output = cmd.arg(path).output().map_err(|e| {
+            crate::LintisError::Formatter(format!("Failed to run clang-format: {}", e))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -272,6 +322,26 @@ impl Formatter for CppFormatter {
                 path.to_path_buf(),
                 format!("clang-format failed: {}", stderr),
             ));
+        }
+
+        // Step 4: Fix comment spacing (clang-format doesn't fix non-ASCII comments like Chinese)
+        // This fixes "//comment" -> "// comment" for all characters
+        SourceFixer::fix_comment_spacing(path)?;
+
+        // Step 5: Fix TODO comments (add username from git blame)
+        SourceFixer::fix_todo_comments(path)?;
+
+        // Step 6: Fix lone semicolons (remove lines with only semicolon)
+        SourceFixer::fix_lone_semicolon(path)?;
+
+        // Step 7: Fix long comment lines (break at appropriate points)
+        // OC uses 150 char limit, C++ uses 120
+        let max_line_length = if language == "oc" { 150 } else { 120 };
+        SourceFixer::fix_long_comments(path, max_line_length)?;
+
+        // Step 8: Fix pragma separators (OC only) - convert "-- -- --" to "#pragma mark -"
+        if language == "oc" {
+            SourceFixer::fix_pragma_separators(path)?;
         }
 
         // Read new content and compare
@@ -287,18 +357,26 @@ impl Formatter for CppFormatter {
     }
 
     fn check(&self, path: &Path) -> Result<bool> {
+        // Detect language from file extension
+        let language = Self::detect_language(path);
+
         // Read current content
         let current = fs::read_to_string(path)
             .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
 
         // Run clang-format to get formatted output (without -i)
-        let output = Command::new("clang-format")
-            .args(["-style=Google"])
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::Formatter(format!("Failed to run clang-format: {}", e))
-            })?;
+        let mut cmd = Command::new("clang-format");
+
+        // Use language-specific config if found, otherwise fall back to Google style
+        if let Some(config_path) = Self::find_clang_format_config(path, language) {
+            cmd.arg(format!("-style=file:{}", config_path.display()));
+        } else {
+            cmd.arg("-style=Google");
+        }
+
+        let output = cmd.arg(path).output().map_err(|e| {
+            crate::LintisError::Formatter(format!("Failed to run clang-format: {}", e))
+        })?;
 
         let formatted = String::from_utf8_lossy(&output.stdout);
 
@@ -312,5 +390,323 @@ impl Formatter for CppFormatter {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
+    }
+}
+
+impl CppFormatter {
+    /// Detect language from file extension and content.
+    /// For .h files, checks content for OC syntax to determine if it's OC or C++.
+    fn detect_language(path: &Path) -> &'static str {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("m") | Some("mm") | Some("M") | Some("MM") => "oc",
+            Some("h") | Some("H") => {
+                // For header files, check content for OC-specific syntax
+                if Self::contains_objc_syntax(path) {
+                    "oc"
+                } else {
+                    "cpp"
+                }
+            }
+            _ => "cpp",
+        }
+    }
+
+    /// Check if a file contains Objective-C specific syntax.
+    fn contains_objc_syntax(path: &Path) -> bool {
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        // OC-specific patterns (exact string matches)
+        let oc_patterns = [
+            "@interface",
+            "@implementation",
+            "@protocol",
+            "@property",
+            "@synthesize",
+            "@dynamic",
+            "@selector",
+            "@class",
+            "@end",
+            "NS_ASSUME_NONNULL_BEGIN",
+            "NS_ENUM",
+            "NS_OPTIONS",
+            "nullable",
+            "nonnull",
+            "+ (", // OC class method
+            "- (", // OC instance method
+            " @\"", // OC string literal: @"string"
+            " @[",  // OC array literal: @[@"a", @"b"]
+        ];
+
+        for pattern in oc_patterns {
+            if content.contains(pattern) {
+                return true;
+            }
+        }
+
+        // Check for Foundation types: NS followed by uppercase letter (e.g., NSString, NSArray)
+        // This follows Apple's naming convention and won't match C++ namespaces (which are lowercase)
+        if Self::contains_ns_type(&content) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if content contains Foundation types (NS followed by uppercase letter).
+    /// Examples: NSString, NSArray, NSDictionary, NSObject, NSURL, etc.
+    fn contains_ns_type(content: &str) -> bool {
+        let bytes = content.as_bytes();
+        let len = bytes.len();
+
+        // Look for "NS" followed by an uppercase letter A-Z
+        for i in 0..len.saturating_sub(2) {
+            if bytes[i] == b'N' && bytes[i + 1] == b'S' {
+                let next_char = bytes[i + 2];
+                // Check if next char is uppercase A-Z (ASCII 65-90)
+                if (b'A'..=b'Z').contains(&next_char) {
+                    // Make sure it's not part of a longer identifier before "NS"
+                    // (i.e., NS should be at word boundary)
+                    if i == 0 || !is_identifier_char(bytes[i - 1]) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
+/// Check if a byte is a valid identifier character (alphanumeric or underscore)
+fn is_identifier_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn create_temp_header(content: &str) -> NamedTempFile {
+        let mut file = tempfile::Builder::new()
+            .suffix(".h")
+            .tempfile()
+            .unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+        file
+    }
+
+    // ==================== detect_language tests ====================
+
+    #[test]
+    fn test_detect_language_m_file() {
+        let path = std::path::Path::new("test.m");
+        assert_eq!(CppFormatter::detect_language(path), "oc");
+    }
+
+    #[test]
+    fn test_detect_language_mm_file() {
+        let path = std::path::Path::new("test.mm");
+        assert_eq!(CppFormatter::detect_language(path), "oc");
+    }
+
+    #[test]
+    fn test_detect_language_cpp_file() {
+        let path = std::path::Path::new("test.cpp");
+        assert_eq!(CppFormatter::detect_language(path), "cpp");
+    }
+
+    #[test]
+    fn test_detect_language_h_file_cpp() {
+        let file = create_temp_header("#include <iostream>\nvoid foo();\n");
+        assert_eq!(CppFormatter::detect_language(file.path()), "cpp");
+    }
+
+    #[test]
+    fn test_detect_language_h_file_oc_interface() {
+        let file = create_temp_header("@interface MyClass : NSObject\n@end\n");
+        assert_eq!(CppFormatter::detect_language(file.path()), "oc");
+    }
+
+    #[test]
+    fn test_detect_language_h_file_oc_property() {
+        let file = create_temp_header("@property (nonatomic) NSString *name;\n");
+        assert_eq!(CppFormatter::detect_language(file.path()), "oc");
+    }
+
+    // ==================== contains_objc_syntax tests ====================
+
+    #[test]
+    fn test_contains_objc_syntax_interface() {
+        let file = create_temp_header("@interface Test\n@end\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_implementation() {
+        let file = create_temp_header("@implementation Test\n@end\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_protocol() {
+        let file = create_temp_header("@protocol MyProtocol\n@end\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_ns_enum() {
+        let file = create_temp_header("typedef NS_ENUM(NSUInteger, MyEnum) {\n};\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_ns_options() {
+        let file = create_temp_header("typedef NS_OPTIONS(NSUInteger, MyOptions) {\n};\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nsinteger() {
+        let file = create_temp_header("- (NSInteger)count;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nsuinteger() {
+        let file = create_temp_header("NSUInteger value = 0;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nsstring() {
+        let file = create_temp_header("NSString *name;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nsarray() {
+        let file = create_temp_header("NSArray *items;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nsdictionary() {
+        let file = create_temp_header("NSDictionary *dict;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nsobject() {
+        let file = create_temp_header("@interface MyClass : NSObject\n@end\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nsurl() {
+        let file = create_temp_header("NSURL *url;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nserror() {
+        let file = create_temp_header("NSError *error;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_string_literal() {
+        let file = create_temp_header("NSString *s = @\"hello\";\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    // ==================== contains_ns_type tests ====================
+
+    #[test]
+    fn test_contains_ns_type_nsstring() {
+        assert!(CppFormatter::contains_ns_type("NSString *name;"));
+    }
+
+    #[test]
+    fn test_contains_ns_type_nsarray() {
+        assert!(CppFormatter::contains_ns_type("NSArray<NSString *> *items;"));
+    }
+
+    #[test]
+    fn test_contains_ns_type_at_line_start() {
+        assert!(CppFormatter::contains_ns_type("NSObject *obj;"));
+    }
+
+    #[test]
+    fn test_contains_ns_type_after_space() {
+        assert!(CppFormatter::contains_ns_type("id<NSCopying> obj;"));
+    }
+
+    #[test]
+    fn test_contains_ns_type_after_paren() {
+        assert!(CppFormatter::contains_ns_type("(NSString *)value"));
+    }
+
+    #[test]
+    fn test_contains_ns_type_no_false_positive_dns() {
+        // "DNS" should not match because D is before NS
+        assert!(!CppFormatter::contains_ns_type("DNSResolver resolver;"));
+    }
+
+    #[test]
+    fn test_contains_ns_type_no_false_positive_lowercase() {
+        // "NSfoo" where next char is lowercase should not match
+        // But actually NS followed by lowercase is rare, let's test NS alone
+        assert!(!CppFormatter::contains_ns_type("namespace ns { }"));
+    }
+
+    #[test]
+    fn test_contains_ns_type_no_false_positive_part_of_word() {
+        // "AwesomeNSString" - NS is part of larger identifier
+        assert!(!CppFormatter::contains_ns_type("AwesomeNSString x;"));
+    }
+
+    #[test]
+    fn test_contains_ns_type_pure_cpp() {
+        assert!(!CppFormatter::contains_ns_type("#include <vector>\nstd::vector<int> v;"));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_array_literal() {
+        let file = create_temp_header("NSArray *arr = @[@\"a\", @\"b\"];\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_class_method() {
+        let file = create_temp_header("+ (instancetype)sharedInstance;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_instance_method() {
+        let file = create_temp_header("- (void)doSomething;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nullable() {
+        let file = create_temp_header("nullable NSString *name;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_nonnull() {
+        let file = create_temp_header("nonnull NSString *name;\n");
+        assert!(CppFormatter::contains_objc_syntax(file.path()));
+    }
+
+    #[test]
+    fn test_contains_objc_syntax_pure_cpp() {
+        let file = create_temp_header("#include <vector>\nstd::vector<int> v;\n");
+        assert!(!CppFormatter::contains_objc_syntax(file.path()));
     }
 }

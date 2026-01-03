@@ -16,20 +16,170 @@ use crate::{Language, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Cpplint configuration for different languages
+#[derive(Debug, Clone)]
+pub struct CpplintConfig {
+    /// Line length limit
+    pub linelength: Option<u32>,
+    /// Filter rules (e.g., "-build/c++11,-build/header_guard")
+    pub filter: Option<String>,
+}
+
+impl Default for CpplintConfig {
+    fn default() -> Self {
+        Self {
+            linelength: None,
+            filter: None,
+        }
+    }
+}
+
 /// C/C++ checker using clang-tidy (preferred) or cpplint.
 pub struct CppChecker {
     /// Custom .clang-tidy config path
     config_path: Option<PathBuf>,
     /// Custom compile_commands.json directory path
     compile_commands_dir: Option<PathBuf>,
+    /// Cpplint config for C++ files
+    cpplint_cpp_config: CpplintConfig,
+    /// Cpplint config for Objective-C files
+    cpplint_oc_config: CpplintConfig,
 }
 
 impl CppChecker {
     pub fn new() -> Self {
+        // Try to load cpplint config from linthis config files
+        let (cpp_config, oc_config) = Self::load_cpplint_configs();
+
         Self {
             config_path: None,
             compile_commands_dir: None,
+            cpplint_cpp_config: cpp_config,
+            cpplint_oc_config: oc_config,
         }
+    }
+
+    /// Load cpplint configs from linthis configuration
+    fn load_cpplint_configs() -> (CpplintConfig, CpplintConfig) {
+        use crate::config::Config;
+
+        // Default configs with sensible defaults for each language
+        let mut cpp_config = CpplintConfig {
+            linelength: Some(120),
+            filter: Some("-build/c++11,-build/c++14".to_string()),
+        };
+
+        // OC default: disable checks not applicable to Objective-C
+        // -whitespace/parens: OC uses @property (attr) syntax which has space before (
+        let mut oc_config = CpplintConfig {
+            linelength: Some(150),
+            filter: Some("-build/c++11,-build/c++14,-build/header_guard,-build/include,-legal/copyright,-readability/casting,-runtime/references,-runtime/int,-whitespace/parens,-whitespace/braces,-whitespace/blank_line,-readability/braces,-whitespace/empty_if_body".to_string()),
+        };
+
+        let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+        // Load from .linthis/configs/{lang}/CPPLINT.cfg (plugin configs)
+        // Merge filters instead of replacing to preserve essential OC defaults
+        let cpp_cfg_path = project_dir.join(".linthis/configs/cpp/CPPLINT.cfg");
+        let oc_cfg_path = project_dir.join(".linthis/configs/oc/CPPLINT.cfg");
+
+        if let Some(cfg) = Self::parse_cpplint_cfg(&cpp_cfg_path) {
+            if cfg.linelength.is_some() {
+                cpp_config.linelength = cfg.linelength;
+            }
+            if let Some(ref f) = cfg.filter {
+                cpp_config.filter = Some(Self::merge_filters(cpp_config.filter.as_deref(), f));
+            }
+        }
+        if let Some(cfg) = Self::parse_cpplint_cfg(&oc_cfg_path) {
+            if cfg.linelength.is_some() {
+                oc_config.linelength = cfg.linelength;
+            }
+            if let Some(ref f) = cfg.filter {
+                oc_config.filter = Some(Self::merge_filters(oc_config.filter.as_deref(), f));
+            }
+        }
+
+        // Priority 2: Override with config.toml settings (if specified)
+        let merged = Config::load_merged(&project_dir);
+
+        if let Some(ref cpp) = merged.language_overrides.cpp {
+            if cpp.linelength.is_some() {
+                cpp_config.linelength = cpp.linelength;
+            }
+            if cpp.cpplint_filter.is_some() {
+                cpp_config.filter = cpp.cpplint_filter.clone();
+            }
+        }
+
+        if let Some(ref oc) = merged.language_overrides.oc {
+            if oc.linelength.is_some() {
+                oc_config.linelength = oc.linelength;
+            }
+            if oc.cpplint_filter.is_some() {
+                oc_config.filter = oc.cpplint_filter.clone();
+            }
+        }
+
+        (cpp_config, oc_config)
+    }
+
+    /// Merge two filter strings, removing duplicates
+    fn merge_filters(base: Option<&str>, additional: &str) -> String {
+        use std::collections::HashSet;
+
+        let mut filters: HashSet<&str> = HashSet::new();
+
+        // Add base filters
+        if let Some(base) = base {
+            for f in base.split(',') {
+                let f = f.trim();
+                if !f.is_empty() {
+                    filters.insert(f);
+                }
+            }
+        }
+
+        // Add additional filters
+        for f in additional.split(',') {
+            let f = f.trim();
+            if !f.is_empty() {
+                filters.insert(f);
+            }
+        }
+
+        filters.into_iter().collect::<Vec<_>>().join(",")
+    }
+
+    /// Parse CPPLINT.cfg file and extract linelength and filter settings
+    fn parse_cpplint_cfg(path: &Path) -> Option<CpplintConfig> {
+        let content = std::fs::read_to_string(path).ok()?;
+
+        let mut linelength = None;
+        let mut filters = Vec::new();
+
+        for line in content.lines() {
+            let line = line.trim();
+            // Skip comments and empty lines
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if let Some(value) = line.strip_prefix("linelength=") {
+                linelength = value.trim().parse().ok();
+            } else if let Some(value) = line.strip_prefix("filter=") {
+                filters.push(value.trim().to_string());
+            }
+        }
+
+        // Combine all filter lines into one comma-separated string
+        let filter = if filters.is_empty() {
+            None
+        } else {
+            Some(filters.join(","))
+        };
+
+        Some(CpplintConfig { linelength, filter })
     }
 
     /// Set custom .clang-tidy config path
@@ -43,6 +193,26 @@ impl CppChecker {
     pub fn with_compile_commands_dir(mut self, path: PathBuf) -> Self {
         self.compile_commands_dir = Some(path);
         self
+    }
+
+    /// Set cpplint config for C++ files
+    pub fn with_cpplint_cpp_config(mut self, config: CpplintConfig) -> Self {
+        self.cpplint_cpp_config = config;
+        self
+    }
+
+    /// Set cpplint config for Objective-C files
+    pub fn with_cpplint_oc_config(mut self, config: CpplintConfig) -> Self {
+        self.cpplint_oc_config = config;
+        self
+    }
+
+    /// Detect if a file is Objective-C (uses smart detection from Language)
+    fn is_objective_c(path: &Path) -> bool {
+        // Use the same smart detection logic as Language::from_path
+        crate::Language::from_path(path)
+            .map(|lang| lang == crate::Language::ObjectiveC)
+            .unwrap_or(false)
     }
 
     /// Find .clang-tidy config file by walking up from file path
@@ -224,10 +394,36 @@ impl CppChecker {
         Ok(issues)
     }
 
-    /// Run cpplint on a file
-    fn run_cpplint(path: &Path) -> Result<Vec<LintIssue>> {
-        let output = Command::new("cpplint")
-            .arg(path)
+    /// Run cpplint on a file with language-specific config
+    fn run_cpplint(&self, path: &Path) -> Result<Vec<LintIssue>> {
+        let mut cmd = Command::new("cpplint");
+
+        // Select config based on file type (Objective-C vs C++)
+        let is_oc = Self::is_objective_c(path);
+        let config = if is_oc {
+            &self.cpplint_oc_config
+        } else {
+            &self.cpplint_cpp_config
+        };
+
+        // Add extensions for Objective-C files (cpplint doesn't recognize .m/.mm by default)
+        if is_oc {
+            cmd.arg("--extensions=m,mm,h");
+        }
+
+        // Apply linelength if configured
+        if let Some(linelength) = config.linelength {
+            cmd.arg(format!("--linelength={}", linelength));
+        }
+
+        // Apply filter if configured
+        if let Some(ref filter) = config.filter {
+            cmd.arg(format!("--filter={}", filter));
+        }
+
+        cmd.arg(path);
+
+        let output = cmd
             .output()
             .map_err(|e| crate::LintisError::Checker(format!("Failed to run cpplint: {}", e)))?;
 
@@ -404,7 +600,7 @@ impl Checker for CppChecker {
         if Self::has_clang_tidy() {
             self.run_clang_tidy(path)
         } else if Self::has_cpplint() {
-            Self::run_cpplint(path)
+            self.run_cpplint(path)
         } else {
             // Neither tool available
             Ok(Vec::new())
@@ -413,5 +609,290 @@ impl Checker for CppChecker {
 
     fn is_available(&self) -> bool {
         Self::has_clang_tidy() || Self::has_cpplint()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // ==================== merge_filters tests ====================
+
+    #[test]
+    fn test_merge_filters_both_present() {
+        let result = CppChecker::merge_filters(Some("-build/c++11,-build/c++14"), "-whitespace/tab");
+        // Result should contain all three filters
+        assert!(result.contains("-build/c++11"));
+        assert!(result.contains("-build/c++14"));
+        assert!(result.contains("-whitespace/tab"));
+    }
+
+    #[test]
+    fn test_merge_filters_base_none() {
+        let result = CppChecker::merge_filters(None, "-build/c++11,-whitespace/tab");
+        assert!(result.contains("-build/c++11"));
+        assert!(result.contains("-whitespace/tab"));
+    }
+
+    #[test]
+    fn test_merge_filters_removes_duplicates() {
+        let result = CppChecker::merge_filters(Some("-build/c++11"), "-build/c++11,-whitespace/tab");
+        // Should not have duplicate -build/c++11
+        let count = result.matches("-build/c++11").count();
+        assert_eq!(count, 1);
+        assert!(result.contains("-whitespace/tab"));
+    }
+
+    #[test]
+    fn test_merge_filters_trims_whitespace() {
+        let result = CppChecker::merge_filters(Some(" -build/c++11 , -build/c++14 "), " -whitespace/tab ");
+        assert!(result.contains("-build/c++11"));
+        assert!(result.contains("-build/c++14"));
+        assert!(result.contains("-whitespace/tab"));
+    }
+
+    #[test]
+    fn test_merge_filters_empty_strings() {
+        let result = CppChecker::merge_filters(Some(""), "");
+        assert!(result.is_empty());
+    }
+
+    // ==================== parse_cpplint_cfg tests ====================
+
+    fn create_temp_cfg(content: &str) -> NamedTempFile {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+        file.flush().unwrap();
+        file
+    }
+
+    #[test]
+    fn test_parse_cpplint_cfg_linelength() {
+        let file = create_temp_cfg("linelength=120\n");
+        let config = CppChecker::parse_cpplint_cfg(file.path()).unwrap();
+        assert_eq!(config.linelength, Some(120));
+        assert!(config.filter.is_none());
+    }
+
+    #[test]
+    fn test_parse_cpplint_cfg_filter() {
+        let file = create_temp_cfg("filter=-build/c++11,-whitespace/tab\n");
+        let config = CppChecker::parse_cpplint_cfg(file.path()).unwrap();
+        assert!(config.linelength.is_none());
+        assert_eq!(config.filter, Some("-build/c++11,-whitespace/tab".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cpplint_cfg_both() {
+        let file = create_temp_cfg("linelength=100\nfilter=-build/header_guard\n");
+        let config = CppChecker::parse_cpplint_cfg(file.path()).unwrap();
+        assert_eq!(config.linelength, Some(100));
+        assert_eq!(config.filter, Some("-build/header_guard".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cpplint_cfg_multiple_filters() {
+        let file = create_temp_cfg("filter=-build/c++11\nfilter=-whitespace/tab\n");
+        let config = CppChecker::parse_cpplint_cfg(file.path()).unwrap();
+        // Multiple filter lines should be joined
+        let filter = config.filter.unwrap();
+        assert!(filter.contains("-build/c++11"));
+        assert!(filter.contains("-whitespace/tab"));
+    }
+
+    #[test]
+    fn test_parse_cpplint_cfg_with_comments() {
+        let file = create_temp_cfg("# This is a comment\nlinelength=80\n# Another comment\n");
+        let config = CppChecker::parse_cpplint_cfg(file.path()).unwrap();
+        assert_eq!(config.linelength, Some(80));
+    }
+
+    #[test]
+    fn test_parse_cpplint_cfg_empty_lines() {
+        let file = create_temp_cfg("\n\nlinelength=150\n\n");
+        let config = CppChecker::parse_cpplint_cfg(file.path()).unwrap();
+        assert_eq!(config.linelength, Some(150));
+    }
+
+    #[test]
+    fn test_parse_cpplint_cfg_nonexistent_file() {
+        let result = CppChecker::parse_cpplint_cfg(Path::new("/nonexistent/path/CPPLINT.cfg"));
+        assert!(result.is_none());
+    }
+
+    // ==================== parse_clang_tidy_line tests ====================
+
+    #[test]
+    fn test_parse_clang_tidy_warning() {
+        let line = "test.cpp:10:5: warning: use nullptr [modernize-use-nullptr]";
+        let default_path = Path::new("default.cpp");
+        let issue = CppChecker::parse_clang_tidy_line(line, default_path).unwrap();
+
+        assert_eq!(issue.line, 10);
+        assert_eq!(issue.column, Some(5));
+        assert_eq!(issue.severity, Severity::Warning);
+        assert!(issue.message.contains("use nullptr"));
+        assert_eq!(issue.code, Some("modernize-use-nullptr".to_string()));
+        assert_eq!(issue.source, Some("clang-tidy".to_string()));
+    }
+
+    #[test]
+    fn test_parse_clang_tidy_error() {
+        let line = "main.cpp:5:1: error: unknown type name 'foo' [clang-diagnostic-error]";
+        let default_path = Path::new("default.cpp");
+        let issue = CppChecker::parse_clang_tidy_line(line, default_path).unwrap();
+
+        assert_eq!(issue.line, 5);
+        assert_eq!(issue.column, Some(1));
+        assert_eq!(issue.severity, Severity::Error);
+        assert!(issue.message.contains("unknown type name"));
+        assert_eq!(issue.code, Some("clang-diagnostic-error".to_string()));
+    }
+
+    #[test]
+    fn test_parse_clang_tidy_no_bracket() {
+        let line = "test.cpp:20:3: warning: some warning without bracket";
+        let default_path = Path::new("default.cpp");
+        let issue = CppChecker::parse_clang_tidy_line(line, default_path).unwrap();
+
+        assert_eq!(issue.line, 20);
+        assert!(issue.code.is_none());
+        assert!(issue.message.contains("some warning without bracket"));
+    }
+
+    #[test]
+    fn test_parse_clang_tidy_irrelevant_line() {
+        let line = "In file included from test.cpp:1:";
+        let default_path = Path::new("default.cpp");
+        let result = CppChecker::parse_clang_tidy_line(line, default_path);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_clang_tidy_note_line() {
+        let line = "test.cpp:10:5: note: previous declaration is here";
+        let default_path = Path::new("default.cpp");
+        let result = CppChecker::parse_clang_tidy_line(line, default_path);
+        assert!(result.is_none()); // notes are not warnings or errors
+    }
+
+    // ==================== parse_cpplint_line tests ====================
+
+    #[test]
+    fn test_parse_cpplint_standard_warning() {
+        let line = "test.cpp:10: Missing space after comma [whitespace/comma] [3]";
+        let default_path = Path::new("default.cpp");
+        let issue = CppChecker::parse_cpplint_line(line, default_path).unwrap();
+
+        assert_eq!(issue.line, 10);
+        assert_eq!(issue.severity, Severity::Warning);
+        assert!(issue.message.contains("Missing space after comma"));
+        assert_eq!(issue.code, Some("whitespace/comma".to_string()));
+        assert_eq!(issue.source, Some("cpplint".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cpplint_header_guard() {
+        let line = "test.h:0: No #ifndef header guard found, suggested CPP variable is: TEST_H_ [build/header_guard] [5]";
+        let default_path = Path::new("test.h");
+        let issue = CppChecker::parse_cpplint_line(line, default_path).unwrap();
+
+        assert_eq!(issue.line, 0);
+        assert!(issue.message.contains("header guard"));
+        assert_eq!(issue.code, Some("build/header_guard".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cpplint_endif_comment() {
+        let line = r##"test.h:50: #endif line should be "#endif  // TEST_H_" [build/header_guard] [5]"##;
+        let default_path = Path::new("test.h");
+        let issue = CppChecker::parse_cpplint_line(line, default_path).unwrap();
+
+        assert_eq!(issue.line, 50);
+        assert!(issue.message.contains("#endif"));
+        assert_eq!(issue.code, Some("build/header_guard".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cpplint_line_length() {
+        let line = "main.cpp:25: Lines should be <= 120 characters long [whitespace/line_length] [2]";
+        let default_path = Path::new("main.cpp");
+        let issue = CppChecker::parse_cpplint_line(line, default_path).unwrap();
+
+        assert_eq!(issue.line, 25);
+        assert!(issue.message.contains("120 characters"));
+        assert_eq!(issue.code, Some("whitespace/line_length".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cpplint_done_processing() {
+        let line = "Done processing test.cpp";
+        let default_path = Path::new("test.cpp");
+        let result = CppChecker::parse_cpplint_line(line, default_path);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_cpplint_total_errors() {
+        let line = "Total errors found: 5";
+        let default_path = Path::new("test.cpp");
+        let result = CppChecker::parse_cpplint_line(line, default_path);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_cpplint_comment_spacing() {
+        let line = "test.cpp:15: Should have a space between // and comment [whitespace/comments] [4]";
+        let default_path = Path::new("test.cpp");
+        let issue = CppChecker::parse_cpplint_line(line, default_path).unwrap();
+
+        assert_eq!(issue.line, 15);
+        assert!(issue.message.contains("space between //"));
+        assert_eq!(issue.code, Some("whitespace/comments".to_string()));
+    }
+
+    // ==================== CpplintConfig tests ====================
+
+    #[test]
+    fn test_cpplint_config_default() {
+        let config = CpplintConfig::default();
+        assert!(config.linelength.is_none());
+        assert!(config.filter.is_none());
+    }
+
+    // ==================== CppChecker builder tests ====================
+
+    #[test]
+    fn test_cpp_checker_with_config() {
+        let checker = CppChecker::new().with_config(PathBuf::from("/custom/.clang-tidy"));
+        assert_eq!(checker.config_path, Some(PathBuf::from("/custom/.clang-tidy")));
+    }
+
+    #[test]
+    fn test_cpp_checker_with_compile_commands_dir() {
+        let checker = CppChecker::new().with_compile_commands_dir(PathBuf::from("/build"));
+        assert_eq!(checker.compile_commands_dir, Some(PathBuf::from("/build")));
+    }
+
+    #[test]
+    fn test_cpp_checker_with_cpplint_cpp_config() {
+        let config = CpplintConfig {
+            linelength: Some(80),
+            filter: Some("-build/c++11".to_string()),
+        };
+        let checker = CppChecker::new().with_cpplint_cpp_config(config.clone());
+        assert_eq!(checker.cpplint_cpp_config.linelength, Some(80));
+    }
+
+    #[test]
+    fn test_cpp_checker_with_cpplint_oc_config() {
+        let config = CpplintConfig {
+            linelength: Some(200),
+            filter: Some("-whitespace/parens".to_string()),
+        };
+        let checker = CppChecker::new().with_cpplint_oc_config(config);
+        assert_eq!(checker.cpplint_oc_config.linelength, Some(200));
     }
 }

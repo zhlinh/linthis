@@ -11,5 +11,7 @@
 //! Auto-fixers for various linting issues.
 
 pub mod cpplint;
+pub mod source;
 
 pub use cpplint::CpplintFixer;
+pub use source::SourceFixer;

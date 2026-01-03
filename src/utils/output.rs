@@ -119,7 +119,11 @@ pub fn format_summary_human(result: &RunResult) -> String {
             RunModeKind::CheckOnly => "All checks passed",
             RunModeKind::Both => "All checks and formats passed",
         };
-        return format!("{}", msg.green().bold());
+        return format!(
+            "{} {} (0 errors, 0 warnings)",
+            "✓".green(),
+            msg.green().bold()
+        );
     }
 
     let mut summary = String::new();
@@ -178,7 +182,11 @@ pub fn format_summary_human(result: &RunResult) -> String {
             RunModeKind::CheckOnly => "All checks passed",
             RunModeKind::Both => "All checks and formats passed",
         };
-        summary.push_str(&format!("{}", msg.green().bold()));
+        summary.push_str(&format!(
+            "{} {} (0 errors, 0 warnings)",
+            "✓".green(),
+            msg.green().bold()
+        ));
     }
 
     // Show duration

@@ -13,6 +13,7 @@
 pub mod language;
 pub mod output;
 pub mod types;
+pub mod unicode;
 pub mod walker;
 
 use std::fs;

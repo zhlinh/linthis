@@ -95,21 +95,33 @@ impl CpplintFixer {
     /// Run cpplint and get errors
     fn run_cpplint(path: &Path) -> Vec<CpplintError> {
         if !Self::has_cpplint() {
+            eprintln!("[cpplint-fixer] cpplint not found in PATH");
             return Vec::new();
         }
 
-        let output = Command::new("cpplint")
-            .arg(path)
-            .output();
+        let output = Command::new("cpplint").arg(path).output();
 
         let output = match output {
             Ok(o) => o,
-            Err(_) => return Vec::new(),
+            Err(e) => {
+                eprintln!("[cpplint-fixer] Failed to run cpplint: {}", e);
+                return Vec::new();
+            }
         };
 
         // cpplint outputs to stderr
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Self::parse_cpplint_output(&stderr)
+        let errors = Self::parse_cpplint_output(&stderr);
+
+        if std::env::var("LINTHIS_DEBUG").is_ok() {
+            eprintln!("[cpplint-fixer] {} cpplint stderr:\n{}", path.display(), stderr);
+            eprintln!("[cpplint-fixer] Parsed {} errors", errors.len());
+            for e in &errors {
+                eprintln!("[cpplint-fixer]   line {}: {} [{}]", e.line, e.message, e.category);
+            }
+        }
+
+        errors
     }
 
     /// Parse cpplint output into structured errors
@@ -148,10 +160,7 @@ impl CpplintFixer {
         }
 
         // 2. Try git config user.name
-        if let Ok(output) = Command::new("git")
-            .args(["config", "user.name"])
-            .output()
-        {
+        if let Ok(output) = Command::new("git").args(["config", "user.name"]).output() {
             if output.status.success() {
                 let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !name.is_empty() {
@@ -179,14 +188,23 @@ impl CpplintFixer {
             return Err(format!("File not found: {}", path.display()));
         }
 
+        let debug = std::env::var("LINTHIS_DEBUG").is_ok();
+
         // Run cpplint to get errors
         let errors = Self::run_cpplint(path);
         if errors.is_empty() {
+            if debug {
+                eprintln!("[cpplint-fixer] No errors found for {}", path.display());
+            }
             return Ok(false);
         }
 
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+        if debug {
+            eprintln!("[cpplint-fixer] Processing {} errors for {}", errors.len(), path.display());
+        }
+
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
 
         let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
         let mut modified = false;
@@ -197,6 +215,9 @@ impl CpplintFixer {
                 "build/header_guard" => {
                     if self.config.header_guard_mode == HeaderGuardMode::FixName {
                         if self.fix_header_guard_from_error(&mut lines, error) {
+                            if debug {
+                                eprintln!("[cpplint-fixer] Fixed header_guard at line {}", error.line);
+                            }
                             modified = true;
                         }
                     } else if self.config.header_guard_mode == HeaderGuardMode::PragmaOnce {
@@ -207,6 +228,9 @@ impl CpplintFixer {
                 }
                 "readability/todo" => {
                     if self.fix_todo_from_error(&mut lines, error) {
+                        if debug {
+                            eprintln!("[cpplint-fixer] Fixed todo at line {}", error.line);
+                        }
                         modified = true;
                     }
                 }
@@ -225,28 +249,42 @@ impl CpplintFixer {
                         modified = true;
                     }
                 }
-                _ => {}
+                "whitespace/comments" => {
+                    if self.fix_comment_spacing(&mut lines, error) {
+                        if debug {
+                            eprintln!("[cpplint-fixer] Fixed comment spacing at line {}", error.line);
+                        }
+                        modified = true;
+                    }
+                }
+                _ => {
+                    if debug {
+                        eprintln!("[cpplint-fixer] Skipping unsupported category: {}", error.category);
+                    }
+                }
             }
         }
 
         if modified {
             let new_content = lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" };
-            fs::write(path, new_content)
-                .map_err(|e| format!("Failed to write file: {}", e))?;
+            fs::write(path, new_content).map_err(|e| format!("Failed to write file: {}", e))?;
         }
 
         Ok(modified)
     }
 
     /// Fix header guard based on cpplint error message
-    fn fix_header_guard_from_error(&self, lines: &mut [String], error: &CpplintError) -> bool {
+    fn fix_header_guard_from_error(&self, lines: &mut Vec<String>, error: &CpplintError) -> bool {
         // Extract suggested guard name from message
-        // Message format: "#ifndef header guard has wrong style, please use: GUARD_NAME_"
-        // Or: "#endif line should be "#endif  // GUARD_NAME_""
+        // Message formats:
+        // 1. "#ifndef header guard has wrong style, please use: GUARD_NAME_"
+        // 2. "#endif line should be "#endif  // GUARD_NAME_""
+        // 3. "No #ifndef header guard found, suggested CPP variable is: GUARD_NAME_"
 
         let suggested_guard = if error.message.contains("please use:") {
             // Extract from "#ifndef header guard has wrong style, please use: GUARD_NAME_"
-            error.message
+            error
+                .message
                 .split("please use:")
                 .nth(1)
                 .map(|s| s.trim().to_string())
@@ -257,6 +295,13 @@ impl CpplintFixer {
                 .and_then(|re| re.captures(&error.message))
                 .and_then(|caps| caps.get(1))
                 .map(|m| m.as_str().to_string())
+        } else if error.message.contains("suggested CPP variable is:") {
+            // Extract from "No #ifndef header guard found, suggested CPP variable is: GUARD_NAME_"
+            error
+                .message
+                .split("suggested CPP variable is:")
+                .nth(1)
+                .map(|s| s.trim().to_string())
         } else {
             None
         };
@@ -265,6 +310,11 @@ impl CpplintFixer {
             Some(g) => g,
             None => return false,
         };
+
+        // Handle missing header guard (line 0 means no guard at all)
+        if error.line == 0 || error.message.contains("No #ifndef header guard found") {
+            return self.insert_header_guard(lines, &suggested_guard);
+        }
 
         let line_idx = error.line.saturating_sub(1);
         if line_idx >= lines.len() {
@@ -292,6 +342,69 @@ impl CpplintFixer {
         false
     }
 
+    /// Insert header guard when none exists
+    fn insert_header_guard(&self, lines: &mut Vec<String>, guard_name: &str) -> bool {
+        // Find the insertion point (after copyright/license comments)
+        let mut insert_idx = 0;
+        let mut in_block_comment = false;
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+
+            // Track block comments
+            if trimmed.starts_with("/*") {
+                in_block_comment = true;
+            }
+            if in_block_comment {
+                if trimmed.contains("*/") {
+                    in_block_comment = false;
+                }
+                insert_idx = i + 1;
+                continue;
+            }
+
+            // Skip line comments at the start (copyright headers)
+            if trimmed.starts_with("//") {
+                insert_idx = i + 1;
+                continue;
+            }
+
+            // Skip empty lines after comments
+            if trimmed.is_empty() && insert_idx > 0 {
+                insert_idx = i + 1;
+                continue;
+            }
+
+            // Found first real content
+            break;
+        }
+
+        // Check if already has #ifndef (shouldn't happen, but be safe)
+        if lines.iter().any(|l| l.trim().starts_with("#ifndef")) {
+            return false;
+        }
+
+        // Insert header guard at the found position
+        // Add empty line before if not at start and previous line isn't empty
+        if insert_idx > 0 && !lines[insert_idx - 1].trim().is_empty() {
+            lines.insert(insert_idx, String::new());
+            insert_idx += 1;
+        }
+
+        lines.insert(insert_idx, format!("#ifndef {}", guard_name));
+        lines.insert(insert_idx + 1, format!("#define {}", guard_name));
+        lines.insert(insert_idx + 2, String::new());
+
+        // Add #endif at the end
+        // Ensure there's an empty line before #endif
+        if !lines.last().map_or(true, |l| l.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push(format!("#endif  // {}", guard_name));
+
+        true
+    }
+
     /// Convert header guards to #pragma once
     fn convert_to_pragma_once(&self, lines: &mut Vec<String>) -> bool {
         // Find #ifndef, #define, #endif pattern
@@ -303,7 +416,8 @@ impl CpplintFixer {
             let trimmed = line.trim();
             if ifndef_idx.is_none() && trimmed.starts_with("#ifndef") {
                 ifndef_idx = Some(i);
-            } else if ifndef_idx.is_some() && define_idx.is_none() && trimmed.starts_with("#define") {
+            } else if ifndef_idx.is_some() && define_idx.is_none() && trimmed.starts_with("#define")
+            {
                 define_idx = Some(i);
             } else if trimmed.starts_with("#endif") {
                 endif_idx = Some(i);
@@ -379,7 +493,12 @@ impl CpplintFixer {
     /// Fix copyright based on cpplint error
     fn fix_copyright_from_error(&self, lines: &mut Vec<String>) -> bool {
         // Check if copyright already exists
-        let first_lines: String = lines.iter().take(10).cloned().collect::<Vec<_>>().join("\n");
+        let first_lines: String = lines
+            .iter()
+            .take(10)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         if first_lines.to_lowercase().contains("copyright") {
             return false;
         }
@@ -441,6 +560,57 @@ impl CpplintFixer {
         }
 
         false
+    }
+
+    /// Fix comment spacing: "//comment" -> "// comment"
+    fn fix_comment_spacing(&self, lines: &mut [String], error: &CpplintError) -> bool {
+        let line_idx = error.line.saturating_sub(1);
+        if line_idx >= lines.len() {
+            return false;
+        }
+
+        let line = &lines[line_idx];
+
+        // Find // and check if next char needs a space
+        let mut result = String::with_capacity(line.len() + 1);
+        let mut chars = line.chars().peekable();
+        let mut modified = false;
+
+        while let Some(c) = chars.next() {
+            result.push(c);
+
+            if c == '/' {
+                if let Some(&next) = chars.peek() {
+                    if next == '/' {
+                        result.push(chars.next().unwrap()); // consume second /
+
+                        // Consume all consecutive slashes (///, ////, etc.)
+                        while let Some(&slash) = chars.peek() {
+                            if slash == '/' {
+                                result.push(chars.next().unwrap());
+                            } else {
+                                break;
+                            }
+                        }
+
+                        // Check if next char after slashes needs a space
+                        if let Some(&after_slashes) = chars.peek() {
+                            if after_slashes != ' ' && after_slashes != '\n' && after_slashes != '\r'
+                            {
+                                result.push(' ');
+                                modified = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if modified {
+            lines[line_idx] = result;
+        }
+
+        modified
     }
 
     /// Fix ASSERT_TRUE(a == b) -> ASSERT_EQ(a, b)
@@ -535,6 +705,46 @@ test.cc:17:  Missing username in TODO; it should look like "// TODO(my_username)
     }
 
     #[test]
+    fn test_parse_missing_header_guard() {
+        // Test parsing "No #ifndef header guard found" error (line 0)
+        let output = r##"test.h:0:  No #ifndef header guard found, suggested CPP variable is: TEST_H_  [build/header_guard] [5]
+"##;
+
+        let errors = CpplintFixer::parse_cpplint_output(output);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].line, 0);
+        assert_eq!(errors[0].category, "build/header_guard");
+        assert!(errors[0].message.contains("suggested CPP variable is: TEST_H_"));
+    }
+
+    #[test]
+    fn test_insert_missing_header_guard() {
+        let fixer = CpplintFixer::new();
+
+        // File without header guard
+        let mut lines = vec![
+            "// Copyright notice".to_string(),
+            "".to_string(),
+            "#include <stdio.h>".to_string(),
+            "".to_string(),
+            "void foo();".to_string(),
+        ];
+
+        let error = CpplintError {
+            line: 0,
+            message: "No #ifndef header guard found, suggested CPP variable is: TEST_H_".to_string(),
+            category: "build/header_guard".to_string(),
+        };
+
+        assert!(fixer.fix_header_guard_from_error(&mut lines, &error));
+
+        // Check that header guard was inserted after copyright
+        assert!(lines.iter().any(|l| l.contains("#ifndef TEST_H_")));
+        assert!(lines.iter().any(|l| l.contains("#define TEST_H_")));
+        assert!(lines.iter().any(|l| l.contains("#endif  // TEST_H_")));
+    }
+
+    #[test]
     fn test_fix_header_guard_from_error() {
         let fixer = CpplintFixer::new();
 
@@ -568,12 +778,110 @@ test.cc:17:  Missing username in TODO; it should look like "// TODO(my_username)
 
         let error = CpplintError {
             line: 1,
-            message: r#"Missing username in TODO; it should look like "// TODO(my_username): Stuff.""#.to_string(),
+            message:
+                r#"Missing username in TODO; it should look like "// TODO(my_username): Stuff.""#
+                    .to_string(),
             category: "readability/todo".to_string(),
         };
 
         assert!(fixer.fix_todo_from_error(&mut lines, &error));
         assert_eq!(lines[0], "// TODO(testuser): fix this");
         assert_eq!(lines[1], "// TODO(existing): keep this");
+    }
+
+    #[test]
+    fn test_fix_endif_line() {
+        let fixer = CpplintFixer::new();
+
+        let mut lines = vec![
+            "#ifndef GUARD_H_".to_string(),
+            "#define GUARD_H_".to_string(),
+            "// content".to_string(),
+            "#endif".to_string(),
+        ];
+
+        let error = CpplintError {
+            line: 4,
+            message: r##"#endif line should be "#endif  // GUARD_H_""##.to_string(),
+            category: "build/header_guard".to_string(),
+        };
+
+        assert!(fixer.fix_header_guard_from_error(&mut lines, &error));
+        assert_eq!(lines[3], "#endif  // GUARD_H_");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_cpplint() {
+        let fixer = CpplintFixer::new();
+
+        let mut lines = vec![
+            "int x = 1; //comment".to_string(),
+            "int y = 2; // already spaced".to_string(),
+        ];
+
+        let error = CpplintError {
+            line: 1,
+            message: "Should have a space between // and comment".to_string(),
+            category: "whitespace/comments".to_string(),
+        };
+
+        assert!(fixer.fix_comment_spacing(&mut lines, &error));
+        assert_eq!(lines[0], "int x = 1; // comment");
+        assert_eq!(lines[1], "int y = 2; // already spaced");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_triple_slash() {
+        let fixer = CpplintFixer::new();
+
+        let mut lines = vec!["///doc comment".to_string()];
+
+        let error = CpplintError {
+            line: 1,
+            message: "Should have a space between // and comment".to_string(),
+            category: "whitespace/comments".to_string(),
+        };
+
+        assert!(fixer.fix_comment_spacing(&mut lines, &error));
+        assert_eq!(lines[0], "/// doc comment");
+    }
+
+    #[test]
+    fn test_insert_header_guard_after_block_comment() {
+        let fixer = CpplintFixer::new();
+
+        let mut lines = vec![
+            "/*".to_string(),
+            " * Copyright 2024".to_string(),
+            " */".to_string(),
+            "".to_string(),
+            "#include <stdio.h>".to_string(),
+        ];
+
+        let error = CpplintError {
+            line: 0,
+            message: "No #ifndef header guard found, suggested CPP variable is: TEST_H_".to_string(),
+            category: "build/header_guard".to_string(),
+        };
+
+        assert!(fixer.fix_header_guard_from_error(&mut lines, &error));
+
+        // Find positions
+        let ifndef_pos = lines.iter().position(|l| l.contains("#ifndef TEST_H_")).unwrap();
+        let block_end_pos = lines.iter().position(|l| l.contains("*/")).unwrap();
+
+        // Header guard should be after block comment
+        assert!(ifndef_pos > block_end_pos);
+    }
+
+    #[test]
+    fn test_parse_whitespace_comments_error() {
+        let output = r##"test.cc:5:  Should have a space between // and comment  [whitespace/comments] [4]
+"##;
+
+        let errors = CpplintFixer::parse_cpplint_output(output);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].line, 5);
+        assert_eq!(errors[0].category, "whitespace/comments");
     }
 }

@@ -131,7 +131,9 @@ pub struct LanguageOverrides {
     #[serde(default)]
     pub java: Option<LanguageConfig>,
     #[serde(default)]
-    pub cpp: Option<LanguageConfig>,
+    pub cpp: Option<CppLanguageConfig>,
+    #[serde(default, alias = "objectivec")]
+    pub oc: Option<CppLanguageConfig>,
 }
 
 /// Per-language configuration
@@ -146,6 +148,26 @@ pub struct LanguageConfig {
     /// Max complexity override
     #[serde(default)]
     pub max_complexity: Option<u32>,
+}
+
+/// C/C++/Objective-C language configuration with cpplint support
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CppLanguageConfig {
+    /// Additional exclusion patterns for this language
+    #[serde(default, alias = "exclude")]
+    pub excludes: Vec<String>,
+    /// Enable/disable this language
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// Max complexity override
+    #[serde(default)]
+    pub max_complexity: Option<u32>,
+    /// Cpplint line length (default: 80)
+    #[serde(default)]
+    pub linelength: Option<u32>,
+    /// Cpplint filter rules (e.g., "-build/c++11,-build/header_guard")
+    #[serde(default)]
+    pub cpplint_filter: Option<String>,
 }
 
 impl LanguageOverrides {
@@ -166,6 +188,7 @@ impl LanguageOverrides {
         merge_lang!(go);
         merge_lang!(java);
         merge_lang!(cpp);
+        merge_lang!(oc);
     }
 }
 
@@ -465,5 +488,324 @@ mod tests {
         let python_config = config.language_overrides.python.as_ref().unwrap();
         assert_eq!(python_config.max_complexity, Some(10));
         assert_eq!(python_config.excludes, vec!["*_test.py".to_string()]);
+    }
+
+    // ==================== LanguageOverrides tests ====================
+
+    #[test]
+    fn test_language_overrides_merge() {
+        let mut base = LanguageOverrides {
+            rust: Some(LanguageConfig {
+                max_complexity: Some(15),
+                ..Default::default()
+            }),
+            python: Some(LanguageConfig {
+                max_complexity: Some(10),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let other = LanguageOverrides {
+            rust: Some(LanguageConfig {
+                max_complexity: Some(20),
+                excludes: vec!["target/**".to_string()],
+                ..Default::default()
+            }),
+            go: Some(LanguageConfig {
+                max_complexity: Some(25),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        base.merge(other);
+
+        // Rust should be overridden
+        assert!(base.rust.is_some());
+        assert_eq!(base.rust.as_ref().unwrap().max_complexity, Some(20));
+
+        // Python should be preserved (not in other)
+        assert!(base.python.is_some());
+        assert_eq!(base.python.as_ref().unwrap().max_complexity, Some(10));
+
+        // Go should be added from other
+        assert!(base.go.is_some());
+        assert_eq!(base.go.as_ref().unwrap().max_complexity, Some(25));
+    }
+
+    #[test]
+    fn test_language_overrides_merge_none_preserves() {
+        let mut base = LanguageOverrides {
+            rust: Some(LanguageConfig {
+                max_complexity: Some(15),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let other = LanguageOverrides::default();
+        base.merge(other);
+
+        // Rust should be preserved
+        assert!(base.rust.is_some());
+        assert_eq!(base.rust.as_ref().unwrap().max_complexity, Some(15));
+    }
+
+    // ==================== Config new/default tests ====================
+
+    #[test]
+    fn test_config_new() {
+        let config = Config::new();
+        assert!(config.languages.is_empty());
+        assert!(config.includes.is_empty());
+        assert!(config.excludes.is_empty());
+        assert!(config.max_complexity.is_none());
+        assert!(config.preset.is_none());
+    }
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+        assert!(config.languages.is_empty());
+        assert!(config.plugins.is_none());
+    }
+
+    // ==================== generate_default_toml tests ====================
+
+    #[test]
+    fn test_generate_default_toml_is_valid() {
+        let toml_content = Config::generate_default_toml();
+        // Should be parseable as TOML
+        let result: Result<Config, _> = toml::from_str(&toml_content);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_generate_default_toml_has_expected_values() {
+        let toml_content = Config::generate_default_toml();
+        let config: Config = toml::from_str(&toml_content).unwrap();
+        assert_eq!(config.max_complexity, Some(20));
+        assert!(config.excludes.is_empty());
+    }
+
+    // ==================== project_config_path tests ====================
+
+    #[test]
+    fn test_project_config_path() {
+        let project_dir = Path::new("/home/user/project");
+        let config_path = Config::project_config_path(project_dir);
+        assert_eq!(config_path, PathBuf::from("/home/user/project/.linthis/config.toml"));
+    }
+
+    // ==================== Config merge edge cases ====================
+
+    #[test]
+    fn test_config_merge_languages() {
+        let mut base = Config {
+            languages: ["rust".to_string()].into_iter().collect(),
+            ..Default::default()
+        };
+
+        let other = Config {
+            languages: ["python".to_string(), "go".to_string()].into_iter().collect(),
+            ..Default::default()
+        };
+
+        base.merge(other);
+
+        // Languages should be replaced, not merged
+        assert_eq!(base.languages.len(), 2);
+        assert!(base.languages.contains("python"));
+        assert!(base.languages.contains("go"));
+        assert!(!base.languages.contains("rust"));
+    }
+
+    #[test]
+    fn test_config_merge_empty_languages_preserves() {
+        let mut base = Config {
+            languages: ["rust".to_string()].into_iter().collect(),
+            ..Default::default()
+        };
+
+        let other = Config {
+            languages: HashSet::new(),
+            ..Default::default()
+        };
+
+        base.merge(other);
+
+        // Empty languages should not override
+        assert_eq!(base.languages.len(), 1);
+        assert!(base.languages.contains("rust"));
+    }
+
+    #[test]
+    fn test_config_merge_includes_extends() {
+        let mut base = Config {
+            includes: vec!["src/**".to_string()],
+            ..Default::default()
+        };
+
+        let other = Config {
+            includes: vec!["lib/**".to_string()],
+            ..Default::default()
+        };
+
+        base.merge(other);
+
+        // Includes should be extended, not replaced
+        assert_eq!(base.includes, vec!["src/**".to_string(), "lib/**".to_string()]);
+    }
+
+    #[test]
+    fn test_config_merge_verbose() {
+        let mut base = Config::default();
+        let other = Config {
+            verbose: Some(true),
+            ..Default::default()
+        };
+
+        base.merge(other);
+        assert_eq!(base.verbose, Some(true));
+    }
+
+    // ==================== PluginConfig tests ====================
+
+    #[test]
+    fn test_plugin_config_default() {
+        let config = PluginConfig::default();
+        assert!(config.sources.is_empty());
+    }
+
+    #[test]
+    fn test_plugin_source_enabled_default() {
+        let toml_str = r#"
+            [plugins]
+            sources = [
+                { name = "test" }
+            ]
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let sources = &config.plugins.unwrap().sources;
+        assert_eq!(sources.len(), 1);
+        assert!(sources[0].enabled); // Should default to true
+    }
+
+    #[test]
+    fn test_plugin_source_with_all_fields() {
+        let toml_str = r#"
+            [plugins]
+            sources = [
+                { name = "test", url = "https://example.com/repo.git", ref = "v1.0", enabled = false }
+            ]
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let sources = &config.plugins.unwrap().sources;
+        assert_eq!(sources[0].name, "test");
+        assert_eq!(sources[0].url, Some("https://example.com/repo.git".to_string()));
+        assert_eq!(sources[0].git_ref, Some("v1.0".to_string()));
+        assert!(!sources[0].enabled);
+    }
+
+    // ==================== SourceConfig tests ====================
+
+    #[test]
+    fn test_source_config_default() {
+        let config = SourceConfig::default();
+        assert!(config.test_source.filepath_regex.is_empty());
+        assert!(config.auto_generate_source.filepath_regex.is_empty());
+        assert!(config.third_party_source.filepath_regex.is_empty());
+    }
+
+    #[test]
+    fn test_source_config_from_toml() {
+        let toml_str = r#"
+            [source.test_source]
+            filepath_regex = [".*_test\\.py$", "test_.*\\.py$"]
+
+            [source.third_party_source]
+            filepath_regex = ["vendor/.*"]
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let source = config.source.unwrap();
+        assert_eq!(source.test_source.filepath_regex.len(), 2);
+        assert_eq!(source.third_party_source.filepath_regex.len(), 1);
+    }
+
+    // ==================== CppLanguageConfig tests ====================
+
+    #[test]
+    fn test_cpp_language_config_from_toml() {
+        let toml_str = r#"
+            [cpp]
+            linelength = 120
+            cpplint_filter = "-build/c++11,-whitespace/tab"
+            max_complexity = 25
+
+            [oc]
+            linelength = 150
+            cpplint_filter = "-build/header_guard"
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+
+        let cpp = config.language_overrides.cpp.unwrap();
+        assert_eq!(cpp.linelength, Some(120));
+        assert_eq!(cpp.cpplint_filter, Some("-build/c++11,-whitespace/tab".to_string()));
+        assert_eq!(cpp.max_complexity, Some(25));
+
+        let oc = config.language_overrides.oc.unwrap();
+        assert_eq!(oc.linelength, Some(150));
+        assert_eq!(oc.cpplint_filter, Some("-build/header_guard".to_string()));
+    }
+
+    #[test]
+    fn test_objectivec_alias() {
+        // Test that 'objectivec' alias works for 'oc'
+        let toml_str = r#"
+            [objectivec]
+            linelength = 200
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let oc = config.language_overrides.oc.unwrap();
+        assert_eq!(oc.linelength, Some(200));
+    }
+
+    // ==================== get_plugin_sources tests ====================
+
+    #[test]
+    fn test_get_plugin_sources_empty() {
+        let config = Config::default();
+        let sources = config.get_plugin_sources();
+        assert!(sources.is_empty());
+    }
+
+    #[test]
+    fn test_get_plugin_sources_with_plugins() {
+        let config = Config {
+            plugins: Some(PluginConfig {
+                sources: vec![
+                    PluginSourceConfig {
+                        name: "test".to_string(),
+                        url: Some("https://example.com".to_string()),
+                        git_ref: Some("main".to_string()),
+                        enabled: true,
+                    },
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let sources = config.get_plugin_sources();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].name, "test");
+        assert_eq!(sources[0].url, Some("https://example.com".to_string()));
+        assert_eq!(sources[0].git_ref, Some("main".to_string()));
+        assert!(sources[0].enabled);
     }
 }
