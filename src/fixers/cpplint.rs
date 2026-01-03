@@ -66,6 +66,8 @@ pub struct CpplintFixer {
     config: CpplintFixerConfig,
     /// Cached username
     cached_username: Option<String>,
+    /// Whether the current file is Objective-C (skip unsafe fixes)
+    is_objc: bool,
 }
 
 impl CpplintFixer {
@@ -73,6 +75,7 @@ impl CpplintFixer {
         Self {
             config: CpplintFixerConfig::default(),
             cached_username: None,
+            is_objc: false,
         }
     }
 
@@ -80,7 +83,14 @@ impl CpplintFixer {
         Self {
             config,
             cached_username: None,
+            is_objc: false,
         }
+    }
+
+    /// Set whether the current file is Objective-C
+    /// This will skip unsafe fix categories (like readability/casting)
+    pub fn set_is_objc(&mut self, is_objc: bool) {
+        self.is_objc = is_objc;
     }
 
     /// Check if cpplint is available
@@ -213,7 +223,12 @@ impl CpplintFixer {
         for error in &errors {
             match error.category.as_str() {
                 "build/header_guard" => {
-                    if self.config.header_guard_mode == HeaderGuardMode::FixName {
+                    // Skip header guard fixes for OC files - OC uses #import which handles include guards
+                    if self.is_objc {
+                        if debug {
+                            eprintln!("[cpplint-fixer] Skipping build/header_guard for OC file");
+                        }
+                    } else if self.config.header_guard_mode == HeaderGuardMode::FixName {
                         if self.fix_header_guard_from_error(&mut lines, error) {
                             if debug {
                                 eprintln!("[cpplint-fixer] Fixed header_guard at line {}", error.line);
@@ -240,7 +255,13 @@ impl CpplintFixer {
                     }
                 }
                 "readability/casting" => {
-                    if self.fix_c_style_cast(&mut lines, error) {
+                    // Skip C-style cast fixes for OC files - OC method signatures
+                    // like `+ (UIImage *)method` are misinterpreted as C-style casts
+                    if self.is_objc {
+                        if debug {
+                            eprintln!("[cpplint-fixer] Skipping readability/casting for OC file");
+                        }
+                    } else if self.fix_c_style_cast(&mut lines, error) {
                         modified = true;
                     }
                 }
@@ -275,11 +296,17 @@ impl CpplintFixer {
 
     /// Fix header guard based on cpplint error message
     fn fix_header_guard_from_error(&self, lines: &mut Vec<String>, error: &CpplintError) -> bool {
+        let debug = std::env::var("LINTHIS_DEBUG").is_ok();
+
         // Extract suggested guard name from message
         // Message formats:
         // 1. "#ifndef header guard has wrong style, please use: GUARD_NAME_"
         // 2. "#endif line should be "#endif  // GUARD_NAME_""
         // 3. "No #ifndef header guard found, suggested CPP variable is: GUARD_NAME_"
+
+        if debug {
+            eprintln!("[cpplint-fixer] fix_header_guard_from_error: line={}, msg={}", error.line, error.message);
+        }
 
         let suggested_guard = if error.message.contains("please use:") {
             // Extract from "#ifndef header guard has wrong style, please use: GUARD_NAME_"
@@ -563,6 +590,8 @@ impl CpplintFixer {
     }
 
     /// Fix comment spacing: "//comment" -> "// comment"
+    /// NOTE: This only modifies actual comments, not `//` inside string literals
+    /// Uses the same detection logic as cpplint's IsCppString function
     fn fix_comment_spacing(&self, lines: &mut [String], error: &CpplintError) -> bool {
         let line_idx = error.line.saturating_sub(1);
         if line_idx >= lines.len() {
@@ -570,47 +599,86 @@ impl CpplintFixer {
         }
 
         let line = &lines[line_idx];
+        let fixed = Self::fix_comment_spacing_line(line);
 
-        // Find // and check if next char needs a space
-        let mut result = String::with_capacity(line.len() + 1);
-        let mut chars = line.chars().peekable();
-        let mut modified = false;
+        if fixed != *line {
+            lines[line_idx] = fixed;
+            true
+        } else {
+            false
+        }
+    }
 
-        while let Some(c) = chars.next() {
-            result.push(c);
+    /// Fix comment spacing for a single line
+    fn fix_comment_spacing_line(line: &str) -> String {
+        // Find the real comment position (not inside a string)
+        let Some(comment_pos) = Self::find_real_comment_pos(line) else {
+            return line.to_string();
+        };
 
-            if c == '/' {
-                if let Some(&next) = chars.peek() {
-                    if next == '/' {
-                        result.push(chars.next().unwrap()); // consume second /
+        let before_comment = &line[..comment_pos];
+        let comment_part = &line[comment_pos..];
 
-                        // Consume all consecutive slashes (///, ////, etc.)
-                        while let Some(&slash) = chars.peek() {
-                            if slash == '/' {
-                                result.push(chars.next().unwrap());
-                            } else {
-                                break;
-                            }
-                        }
+        // Count consecutive slashes
+        let slash_count = comment_part.chars().take_while(|&c| c == '/').count();
+        let after_slashes = &comment_part[slash_count..];
 
-                        // Check if next char after slashes needs a space
-                        if let Some(&after_slashes) = chars.peek() {
-                            if after_slashes != ' ' && after_slashes != '\n' && after_slashes != '\r'
-                            {
-                                result.push(' ');
-                                modified = true;
-                            }
-                        }
-                    }
-                }
+        // Check if space is needed
+        if !after_slashes.is_empty() {
+            let first_char = after_slashes.chars().next().unwrap();
+            if first_char != ' ' && first_char != '\n' && first_char != '\r' {
+                // Need to add space
+                return format!(
+                    "{}{} {}",
+                    before_comment,
+                    "/".repeat(slash_count),
+                    after_slashes
+                );
             }
         }
 
-        if modified {
-            lines[line_idx] = result;
-        }
+        line.to_string()
+    }
 
-        modified
+    /// Find the position of the first real // comment (not inside a string)
+    fn find_real_comment_pos(line: &str) -> Option<usize> {
+        let mut search_start = 0;
+
+        loop {
+            // Find next // starting from search_start
+            let rest = &line[search_start..];
+            let Some(rel_pos) = rest.find("//") else {
+                return None;
+            };
+
+            let abs_pos = search_start + rel_pos;
+            let before_comment = &line[..abs_pos];
+
+            // Check if this // is inside a string
+            if !Self::is_in_cpp_string(before_comment) {
+                // This is a real comment
+                return Some(abs_pos);
+            }
+
+            // This // is inside a string, continue searching after it
+            search_start = abs_pos + 2;
+        }
+    }
+
+    /// Check if the line ends inside a string constant (cpplint's IsCppString logic)
+    fn is_in_cpp_string(line: &str) -> bool {
+        // Replace \\ with XX to handle escaped backslashes
+        let line = line.replace("\\\\", "XX");
+
+        // Count quotes: total " minus escaped \" minus '"' (quote in char literal)
+        let total_quotes = line.matches('"').count();
+        let escaped_quotes = line.matches("\\\"").count();
+        let char_literal_quotes = line.matches("'\"'").count();
+
+        let effective_quotes = total_quotes - escaped_quotes - char_literal_quotes;
+
+        // If odd number of quotes, we're inside a string
+        (effective_quotes & 1) == 1
     }
 
     /// Fix ASSERT_TRUE(a == b) -> ASSERT_EQ(a, b)
@@ -844,6 +912,41 @@ test.cc:17:  Missing username in TODO; it should look like "// TODO(my_username)
 
         assert!(fixer.fix_comment_spacing(&mut lines, &error));
         assert_eq!(lines[0], "/// doc comment");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_preserves_url() {
+        let fixer = CpplintFixer::new();
+
+        // URLs like https:// should NOT be modified
+        let mut lines = vec!["return @\"https://example.com\";".to_string()];
+
+        let error = CpplintError {
+            line: 1,
+            message: "Should have a space between // and comment".to_string(),
+            category: "whitespace/comments".to_string(),
+        };
+
+        // Should not modify URL
+        assert!(!fixer.fix_comment_spacing(&mut lines, &error));
+        assert_eq!(lines[0], "return @\"https://example.com\";");
+    }
+
+    #[test]
+    fn test_fix_comment_spacing_url_and_comment() {
+        let fixer = CpplintFixer::new();
+
+        // Should preserve URL but fix comment
+        let mut lines = vec!["NSString *url = @\"https://example.com\"; //comment".to_string()];
+
+        let error = CpplintError {
+            line: 1,
+            message: "Should have a space between // and comment".to_string(),
+            category: "whitespace/comments".to_string(),
+        };
+
+        assert!(fixer.fix_comment_spacing(&mut lines, &error));
+        assert_eq!(lines[0], "NSString *url = @\"https://example.com\"; // comment");
     }
 
     #[test]
