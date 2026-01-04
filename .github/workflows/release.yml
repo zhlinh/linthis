@@ -163,7 +163,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
-          args: --locked --out dist
+          args: --out dist
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
@@ -184,11 +184,34 @@ jobs:
           pattern: binaries-*
           path: binaries
           merge-multiple: true
+      - name: Prepare release body
+        id: release_body
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          cat << EOF > release_body.md
+          ## Installation
+
+          \`\`\`bash
+          pip install linthis==$VERSION
+          # or
+          pip install --upgrade linthis
+          \`\`\`
+
+          ## Quick Start
+
+          \`\`\`bash
+          # Run linthis
+          linthis [-i <path>]
+          \`\`\`
+
+          See [CHANGELOG.md](CHANGELOG.md) for details.
+          EOF
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: binaries/*
           generate_release_notes: true
+          body_path: release_body.md
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         env:
