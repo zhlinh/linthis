@@ -17,10 +17,17 @@
 
 use std::env;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Mutex;
 
 use regex::Regex;
+
+// Installation state: 0 = not checked, 1 = installing, 2 = installed, 3 = failed
+static CPPLINT_INSTALL_STATE: AtomicU8 = AtomicU8::new(0);
+static INSTALL_LOCK: Mutex<()> = Mutex::new(());
 
 /// Configuration for cpplint fixes
 #[derive(Debug, Clone)]
@@ -102,11 +109,129 @@ impl CpplintFixer {
             .unwrap_or(false)
     }
 
+    /// Try to auto-install cpplint using pip
+    fn try_install_cpplint() -> bool {
+        // Acquire lock to ensure only one thread installs
+        let _lock = INSTALL_LOCK.lock().unwrap();
+
+        // Double-check state after acquiring lock
+        let state = CPPLINT_INSTALL_STATE.load(Ordering::SeqCst);
+        if state != 0 {
+            return state == 2; // Return true if already installed
+        }
+
+        // Set installing state
+        CPPLINT_INSTALL_STATE.store(1, Ordering::SeqCst);
+
+        eprintln!("\n📦 cpplint not found, attempting to install...");
+
+        // Try pip first (more compatible on macOS), then pip3
+        for pip_cmd in &["pip", "pip3"] {
+            if !Command::new(pip_cmd)
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            eprintln!("   Using {} to install cpplint...", pip_cmd);
+
+            // Run pip install with progress output
+            let mut child = match Command::new(pip_cmd)
+                .args(&["install", "cpplint", "--upgrade"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(e) => {
+                    eprintln!("   ❌ Failed to start pip: {}", e);
+                    continue;
+                }
+            };
+
+            // Read and display output
+            if let Some(stderr) = child.stderr.take() {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().flatten() {
+                    // Filter and display relevant progress information
+                    if line.contains("Collecting")
+                        || line.contains("Downloading")
+                        || line.contains("Installing")
+                        || line.contains("Successfully")
+                    {
+                        eprintln!("   {}", line);
+                    }
+                }
+            }
+
+            // Wait for installation to complete
+            match child.wait() {
+                Ok(status) if status.success() => {
+                    // Verify installation
+                    if Self::has_cpplint() {
+                        eprintln!("   ✓ cpplint installed successfully!\n");
+                        CPPLINT_INSTALL_STATE.store(2, Ordering::SeqCst);
+                        return true;
+                    } else {
+                        eprintln!("   ⚠️  Installation completed but cpplint not found in PATH");
+                        eprintln!("   You may need to restart your terminal or add Python's bin directory to PATH\n");
+                    }
+                }
+                Ok(status) => {
+                    eprintln!("   ❌ Installation failed with exit code: {}", status);
+                }
+                Err(e) => {
+                    eprintln!("   ❌ Failed to wait for pip: {}", e);
+                }
+            }
+        }
+
+        // Installation failed
+        eprintln!("   ❌ Auto-installation failed. Please install manually:");
+        eprintln!("      pip install cpplint");
+        eprintln!("   Or if pip doesn't work:");
+        eprintln!("      pip3 install cpplint\n");
+
+        CPPLINT_INSTALL_STATE.store(3, Ordering::SeqCst);
+        false
+    }
+
     /// Run cpplint and get errors
     fn run_cpplint(path: &Path, is_objc: bool) -> Vec<CpplintError> {
+        // Check if cpplint is available
         if !Self::has_cpplint() {
-            eprintln!("[cpplint-fixer] cpplint not found in PATH");
-            return Vec::new();
+            let state = CPPLINT_INSTALL_STATE.load(Ordering::SeqCst);
+
+            match state {
+                0 => {
+                    // First time detection - try to auto-install
+                    if Self::try_install_cpplint() {
+                        // Installation successful, continue
+                    } else {
+                        // Installation failed, skip cpplint
+                        return Vec::new();
+                    }
+                }
+                1 => {
+                    // Installation in progress (another thread), skip for now
+                    return Vec::new();
+                }
+                2 => {
+                    // Should have been installed, but still not found
+                    // This shouldn't happen, but skip silently
+                    return Vec::new();
+                }
+                3 => {
+                    // Installation failed previously, skip silently
+                    return Vec::new();
+                }
+                _ => {
+                    return Vec::new();
+                }
+            }
         }
 
         let mut cmd = Command::new("cpplint");
@@ -151,15 +276,27 @@ impl CpplintFixer {
 
         // Format: file:line: message [category] [confidence]
         // Example: test.h:8: #ifndef header guard has wrong style, please use: FOO_H_ [build/header_guard] [5]
-        let re = Regex::new(r"^[^:]+:(\d+):\s*(.+?)\s*\[([^\]]+)\]").unwrap();
+        let re = Regex::new(r"^([^:]+):(\d+):\s*(.+?)\s*\[([^\]]+)\]").unwrap();
 
         for line in output.lines() {
             if let Some(caps) = re.captures(line) {
-                if let Ok(line_num) = caps[1].parse::<usize>() {
+                let file_path = &caps[1];
+
+                // Skip errors from system paths (SDK, frameworks, system includes)
+                if file_path.starts_with("/Library/Developer/")
+                    || file_path.starts_with("/System/Library/")
+                    || file_path.starts_with("/usr/include/")
+                    || file_path.starts_with("/usr/local/include/")
+                    || file_path.contains("/SDKs/")
+                    || file_path.contains(".framework/") {
+                    continue;
+                }
+
+                if let Ok(line_num) = caps[2].parse::<usize>() {
                     errors.push(CpplintError {
                         line: line_num,
-                        message: caps[2].to_string(),
-                        category: caps[3].to_string(),
+                        message: caps[3].to_string(),
+                        category: caps[4].to_string(),
                     });
                 }
             }
