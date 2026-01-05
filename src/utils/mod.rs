@@ -77,11 +77,18 @@ pub fn get_staged_files() -> crate::Result<Vec<std::path::PathBuf>> {
         return Ok(Vec::new());
     }
 
+    // Get git root directory
+    let git_root = get_project_root();
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let files = stdout
         .lines()
         .filter(|line| !line.is_empty())
-        .map(|line| std::path::PathBuf::from(line.trim()))
+        .map(|line| {
+            // Convert relative path to absolute path based on git root
+            let relative_path = std::path::PathBuf::from(line.trim());
+            git_root.join(relative_path)
+        })
         .collect();
 
     Ok(files)
@@ -91,6 +98,24 @@ pub fn get_staged_files() -> crate::Result<Vec<std::path::PathBuf>> {
 pub fn should_ignore(path: &Path, patterns: &[regex::Regex]) -> bool {
     let path_str = path.to_string_lossy();
     patterns.iter().any(|pattern| pattern.is_match(&path_str))
+}
+
+/// Read a specific line from a file (1-indexed).
+pub fn read_file_line(path: &Path, line_number: usize) -> Option<String> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    if line_number == 0 {
+        return None;
+    }
+
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    reader
+        .lines()
+        .nth(line_number - 1)
+        .and_then(|line| line.ok())
 }
 
 /// Get the project root directory (git root or current directory).

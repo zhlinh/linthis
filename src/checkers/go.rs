@@ -58,10 +58,36 @@ impl GoChecker {
             .unwrap_or(false)
     }
 
+    /// Find golangci-lint configuration file
+    fn find_golangci_config(module_root: &Path) -> Option<std::path::PathBuf> {
+        let config_names = [
+            ".linthis/configs/go/.golangci.yml",  // Plugin config (highest priority)
+            ".linthis/configs/go/.golangci.yaml",
+            ".golangci.yml",
+            ".golangci.yaml",
+        ];
+
+        for config_name in &config_names {
+            let config_path = module_root.join(config_name);
+            if config_path.exists() {
+                return Some(config_path);
+            }
+        }
+
+        None
+    }
+
     /// Run golangci-lint on a Go module
     fn run_golangci_lint(module_root: &Path) -> Result<Vec<LintIssue>> {
-        let output = Command::new("golangci-lint")
-            .args(["run", "--out-format=line-number", "./..."])
+        let mut cmd = Command::new("golangci-lint");
+        cmd.args(["run", "--out-format=line-number", "./..."]);
+
+        // Add config file if found
+        if let Some(config_path) = Self::find_golangci_config(module_root) {
+            cmd.arg("-c").arg(config_path);
+        }
+
+        let output = cmd
             .current_dir(module_root)
             .output()
             .map_err(|e| {

@@ -54,6 +54,8 @@ pub struct LintIssue {
     pub source: Option<String>,
     /// Programming language of the file
     pub language: Option<Language>,
+    /// The source code line where the issue occurs (optional)
+    pub code_line: Option<String>,
 }
 
 impl LintIssue {
@@ -68,6 +70,7 @@ impl LintIssue {
             suggestion: None,
             source: None,
             language: None,
+            code_line: None,
         }
     }
 
@@ -93,6 +96,11 @@ impl LintIssue {
 
     pub fn with_language(mut self, language: Language) -> Self {
         self.language = Some(language);
+        self
+    }
+
+    pub fn with_code_line(mut self, code_line: String) -> Self {
+        self.code_line = Some(code_line);
         self
     }
 }
@@ -376,8 +384,8 @@ mod tests {
 
     #[test]
     fn test_format_result_with_diff() {
-        let result = FormatResult::changed(PathBuf::from("test.cpp"))
-            .with_diff("- old\n+ new".to_string());
+        let result =
+            FormatResult::changed(PathBuf::from("test.cpp")).with_diff("- old\n+ new".to_string());
 
         assert!(result.changed);
         assert_eq!(result.diff, Some("- old\n+ new".to_string()));
@@ -385,10 +393,7 @@ mod tests {
 
     #[test]
     fn test_format_result_error() {
-        let result = FormatResult::error(
-            PathBuf::from("test.cpp"),
-            "Format failed".to_string(),
-        );
+        let result = FormatResult::error(PathBuf::from("test.cpp"), "Format failed".to_string());
 
         assert_eq!(result.file_path, PathBuf::from("test.cpp"));
         assert!(!result.changed);

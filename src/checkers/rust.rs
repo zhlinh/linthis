@@ -40,7 +40,12 @@ impl RustChecker {
         loop {
             let cargo_toml = current.join("Cargo.toml");
             if cargo_toml.exists() {
-                return Some(current);
+                // If current is empty, use current directory
+                return Some(if current.as_os_str().is_empty() {
+                    PathBuf::from(".")
+                } else {
+                    current
+                });
             }
             if !current.pop() {
                 break;

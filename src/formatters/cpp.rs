@@ -35,8 +35,8 @@ pub struct CppFormatter {
 impl CppFormatter {
     pub fn new() -> Self {
         Self {
-            use_clang_tidy_fix: true,  // Enable by default
-            use_cpplint_fix: true,     // Enable by default
+            use_clang_tidy_fix: true, // Enable by default
+            use_cpplint_fix: true,    // Enable by default
             compile_commands_dir: None,
             cpplint_fixer: Mutex::new(CpplintFixer::new()),
         }
@@ -121,7 +121,11 @@ impl CppFormatter {
         // Walk up to find .linthis directory
         let mut search_dir = current.clone();
         loop {
-            let linthis_config = search_dir.join(".linthis").join("configs").join(language).join(".clang-format");
+            let linthis_config = search_dir
+                .join(".linthis")
+                .join("configs")
+                .join(language)
+                .join(".clang-format");
             if linthis_config.exists() {
                 return Some(linthis_config);
             }
@@ -158,7 +162,13 @@ impl CppFormatter {
             }
 
             // Check common build directories
-            for build_dir in &["build", "Build", "out", "cmake-build-debug", "cmake-build-release"] {
+            for build_dir in &[
+                "build",
+                "Build",
+                "out",
+                "cmake-build-debug",
+                "cmake-build-release",
+            ] {
                 let compile_db = current.join(build_dir).join("compile_commands.json");
                 if compile_db.exists() {
                     return Some(current.join(build_dir));
@@ -177,7 +187,11 @@ impl CppFormatter {
         None
     }
 
-    fn find_compile_commands_recursive(dir: &Path, depth: usize, max_depth: usize) -> Option<PathBuf> {
+    fn find_compile_commands_recursive(
+        dir: &Path,
+        depth: usize,
+        max_depth: usize,
+    ) -> Option<PathBuf> {
         if depth >= max_depth {
             return None;
         }
@@ -214,7 +228,9 @@ impl CppFormatter {
                 if path.join("compile_commands.json").exists() {
                     return Some(path);
                 }
-                if let Some(found) = Self::find_compile_commands_recursive(&path, depth + 1, max_depth) {
+                if let Some(found) =
+                    Self::find_compile_commands_recursive(&path, depth + 1, max_depth)
+                {
                     return Some(found);
                 }
             }
@@ -264,7 +280,10 @@ impl Default for CppFormatter {
 
 impl Formatter for CppFormatter {
     fn name(&self) -> &str {
-        match (self.use_clang_tidy_fix && Self::has_clang_tidy(), self.use_cpplint_fix) {
+        match (
+            self.use_clang_tidy_fix && Self::has_clang_tidy(),
+            self.use_cpplint_fix,
+        ) {
             (true, true) => "clang-format + clang-tidy + cpplint-fix",
             (true, false) => "clang-format + clang-tidy",
             (false, true) => "clang-format + cpplint-fix",
@@ -401,7 +420,10 @@ impl CppFormatter {
         match path.extension().and_then(|e| e.to_str()) {
             Some("m") | Some("mm") | Some("M") | Some("MM") => {
                 if debug {
-                    eprintln!("[cpp-formatter] {} detected as OC (by extension)", path.display());
+                    eprintln!(
+                        "[cpp-formatter] {} detected as OC (by extension)",
+                        path.display()
+                    );
                 }
                 "oc"
             }
@@ -409,19 +431,28 @@ impl CppFormatter {
                 // For header files, check content for OC-specific syntax
                 if Self::contains_objc_syntax(path) {
                     if debug {
-                        eprintln!("[cpp-formatter] {} detected as OC (by content)", path.display());
+                        eprintln!(
+                            "[cpp-formatter] {} detected as OC (by content)",
+                            path.display()
+                        );
                     }
                     "oc"
                 } else {
                     if debug {
-                        eprintln!("[cpp-formatter] {} detected as C++ (no OC syntax found)", path.display());
+                        eprintln!(
+                            "[cpp-formatter] {} detected as C++ (no OC syntax found)",
+                            path.display()
+                        );
                     }
                     "cpp"
                 }
             }
             _ => {
                 if debug {
-                    eprintln!("[cpp-formatter] {} detected as C++ (by extension)", path.display());
+                    eprintln!(
+                        "[cpp-formatter] {} detected as C++ (by extension)",
+                        path.display()
+                    );
                 }
                 "cpp"
             }
@@ -437,7 +468,7 @@ impl CppFormatter {
 
         // OC-specific patterns (exact string matches)
         let oc_patterns = [
-            "@import",  // OC module import: @import UIKit;
+            "@import", // OC module import: @import UIKit;
             "@interface",
             "@implementation",
             "@protocol",
@@ -452,8 +483,8 @@ impl CppFormatter {
             "NS_OPTIONS",
             "nullable",
             "nonnull",
-            "+ (", // OC class method
-            "- (", // OC instance method
+            "+ (",  // OC class method
+            "- (",  // OC instance method
             " @\"", // OC string literal: @"string"
             " @[",  // OC array literal: @[@"a", @"b"]
         ];
@@ -509,10 +540,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn create_temp_header(content: &str) -> NamedTempFile {
-        let mut file = tempfile::Builder::new()
-            .suffix(".h")
-            .tempfile()
-            .unwrap();
+        let mut file = tempfile::Builder::new().suffix(".h").tempfile().unwrap();
         file.write_all(content.as_bytes()).unwrap();
         file
     }
@@ -650,7 +678,9 @@ mod tests {
 
     #[test]
     fn test_contains_ns_type_nsarray() {
-        assert!(CppFormatter::contains_ns_type("NSArray<NSString *> *items;"));
+        assert!(CppFormatter::contains_ns_type(
+            "NSArray<NSString *> *items;"
+        ));
     }
 
     #[test]
@@ -689,7 +719,9 @@ mod tests {
 
     #[test]
     fn test_contains_ns_type_pure_cpp() {
-        assert!(!CppFormatter::contains_ns_type("#include <vector>\nstd::vector<int> v;"));
+        assert!(!CppFormatter::contains_ns_type(
+            "#include <vector>\nstd::vector<int> v;"
+        ));
     }
 
     #[test]

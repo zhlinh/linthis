@@ -97,3 +97,11 @@ header_guard_mode = "fix_name"
 linelength = 120
 # Cpplint filter rules - disable checks not applicable to Objective-C
 cpplint_filter = "-build/c++11,-build/c++14,-build/header_guard,-build/include,-legal/copyright,-readability/casting,-runtime/references,-runtime/int,-whitespace/braces,-whitespace/blank_line,-readability/braces,-whitespace/empty_if_body"
+
+# Plugin settings
+[plugin]
+# Auto-sync settings (inspired by oh-my-zsh auto-update)
+[plugin.auto_sync]
+enabled = true           # Enable automatic plugin synchronization
+mode = "prompt"          # Sync mode: "auto" (automatic), "prompt" (ask before sync), "disabled"
+interval_days = 7        # Check for updates every N days
