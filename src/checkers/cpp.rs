@@ -766,15 +766,25 @@ mod tests {
 
     #[test]
     fn test_parse_clang_tidy_error() {
-        let line = "main.cpp:5:1: error: unknown type name 'foo' [clang-diagnostic-error]";
+        // Use a non-clang-diagnostic error (clang-diagnostic-* are filtered out)
+        let line = "main.cpp:5:1: error: no matching function for call [misc-error]";
         let default_path = Path::new("default.cpp");
         let issue = CppChecker::parse_clang_tidy_line(line, default_path).unwrap();
 
         assert_eq!(issue.line, 5);
         assert_eq!(issue.column, Some(1));
         assert_eq!(issue.severity, Severity::Error);
-        assert!(issue.message.contains("unknown type name"));
-        assert_eq!(issue.code, Some("clang-diagnostic-error".to_string()));
+        assert!(issue.message.contains("no matching function"));
+        assert_eq!(issue.code, Some("misc-error".to_string()));
+    }
+
+    #[test]
+    fn test_parse_clang_tidy_clang_diagnostic_filtered() {
+        // clang-diagnostic-* errors are compiler diagnostics, should be filtered out
+        let line = "main.cpp:5:1: error: unknown type name 'foo' [clang-diagnostic-error]";
+        let default_path = Path::new("default.cpp");
+        let result = CppChecker::parse_clang_tidy_line(line, default_path);
+        assert!(result.is_none());
     }
 
     #[test]
