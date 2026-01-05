@@ -239,6 +239,7 @@ jobs:
     name: Publish to crates.io
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows, macos, sdist]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
