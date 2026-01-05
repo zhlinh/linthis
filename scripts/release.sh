@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Release script for linthis
-# Usage: ./scripts/release.sh <version>
-#        ./scripts/release.sh --patch|--minor|--major
+# Usage: ./scripts/release.sh <version> [--push]
+#        ./scripts/release.sh --patch|--minor|--major [--push]
 #
 # Examples:
 #   ./scripts/release.sh 3.1.0
-#   ./scripts/release.sh --patch  # 3.0.2 -> 3.0.3
-#   ./scripts/release.sh --minor  # 3.0.2 -> 3.1.0
-#   ./scripts/release.sh --major  # 3.0.2 -> 4.0.0
+#   ./scripts/release.sh --patch        # 3.0.2 -> 3.0.3
+#   ./scripts/release.sh --minor        # 3.0.2 -> 3.1.0
+#   ./scripts/release.sh --major        # 3.0.2 -> 4.0.0
+#   ./scripts/release.sh --patch --push # bump and push directly
 
 set -eu
 
@@ -78,23 +79,31 @@ update_version_in_file() {
 
 main() {
 	if [[ $# -eq 0 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
-		echo "Usage: $0 <version>|--patch|--minor|--major"
+		echo "Usage: $0 <version>|--patch|--minor|--major [--push]"
 		echo ""
 		echo "Options:"
 		echo "  <version>   Specific version (e.g., 3.1.0)"
 		echo "  --patch     Bump patch version (3.0.2 -> 3.0.3)"
 		echo "  --minor     Bump minor version (3.0.2 -> 3.1.0)"
 		echo "  --major     Bump major version (3.0.2 -> 4.0.0)"
+		echo "  --push      Auto commit, tag and push (skip interactive prompt)"
 		echo ""
 		echo "Current version: $(get_current_version)"
 		exit 0
+	fi
+
+	# Parse --push flag
+	local auto_push=false
+	local version_arg="$1"
+	if [[ $# -ge 2 ]] && [[ "$2" == "--push" ]]; then
+		auto_push=true
 	fi
 
 	local current_version
 	current_version=$(get_current_version)
 
 	local new_version
-	new_version=$(bump_version "$current_version" "$1")
+	new_version=$(bump_version "$current_version" "$version_arg")
 
 	validate_version "$new_version"
 
@@ -124,9 +133,45 @@ main() {
 	echo ""
 	echo "Next steps:"
 	echo "  1. Review changes: git diff"
-	echo "  2. Commit: git add -A && git commit -m 'chore: release v$new_version'"
+	echo "  2. Commit: git add Cargo.toml pyproject.toml Cargo.lock && git commit -m 'chore: release v$new_version'"
 	echo "  3. Tag: git tag v$new_version"
-	echo "  4. Push: git push && git push --tags"
+	echo "  4. Push: git push && git push origin v$new_version"
+	echo ""
+	echo "One-liner:"
+	echo "  git add Cargo.toml pyproject.toml Cargo.lock && git commit -m 'chore: release v$new_version' && git tag v$new_version && git push && git push origin v$new_version"
+	echo ""
+
+	# Determine whether to push
+	local do_push=false
+	if [[ "$auto_push" == true ]]; then
+		do_push=true
+	else
+		read -rp "Do you want to commit and push now? [y/N] " response
+		case "$response" in
+		[yY] | [yY][eE][sS])
+			do_push=true
+			;;
+		esac
+	fi
+
+	if [[ "$do_push" == true ]]; then
+		echo ""
+		echo "Committing changes..."
+		git add Cargo.toml pyproject.toml Cargo.lock
+		git commit -m "chore: release v$new_version"
+
+		echo "Creating tag v$new_version..."
+		git tag "v$new_version"
+
+		echo "Pushing to remote..."
+		git push
+		git push origin "v$new_version"
+
+		echo ""
+		echo -e "${GREEN}Release v$new_version pushed successfully!${NC}"
+	else
+		echo -e "${YELLOW}Skipped. Run the commands above manually when ready.${NC}"
+	fi
 }
 
 main "$@"
