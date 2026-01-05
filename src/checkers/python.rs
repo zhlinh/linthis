@@ -66,6 +66,38 @@ impl PythonChecker {
         Self
     }
 
+    /// Find Ruff configuration file
+    fn find_ruff_config(path: &Path) -> Option<std::path::PathBuf> {
+        let mut current = if path.is_file() {
+            path.parent()?.to_path_buf()
+        } else {
+            path.to_path_buf()
+        };
+
+        let config_names = [
+            ".linthis/configs/python/ruff.toml",  // Plugin config (highest priority)
+            ".linthis/configs/python/.ruff.toml",
+            "ruff.toml",
+            ".ruff.toml",
+            "pyproject.toml",
+        ];
+
+        loop {
+            for config_name in &config_names {
+                let config_path = current.join(config_name);
+                if config_path.exists() {
+                    return Some(config_path);
+                }
+            }
+
+            if !current.pop() {
+                break;
+            }
+        }
+
+        None
+    }
+
     /// Parse ruff JSON output and extract issues.
     fn parse_ruff_json_output(&self, output: &str, _file_path: &Path) -> Vec<LintIssue> {
         let mut issues = Vec::new();
@@ -160,8 +192,15 @@ impl Checker for PythonChecker {
     }
 
     fn check(&self, path: &Path) -> Result<Vec<LintIssue>> {
-        let output = Command::new("ruff")
-            .args(["check", "--output-format", "json"])
+        let mut cmd = Command::new("ruff");
+        cmd.args(["check", "--output-format", "json"]);
+
+        // Try to find ruff config
+        if let Some(config_path) = Self::find_ruff_config(path) {
+            cmd.arg("--config").arg(config_path);
+        }
+
+        let output = cmd
             .arg(path)
             .output()
             .map_err(|e| crate::LintisError::Checker(format!("Failed to run ruff: {}", e)))?;

@@ -46,8 +46,9 @@ impl SourceFixer {
             if content.ends_with('\n') {
                 result.push('\n');
             }
-            fs::write(path, result)
-                .map_err(|e| crate::LintisError::Formatter(format!("Failed to write file: {}", e)))?;
+            fs::write(path, result).map_err(|e| {
+                crate::LintisError::Formatter(format!("Failed to write file: {}", e))
+            })?;
         }
 
         Ok(())
@@ -188,8 +189,9 @@ impl SourceFixer {
             } else {
                 new_content
             };
-            fs::write(path, final_content)
-                .map_err(|e| crate::LintisError::Formatter(format!("Failed to write file: {}", e)))?;
+            fs::write(path, final_content).map_err(|e| {
+                crate::LintisError::Formatter(format!("Failed to write file: {}", e))
+            })?;
         }
 
         Ok(())
@@ -226,10 +228,7 @@ impl SourceFixer {
     /// Get fallback username from git config or environment
     fn get_fallback_username() -> String {
         // Try git config user.name
-        if let Ok(output) = Command::new("git")
-            .args(["config", "user.name"])
-            .output()
-        {
+        if let Ok(output) = Command::new("git").args(["config", "user.name"]).output() {
             if output.status.success() {
                 let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !name.is_empty() {
@@ -271,8 +270,9 @@ impl SourceFixer {
 
         // Only write if changed
         if modified {
-            fs::write(path, result)
-                .map_err(|e| crate::LintisError::Formatter(format!("Failed to write file: {}", e)))?;
+            fs::write(path, result).map_err(|e| {
+                crate::LintisError::Formatter(format!("Failed to write file: {}", e))
+            })?;
         }
 
         Ok(())
@@ -313,8 +313,9 @@ impl SourceFixer {
         }
 
         if modified {
-            fs::write(path, result)
-                .map_err(|e| crate::LintisError::Formatter(format!("Failed to write file: {}", e)))?;
+            fs::write(path, result).map_err(|e| {
+                crate::LintisError::Formatter(format!("Failed to write file: {}", e))
+            })?;
         }
 
         Ok(())
@@ -336,7 +337,12 @@ impl SourceFixer {
 
             // If there's code before the comment, this is a trailing comment
             if !before_comment.trim().is_empty() {
-                return Self::break_trailing_comment(indent, before_comment, comment_part, max_length);
+                return Self::break_trailing_comment(
+                    indent,
+                    before_comment,
+                    comment_part,
+                    max_length,
+                );
             }
 
             // Pure comment line starting with //
@@ -456,7 +462,10 @@ impl SourceFixer {
                         .or_else(|| pragma_content.find("--"))
                         .unwrap_or(pragma_content.len());
 
-                    let section_name = pragma_content[..separator_start].trim().trim_end_matches('-').trim();
+                    let section_name = pragma_content[..separator_start]
+                        .trim()
+                        .trim_end_matches('-')
+                        .trim();
 
                     // Convert to standard #pragma mark format
                     let new_line = if section_name.is_empty() || section_name == "mark" {
@@ -482,8 +491,9 @@ impl SourceFixer {
         }
 
         if modified {
-            fs::write(path, result)
-                .map_err(|e| crate::LintisError::Formatter(format!("Failed to write file: {}", e)))?;
+            fs::write(path, result).map_err(|e| {
+                crate::LintisError::Formatter(format!("Failed to write file: {}", e))
+            })?;
         }
 
         Ok(())
@@ -567,7 +577,10 @@ NSString *url3 = @"file:///local/path";
         // Should preserve URL but fix comment
         let file = create_temp_file("NSString *url = @\"https://example.com\"; //comment\n");
         SourceFixer::fix_comment_spacing(file.path()).unwrap();
-        assert_eq!(read_temp_file(&file), "NSString *url = @\"https://example.com\"; // comment\n");
+        assert_eq!(
+            read_temp_file(&file),
+            "NSString *url = @\"https://example.com\"; // comment\n"
+        );
     }
 
     #[test]
@@ -583,7 +596,10 @@ NSString *url3 = @"file:///local/path";
         // Handle escaped quotes correctly
         let file = create_temp_file("char *s = \"he said \\\"hello//world\\\"\";\n");
         SourceFixer::fix_comment_spacing(file.path()).unwrap();
-        assert_eq!(read_temp_file(&file), "char *s = \"he said \\\"hello//world\\\"\";\n");
+        assert_eq!(
+            read_temp_file(&file),
+            "char *s = \"he said \\\"hello//world\\\"\";\n"
+        );
     }
 
     #[test]

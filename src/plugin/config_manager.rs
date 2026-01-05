@@ -58,8 +58,9 @@ impl PluginConfigManager {
             return Ok(DocumentMut::new());
         }
 
-        let content = std::fs::read_to_string(&self.config_path)
-            .with_context(|| format!("Failed to read config file: {}", self.config_path.display()))?;
+        let content = std::fs::read_to_string(&self.config_path).with_context(|| {
+            format!("Failed to read config file: {}", self.config_path.display())
+        })?;
 
         content
             .parse::<DocumentMut>()
@@ -74,8 +75,12 @@ impl PluginConfigManager {
                 .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
         }
 
-        std::fs::write(&self.config_path, doc.to_string())
-            .with_context(|| format!("Failed to write config file: {}", self.config_path.display()))
+        std::fs::write(&self.config_path, doc.to_string()).with_context(|| {
+            format!(
+                "Failed to write config file: {}",
+                self.config_path.display()
+            )
+        })
     }
 
     /// Add a plugin to the configuration

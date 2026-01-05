@@ -22,23 +22,49 @@ pub fn get_column_width(s: &str) -> usize {
 pub fn is_wide_char(c: char) -> bool {
     let cp = c as u32;
     // CJK Unified Ideographs and extensions
-    if (0x4E00..=0x9FFF).contains(&cp) { return true; }  // CJK Unified
-    if (0x3400..=0x4DBF).contains(&cp) { return true; }  // CJK Extension A
-    if (0x20000..=0x2A6DF).contains(&cp) { return true; } // CJK Extension B
-    if (0x2A700..=0x2B73F).contains(&cp) { return true; } // CJK Extension C
-    if (0x2B740..=0x2B81F).contains(&cp) { return true; } // CJK Extension D
-    // Fullwidth forms
-    if (0xFF01..=0xFF60).contains(&cp) { return true; }  // Fullwidth ASCII
-    if (0xFFE0..=0xFFE6).contains(&cp) { return true; }  // Fullwidth symbols
-    // CJK punctuation and symbols
-    if (0x3000..=0x303F).contains(&cp) { return true; }  // CJK Symbols
-    if (0xFF00..=0xFFEF).contains(&cp) { return true; }  // Halfwidth/Fullwidth
-    // Hiragana, Katakana
-    if (0x3040..=0x309F).contains(&cp) { return true; }  // Hiragana
-    if (0x30A0..=0x30FF).contains(&cp) { return true; }  // Katakana
-    // Hangul
-    if (0xAC00..=0xD7AF).contains(&cp) { return true; }  // Hangul Syllables
-    if (0x1100..=0x11FF).contains(&cp) { return true; }  // Hangul Jamo
+    if (0x4E00..=0x9FFF).contains(&cp) {
+        return true;
+    } // CJK Unified
+    if (0x3400..=0x4DBF).contains(&cp) {
+        return true;
+    } // CJK Extension A
+    if (0x20000..=0x2A6DF).contains(&cp) {
+        return true;
+    } // CJK Extension B
+    if (0x2A700..=0x2B73F).contains(&cp) {
+        return true;
+    } // CJK Extension C
+    if (0x2B740..=0x2B81F).contains(&cp) {
+        return true;
+    } // CJK Extension D
+      // Fullwidth forms
+    if (0xFF01..=0xFF60).contains(&cp) {
+        return true;
+    } // Fullwidth ASCII
+    if (0xFFE0..=0xFFE6).contains(&cp) {
+        return true;
+    } // Fullwidth symbols
+      // CJK punctuation and symbols
+    if (0x3000..=0x303F).contains(&cp) {
+        return true;
+    } // CJK Symbols
+    if (0xFF00..=0xFFEF).contains(&cp) {
+        return true;
+    } // Halfwidth/Fullwidth
+      // Hiragana, Katakana
+    if (0x3040..=0x309F).contains(&cp) {
+        return true;
+    } // Hiragana
+    if (0x30A0..=0x30FF).contains(&cp) {
+        return true;
+    } // Katakana
+      // Hangul
+    if (0xAC00..=0xD7AF).contains(&cp) {
+        return true;
+    } // Hangul Syllables
+    if (0x1100..=0x11FF).contains(&cp) {
+        return true;
+    } // Hangul Jamo
     false
 }
 
@@ -54,7 +80,9 @@ pub fn break_text_at_width(text: &str, max_width: usize) -> Vec<String> {
     let mut current_width = 0usize;
 
     // Chinese punctuation (break after these); quotes excluded due to Rust syntax
-    let break_after: &[char] = &['。', '，', '、', '；', '：', '！', '？', '）', '】', '》', ' '];
+    let break_after: &[char] = &[
+        '。', '，', '、', '；', '：', '！', '？', '）', '】', '》', ' ',
+    ];
 
     for c in text.chars() {
         let char_width = if is_wide_char(c) { 2 } else { 1 };
@@ -118,26 +146,26 @@ mod tests {
 
     #[test]
     fn test_column_width_cjk() {
-        assert_eq!(get_column_width("中文"), 4);  // 2 chars * 2 columns
-        assert_eq!(get_column_width("// 中文"), 7);  // 3 ASCII + 2*2 CJK
+        assert_eq!(get_column_width("中文"), 4); // 2 chars * 2 columns
+        assert_eq!(get_column_width("// 中文"), 7); // 3 ASCII + 2*2 CJK
     }
 
     #[test]
     fn test_column_width_japanese() {
         // Hiragana and Katakana are wide characters
-        assert_eq!(get_column_width("あいう"), 6);  // 3 chars * 2 columns
-        assert_eq!(get_column_width("アイウ"), 6);  // 3 chars * 2 columns
+        assert_eq!(get_column_width("あいう"), 6); // 3 chars * 2 columns
+        assert_eq!(get_column_width("アイウ"), 6); // 3 chars * 2 columns
     }
 
     #[test]
     fn test_column_width_korean() {
-        assert_eq!(get_column_width("한글"), 4);  // 2 chars * 2 columns
+        assert_eq!(get_column_width("한글"), 4); // 2 chars * 2 columns
     }
 
     #[test]
     fn test_column_width_fullwidth() {
         // Fullwidth ASCII
-        assert_eq!(get_column_width("ＡＢＣ"), 6);  // 3 chars * 2 columns
+        assert_eq!(get_column_width("ＡＢＣ"), 6); // 3 chars * 2 columns
     }
 
     #[test]
@@ -173,13 +201,13 @@ mod tests {
 
     #[test]
     fn test_is_wide_char_japanese() {
-        assert!(is_wide_char('あ'));  // Hiragana
-        assert!(is_wide_char('ア'));  // Katakana
+        assert!(is_wide_char('あ')); // Hiragana
+        assert!(is_wide_char('ア')); // Katakana
     }
 
     #[test]
     fn test_is_wide_char_korean() {
-        assert!(is_wide_char('한'));  // Hangul
+        assert!(is_wide_char('한')); // Hangul
     }
 
     // ==================== break_text_at_width tests ====================

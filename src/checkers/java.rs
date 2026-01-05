@@ -24,6 +24,39 @@ impl JavaChecker {
         Self
     }
 
+    /// Find checkstyle configuration file in the project
+    fn find_checkstyle_config(path: &Path) -> Option<std::path::PathBuf> {
+        let mut current = if path.is_file() {
+            path.parent()?.to_path_buf()
+        } else {
+            path.to_path_buf()
+        };
+
+        // Look for checkstyle configuration files
+        let config_names = [
+            ".linthis/configs/java/checkstyle.xml",  // Plugin config (highest priority)
+            "checkstyle.xml",
+            ".checkstyle.xml",
+            "config/checkstyle/checkstyle.xml",
+            "checkstyle-config.xml",
+        ];
+
+        loop {
+            for config_name in &config_names {
+                let config_path = current.join(config_name);
+                if config_path.exists() {
+                    return Some(config_path);
+                }
+            }
+
+            if !current.pop() {
+                break;
+            }
+        }
+
+        None
+    }
+
     /// Parse checkstyle output and extract issues.
     /// Default format: [SEVERITY] file:line:column: message
     fn parse_checkstyle_output(&self, output: &str, file_path: &Path) -> Vec<LintIssue> {
@@ -111,9 +144,17 @@ impl Checker for JavaChecker {
     }
 
     fn check(&self, path: &Path) -> Result<Vec<LintIssue>> {
+        // Find checkstyle configuration file
+        let config_arg = if let Some(config_path) = Self::find_checkstyle_config(path) {
+            vec!["-c".to_string(), config_path.to_string_lossy().to_string()]
+        } else {
+            // Use Google checks as default (built-in to checkstyle)
+            vec!["-c".to_string(), "/google_checks.xml".to_string()]
+        };
+
         // Try to use checkstyle if available
         let output = Command::new("checkstyle")
-            .args(["-c", "/google_checks.xml"])
+            .args(&config_arg)
             .arg(path)
             .output()
             .map_err(|e| crate::LintisError::Checker(format!("Failed to run checkstyle: {}", e)))?;

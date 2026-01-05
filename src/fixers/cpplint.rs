@@ -260,10 +260,17 @@ impl CpplintFixer {
         let errors = Self::parse_cpplint_output(&stderr);
 
         if std::env::var("LINTHIS_DEBUG").is_ok() {
-            eprintln!("[cpplint-fixer] {} cpplint stderr:\n{}", path.display(), stderr);
+            eprintln!(
+                "[cpplint-fixer] {} cpplint stderr:\n{}",
+                path.display(),
+                stderr
+            );
             eprintln!("[cpplint-fixer] Parsed {} errors", errors.len());
             for e in &errors {
-                eprintln!("[cpplint-fixer]   line {}: {} [{}]", e.line, e.message, e.category);
+                eprintln!(
+                    "[cpplint-fixer]   line {}: {} [{}]",
+                    e.line, e.message, e.category
+                );
             }
         }
 
@@ -288,7 +295,8 @@ impl CpplintFixer {
                     || file_path.starts_with("/usr/include/")
                     || file_path.starts_with("/usr/local/include/")
                     || file_path.contains("/SDKs/")
-                    || file_path.contains(".framework/") {
+                    || file_path.contains(".framework/")
+                {
                     continue;
                 }
 
@@ -358,7 +366,11 @@ impl CpplintFixer {
         }
 
         if debug {
-            eprintln!("[cpplint-fixer] Processing {} errors for {}", errors.len(), path.display());
+            eprintln!(
+                "[cpplint-fixer] Processing {} errors for {}",
+                errors.len(),
+                path.display()
+            );
         }
 
         let content =
@@ -379,7 +391,10 @@ impl CpplintFixer {
                     } else if self.config.header_guard_mode == HeaderGuardMode::FixName {
                         if self.fix_header_guard_from_error(&mut lines, error) {
                             if debug {
-                                eprintln!("[cpplint-fixer] Fixed header_guard at line {}", error.line);
+                                eprintln!(
+                                    "[cpplint-fixer] Fixed header_guard at line {}",
+                                    error.line
+                                );
                             }
                             modified = true;
                         }
@@ -421,7 +436,10 @@ impl CpplintFixer {
                 "whitespace/comments" => {
                     if self.fix_comment_spacing(&mut lines, error) {
                         if debug {
-                            eprintln!("[cpplint-fixer] Fixed comment spacing at line {}", error.line);
+                            eprintln!(
+                                "[cpplint-fixer] Fixed comment spacing at line {}",
+                                error.line
+                            );
                         }
                         modified = true;
                     }
@@ -429,7 +447,10 @@ impl CpplintFixer {
                 "whitespace/semicolon" => {
                     if self.fix_empty_semicolon(&mut lines, error) {
                         if debug {
-                            eprintln!("[cpplint-fixer] Fixed empty semicolon at line {}", error.line);
+                            eprintln!(
+                                "[cpplint-fixer] Fixed empty semicolon at line {}",
+                                error.line
+                            );
                         }
                         modified = true;
                     }
@@ -450,14 +471,20 @@ impl CpplintFixer {
                         }
                     } else if self.fix_operator_spacing(&mut lines, error) {
                         if debug {
-                            eprintln!("[cpplint-fixer] Fixed operator spacing at line {}", error.line);
+                            eprintln!(
+                                "[cpplint-fixer] Fixed operator spacing at line {}",
+                                error.line
+                            );
                         }
                         modified = true;
                     }
                 }
                 _ => {
                     if debug {
-                        eprintln!("[cpplint-fixer] Skipping unsupported category: {}", error.category);
+                        eprintln!(
+                            "[cpplint-fixer] Skipping unsupported category: {}",
+                            error.category
+                        );
                     }
                 }
             }
@@ -482,7 +509,10 @@ impl CpplintFixer {
         // 3. "No #ifndef header guard found, suggested CPP variable is: GUARD_NAME_"
 
         if debug {
-            eprintln!("[cpplint-fixer] fix_header_guard_from_error: line={}, msg={}", error.line, error.message);
+            eprintln!(
+                "[cpplint-fixer] fix_header_guard_from_error: line={}, msg={}",
+                error.line, error.message
+            );
         }
 
         let suggested_guard = if error.message.contains("please use:") {
@@ -937,7 +967,7 @@ impl CpplintFixer {
             if let Some(caps) = re.captures(line) {
                 let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                 let suffix = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                lines[line_idx] = format!("{}{}{}",indent, "{}", suffix);
+                lines[line_idx] = format!("{}{}{}", indent, "{}", suffix);
                 return true;
             }
         }
@@ -1061,7 +1091,9 @@ test.cc:17:  Missing username in TODO; it should look like "// TODO(my_username)
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].line, 0);
         assert_eq!(errors[0].category, "build/header_guard");
-        assert!(errors[0].message.contains("suggested CPP variable is: TEST_H_"));
+        assert!(errors[0]
+            .message
+            .contains("suggested CPP variable is: TEST_H_"));
     }
 
     #[test]
@@ -1079,7 +1111,8 @@ test.cc:17:  Missing username in TODO; it should look like "// TODO(my_username)
 
         let error = CpplintError {
             line: 0,
-            message: "No #ifndef header guard found, suggested CPP variable is: TEST_H_".to_string(),
+            message: "No #ifndef header guard found, suggested CPP variable is: TEST_H_"
+                .to_string(),
             category: "build/header_guard".to_string(),
         };
 
@@ -1225,7 +1258,10 @@ test.cc:17:  Missing username in TODO; it should look like "// TODO(my_username)
         };
 
         assert!(fixer.fix_comment_spacing(&mut lines, &error));
-        assert_eq!(lines[0], "NSString *url = @\"https://example.com\"; // comment");
+        assert_eq!(
+            lines[0],
+            "NSString *url = @\"https://example.com\"; // comment"
+        );
     }
 
     #[test]
@@ -1242,14 +1278,18 @@ test.cc:17:  Missing username in TODO; it should look like "// TODO(my_username)
 
         let error = CpplintError {
             line: 0,
-            message: "No #ifndef header guard found, suggested CPP variable is: TEST_H_".to_string(),
+            message: "No #ifndef header guard found, suggested CPP variable is: TEST_H_"
+                .to_string(),
             category: "build/header_guard".to_string(),
         };
 
         assert!(fixer.fix_header_guard_from_error(&mut lines, &error));
 
         // Find positions
-        let ifndef_pos = lines.iter().position(|l| l.contains("#ifndef TEST_H_")).unwrap();
+        let ifndef_pos = lines
+            .iter()
+            .position(|l| l.contains("#ifndef TEST_H_"))
+            .unwrap();
         let block_end_pos = lines.iter().position(|l| l.contains("*/")).unwrap();
 
         // Header guard should be after block comment

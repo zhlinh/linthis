@@ -11,9 +11,8 @@ use super::Config;
 /// Get config file path based on global flag
 fn get_config_path(global: bool) -> crate::Result<PathBuf> {
     let config_dir = if global {
-        let home = dirs::home_dir().ok_or_else(|| {
-            crate::LintisError::Config("Cannot find home directory".to_string())
-        })?;
+        let home = dirs::home_dir()
+            .ok_or_else(|| crate::LintisError::Config("Cannot find home directory".to_string()))?;
         home.join(".linthis")
     } else {
         PathBuf::from(".linthis")
@@ -38,19 +37,17 @@ fn ensure_config_file(config_path: &Path) -> crate::Result<()> {
 /// Load TOML document from config file
 fn load_toml_doc(config_path: &Path) -> crate::Result<DocumentMut> {
     ensure_config_file(config_path)?;
-    let content = fs::read_to_string(config_path).map_err(|e| {
-        crate::LintisError::Config(format!("Failed to read config file: {}", e))
-    })?;
-    content.parse::<DocumentMut>().map_err(|e| {
-        crate::LintisError::Config(format!("Failed to parse config file: {}", e))
-    })
+    let content = fs::read_to_string(config_path)
+        .map_err(|e| crate::LintisError::Config(format!("Failed to read config file: {}", e)))?;
+    content
+        .parse::<DocumentMut>()
+        .map_err(|e| crate::LintisError::Config(format!("Failed to parse config file: {}", e)))
 }
 
 /// Save TOML document to config file
 fn save_toml_doc(config_path: &Path, doc: &DocumentMut) -> crate::Result<()> {
-    fs::write(config_path, doc.to_string()).map_err(|e| {
-        crate::LintisError::Config(format!("Failed to write config file: {}", e))
-    })
+    fs::write(config_path, doc.to_string())
+        .map_err(|e| crate::LintisError::Config(format!("Failed to write config file: {}", e)))
 }
 
 /// Add value to an array field
@@ -151,7 +148,11 @@ pub fn handle_config_remove(field: &str, value: &str, global: bool) -> ExitCode 
     let arr = match arr {
         Some(a) => a,
         None => {
-            eprintln!("{}: Field '{}' not found or is not an array", "Error".red(), field);
+            eprintln!(
+                "{}: Field '{}' not found or is not an array",
+                "Error".red(),
+                field
+            );
             return ExitCode::from(1);
         }
     };
@@ -238,9 +239,7 @@ fn parse_scalar_value(field: &str, val: &str) -> crate::Result<toml_edit::Item> 
     match field {
         "max_complexity" => {
             let num = val.parse::<i64>().map_err(|_| {
-                crate::LintisError::Config(
-                    "max_complexity must be a positive integer".to_string(),
-                )
+                crate::LintisError::Config("max_complexity must be a positive integer".to_string())
             })?;
             if num < 0 {
                 return Err(crate::LintisError::Config(
@@ -451,7 +450,11 @@ pub fn handle_config_list(verbose: bool, global: bool) -> ExitCode {
     };
 
     let config_type = if global { "Global" } else { "Project" };
-    println!("{} Configuration ({})", config_type.bold(), config_path.display());
+    println!(
+        "{} Configuration ({})",
+        config_type.bold(),
+        config_path.display()
+    );
     println!();
 
     if doc.is_empty() {

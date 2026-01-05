@@ -294,6 +294,28 @@ impl PluginFetcher {
         None
     }
 
+    /// Check if a cached plugin has updates available
+    ///
+    /// Returns true if the remote has a different commit hash than local
+    pub fn has_updates(&self, cache_path: &Path, url: &str, git_ref: Option<&str>) -> bool {
+        // If not cached, can't check for updates
+        if !cache_path.exists() {
+            return false;
+        }
+
+        let local_hash = match self.get_local_commit_hash(cache_path) {
+            Some(hash) => hash,
+            None => return false,
+        };
+
+        let remote_hash = match self.get_remote_commit_hash(url, git_ref) {
+            Some(hash) => hash,
+            None => return false,
+        };
+
+        local_hash != remote_hash
+    }
+
     /// Get the remote HEAD commit hash for a repository
     pub fn get_remote_commit_hash(&self, url: &str, git_ref: Option<&str>) -> Option<String> {
         let ref_name = git_ref.unwrap_or("HEAD");
@@ -318,7 +340,11 @@ impl PluginFetcher {
     }
 
     /// Check if a cached plugin has updates available
-    pub fn check_for_updates(&self, source: &PluginSource, cache: &PluginCache) -> Option<(String, String)> {
+    pub fn check_for_updates(
+        &self,
+        source: &PluginSource,
+        cache: &PluginCache,
+    ) -> Option<(String, String)> {
         let url = source.url.as_ref()?;
         let cache_path = cache.url_to_cache_path(url);
 

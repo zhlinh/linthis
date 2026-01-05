@@ -62,6 +62,14 @@ pub struct Config {
     /// Plugin configuration
     #[serde(default, alias = "plugin")]
     pub plugins: Option<PluginConfig>,
+
+    /// Plugin auto-sync configuration
+    #[serde(default)]
+    pub plugin_auto_sync: Option<crate::plugin::AutoSyncConfig>,
+
+    /// Self auto-update configuration
+    #[serde(default)]
+    pub self_auto_update: Option<crate::self_update::SelfUpdateConfig>,
 }
 
 /// Plugin configuration section
@@ -410,7 +418,10 @@ mod tests {
         base.merge(override_config);
 
         assert_eq!(base.max_complexity, Some(15));
-        assert_eq!(base.excludes, vec!["*.log".to_string(), "*.tmp".to_string()]);
+        assert_eq!(
+            base.excludes,
+            vec!["*.log".to_string(), "*.tmp".to_string()]
+        );
         assert_eq!(base.preset, Some("google".to_string()));
     }
 
@@ -433,7 +444,10 @@ mod tests {
         "#;
 
         let config: Config = toml::from_str(toml_with_old_names).unwrap();
-        assert_eq!(config.excludes, vec!["*.log".to_string(), "target/**".to_string()]);
+        assert_eq!(
+            config.excludes,
+            vec!["*.log".to_string(), "target/**".to_string()]
+        );
         assert!(config.plugins.is_some());
         assert_eq!(config.plugins.as_ref().unwrap().sources.len(), 1);
         assert_eq!(config.plugins.as_ref().unwrap().sources[0].name, "test");
@@ -453,8 +467,14 @@ mod tests {
         "#;
 
         let config: Config = toml::from_str(toml_with_new_names).unwrap();
-        assert_eq!(config.includes, vec!["src/**".to_string(), "lib/**".to_string()]);
-        assert_eq!(config.excludes, vec!["*.log".to_string(), "target/**".to_string()]);
+        assert_eq!(
+            config.includes,
+            vec!["src/**".to_string(), "lib/**".to_string()]
+        );
+        assert_eq!(
+            config.excludes,
+            vec!["*.log".to_string(), "target/**".to_string()]
+        );
         assert!(config.plugins.is_some());
         assert_eq!(config.plugins.as_ref().unwrap().sources.len(), 1);
     }
@@ -595,7 +615,10 @@ mod tests {
     fn test_project_config_path() {
         let project_dir = Path::new("/home/user/project");
         let config_path = Config::project_config_path(project_dir);
-        assert_eq!(config_path, PathBuf::from("/home/user/project/.linthis/config.toml"));
+        assert_eq!(
+            config_path,
+            PathBuf::from("/home/user/project/.linthis/config.toml")
+        );
     }
 
     // ==================== Config merge edge cases ====================
@@ -608,7 +631,9 @@ mod tests {
         };
 
         let other = Config {
-            languages: ["python".to_string(), "go".to_string()].into_iter().collect(),
+            languages: ["python".to_string(), "go".to_string()]
+                .into_iter()
+                .collect(),
             ..Default::default()
         };
 
@@ -655,7 +680,10 @@ mod tests {
         base.merge(other);
 
         // Includes should be extended, not replaced
-        assert_eq!(base.includes, vec!["src/**".to_string(), "lib/**".to_string()]);
+        assert_eq!(
+            base.includes,
+            vec!["src/**".to_string(), "lib/**".to_string()]
+        );
     }
 
     #[test]
@@ -705,7 +733,10 @@ mod tests {
         let config: Config = toml::from_str(toml_str).unwrap();
         let sources = &config.plugins.unwrap().sources;
         assert_eq!(sources[0].name, "test");
-        assert_eq!(sources[0].url, Some("https://example.com/repo.git".to_string()));
+        assert_eq!(
+            sources[0].url,
+            Some("https://example.com/repo.git".to_string())
+        );
         assert_eq!(sources[0].git_ref, Some("v1.0".to_string()));
         assert!(!sources[0].enabled);
     }
@@ -755,7 +786,10 @@ mod tests {
 
         let cpp = config.language_overrides.cpp.unwrap();
         assert_eq!(cpp.linelength, Some(120));
-        assert_eq!(cpp.cpplint_filter, Some("-build/c++11,-whitespace/tab".to_string()));
+        assert_eq!(
+            cpp.cpplint_filter,
+            Some("-build/c++11,-whitespace/tab".to_string())
+        );
         assert_eq!(cpp.max_complexity, Some(25));
 
         let oc = config.language_overrides.oc.unwrap();
@@ -789,14 +823,12 @@ mod tests {
     fn test_get_plugin_sources_with_plugins() {
         let config = Config {
             plugins: Some(PluginConfig {
-                sources: vec![
-                    PluginSourceConfig {
-                        name: "test".to_string(),
-                        url: Some("https://example.com".to_string()),
-                        git_ref: Some("main".to_string()),
-                        enabled: true,
-                    },
-                ],
+                sources: vec![PluginSourceConfig {
+                    name: "test".to_string(),
+                    url: Some("https://example.com".to_string()),
+                    git_ref: Some("main".to_string()),
+                    enabled: true,
+                }],
             }),
             ..Default::default()
         };

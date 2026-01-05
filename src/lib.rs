@@ -17,6 +17,7 @@ pub mod fixers;
 pub mod formatters;
 pub mod plugin;
 pub mod presets;
+pub mod self_update;
 pub mod utils;
 
 use std::collections::HashSet;
@@ -128,7 +129,7 @@ impl Language {
             // Objective-C patterns (comprehensive list matching formatter)
             let objc_patterns = [
                 "#import",
-                "@import",  // OC module import: @import UIKit;
+                "@import", // OC module import: @import UIKit;
                 "@interface",
                 "@implementation",
                 "@protocol",
@@ -533,7 +534,6 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // Collect files to process
     let files = walk_paths(&options.paths, &walker_config);
-    result.total_files = files.len();
 
     if !options.quiet {
         eprint!("\r\x1b[K⏳ Found {} files, checking...", files.len());
@@ -551,6 +551,9 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         .iter()
         .filter_map(|f| Language::from_path(f).map(|l| (f, l)))
         .collect();
+
+    // Set total_files to actual processable files count
+    result.total_files = file_langs.len();
 
     // For RunMode::Both: lint → format → lint (only files with issues)
     if options.mode == RunMode::Both {
@@ -622,10 +625,29 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         }
 
         // Helper to normalize paths for comparison
+        // Convert to absolute path for reliable comparison
         fn normalize_path(p: &Path) -> PathBuf {
-            let s = p.to_string_lossy();
-            let s = s.strip_prefix("./").unwrap_or(&s);
-            PathBuf::from(s)
+            // Try to canonicalize (absolute path), fall back to simple normalization
+            if let Ok(canonical) = p.canonicalize() {
+                canonical
+            } else {
+                // If canonicalize fails (e.g., file doesn't exist), try to make absolute
+                if p.is_absolute() {
+                    p.to_path_buf()
+                } else {
+                    // Make relative path absolute
+                    if let Ok(current_dir) = std::env::current_dir() {
+                        let joined = current_dir.join(p);
+                        // Try to canonicalize the joined path
+                        joined.canonicalize().unwrap_or(joined)
+                    } else {
+                        // Fall back to removing "./" prefix
+                        let s = p.to_string_lossy();
+                        let s = s.strip_prefix("./").unwrap_or(&s);
+                        PathBuf::from(s)
+                    }
+                }
+            }
         }
 
         let recheck_total = formatted_files.len();

@@ -24,6 +24,42 @@ impl TypeScriptChecker {
         Self
     }
 
+    /// Find ESLint configuration file
+    fn find_eslint_config(path: &Path) -> Option<std::path::PathBuf> {
+        let mut current = if path.is_file() {
+            path.parent()?.to_path_buf()
+        } else {
+            path.to_path_buf()
+        };
+
+        let config_names = [
+            ".linthis/configs/javascript/.eslintrc.js",  // Plugin config (highest priority)
+            ".linthis/configs/javascript/.eslintrc.json",
+            ".linthis/configs/typescript/.eslintrc.js",
+            ".linthis/configs/typescript/.eslintrc.json",
+            ".eslintrc.js",
+            ".eslintrc.json",
+            ".eslintrc.yml",
+            ".eslintrc.yaml",
+            ".eslintrc",
+        ];
+
+        loop {
+            for config_name in &config_names {
+                let config_path = current.join(config_name);
+                if config_path.exists() {
+                    return Some(config_path);
+                }
+            }
+
+            if !current.pop() {
+                break;
+            }
+        }
+
+        None
+    }
+
     /// Parse eslint JSON output and extract issues.
     fn parse_eslint_output(&self, output: &str, file_path: &Path) -> Vec<LintIssue> {
         let mut issues = Vec::new();
@@ -101,8 +137,15 @@ impl Checker for TypeScriptChecker {
     }
 
     fn check(&self, path: &Path) -> Result<Vec<LintIssue>> {
-        let output = Command::new("eslint")
-            .args(["--format", "json", "--no-error-on-unmatched-pattern"])
+        let mut cmd = Command::new("eslint");
+        cmd.args(["--format", "json", "--no-error-on-unmatched-pattern"]);
+
+        // Try to find eslint config
+        if let Some(config_path) = Self::find_eslint_config(path) {
+            cmd.arg("-c").arg(config_path);
+        }
+
+        let output = cmd
             .arg(path)
             .output()
             .map_err(|e| crate::LintisError::Checker(format!("Failed to run eslint: {}", e)))?;

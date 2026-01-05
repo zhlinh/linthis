@@ -16,6 +16,7 @@
 //! - Loading and merging plugin configurations
 //! - Managing plugin lifecycle (init, list, clean, update)
 
+pub mod auto_sync;
 pub mod cache;
 pub mod config_manager;
 pub mod fetcher;
@@ -130,6 +131,7 @@ pub fn log_plugin_operation(operation: &str, details: &str, verbose: bool) {
 }
 
 // Re-export commonly used types
+pub use auto_sync::{AutoSyncConfig, AutoSyncManager};
 pub use cache::PluginCache;
 pub use config_manager::PluginConfigManager;
 pub use fetcher::PluginFetcher;
@@ -156,7 +158,10 @@ mod tests {
     fn test_plugin_source_new_from_https_url() {
         let source = PluginSource::new("https://github.com/zhlinh/linthis-plugin.git");
         assert_eq!(source.name, "linthis-plugin");
-        assert_eq!(source.url, Some("https://github.com/zhlinh/linthis-plugin.git".to_string()));
+        assert_eq!(
+            source.url,
+            Some("https://github.com/zhlinh/linthis-plugin.git".to_string())
+        );
         assert!(source.git_ref.is_none());
         assert!(source.enabled);
     }
@@ -165,14 +170,20 @@ mod tests {
     fn test_plugin_source_new_from_https_url_no_git_suffix() {
         let source = PluginSource::new("https://github.com/zhlinh/linthis-plugin");
         assert_eq!(source.name, "linthis-plugin");
-        assert_eq!(source.url, Some("https://github.com/zhlinh/linthis-plugin".to_string()));
+        assert_eq!(
+            source.url,
+            Some("https://github.com/zhlinh/linthis-plugin".to_string())
+        );
     }
 
     #[test]
     fn test_plugin_source_new_from_ssh_url() {
         let source = PluginSource::new("git@github.com:zhlinh/linthis-plugin.git");
         assert_eq!(source.name, "linthis-plugin");
-        assert_eq!(source.url, Some("git@github.com:zhlinh/linthis-plugin.git".to_string()));
+        assert_eq!(
+            source.url,
+            Some("git@github.com:zhlinh/linthis-plugin.git".to_string())
+        );
     }
 
     // ==================== PluginSource::with_ref tests ====================
@@ -186,8 +197,8 @@ mod tests {
 
     #[test]
     fn test_plugin_source_with_ref_branch() {
-        let source = PluginSource::new("https://github.com/zhlinh/linthis-plugin.git")
-            .with_ref("main");
+        let source =
+            PluginSource::new("https://github.com/zhlinh/linthis-plugin.git").with_ref("main");
         assert_eq!(source.git_ref, Some("main".to_string()));
     }
 

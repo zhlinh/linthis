@@ -291,7 +291,11 @@ impl CppChecker {
     }
 
     /// Recursively search for compile_commands.json in build-like directories
-    fn find_compile_commands_recursive(dir: &Path, depth: usize, max_depth: usize) -> Option<PathBuf> {
+    fn find_compile_commands_recursive(
+        dir: &Path,
+        depth: usize,
+        max_depth: usize,
+    ) -> Option<PathBuf> {
         if depth >= max_depth {
             return None;
         }
@@ -337,7 +341,9 @@ impl CppChecker {
                 }
 
                 // Recurse deeper
-                if let Some(found) = Self::find_compile_commands_recursive(&path, depth + 1, max_depth) {
+                if let Some(found) =
+                    Self::find_compile_commands_recursive(&path, depth + 1, max_depth)
+                {
                     return Some(found);
                 }
             }
@@ -485,23 +491,33 @@ impl CppChecker {
             (message_part.to_string(), None)
         };
 
-        let mut issue = LintIssue::new(
-            if file_path_parsed.exists() {
-                file_path_parsed
-            } else {
-                default_path.to_path_buf()
-            },
-            line_num,
-            message,
-            severity,
-        )
-        .with_source("clang-tidy".to_string());
+        // Filter out all clang-diagnostic-* errors: these are compiler diagnostics
+        // (missing headers, type errors, etc.) not actual code style/quality issues
+        if let Some(ref c) = code {
+            if c.starts_with("clang-diagnostic-") {
+                return None;
+            }
+        }
+
+        let file_path = if file_path_parsed.exists() {
+            file_path_parsed
+        } else {
+            default_path.to_path_buf()
+        };
+
+        let mut issue = LintIssue::new(file_path.clone(), line_num, message, severity)
+            .with_source("clang-tidy".to_string());
 
         if let Some(c) = col {
             issue = issue.with_column(c);
         }
         if let Some(c) = code {
             issue = issue.with_code(c);
+        }
+
+        // Read the source code line
+        if let Some(code_line) = crate::utils::read_file_line(&file_path, line_num) {
+            issue = issue.with_code_line(code_line);
         }
 
         Some(issue)
@@ -557,20 +573,23 @@ impl CppChecker {
             Severity::Warning
         };
 
-        let mut issue = LintIssue::new(
-            if file_path_parsed.exists() {
-                file_path_parsed
-            } else {
-                default_path.to_path_buf()
-            },
-            line_num,
-            message,
-            severity,
-        )
-        .with_source("cpplint".to_string());
+        let file_path = if file_path_parsed.exists() {
+            file_path_parsed
+        } else {
+            default_path.to_path_buf()
+        };
+
+        let mut issue =
+            LintIssue::new(file_path.clone(), line_num, message, severity)
+                .with_source("cpplint".to_string());
 
         if let Some(c) = code {
             issue = issue.with_code(c);
+        }
+
+        // Read the source code line
+        if let Some(code_line) = crate::utils::read_file_line(&file_path, line_num) {
+            issue = issue.with_code_line(code_line);
         }
 
         Some(issue)
@@ -623,7 +642,8 @@ mod tests {
 
     #[test]
     fn test_merge_filters_both_present() {
-        let result = CppChecker::merge_filters(Some("-build/c++11,-build/c++14"), "-whitespace/tab");
+        let result =
+            CppChecker::merge_filters(Some("-build/c++11,-build/c++14"), "-whitespace/tab");
         // Result should contain all three filters
         assert!(result.contains("-build/c++11"));
         assert!(result.contains("-build/c++14"));
@@ -639,7 +659,8 @@ mod tests {
 
     #[test]
     fn test_merge_filters_removes_duplicates() {
-        let result = CppChecker::merge_filters(Some("-build/c++11"), "-build/c++11,-whitespace/tab");
+        let result =
+            CppChecker::merge_filters(Some("-build/c++11"), "-build/c++11,-whitespace/tab");
         // Should not have duplicate -build/c++11
         let count = result.matches("-build/c++11").count();
         assert_eq!(count, 1);
@@ -648,7 +669,8 @@ mod tests {
 
     #[test]
     fn test_merge_filters_trims_whitespace() {
-        let result = CppChecker::merge_filters(Some(" -build/c++11 , -build/c++14 "), " -whitespace/tab ");
+        let result =
+            CppChecker::merge_filters(Some(" -build/c++11 , -build/c++14 "), " -whitespace/tab ");
         assert!(result.contains("-build/c++11"));
         assert!(result.contains("-build/c++14"));
         assert!(result.contains("-whitespace/tab"));
@@ -682,7 +704,10 @@ mod tests {
         let file = create_temp_cfg("filter=-build/c++11,-whitespace/tab\n");
         let config = CppChecker::parse_cpplint_cfg(file.path()).unwrap();
         assert!(config.linelength.is_none());
-        assert_eq!(config.filter, Some("-build/c++11,-whitespace/tab".to_string()));
+        assert_eq!(
+            config.filter,
+            Some("-build/c++11,-whitespace/tab".to_string())
+        );
     }
 
     #[test]
@@ -807,7 +832,8 @@ mod tests {
 
     #[test]
     fn test_parse_cpplint_endif_comment() {
-        let line = r##"test.h:50: #endif line should be "#endif  // TEST_H_" [build/header_guard] [5]"##;
+        let line =
+            r##"test.h:50: #endif line should be "#endif  // TEST_H_" [build/header_guard] [5]"##;
         let default_path = Path::new("test.h");
         let issue = CppChecker::parse_cpplint_line(line, default_path).unwrap();
 
@@ -818,7 +844,8 @@ mod tests {
 
     #[test]
     fn test_parse_cpplint_line_length() {
-        let line = "main.cpp:25: Lines should be <= 120 characters long [whitespace/line_length] [2]";
+        let line =
+            "main.cpp:25: Lines should be <= 120 characters long [whitespace/line_length] [2]";
         let default_path = Path::new("main.cpp");
         let issue = CppChecker::parse_cpplint_line(line, default_path).unwrap();
 
@@ -845,7 +872,8 @@ mod tests {
 
     #[test]
     fn test_parse_cpplint_comment_spacing() {
-        let line = "test.cpp:15: Should have a space between // and comment [whitespace/comments] [4]";
+        let line =
+            "test.cpp:15: Should have a space between // and comment [whitespace/comments] [4]";
         let default_path = Path::new("test.cpp");
         let issue = CppChecker::parse_cpplint_line(line, default_path).unwrap();
 
@@ -868,7 +896,10 @@ mod tests {
     #[test]
     fn test_cpp_checker_with_config() {
         let checker = CppChecker::new().with_config(PathBuf::from("/custom/.clang-tidy"));
-        assert_eq!(checker.config_path, Some(PathBuf::from("/custom/.clang-tidy")));
+        assert_eq!(
+            checker.config_path,
+            Some(PathBuf::from("/custom/.clang-tidy"))
+        );
     }
 
     #[test]

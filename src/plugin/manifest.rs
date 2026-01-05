@@ -96,24 +96,28 @@ impl PluginManifest {
 
     /// Parse extended manifest format with ["language.xxx".tools.yyy] sections
     fn parse_extended_format(content: &str, path: &Path) -> Result<Self> {
-        let value: toml::Value = toml::from_str(content).map_err(|e| PluginError::InvalidManifest {
-            path: path.to_path_buf(),
-            message: e.to_string(),
-        })?;
+        let value: toml::Value =
+            toml::from_str(content).map_err(|e| PluginError::InvalidManifest {
+                path: path.to_path_buf(),
+                message: e.to_string(),
+            })?;
 
         // Parse plugin metadata
-        let plugin_table = value.get("plugin").ok_or_else(|| PluginError::InvalidManifest {
-            path: path.to_path_buf(),
-            message: "Missing [plugin] section".to_string(),
-        })?;
-
-        let plugin: PluginMetadata = plugin_table
-            .clone()
-            .try_into()
-            .map_err(|e: toml::de::Error| PluginError::InvalidManifest {
+        let plugin_table = value
+            .get("plugin")
+            .ok_or_else(|| PluginError::InvalidManifest {
                 path: path.to_path_buf(),
-                message: format!("Invalid plugin metadata: {}", e),
+                message: "Missing [plugin] section".to_string(),
             })?;
+
+        let plugin: PluginMetadata =
+            plugin_table
+                .clone()
+                .try_into()
+                .map_err(|e: toml::de::Error| PluginError::InvalidManifest {
+                    path: path.to_path_buf(),
+                    message: format!("Invalid plugin metadata: {}", e),
+                })?;
 
         // Parse ["language.xxx"] sections
         let mut configs: HashMap<String, HashMap<String, String>> = HashMap::new();

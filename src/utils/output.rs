@@ -60,6 +60,18 @@ pub fn format_issue_human(issue: &LintIssue) -> String {
         code_str
     );
 
+    // Show the source code line if available
+    if let Some(code_line) = &issue.code_line {
+        let line_num = format!("{:>5}", issue.line);
+        output.push_str(&format!("\n{} | {}", line_num.cyan(), code_line));
+
+        // Show column indicator if available
+        if let Some(col) = issue.column {
+            let spaces = " ".repeat(line_num.len() + 3 + col.saturating_sub(1));
+            output.push_str(&format!("\n{}^", spaces));
+        }
+    }
+
     if let Some(suggestion) = &issue.suggestion {
         output.push_str(&format!("\n  --> {}", suggestion.cyan()));
     }
@@ -119,10 +131,24 @@ pub fn format_summary_human(result: &RunResult) -> String {
             RunModeKind::CheckOnly => "All checks passed",
             RunModeKind::Both => "All checks and formats passed",
         };
+
+        // Add file statistics
+        let file_stats = if result.total_files > 0 {
+            format!(
+                " ({} file{} checked, {} formatted)",
+                result.total_files,
+                if result.total_files == 1 { "" } else { "s" },
+                result.files_formatted
+            )
+        } else {
+            String::new()
+        };
+
         return format!(
-            "{} {} (0 errors, 0 warnings)",
+            "{} {}{} (0 errors, 0 warnings)",
             "✓".green(),
-            msg.green().bold()
+            msg.green().bold(),
+            file_stats
         );
     }
 
@@ -157,7 +183,7 @@ pub fn format_summary_human(result: &RunResult) -> String {
             summary.push('\n');
         }
         summary.push_str(&format!(
-            "{} {} remaining issue{} ({} error{}, {} warning{}) in {} file{}",
+            "{} {} remaining issue{} ({} error{}, {} warning{}) in {} of {} file{}",
             "✗".red(),
             issue_count,
             if issue_count == 1 { "" } else { "s" },
@@ -166,11 +192,8 @@ pub fn format_summary_human(result: &RunResult) -> String {
             warning_count,
             if warning_count == 1 { "" } else { "s" },
             result.files_with_issues,
-            if result.files_with_issues == 1 {
-                ""
-            } else {
-                "s"
-            }
+            result.total_files,
+            if result.total_files == 1 { "" } else { "s" }
         ));
     } else if result.files_formatted > 0 || result.issues_fixed > 0 {
         // All issues were fixed
@@ -182,10 +205,24 @@ pub fn format_summary_human(result: &RunResult) -> String {
             RunModeKind::CheckOnly => "All checks passed",
             RunModeKind::Both => "All checks and formats passed",
         };
+
+        // Add file statistics
+        let file_stats = if result.total_files > 0 {
+            format!(
+                " ({} file{} checked, {} formatted)",
+                result.total_files,
+                if result.total_files == 1 { "" } else { "s" },
+                result.files_formatted
+            )
+        } else {
+            String::new()
+        };
+
         summary.push_str(&format!(
-            "{} {} (0 errors, 0 warnings)",
+            "{} {}{} (0 errors, 0 warnings)",
             "✓".green(),
-            msg.green().bold()
+            msg.green().bold(),
+            file_stats
         ));
     }
 
@@ -219,31 +256,43 @@ pub fn format_result_human(result: &RunResult) -> String {
         .filter(|i| i.severity == Severity::Warning)
         .collect();
 
-    // Output errors with [E1][lang], [E2][lang], etc.
+    // Output errors with [E1][lang][tool], [E2][lang][tool], etc.
     for (idx, issue) in errors.iter().enumerate() {
         let lang_tag = issue
             .language
             .map(|l| format!("[{}]", l.name()))
             .unwrap_or_default();
+        let tool_tag = issue
+            .source
+            .as_ref()
+            .map(|s| format!("[{}]", s))
+            .unwrap_or_default();
         output.push_str(&format!(
-            "{}{} {}",
+            "{}{}{} {}",
             format!("[E{}]", idx + 1).red().bold(),
             lang_tag.red(),
+            tool_tag.red(),
             format_issue_human(issue)
         ));
         output.push('\n');
     }
 
-    // Output warnings with [W1][lang], [W2][lang], etc.
+    // Output warnings with [W1][lang][tool], [W2][lang][tool], etc.
     for (idx, issue) in warnings.iter().enumerate() {
         let lang_tag = issue
             .language
             .map(|l| format!("[{}]", l.name()))
             .unwrap_or_default();
+        let tool_tag = issue
+            .source
+            .as_ref()
+            .map(|s| format!("[{}]", s))
+            .unwrap_or_default();
         output.push_str(&format!(
-            "{}{} {}",
+            "{}{}{} {}",
             format!("[W{}]", idx + 1).yellow().bold(),
             lang_tag.yellow(),
+            tool_tag.yellow(),
             format_issue_human(issue)
         ));
         output.push('\n');

@@ -666,6 +666,11 @@ The ref can specify:
 
 This allows you to lock plugin versions or use development versions.
 
+## Documentation
+
+- [Plugin Auto-Sync](docs/AUTO_SYNC.md) - Automatic plugin synchronization (inspired by oh-my-zsh)
+- [Self Auto-Update](docs/SELF_UPDATE.md) - Automatic self-update functionality
+
 ## Development
 
 ### Build
