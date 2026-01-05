@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "linthis"
-version = "0.0.5"
+version = "0.0.6"
 description = "A fast, cross-platform multi-language linter and formatter"
 readme = "README.md"
 requires-python = ">=3.8"
