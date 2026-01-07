@@ -3035,10 +3035,8 @@ fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                                     "ℹ".cyan(),
                                     global_plugins.len()
                                 );
-                                println!(
-                                    "Run {} to sync global plugins.",
-                                    "linthis plugin sync -g".bold()
-                                );
+                                println!("To sync global plugins, run:");
+                                println!("  {}", "linthis plugin sync -g".bold());
                             }
                         }
                     }
@@ -3052,10 +3050,8 @@ fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                                     "ℹ".cyan(),
                                     project_plugins.len()
                                 );
-                                println!(
-                                    "Run {} to sync project plugins.",
-                                    "linthis plugin sync".bold()
-                                );
+                                println!("To sync project plugins, run:");
+                                println!("  {}", "linthis plugin sync".bold());
                             }
                         }
                     }
@@ -4509,7 +4505,7 @@ fn run_benchmark(cli: &Cli) -> ExitCode {
     };
 
     // Collect Python files
-    let files = walk_paths(&paths, &walker_config);
+    let (files, _) = walk_paths(&paths, &walker_config);
 
     if files.is_empty() {
         println!("{}", "No Python files found to benchmark.".yellow());

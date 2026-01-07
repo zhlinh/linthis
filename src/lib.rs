@@ -536,9 +536,18 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     };
 
     // Collect files to process
-    let files = walk_paths(&options.paths, &walker_config);
+    let (files, path_warnings) = walk_paths(&options.paths, &walker_config);
 
-    if !options.quiet {
+    // Print warnings about paths (clear line first, then print warnings)
+    if !path_warnings.is_empty() && !options.quiet {
+        eprint!("\r\x1b[K"); // Clear "Scanning files..." line
+        for warning in &path_warnings {
+            eprintln!("\x1b[33mWarning\x1b[0m: {}", warning);
+        }
+        eprint!("⏳ Found {} files, checking...", files.len());
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+    } else if !options.quiet {
         eprint!("\r\x1b[K⏳ Found {} files, checking...", files.len());
         use std::io::Write;
         let _ = std::io::stderr().flush();

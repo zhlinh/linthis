@@ -129,22 +129,36 @@ where
 }
 
 /// Walk multiple paths (files or directories).
-pub fn walk_paths(paths: &[PathBuf], config: &WalkerConfig) -> Vec<PathBuf> {
+/// Returns (files, warnings) tuple.
+pub fn walk_paths(paths: &[PathBuf], config: &WalkerConfig) -> (Vec<PathBuf>, Vec<String>) {
     let glob_set = build_glob_set(&config.exclude_patterns);
 
     let mut result = Vec::new();
+    let mut warnings = Vec::new();
 
     for path in paths {
         if path.is_file() {
-            if !is_excluded(path, &glob_set) && matches_language_filter(path, &config.languages) {
+            if is_excluded(path, &glob_set) {
+                warnings.push(format!(
+                    "Path '{}' is excluded by exclude patterns",
+                    path.display()
+                ));
+            } else if !matches_language_filter(path, &config.languages) {
+                warnings.push(format!(
+                    "Path '{}' does not match language filter",
+                    path.display()
+                ));
+            } else {
                 result.push(path.clone());
             }
         } else if path.is_dir() {
             result.extend(walk_files(path, config));
+        } else if !path.exists() {
+            warnings.push(format!("Path '{}' does not exist", path.display()));
         }
     }
 
-    result
+    (result, warnings)
 }
 
 #[cfg(test)]
