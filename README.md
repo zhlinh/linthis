@@ -130,15 +130,16 @@ linthis plugin add --global <alias> <git-url>
 
 ### Use Plugin
 
+Plugins are automatically loaded when running linthis. After adding a plugin:
+
 ```bash
-# Use plugin configuration for linting and formatting
-linthis -p myplugin
-linthis --plugin myplugin
+# Plugin configs are auto-loaded
+linthis
 
 # Combine with other options
-linthis -p myplugin -l python -i src/
-linthis --plugin myplugin --check-only
-linthis --plugin myplugin --staged
+linthis -l python -i src/
+linthis --check-only
+linthis --staged
 ```
 
 ### Remove Plugin
@@ -166,8 +167,9 @@ linthis plugin list
 linthis plugin list -g
 linthis plugin list --global
 
-# Update plugin cache
-linthis --plugin-update
+# Sync (update) plugins
+linthis plugin sync          # Sync local plugins
+linthis plugin sync --global # Sync global plugins
 
 # Initialize new plugin
 linthis plugin init my-config
@@ -405,7 +407,6 @@ All modifications preserve TOML file format and comments.
 | ----- | ----------------------- | ---------------------------------------- | ----------------------- |
 | `-i`  | `--include`             | Specify files or directories to check    | `-i src -i lib`         |
 | `-e`  | `--exclude`             | Exclude patterns (can be used multiple times) | `-e "*.test.js"`        |
-| `-p`  | `--plugin`              | Use plugin (alias or Git URL)            | `-p myplugin`           |
 | `-c`  | `--check-only`          | Check only, no formatting                | `-c`                    |
 | `-f`  | `--format-only`         | Format only, no checking                 | `-f`                    |
 | `-s`  | `--staged`              | Check only Git staged files              | `-s`                    |
@@ -416,9 +417,9 @@ All modifications preserve TOML file format and comments.
 |       | `--config`              | Specify config file path                 | `--config custom.toml`  |
 |       | `--init`                | Initialize .linthis.toml config file     | `--init`                |
 |       | `--preset`              | Format preset                            | `--preset google`       |
-|       | `--plugin-update`       | Force update plugin cache                | `--plugin-update`       |
 |       | `--no-default-excludes` | Disable default exclude rules            | `--no-default-excludes` |
 |       | `--no-gitignore`        | Disable .gitignore rules                 | `--no-gitignore`        |
+|       | `--no-plugin`           | Skip loading plugins, use default config | `--no-plugin`           |
 
 ### Plugin Management Subcommands
 
@@ -673,7 +674,7 @@ git push -u origin main
 
 ```bash
 linthis plugin add company https://github.com/mycompany/linthis-standards.git
-linthis --plugin company
+linthis  # Plugin configs are auto-loaded
 ```
 
 ## FAQ
@@ -699,7 +700,8 @@ linthis -l python  # Only check Python files
 ### Q: How to update plugins?
 
 ```bash
-linthis --plugin-update
+linthis plugin sync          # Sync local plugins
+linthis plugin sync --global # Sync global plugins
 ```
 
 ### Q: What is the plugin Git reference (ref) used for?

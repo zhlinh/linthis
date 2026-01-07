@@ -107,14 +107,9 @@ struct Cli {
     #[arg(long)]
     benchmark: bool,
 
-    /// Use a config plugin (name or Git URL)
-    /// Examples: -p official, --plugin https://github.com/org/config.git
-    #[arg(short = 'p', long)]
-    plugin: Option<String>,
-
-    /// Force update cached plugins
+    /// Skip loading plugins, use default configuration
     #[arg(long)]
-    plugin_update: bool,
+    no_plugin: bool,
 
     /// Plugin subcommands (init, list, clean)
     #[command(subcommand)]
@@ -2366,15 +2361,6 @@ A linthis configuration plugin providing consistent linting and formatting rules
 
 ## Usage
 
-### Via Command Line
-
-```bash
-# Use this plugin for a single run
-linthis --plugin https://github.com/your-org/{name}.git
-```
-
-### Via Configuration File
-
 Add to your `.linthis/config.toml`:
 
 ```toml
@@ -3253,8 +3239,7 @@ fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                     }
                     println!("  Config: {}", manager.config_path().display());
                     println!();
-                    println!("You can now use it with:");
-                    println!("  linthis --plugin {}", alias);
+                    println!("Plugin will be automatically loaded when running linthis.");
 
                     ExitCode::SUCCESS
                 }
@@ -4594,49 +4579,41 @@ fn main() -> ExitCode {
     // Track loaded plugins for display
     let mut loaded_plugins: Vec<String> = Vec::new();
 
-    // Load plugins: from --plugin flag, or from config files (project first, then global)
-    {
+    // Load plugins from config files (project first, then global)
+    if !cli.no_plugin {
         use linthis::plugin::{PluginConfigManager, PluginLoader, PluginSource};
 
-        let plugins_to_load: Vec<(String, PluginSource)> = if let Some(ref plugin_name) = cli.plugin {
-            // Use explicitly specified plugin
-            vec![(plugin_name.clone(), PluginSource::new(plugin_name))]
-        } else {
-            // Try to load from config files: project first, then global
-            let mut plugins = Vec::new();
+        let mut plugins_to_load: Vec<(String, PluginSource)> = Vec::new();
 
-            // Check project config first
-            if let Ok(project_manager) = PluginConfigManager::project() {
-                if let Ok(project_plugins) = project_manager.list_plugins() {
-                    for (name, url, git_ref) in project_plugins {
+        // Check project config first
+        if let Ok(project_manager) = PluginConfigManager::project() {
+            if let Ok(project_plugins) = project_manager.list_plugins() {
+                for (name, url, git_ref) in project_plugins {
+                    let source = if let Some(ref r) = git_ref {
+                        PluginSource::new(&url).with_ref(r)
+                    } else {
+                        PluginSource::new(&url)
+                    };
+                    plugins_to_load.push((name, source));
+                }
+            }
+        }
+
+        // If no project plugins, check global config
+        if plugins_to_load.is_empty() {
+            if let Ok(global_manager) = PluginConfigManager::global() {
+                if let Ok(global_plugins) = global_manager.list_plugins() {
+                    for (name, url, git_ref) in global_plugins {
                         let source = if let Some(ref r) = git_ref {
                             PluginSource::new(&url).with_ref(r)
                         } else {
                             PluginSource::new(&url)
                         };
-                        plugins.push((name, source));
+                        plugins_to_load.push((name, source));
                     }
                 }
             }
-
-            // If no project plugins, check global config
-            if plugins.is_empty() {
-                if let Ok(global_manager) = PluginConfigManager::global() {
-                    if let Ok(global_plugins) = global_manager.list_plugins() {
-                        for (name, url, git_ref) in global_plugins {
-                            let source = if let Some(ref r) = git_ref {
-                                PluginSource::new(&url).with_ref(r)
-                            } else {
-                                PluginSource::new(&url)
-                            };
-                            plugins.push((name, source));
-                        }
-                    }
-                }
-            }
-
-            plugins
-        };
+        }
 
         if !plugins_to_load.is_empty() {
             let loader = match PluginLoader::with_verbose(cli.verbose) {
@@ -4652,7 +4629,7 @@ fn main() -> ExitCode {
             };
 
             for (plugin_name, source) in plugins_to_load {
-                match loader.load_configs(&[source], cli.plugin_update) {
+                match loader.load_configs(&[source], false) {
                     Ok(configs) => {
                         loaded_plugins.push(plugin_name.clone());
                         if cli.verbose {
@@ -4710,60 +4687,6 @@ fn main() -> ExitCode {
                 }
             }
         }
-    }
-
-    // Handle --plugin-update without --plugin (update all cached)
-    if cli.plugin_update && cli.plugin.is_none() {
-        use linthis::plugin::cache::PluginCache;
-        use linthis::plugin::{PluginLoader, PluginSource};
-
-        let cache = match PluginCache::new() {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("{}: {}", "Error".red(), e);
-                return ExitCode::from(1);
-            }
-        };
-
-        match cache.list_cached() {
-            Ok(plugins) => {
-                if plugins.is_empty() {
-                    println!("No cached plugins to update.");
-                } else {
-                    let loader = match PluginLoader::with_verbose(cli.verbose) {
-                        Ok(l) => l,
-                        Err(e) => {
-                            eprintln!("{}: {}", "Error".red(), e);
-                            return ExitCode::from(1);
-                        }
-                    };
-
-                    for plugin in plugins {
-                        let source = PluginSource {
-                            name: plugin.name.clone(),
-                            url: Some(plugin.url.clone()),
-                            git_ref: plugin.git_ref.clone(),
-                            enabled: true,
-                        };
-
-                        match loader.load_configs(&[source], true) {
-                            Ok(_) => {
-                                println!("{} Updated {}", "✓".green(), plugin.name);
-                            }
-                            Err(e) => {
-                                eprintln!("{} Failed to update {}: {}", "✗".red(), plugin.name, e);
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("{}: Failed to list plugins: {}", "Error".red(), e);
-                return ExitCode::from(1);
-            }
-        }
-
-        return ExitCode::SUCCESS;
     }
 
     // Handle --init flag
