@@ -60,15 +60,36 @@ pub fn format_issue_human(issue: &LintIssue) -> String {
         code_str
     );
 
-    // Show the source code line if available
+    // Show context and source code lines if available
     if let Some(code_line) = &issue.code_line {
-        let line_num = format!("{:>5}", issue.line);
-        output.push_str(&format!("\n{} | {}", line_num.cyan(), code_line));
+        // Calculate line number width based on max line number (context_after last line or issue line)
+        let max_line = if !issue.context_after.is_empty() {
+            issue.context_after.last().map(|(n, _)| *n).unwrap_or(issue.line)
+        } else {
+            issue.line
+        };
+        let line_width = max_line.to_string().len().max(5);
+
+        // Show context before (dimmed)
+        for (line_num, content) in &issue.context_before {
+            let num_str = format!("{:>width$}", line_num, width = line_width);
+            output.push_str(&format!("\n  {} | {}", num_str.dimmed(), content.dimmed()));
+        }
+
+        // Show the issue line (highlighted with >)
+        let line_num = format!("{:>width$}", issue.line, width = line_width);
+        output.push_str(&format!("\n{} {} | {}", ">".red().bold(), line_num.cyan().bold(), code_line));
 
         // Show column indicator if available
         if let Some(col) = issue.column {
-            let spaces = " ".repeat(line_num.len() + 3 + col.saturating_sub(1));
-            output.push_str(&format!("\n{}^", spaces));
+            let spaces = " ".repeat(line_width + 5 + col.saturating_sub(1));
+            output.push_str(&format!("\n{}^", spaces.red()));
+        }
+
+        // Show context after (dimmed)
+        for (line_num, content) in &issue.context_after {
+            let num_str = format!("{:>width$}", line_num, width = line_width);
+            output.push_str(&format!("\n  {} | {}", num_str.dimmed(), content.dimmed()));
         }
     }
 
