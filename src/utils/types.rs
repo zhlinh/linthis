@@ -56,6 +56,12 @@ pub struct LintIssue {
     pub language: Option<Language>,
     /// The source code line where the issue occurs (optional)
     pub code_line: Option<String>,
+    /// Context lines before the issue line (line_number, content)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_before: Vec<(usize, String)>,
+    /// Context lines after the issue line (line_number, content)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_after: Vec<(usize, String)>,
 }
 
 impl LintIssue {
@@ -71,6 +77,8 @@ impl LintIssue {
             source: None,
             language: None,
             code_line: None,
+            context_before: Vec::new(),
+            context_after: Vec::new(),
         }
     }
 
@@ -101,6 +109,16 @@ impl LintIssue {
 
     pub fn with_code_line(mut self, code_line: String) -> Self {
         self.code_line = Some(code_line);
+        self
+    }
+
+    pub fn with_context_before(mut self, context: Vec<(usize, String)>) -> Self {
+        self.context_before = context;
+        self
+    }
+
+    pub fn with_context_after(mut self, context: Vec<(usize, String)>) -> Self {
+        self.context_after = context;
         self
     }
 }

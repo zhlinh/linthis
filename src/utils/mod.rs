@@ -118,6 +118,69 @@ pub fn read_file_line(path: &Path, line_number: usize) -> Option<String> {
         .and_then(|line| line.ok())
 }
 
+/// Result of reading a file line with context.
+pub struct LineWithContext {
+    /// The target line content
+    pub line: String,
+    /// Context lines before (line_number, content)
+    pub before: Vec<(usize, String)>,
+    /// Context lines after (line_number, content)
+    pub after: Vec<(usize, String)>,
+}
+
+/// Read a specific line from a file with surrounding context (1-indexed).
+/// Returns the target line and up to `context_lines` lines before and after.
+pub fn read_file_line_with_context(
+    path: &Path,
+    line_number: usize,
+    context_lines: usize,
+) -> Option<LineWithContext> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    if line_number == 0 {
+        return None;
+    }
+
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    // Calculate the range of lines to read
+    let start_line = line_number.saturating_sub(context_lines);
+    let end_line = line_number + context_lines;
+
+    let mut before = Vec::new();
+    let mut target_line = None;
+    let mut after = Vec::new();
+
+    for (idx, line_result) in reader.lines().enumerate() {
+        let current_line = idx + 1; // 1-indexed
+
+        if current_line < start_line {
+            continue;
+        }
+        if current_line > end_line {
+            break;
+        }
+
+        if let Ok(content) = line_result {
+            if current_line < line_number {
+                before.push((current_line, content));
+            } else if current_line == line_number {
+                target_line = Some(content);
+            } else {
+                after.push((current_line, content));
+            }
+        }
+    }
+
+    target_line.map(|line| LineWithContext {
+        line,
+        before,
+        after,
+    })
+}
+
 /// Get the project root directory (git root or current directory).
 pub fn get_project_root() -> std::path::PathBuf {
     Command::new("git")

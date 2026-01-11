@@ -559,9 +559,12 @@ impl CppChecker {
             issue = issue.with_code(c);
         }
 
-        // Read the source code line
-        if let Some(code_line) = crate::utils::read_file_line(&file_path, line_num) {
-            issue = issue.with_code_line(code_line);
+        // Read the source code line with context
+        if let Some(ctx) = crate::utils::read_file_line_with_context(&file_path, line_num, 1) {
+            issue = issue
+                .with_code_line(ctx.line)
+                .with_context_before(ctx.before)
+                .with_context_after(ctx.after);
         }
 
         Some(issue)
@@ -631,9 +634,12 @@ impl CppChecker {
             issue = issue.with_code(c);
         }
 
-        // Read the source code line
-        if let Some(code_line) = crate::utils::read_file_line(&file_path, line_num) {
-            issue = issue.with_code_line(code_line);
+        // Read the source code line with context
+        if let Some(ctx) = crate::utils::read_file_line_with_context(&file_path, line_num, 1) {
+            issue = issue
+                .with_code_line(ctx.line)
+                .with_context_before(ctx.before)
+                .with_context_after(ctx.after);
         }
 
         Some(issue)
