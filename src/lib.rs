@@ -15,6 +15,7 @@ pub mod checkers;
 pub mod config;
 pub mod fixers;
 pub mod formatters;
+pub mod interactive;
 pub mod plugin;
 pub mod presets;
 pub mod self_update;
@@ -305,8 +306,6 @@ pub struct RunOptions {
     pub quiet: bool,
     /// Active plugins (name only, for display)
     pub plugins: Vec<String>,
-    /// Fail on warnings (treat warnings as errors)
-    pub fail_on_warnings: bool,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -333,7 +332,6 @@ impl Default for RunOptions {
             verbose: false,
             quiet: false,
             plugins: Vec::new(),
-            fail_on_warnings: false,
         }
     }
 }
@@ -745,7 +743,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // Calculate final stats
     result.count_files_with_issues();
-    result.calculate_exit_code_with_warnings(options.fail_on_warnings);
+    result.calculate_exit_code();
     result.duration_ms = start.elapsed().as_millis() as u64;
 
     Ok(result)
