@@ -222,20 +222,23 @@ impl RunResult {
     }
 
     /// Calculate exit code based on results
+    ///
+    /// Exit codes:
+    /// - 0: No issues (success)
+    /// - 1: Has errors
+    /// - 2: Formatting errors occurred
+    /// - 3: Has warnings only (no errors)
     pub fn calculate_exit_code(&mut self) {
-        self.calculate_exit_code_with_warnings(false);
-    }
-
-    /// Calculate exit code based on results, with option to fail on warnings
-    pub fn calculate_exit_code_with_warnings(&mut self, fail_on_warnings: bool) {
         let has_errors = self.issues.iter().any(|i| i.severity == Severity::Error);
         let has_warnings = self.issues.iter().any(|i| i.severity == Severity::Warning);
         let has_format_errors = self.format_results.iter().any(|r| r.error.is_some());
 
         if has_format_errors {
             self.exit_code = 2;
-        } else if has_errors || (fail_on_warnings && has_warnings) {
+        } else if has_errors {
             self.exit_code = 1;
+        } else if has_warnings {
+            self.exit_code = 3;
         } else {
             self.exit_code = 0;
         }
@@ -521,7 +524,7 @@ mod tests {
         ));
 
         result.calculate_exit_code();
-        assert_eq!(result.exit_code, 0); // Warnings don't cause exit code 1
+        assert_eq!(result.exit_code, 3); // Warnings only cause exit code 3
     }
 
     #[test]

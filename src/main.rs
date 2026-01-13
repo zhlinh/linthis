@@ -15,8 +15,9 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use linthis::interactive::run_interactive;
 use linthis::utils::output::{format_result, OutputFormat};
-use linthis::{run, Language, RunMode, RunOptions, Severity};
+use linthis::{run, Language, RunMode, RunOptions};
 
 #[derive(Parser, Debug)]
 #[command(name = "linthis")]
@@ -99,13 +100,19 @@ struct Cli {
     #[arg(short, long)]
     quiet: bool,
 
-    /// Fail on warnings (treat warnings as errors for exit code)
-    #[arg(short = 'w', long)]
-    fail_on_warnings: bool,
-
     /// Run benchmark comparing ruff vs flake8+black for Python
     #[arg(long)]
     benchmark: bool,
+
+    /// Interactive fix mode: review and fix issues one by one
+    ///
+    /// Usage:
+    ///   --fix           Load last result and enter interactive mode
+    ///   --fix last      Same as above (explicit)
+    ///   --fix <FILE>    Load specific result file
+    ///   -c --fix        Run check then enter interactive mode
+    #[arg(short = 'F', long, value_name = "SOURCE", num_args = 0..=1, default_missing_value = "last")]
+    fix: Option<String>,
 
     /// Skip loading plugins, use default configuration
     #[arg(long)]
@@ -4532,6 +4539,50 @@ fn strip_ansi_codes(s: &str) -> String {
     ansi_regex.replace_all(s, "").to_string()
 }
 
+/// Find the most recent result file in .linthis/result/
+fn find_latest_result_file() -> Option<PathBuf> {
+    use std::fs;
+
+    let result_dir = PathBuf::from(".linthis").join("result");
+    if !result_dir.exists() {
+        return None;
+    }
+
+    let entries = fs::read_dir(&result_dir).ok()?;
+    let mut result_files: Vec<_> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.starts_with("result-")
+                && (name.ends_with(".json") || name.ends_with(".txt"))
+        })
+        .collect();
+
+    if result_files.is_empty() {
+        return None;
+    }
+
+    // Sort by modification time, newest first
+    result_files.sort_by(|a, b| {
+        let a_time = a.metadata().and_then(|m| m.modified()).ok();
+        let b_time = b.metadata().and_then(|m| m.modified()).ok();
+        b_time.cmp(&a_time)
+    });
+
+    Some(result_files[0].path())
+}
+
+/// Print hint about how to enter interactive fix mode
+fn print_fix_hint() {
+    eprintln!();
+    eprintln!(
+        "  {} To review and fix issues interactively:",
+        "Tip:".cyan().bold()
+    );
+    eprintln!("       {}     - load last result and fix", "linthis --fix".cyan());
+    eprintln!("       {}  - rerun check then fix", "linthis -c --fix".cyan());
+}
+
 fn main() -> ExitCode {
     env_logger::init();
 
@@ -4555,6 +4606,74 @@ fn main() -> ExitCode {
     // Handle init subcommand
     if let Some(Commands::Init { global, with_hook, force }) = cli.command {
         return handle_init_command(global, with_hook, force);
+    }
+
+    // Handle --fix without -c: load result file and enter interactive mode
+    // If --fix is used with -c, we'll run check first then enter interactive mode later
+    if let Some(ref source) = cli.fix {
+        // --fix without -c: load from file
+        if !cli.check_only && !cli.format_only {
+            let path = if source == "last" {
+                match find_latest_result_file() {
+                    Some(p) => p,
+                    None => {
+                        eprintln!(
+                            "{}: No result files found in .linthis/result/",
+                            "Error".red()
+                        );
+                        eprintln!("  Run {} first to generate a result file.", "linthis -c".cyan());
+                        return ExitCode::from(1);
+                    }
+                }
+            } else {
+                PathBuf::from(source)
+            };
+
+            if !path.exists() {
+                eprintln!("{}: Result file not found: {}", "Error".red(), path.display());
+                return ExitCode::from(1);
+            }
+
+            println!(
+                "{} Loading results from: {}",
+                "→".cyan(),
+                path.display()
+            );
+
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    match serde_json::from_str::<linthis::utils::types::RunResult>(&content) {
+                        Ok(result) => {
+                            if result.issues.is_empty() {
+                                println!("{}", "No issues in the saved result.".green());
+                                return ExitCode::SUCCESS;
+                            }
+                            println!(
+                                "  Found {} issue{} from previous run\n",
+                                result.issues.len(),
+                                if result.issues.len() == 1 { "" } else { "s" }
+                            );
+                            run_interactive(&result);
+                            return ExitCode::from(result.exit_code as u8);
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "{}: Failed to parse result file as JSON: {}",
+                                "Error".red(),
+                                e
+                            );
+                            eprintln!("  Result files are saved in JSON format by default.");
+                            eprintln!("  Make sure the file is a valid JSON result file.");
+                            return ExitCode::from(2);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{}: Failed to read result file: {}", "Error".red(), e);
+                    return ExitCode::from(2);
+                }
+            }
+        }
     }
 
     // Perform self-update and auto-sync checks (before loading plugins)
@@ -4859,7 +4978,6 @@ fn main() -> ExitCode {
         verbose: cli.verbose,
         quiet: cli.quiet,
         plugins: loaded_plugins,
-        fail_on_warnings: cli.fail_on_warnings,
     };
 
     // Parse output format
@@ -4887,7 +5005,13 @@ fn main() -> ExitCode {
                 }
             }
 
+            // Run interactive fix mode if --fix was used with -c
+            if cli.fix.is_some() && !result.issues.is_empty() {
+                run_interactive(&result);
+            }
+
             // Save to file by default (unless --no-save-result is specified)
+            // Default format is JSON for programmatic access (--last, --from-result)
             if !cli.no_save_result || cli.output_file.is_some() {
                 use chrono::Local;
                 use std::fs::{self, File};
@@ -4903,7 +5027,7 @@ fn main() -> ExitCode {
                     }
                     custom_path.clone()
                 } else {
-                    // Use default path: .linthis/result/result-{timestamp}.txt
+                    // Use default path: .linthis/result/result-{timestamp}.json
                     let result_dir = PathBuf::from(".linthis").join("result");
                     if let Err(e) = fs::create_dir_all(&result_dir) {
                         eprintln!(
@@ -4915,15 +5039,21 @@ fn main() -> ExitCode {
                         return ExitCode::from(result.exit_code as u8);
                     }
                     let timestamp = Local::now().format("%Y%m%d-%H%M%S");
-                    result_dir.join(format!("result-{}.txt", timestamp))
+                    result_dir.join(format!("result-{}.json", timestamp))
                 };
 
-                // Strip ANSI color codes for file output
-                let plain_output = strip_ansi_codes(&output);
+                // Serialize result as JSON for default files, or use specified format for custom path
+                let file_content = if cli.output_file.is_some() {
+                    // Custom path: use the output format specified by user
+                    strip_ansi_codes(&output)
+                } else {
+                    // Default path: always save as JSON for --last/--from-result support
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| output.clone())
+                };
 
                 match File::create(&output_file) {
                     Ok(mut file) => {
-                        if let Err(e) = writeln!(file, "{}", plain_output) {
+                        if let Err(e) = writeln!(file, "{}", file_content) {
                             eprintln!(
                                 "{}: Failed to write to {}: {}",
                                 "Warning".yellow(),
@@ -4955,10 +5085,9 @@ fn main() -> ExitCode {
                         let mut result_files: Vec<_> = entries
                             .filter_map(|e| e.ok())
                             .filter(|e| {
-                                e.file_name()
-                                    .to_string_lossy()
-                                    .starts_with("result-")
-                                    && e.path().extension().map_or(false, |ext| ext == "txt")
+                                let name = e.file_name().to_string_lossy().to_string();
+                                name.starts_with("result-")
+                                    && (name.ends_with(".json") || name.ends_with(".txt"))
                             })
                             .collect();
 
@@ -4991,29 +5120,33 @@ fn main() -> ExitCode {
             // Show failure message if exit code is non-zero
             if result.exit_code != 0 && !cli.quiet {
                 eprintln!();
-                if result.exit_code == 1 {
-                    let has_errors = result.issues.iter().any(|i| i.severity == Severity::Error);
-                    let has_warnings = result.issues.iter().any(|i| i.severity == Severity::Warning);
-
-                    if has_errors {
+                match result.exit_code {
+                    1 => {
                         eprintln!("{} {} {}",
                             "✗".red().bold(),
                             "Linting failed due to errors.".red().bold(),
-                            "Fix the issues above before committing.".red()
-                        );
-                    } else if has_warnings && cli.fail_on_warnings {
-                        eprintln!("{} {} {}",
-                            "✗".red().bold(),
-                            "Linting failed due to warnings (--fail-on-warnings is enabled).".red().bold(),
-                            "Fix the warnings above before committing.".red()
+                            "Fix the errors above before committing.".red()
                         );
                     }
-                } else if result.exit_code == 2 {
-                    eprintln!("{} {}",
-                        "✗".red().bold(),
-                        "Linting failed due to formatting errors.".red().bold()
-                    );
+                    2 => {
+                        eprintln!("{} {}",
+                            "✗".red().bold(),
+                            "Linting failed due to formatting errors.".red().bold()
+                        );
+                    }
+                    3 => {
+                        eprintln!("{} {}",
+                            "⚠".yellow().bold(),
+                            "Linting completed with warnings.".yellow().bold()
+                        );
+                    }
+                    _ => {}
                 }
+            }
+
+            // Show hint for --fix mode if there are issues and not already using --fix
+            if !cli.quiet && cli.fix.is_none() && !result.issues.is_empty() {
+                print_fix_hint();
             }
 
             ExitCode::from(result.exit_code as u8)
