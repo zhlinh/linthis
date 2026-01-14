@@ -176,6 +176,9 @@ pub struct CppLanguageConfig {
     /// Cpplint filter rules (e.g., "-build/c++11,-build/header_guard")
     #[serde(default)]
     pub cpplint_filter: Option<String>,
+    /// Clang-tidy checks to ignore (e.g., ["clang-analyzer-osx.cocoa.RetainCount"])
+    #[serde(default)]
+    pub clang_tidy_ignored_checks: Option<Vec<String>>,
 }
 
 impl LanguageOverrides {

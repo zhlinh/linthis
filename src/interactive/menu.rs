@@ -19,12 +19,12 @@ use crate::utils::types::{LintIssue, RunResult, Severity};
 use colored::Colorize;
 use std::io::{self, BufRead, Write};
 
-use super::editor::open_in_editor;
-use super::nolint::{add_nolint_comment, describe_nolint_action, NolintResult};
+use super::editor::{open_in_editor, LineChange};
+use super::nolint::{add_nolint_comment, describe_nolint_action, LineDiff, NolintResult};
 use super::quickfix::{default_quickfix_path, write_quickfix_file};
 
 /// Action taken for a single issue
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InteractiveAction {
     /// Open file in editor at issue location
     Edit,
@@ -32,6 +32,10 @@ pub enum InteractiveAction {
     Ignore,
     /// Skip this issue (do nothing)
     Skip,
+    /// Go to previous issue
+    Previous,
+    /// Go to specific issue number
+    GoTo(usize),
     /// Quit interactive mode
     Quit,
 }
@@ -119,6 +123,9 @@ fn show_main_menu(result: &RunResult) -> MainMenuChoice {
     println!("  [{}] Open all in editor (vim quickfix)", "2".cyan());
     println!("  [{}] Exit", "3".cyan());
     println!();
+    println!("  {}", "Vim quickfix shortcuts:".dimmed());
+    println!("    {} - next issue  {} - previous  {} - list all", ":cn".cyan(), ":cp".cyan(), ":copen".cyan());
+    println!();
     print!("  > ");
     io::stdout().flush().ok();
 
@@ -139,22 +146,42 @@ fn show_main_menu(result: &RunResult) -> MainMenuChoice {
 fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
     let mut result = InteractiveResult::default();
     let total = issues.len();
+    let mut idx: usize = 0;
 
-    for (idx, issue) in issues.iter().enumerate() {
+    // Track which issues have been processed
+    let mut processed = vec![false; total];
+
+    while idx < total {
+        let issue = &issues[idx];
         let action = show_issue_menu(issue, idx + 1, total);
 
         match action {
             InteractiveAction::Edit => {
                 result.edited += 1;
-                if let Err(e) = open_in_editor(&issue.file_path, issue.line, issue.column) {
-                    eprintln!("{}: {}", "Failed to open editor".red(), e);
+                processed[idx] = true;
+
+                let editor_result = open_in_editor(&issue.file_path, issue.line, issue.column);
+
+                if editor_result.success {
+                    println!();
+                    if editor_result.changes.is_empty() {
+                        println!("  {}", "No changes made".dimmed());
+                    } else {
+                        print_editor_changes(&editor_result.changes);
+                    }
+                } else if let Some(ref error) = editor_result.error {
+                    eprintln!("{}: {}", "Failed to open editor".red(), error);
                 }
+                idx += 1;
             }
             InteractiveAction::Ignore => {
+                processed[idx] = true;
                 match add_nolint_comment(issue) {
-                    NolintResult::Success => {
+                    NolintResult::Success(diffs) => {
                         result.ignored += 1;
                         println!("{} Added NOLINT comment", "✓".green());
+                        println!();
+                        print_diff(&diffs);
                     }
                     NolintResult::AlreadyIgnored => {
                         println!("{}", "Already has NOLINT comment".yellow());
@@ -165,13 +192,47 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
                         result.skipped += 1;
                     }
                 }
+                idx += 1;
             }
             InteractiveAction::Skip => {
                 result.skipped += 1;
+                processed[idx] = true;
+                idx += 1;
+            }
+            InteractiveAction::Previous => {
+                if idx > 0 {
+                    idx -= 1;
+                    // Adjust counters if we're revisiting a processed issue
+                    if processed[idx] {
+                        println!("{}", "  (Revisiting previously processed issue)".dimmed());
+                    }
+                } else {
+                    println!("{}", "  Already at first issue".yellow());
+                }
+            }
+            InteractiveAction::GoTo(target) => {
+                if target > 0 && target <= total {
+                    idx = target - 1; // Convert to 0-based index
+                    if processed[idx] {
+                        println!("{}", "  (Jumping to previously processed issue)".dimmed());
+                    }
+                } else {
+                    println!(
+                        "  {} Issue #{} out of range (1-{})",
+                        "Invalid:".yellow(),
+                        target,
+                        total
+                    );
+                }
             }
             InteractiveAction::Quit => {
                 result.quit_early = true;
-                result.skipped += total - idx;
+                // Count unprocessed issues as skipped
+                for &was_processed in &processed[idx..] {
+                    if !was_processed {
+                        result.skipped += 1;
+                    }
+                }
                 break;
             }
         }
@@ -256,11 +317,17 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
 
     println!();
 
-    // Action menu
+    // Action menu with progress indicator
+    println!("  {}", format!("Issue {}/{}", current, total).bold().cyan());
+    println!();
     let nolint_desc = describe_nolint_action(issue);
     println!("    [{}] Edit - open $EDITOR at this line", "e".cyan());
     println!("    [{}] Ignore - {}", "i".cyan(), nolint_desc.dimmed());
     println!("    [{}] Skip", "s".cyan());
+    if current > 1 {
+        println!("    [{}] Previous - go back to issue #{}", "p".cyan(), current - 1);
+    }
+    println!("    [{}] Go to #N - jump to specific issue", "g".cyan());
     println!("    [{}] Quit", "q".cyan());
     println!();
     print!("  > ");
@@ -272,9 +339,33 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
         "e" | "edit" => InteractiveAction::Edit,
         "i" | "ignore" => InteractiveAction::Ignore,
         "s" | "skip" | "" => InteractiveAction::Skip, // Enter defaults to skip
+        "p" | "prev" | "previous" => InteractiveAction::Previous,
         "q" | "quit" => InteractiveAction::Quit,
+        input if input.starts_with("g") => {
+            // Handle "g N" or just "g" (will prompt for number)
+            let parts: Vec<&str> = input.split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let Ok(num) = parts[1].parse::<usize>() {
+                    InteractiveAction::GoTo(num)
+                } else {
+                    println!("{}", "Invalid issue number".yellow());
+                    show_issue_menu(issue, current, total)
+                }
+            } else {
+                // Prompt for issue number
+                print!("  {} ", "Go to issue #:".cyan());
+                io::stdout().flush().ok();
+                let num_input = read_line().trim().to_string();
+                if let Ok(num) = num_input.parse::<usize>() {
+                    InteractiveAction::GoTo(num)
+                } else {
+                    println!("{}", "Invalid issue number".yellow());
+                    show_issue_menu(issue, current, total)
+                }
+            }
+        }
         _ => {
-            println!("{}", "Invalid choice. Use: e/i/s/q".yellow());
+            println!("{}", "Invalid choice. Use: e/i/s/p/g/q".yellow());
             show_issue_menu(issue, current, total)
         }
     }
@@ -340,13 +431,180 @@ fn open_quickfix(issues: &[LintIssue]) -> Result<(), String> {
         path.display()
     );
     println!();
+
+    // Try to detect vim-compatible editor
+    let editor = detect_quickfix_editor();
+
+    if let Some(editor_cmd) = editor {
+        println!("Opening in {}...", editor_cmd.cyan());
+        println!("  Use {} to jump between issues", ":cn / :cp".cyan());
+        println!();
+
+        // Launch editor with quickfix
+        match launch_quickfix_editor(&editor_cmd, &path) {
+            Ok(()) => {
+                println!();
+                println!("{} Editor closed", "✓".green());
+            }
+            Err(e) => {
+                eprintln!("{}: {}", "Failed to open editor".red(), e);
+                println!();
+                show_manual_quickfix_instructions(&path);
+            }
+        }
+    } else {
+        // No compatible editor found, show manual instructions
+        show_manual_quickfix_instructions(&path);
+    }
+
+    Ok(())
+}
+
+/// Show manual instructions for opening quickfix
+fn show_manual_quickfix_instructions(path: &std::path::Path) {
     println!("To open in vim:");
     println!("  {} {}", "vim -q".cyan(), path.display());
     println!();
     println!("Or load in vim with:");
     println!("  {} {}", ":cfile".cyan(), path.display());
+    println!();
+    println!("{}", "Quickfix shortcuts in vim:".bold());
+    println!("  {} - Jump to next issue", ":cn".cyan());
+    println!("  {} - Jump to previous issue", ":cp".cyan());
+    println!("  {} - Open quickfix window", ":copen".cyan());
+    println!("  {} - Close quickfix window", ":cclose".cyan());
+    println!("  {} - Jump to issue #N", ":cc N".cyan());
+}
 
-    Ok(())
+/// Detect a quickfix-compatible editor
+fn detect_quickfix_editor() -> Option<String> {
+    // Check for vim-compatible editors in order of preference
+    let vim_editors = [
+        "nvim",      // Neovim (best vim compatibility)
+        "vim",       // Vim
+        "vi",        // Vi (basic but widely available)
+    ];
+
+    // Check $EDITOR first if it's a vim variant
+    if let Ok(editor) = std::env::var("EDITOR") {
+        let editor_lower = editor.to_lowercase();
+        if editor_lower.contains("vim") || editor_lower.contains("nvim") || editor_lower.contains("vi") {
+            return Some(editor);
+        }
+    }
+
+    // Try to find a vim-compatible editor
+    for editor in &vim_editors {
+        if which_exists(editor) {
+            return Some(editor.to_string());
+        }
+    }
+
+    None
+}
+
+/// Check if a command exists in PATH
+fn which_exists(cmd: &str) -> bool {
+    use std::process::{Command, Stdio};
+
+    #[cfg(windows)]
+    let which_cmd = "where";
+    #[cfg(not(windows))]
+    let which_cmd = "which";
+
+    Command::new(which_cmd)
+        .arg(cmd)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Launch editor with quickfix file
+fn launch_quickfix_editor(editor: &str, path: &std::path::Path) -> Result<(), String> {
+    use std::process::Command;
+
+    let mut cmd = Command::new(editor);
+    cmd.arg("-q").arg(path);
+
+    match cmd.status() {
+        Ok(status) => {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Editor exited with status: {}",
+                    status.code().unwrap_or(-1)
+                ))
+            }
+        }
+        Err(e) => Err(format!("Failed to launch editor: {}", e)),
+    }
+}
+
+/// Print diff information in git-style format (for NOLINT comments)
+fn print_diff(diffs: &[LineDiff]) {
+    println!("  {}", "Changes:".bold());
+    for diff in diffs {
+        // Show removed line (if not empty, meaning it was a modification)
+        if !diff.old_content.is_empty() {
+            println!(
+                "  {} {}",
+                format!("-{:>4} |", diff.line_number).red(),
+                diff.old_content.red()
+            );
+        }
+        // Show added/modified line
+        println!(
+            "  {} {}",
+            format!("+{:>4} |", diff.line_number).green(),
+            diff.new_content.green()
+        );
+    }
+    println!();
+}
+
+/// Print changes made in the editor
+fn print_editor_changes(changes: &[LineChange]) {
+    println!("  {}", "Changes:".bold());
+
+    // Limit the number of changes shown to avoid overwhelming output
+    const MAX_CHANGES_SHOWN: usize = 20;
+    let changes_to_show = if changes.len() > MAX_CHANGES_SHOWN {
+        &changes[..MAX_CHANGES_SHOWN]
+    } else {
+        changes
+    };
+
+    for change in changes_to_show {
+        // Show removed line (if not empty, meaning it was a modification)
+        if !change.old_content.is_empty() {
+            println!(
+                "  {} {}",
+                format!("-{:>4} |", change.line_number).red(),
+                change.old_content.red()
+            );
+        }
+        // Show added/modified line (if not empty)
+        if !change.new_content.is_empty() {
+            println!(
+                "  {} {}",
+                format!("+{:>4} |", change.line_number).green(),
+                change.new_content.green()
+            );
+        }
+    }
+
+    if changes.len() > MAX_CHANGES_SHOWN {
+        println!(
+            "  {} ({} more changes not shown)",
+            "...".dimmed(),
+            changes.len() - MAX_CHANGES_SHOWN
+        );
+    }
+
+    println!();
 }
 
 /// Read a line from stdin (cross-platform)
@@ -394,5 +652,21 @@ mod tests {
     fn test_interactive_action_variants() {
         assert_ne!(InteractiveAction::Edit, InteractiveAction::Skip);
         assert_ne!(InteractiveAction::Ignore, InteractiveAction::Quit);
+        assert_ne!(InteractiveAction::Previous, InteractiveAction::Skip);
+    }
+
+    #[test]
+    fn test_interactive_action_goto() {
+        let goto1 = InteractiveAction::GoTo(1);
+        let goto2 = InteractiveAction::GoTo(2);
+        assert_ne!(goto1, goto2);
+        assert_eq!(goto1, InteractiveAction::GoTo(1));
+    }
+
+    #[test]
+    fn test_interactive_action_clone() {
+        let action = InteractiveAction::GoTo(42);
+        let cloned = action.clone();
+        assert_eq!(action, cloned);
     }
 }

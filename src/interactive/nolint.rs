@@ -22,11 +22,19 @@ use crate::utils::types::LintIssue;
 use crate::Language;
 use std::fs;
 
+/// Diff information for a single line change
+#[derive(Debug, Clone)]
+pub struct LineDiff {
+    pub line_number: usize,
+    pub old_content: String,
+    pub new_content: String,
+}
+
 /// Result of adding a NOLINT comment
 #[derive(Debug)]
 pub enum NolintResult {
-    /// Successfully added the comment
-    Success,
+    /// Successfully added the comment with diff information
+    Success(Vec<LineDiff>),
     /// File was not modified (e.g., comment already exists)
     AlreadyIgnored,
     /// Failed to add comment
@@ -88,14 +96,14 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
     }
 
     // Generate the new content based on language and insertion strategy
-    let new_content = match generate_nolint_content(&lines, line_idx, lang, source, code) {
+    let (new_content, diffs) = match generate_nolint_content(&lines, line_idx, lang, source, code) {
         Ok(c) => c,
         Err(e) => return NolintResult::Error(e),
     };
 
     // Write back to file
     match fs::write(file_path, new_content) {
-        Ok(_) => NolintResult::Success,
+        Ok(_) => NolintResult::Success(diffs),
         Err(e) => NolintResult::Error(format!("Failed to write file: {}", e)),
     }
 }
@@ -137,8 +145,9 @@ fn generate_nolint_content(
     lang: Language,
     source: &str,
     code: &str,
-) -> Result<String, String> {
+) -> Result<(String, Vec<LineDiff>), String> {
     let mut result_lines: Vec<String> = Vec::with_capacity(lines.len() + 1);
+    let mut diffs: Vec<LineDiff> = Vec::new();
 
     // Get indentation of the target line
     let target_line = lines[line_idx];
@@ -154,7 +163,13 @@ fn generate_nolint_content(
                     if line.trim().is_empty() {
                         result_lines.push(line.to_string());
                     } else {
-                        result_lines.push(format!("{}  {}", line, nolint));
+                        let new_line = format!("{}  {}", line, nolint);
+                        diffs.push(LineDiff {
+                            line_number: i + 1,
+                            old_content: line.to_string(),
+                            new_content: new_line.clone(),
+                        });
+                        result_lines.push(new_line);
                     }
                 } else {
                     result_lines.push(line.to_string());
@@ -169,7 +184,13 @@ fn generate_nolint_content(
                     if line.trim().is_empty() {
                         result_lines.push(line.to_string());
                     } else {
-                        result_lines.push(format!("{}  {}", line, noqa));
+                        let new_line = format!("{}  {}", line, noqa);
+                        diffs.push(LineDiff {
+                            line_number: i + 1,
+                            old_content: line.to_string(),
+                            new_content: new_line.clone(),
+                        });
+                        result_lines.push(new_line);
                     }
                 } else {
                     result_lines.push(line.to_string());
@@ -181,7 +202,13 @@ fn generate_nolint_content(
             for (i, line) in lines.iter().enumerate() {
                 if i == line_idx {
                     let allow = generate_rust_allow(code);
-                    result_lines.push(format!("{}{}", indent, allow));
+                    let new_line = format!("{}{}", indent, allow);
+                    diffs.push(LineDiff {
+                        line_number: i + 1,
+                        old_content: String::new(),
+                        new_content: new_line.clone(),
+                    });
+                    result_lines.push(new_line);
                     result_lines.push(line.to_string());
                 } else {
                     result_lines.push(line.to_string());
@@ -193,7 +220,13 @@ fn generate_nolint_content(
             for (i, line) in lines.iter().enumerate() {
                 if i == line_idx {
                     let disable = generate_eslint_disable(code);
-                    result_lines.push(format!("{}{}", indent, disable));
+                    let new_line = format!("{}{}", indent, disable);
+                    diffs.push(LineDiff {
+                        line_number: i + 1,
+                        old_content: String::new(),
+                        new_content: new_line.clone(),
+                    });
+                    result_lines.push(new_line);
                     result_lines.push(line.to_string());
                 } else {
                     result_lines.push(line.to_string());
@@ -208,7 +241,13 @@ fn generate_nolint_content(
                     if line.trim().is_empty() {
                         result_lines.push(line.to_string());
                     } else {
-                        result_lines.push(format!("{} {}", line, nolint));
+                        let new_line = format!("{} {}", line, nolint);
+                        diffs.push(LineDiff {
+                            line_number: i + 1,
+                            old_content: line.to_string(),
+                            new_content: new_line.clone(),
+                        });
+                        result_lines.push(new_line);
                     }
                 } else {
                     result_lines.push(line.to_string());
@@ -220,7 +259,13 @@ fn generate_nolint_content(
             for (i, line) in lines.iter().enumerate() {
                 if i == line_idx {
                     let suppress = generate_java_suppress(source, code);
-                    result_lines.push(format!("{}{}", indent, suppress));
+                    let new_line = format!("{}{}", indent, suppress);
+                    diffs.push(LineDiff {
+                        line_number: i + 1,
+                        old_content: String::new(),
+                        new_content: new_line.clone(),
+                    });
+                    result_lines.push(new_line);
                     result_lines.push(line.to_string());
                 } else {
                     result_lines.push(line.to_string());
@@ -236,7 +281,7 @@ fn generate_nolint_content(
         "\n"
     };
 
-    Ok(result_lines.join(newline) + newline)
+    Ok((result_lines.join(newline) + newline, diffs))
 }
 
 /// Get the leading whitespace (indentation) of a line

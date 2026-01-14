@@ -10,10 +10,30 @@
 
 //! Cross-platform editor integration for opening files at specific lines.
 
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-/// Open a file in the user's preferred editor at a specific line.
+/// Result of opening a file in an editor
+#[derive(Debug)]
+pub struct EditorResult {
+    /// Whether the editor operation succeeded
+    pub success: bool,
+    /// Lines that were changed (if any)
+    pub changes: Vec<LineChange>,
+    /// Error message if operation failed
+    pub error: Option<String>,
+}
+
+/// Information about a changed line
+#[derive(Debug, Clone)]
+pub struct LineChange {
+    pub line_number: usize,
+    pub old_content: String,
+    pub new_content: String,
+}
+
+/// Open a file in the user's preferred editor at a specific line and detect changes.
 ///
 /// # Platform Support
 /// - Unix: Uses $EDITOR environment variable, defaults to vim
@@ -34,9 +54,19 @@ use std::process::Command;
 /// * `column` - Optional column number (1-indexed)
 ///
 /// # Returns
-/// * `Ok(())` if the editor was spawned successfully
-/// * `Err(String)` with error message if spawning failed
-pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> Result<(), String> {
+/// * `EditorResult` with change information and success status
+pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> EditorResult {
+    // Read file content before editing
+    let original_content = match fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(e) => {
+            return EditorResult {
+                success: false,
+                changes: vec![],
+                error: Some(format!("Failed to read file: {}", e)),
+            }
+        }
+    };
     let editor = get_editor();
     let editor_lower = editor.to_lowercase();
 
@@ -107,26 +137,86 @@ pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> Result
     }
 
     // Spawn the editor
-    match cmd.spawn() {
+    let spawn_result = cmd.spawn();
+
+    match spawn_result {
         Ok(mut child) => {
             // Wait for the editor to close
             match child.wait() {
                 Ok(status) => {
-                    if status.success() {
-                        Ok(())
-                    } else {
-                        Err(format!(
-                            "Editor '{}' exited with status: {}",
-                            editor,
-                            status.code().unwrap_or(-1)
-                        ))
+                    if !status.success() {
+                        return EditorResult {
+                            success: false,
+                            changes: vec![],
+                            error: Some(format!(
+                                "Editor '{}' exited with status: {}",
+                                editor,
+                                status.code().unwrap_or(-1)
+                            )),
+                        };
+                    }
+
+                    // Read file content after editing
+                    let new_content = match fs::read_to_string(file) {
+                        Ok(content) => content,
+                        Err(e) => {
+                            return EditorResult {
+                                success: false,
+                                changes: vec![],
+                                error: Some(format!("Failed to read file after editing: {}", e)),
+                            }
+                        }
+                    };
+
+                    // Detect changes
+                    let changes = detect_changes(&original_content, &new_content);
+
+                    EditorResult {
+                        success: true,
+                        changes,
+                        error: None,
                     }
                 }
-                Err(e) => Err(format!("Failed to wait for editor '{}': {}", editor, e)),
+                Err(e) => EditorResult {
+                    success: false,
+                    changes: vec![],
+                    error: Some(format!("Failed to wait for editor '{}': {}", editor, e)),
+                },
             }
         }
-        Err(e) => Err(format!("Failed to launch editor '{}': {}", editor, e)),
+        Err(e) => EditorResult {
+            success: false,
+            changes: vec![],
+            error: Some(format!("Failed to launch editor '{}': {}", editor, e)),
+        },
     }
+}
+
+/// Detect changes between two versions of file content
+fn detect_changes(original: &str, new: &str) -> Vec<LineChange> {
+    let original_lines: Vec<&str> = original.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+
+    let mut changes = Vec::new();
+
+    // Simple line-by-line comparison
+    let max_lines = original_lines.len().max(new_lines.len());
+
+    for i in 0..max_lines {
+        let old_line = original_lines.get(i).map(|s| s.to_string()).unwrap_or_default();
+        let new_line = new_lines.get(i).map(|s| s.to_string()).unwrap_or_default();
+
+        // Line was modified, added, or deleted
+        if old_line != new_line {
+            changes.push(LineChange {
+                line_number: i + 1,
+                old_content: old_line,
+                new_content: new_line,
+            });
+        }
+    }
+
+    changes
 }
 
 /// Get the user's preferred editor from environment variables.
