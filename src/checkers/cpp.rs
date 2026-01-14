@@ -44,6 +44,10 @@ pub struct CppChecker {
     cpplint_cpp_config: CpplintConfig,
     /// Cpplint config for Objective-C files
     cpplint_oc_config: CpplintConfig,
+    /// Clang-tidy checks to ignore for C++ files
+    cpp_ignored_checks: Vec<String>,
+    /// Clang-tidy checks to ignore for Objective-C files
+    oc_ignored_checks: Vec<String>,
 }
 
 impl CppChecker {
@@ -54,11 +58,16 @@ impl CppChecker {
         // Load clang-tidy config from linthis plugin configs
         let clang_tidy_config = Self::find_plugin_clang_tidy_config();
 
+        // Load ignored checks for clang-tidy
+        let (cpp_ignored, oc_ignored) = Self::load_ignored_checks();
+
         Self {
             config_path: clang_tidy_config,
             compile_commands_dir: None,
             cpplint_cpp_config: cpp_config,
             cpplint_oc_config: oc_config,
+            cpp_ignored_checks: cpp_ignored,
+            oc_ignored_checks: oc_ignored,
         }
     }
 
@@ -145,6 +154,34 @@ impl CppChecker {
         }
 
         (cpp_config, oc_config)
+    }
+
+    /// Load clang-tidy ignored checks from linthis configuration
+    fn load_ignored_checks() -> (Vec<String>, Vec<String>) {
+        use crate::config::Config;
+
+        let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let merged = Config::load_merged(&project_dir);
+
+        // Default ignored checks for Objective-C (ARC-related false positives)
+        let default_oc_ignored = vec![
+            "clang-analyzer-osx.cocoa.RetainCount".to_string(),
+            "clang-analyzer-osx.cocoa.Dealloc".to_string(),
+        ];
+
+        let cpp_ignored = merged
+            .language_overrides
+            .cpp
+            .and_then(|c| c.clang_tidy_ignored_checks)
+            .unwrap_or_default();
+
+        let oc_ignored = merged
+            .language_overrides
+            .oc
+            .and_then(|c| c.clang_tidy_ignored_checks)
+            .unwrap_or(default_oc_ignored);
+
+        (cpp_ignored, oc_ignored)
     }
 
     /// Merge two filter strings, removing duplicates
@@ -423,7 +460,16 @@ impl CppChecker {
             .map_err(|e| crate::LintisError::Checker(format!("Failed to run clang-tidy: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let issues = Self::parse_clang_tidy_output(&stdout, path);
+
+        // Select ignored checks based on file type
+        let is_oc = Self::is_objective_c(path);
+        let ignored_checks = if is_oc {
+            &self.oc_ignored_checks
+        } else {
+            &self.cpp_ignored_checks
+        };
+
+        let issues = Self::parse_clang_tidy_output(&stdout, path, ignored_checks);
 
         Ok(issues)
     }
@@ -470,11 +516,21 @@ impl CppChecker {
 
     /// Parse clang-tidy output
     /// Format: file:line:col: severity: message [check-name]
-    fn parse_clang_tidy_output(output: &str, file_path: &Path) -> Vec<LintIssue> {
+    fn parse_clang_tidy_output(
+        output: &str,
+        file_path: &Path,
+        ignored_checks: &[String],
+    ) -> Vec<LintIssue> {
         let mut issues = Vec::new();
 
         for line in output.lines() {
             if let Some(issue) = Self::parse_clang_tidy_line(line, file_path) {
+                // Filter out ignored checks
+                if let Some(ref code) = issue.code {
+                    if ignored_checks.iter().any(|ignored| code == ignored) {
+                        continue;
+                    }
+                }
                 issues.push(issue);
             }
         }
