@@ -17,7 +17,9 @@
 
 use crate::utils::types::{LintIssue, RunResult, Severity};
 use colored::Colorize;
+use std::collections::HashSet;
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 
 use super::editor::{open_in_editor, LineChange};
 use super::nolint::{add_nolint_comment, describe_nolint_action, LineDiff, NolintResult};
@@ -51,6 +53,8 @@ pub struct InteractiveResult {
     pub skipped: usize,
     /// Whether user quit early
     pub quit_early: bool,
+    /// Set of files that were modified (for rechecking)
+    pub modified_files: HashSet<PathBuf>,
 }
 
 /// Run the interactive review mode
@@ -167,7 +171,9 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
                     if editor_result.changes.is_empty() {
                         println!("  {}", "No changes made".dimmed());
                     } else {
-                        print_editor_changes(&editor_result.changes);
+                        print_editor_changes(&editor_result.changes, &issue.file_path);
+                        // Track this file for rechecking
+                        result.modified_files.insert(issue.file_path.clone());
                     }
                 } else if let Some(ref error) = editor_result.error {
                     eprintln!("{}: {}", "Failed to open editor".red(), error);
@@ -181,7 +187,9 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
                         result.ignored += 1;
                         println!("{} Added NOLINT comment", "✓".green());
                         println!();
-                        print_diff(&diffs);
+                        print_diff(&diffs, &issue.file_path);
+                        // Track this file for rechecking
+                        result.modified_files.insert(issue.file_path.clone());
                     }
                     NolintResult::AlreadyIgnored => {
                         println!("{}", "Already has NOLINT comment".yellow());
@@ -544,9 +552,19 @@ fn launch_quickfix_editor(editor: &str, path: &std::path::Path) -> Result<(), St
 }
 
 /// Print diff information in git-style format (for NOLINT comments)
-fn print_diff(diffs: &[LineDiff]) {
+fn print_diff(diffs: &[LineDiff], _file_path: &PathBuf) {
     println!("  {}", "Changes:".bold());
+
     for diff in diffs {
+        // Show context before (from diff)
+        if let Some(ref context_before) = diff.context_before {
+            println!(
+                "  {} {}",
+                format!(" {:>4} |", diff.line_number - 1).dimmed(),
+                context_before.dimmed()
+            );
+        }
+
         // Show removed line (if not empty, meaning it was a modification)
         if !diff.old_content.is_empty() {
             println!(
@@ -555,19 +573,38 @@ fn print_diff(diffs: &[LineDiff]) {
                 diff.old_content.red()
             );
         }
+
         // Show added/modified line
         println!(
             "  {} {}",
             format!("+{:>4} |", diff.line_number).green(),
             diff.new_content.green()
         );
+
+        // Show context after (from diff)
+        if let Some(ref context_after) = diff.context_after {
+            println!(
+                "  {} {}",
+                format!(" {:>4} |", diff.line_number + 1).dimmed(),
+                context_after.dimmed()
+            );
+        }
     }
     println!();
 }
 
 /// Print changes made in the editor
-fn print_editor_changes(changes: &[LineChange]) {
+fn print_editor_changes(changes: &[LineChange], file_path: &PathBuf) {
+    use std::fs;
+
     println!("  {}", "Changes:".bold());
+
+    // Read file to get context lines
+    let file_content = fs::read_to_string(file_path).ok();
+    let lines: Vec<String> = file_content
+        .as_ref()
+        .map(|content| content.lines().map(|s| s.to_string()).collect())
+        .unwrap_or_default();
 
     // Limit the number of changes shown to avoid overwhelming output
     const MAX_CHANGES_SHOWN: usize = 20;
@@ -578,6 +615,19 @@ fn print_editor_changes(changes: &[LineChange]) {
     };
 
     for change in changes_to_show {
+        let line_idx = change.line_number.saturating_sub(1);
+
+        // Show context before (one line before)
+        if line_idx > 0 && line_idx <= lines.len() {
+            if let Some(context_line) = lines.get(line_idx - 1) {
+                println!(
+                    "  {} {}",
+                    format!(" {:>4} |", change.line_number - 1).dimmed(),
+                    context_line.dimmed()
+                );
+            }
+        }
+
         // Show removed line (if not empty, meaning it was a modification)
         if !change.old_content.is_empty() {
             println!(
@@ -586,6 +636,7 @@ fn print_editor_changes(changes: &[LineChange]) {
                 change.old_content.red()
             );
         }
+
         // Show added/modified line (if not empty)
         if !change.new_content.is_empty() {
             println!(
@@ -593,6 +644,17 @@ fn print_editor_changes(changes: &[LineChange]) {
                 format!("+{:>4} |", change.line_number).green(),
                 change.new_content.green()
             );
+        }
+
+        // Show context after (one line after)
+        if line_idx + 1 < lines.len() {
+            if let Some(context_line) = lines.get(line_idx + 1) {
+                println!(
+                    "  {} {}",
+                    format!(" {:>4} |", change.line_number + 1).dimmed(),
+                    context_line.dimmed()
+                );
+            }
         }
     }
 

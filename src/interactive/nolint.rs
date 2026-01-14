@@ -28,6 +28,10 @@ pub struct LineDiff {
     pub line_number: usize,
     pub old_content: String,
     pub new_content: String,
+    /// Context line before the change (for display)
+    pub context_before: Option<String>,
+    /// Context line after the change (for display)
+    pub context_after: Option<String>,
 }
 
 /// Result of adding a NOLINT comment
@@ -138,6 +142,37 @@ fn has_nolint_comment(line: &str, lang: Language, _source: &str) -> bool {
     }
 }
 
+/// Helper function to create LineDiff with context
+fn create_diff_with_context(
+    lines: &[&str],
+    line_idx: usize,
+    line_number: usize,
+    old_content: String,
+    new_content: String,
+) -> LineDiff {
+    // Get context before (one line before)
+    let context_before = if line_idx > 0 {
+        lines.get(line_idx - 1).map(|s| s.to_string())
+    } else {
+        None
+    };
+
+    // Get context after (one line after)
+    let context_after = if line_idx + 1 < lines.len() {
+        lines.get(line_idx + 1).map(|s| s.to_string())
+    } else {
+        None
+    };
+
+    LineDiff {
+        line_number,
+        old_content,
+        new_content,
+        context_before,
+        context_after,
+    }
+}
+
 /// Generate new file content with the NOLINT comment inserted
 fn generate_nolint_content(
     lines: &[&str],
@@ -155,21 +190,56 @@ fn generate_nolint_content(
 
     match lang {
         Language::Cpp | Language::ObjectiveC => {
-            // C/C++/ObjC: Add NOLINT comment at end of line or NOLINTNEXTLINE above
+            // C/C++/ObjC: Smart NOLINT insertion
+            // Use NOLINTNEXTLINE on previous line if adding NOLINT would exceed line length limit
+            const MAX_LINE_LENGTH: usize = 100;
+
             for (i, line) in lines.iter().enumerate() {
                 if i == line_idx {
                     let nolint = generate_cpp_nolint(source, code);
-                    // Append to end of line
+
                     if line.trim().is_empty() {
                         result_lines.push(line.to_string());
                     } else {
-                        let new_line = format!("{}  {}", line, nolint);
-                        diffs.push(LineDiff {
-                            line_number: i + 1,
-                            old_content: line.to_string(),
-                            new_content: new_line.clone(),
-                        });
-                        result_lines.push(new_line);
+                        // Check if adding NOLINT at end would exceed line length
+                        let new_line_with_nolint = format!("{}  {}", line, nolint);
+
+                        if new_line_with_nolint.len() > MAX_LINE_LENGTH {
+                            // Use NOLINTNEXTLINE on previous line instead
+                            let nolintnextline = generate_cpp_nolintnextline(source, code);
+                            let prev_line = format!("{}{}", indent, nolintnextline);
+
+                            // Insert NOLINTNEXTLINE before the target line
+                            if !result_lines.is_empty() {
+                                // For inserted line, context_after should be the target line itself
+                                let context_before = if i > 0 {
+                                    lines.get(i - 1).map(|s| s.to_string())
+                                } else {
+                                    None
+                                };
+                                let context_after = Some(line.to_string()); // Target line
+
+                                diffs.push(LineDiff {
+                                    line_number: i + 1,
+                                    old_content: String::new(),
+                                    new_content: prev_line.clone(),
+                                    context_before,
+                                    context_after,
+                                });
+                            }
+                            result_lines.push(prev_line);
+                            result_lines.push(line.to_string());
+                        } else {
+                            // Append NOLINT to end of line (line is short enough)
+                            diffs.push(create_diff_with_context(
+                                lines,
+                                i,
+                                i + 1,
+                                line.to_string(),
+                                new_line_with_nolint.clone(),
+                            ));
+                            result_lines.push(new_line_with_nolint);
+                        }
                     }
                 } else {
                     result_lines.push(line.to_string());
@@ -177,20 +247,55 @@ fn generate_nolint_content(
             }
         }
         Language::Python => {
-            // Python: Add # noqa at end of line
+            // Python: Smart noqa insertion
+            // Use comment on previous line if adding noqa would exceed line length limit
+            const MAX_LINE_LENGTH: usize = 100;
+
             for (i, line) in lines.iter().enumerate() {
                 if i == line_idx {
                     let noqa = generate_python_noqa(source, code);
+
                     if line.trim().is_empty() {
                         result_lines.push(line.to_string());
                     } else {
-                        let new_line = format!("{}  {}", line, noqa);
-                        diffs.push(LineDiff {
-                            line_number: i + 1,
-                            old_content: line.to_string(),
-                            new_content: new_line.clone(),
-                        });
-                        result_lines.push(new_line);
+                        // Check if adding noqa at end would exceed line length
+                        let new_line_with_noqa = format!("{}  {}", line, noqa);
+
+                        if new_line_with_noqa.len() > MAX_LINE_LENGTH {
+                            // Add comment on previous line instead
+                            let prev_line = format!("{}# fmt: skip - {}", indent, noqa);
+
+                            // Insert comment before the target line
+                            if !result_lines.is_empty() {
+                                // For inserted line, context_after should be the target line itself
+                                let context_before = if i > 0 {
+                                    lines.get(i - 1).map(|s| s.to_string())
+                                } else {
+                                    None
+                                };
+                                let context_after = Some(line.to_string()); // Target line
+
+                                diffs.push(LineDiff {
+                                    line_number: i + 1,
+                                    old_content: String::new(),
+                                    new_content: prev_line.clone(),
+                                    context_before,
+                                    context_after,
+                                });
+                            }
+                            result_lines.push(prev_line);
+                            result_lines.push(line.to_string());
+                        } else {
+                            // Append noqa to end of line (line is short enough)
+                            diffs.push(create_diff_with_context(
+                                lines,
+                                i,
+                                i + 1,
+                                line.to_string(),
+                                new_line_with_noqa.clone(),
+                            ));
+                            result_lines.push(new_line_with_noqa);
+                        }
                     }
                 } else {
                     result_lines.push(line.to_string());
@@ -203,11 +308,13 @@ fn generate_nolint_content(
                 if i == line_idx {
                     let allow = generate_rust_allow(code);
                     let new_line = format!("{}{}", indent, allow);
-                    diffs.push(LineDiff {
-                        line_number: i + 1,
-                        old_content: String::new(),
-                        new_content: new_line.clone(),
-                    });
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
                     result_lines.push(new_line);
                     result_lines.push(line.to_string());
                 } else {
@@ -221,11 +328,13 @@ fn generate_nolint_content(
                 if i == line_idx {
                     let disable = generate_eslint_disable(code);
                     let new_line = format!("{}{}", indent, disable);
-                    diffs.push(LineDiff {
-                        line_number: i + 1,
-                        old_content: String::new(),
-                        new_content: new_line.clone(),
-                    });
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
                     result_lines.push(new_line);
                     result_lines.push(line.to_string());
                 } else {
@@ -242,11 +351,13 @@ fn generate_nolint_content(
                         result_lines.push(line.to_string());
                     } else {
                         let new_line = format!("{} {}", line, nolint);
-                        diffs.push(LineDiff {
-                            line_number: i + 1,
-                            old_content: line.to_string(),
-                            new_content: new_line.clone(),
-                        });
+                        diffs.push(create_diff_with_context(
+                            lines,
+                            i,
+                            i + 1,
+                            line.to_string(),
+                            new_line.clone(),
+                        ));
                         result_lines.push(new_line);
                     }
                 } else {
@@ -260,11 +371,13 @@ fn generate_nolint_content(
                 if i == line_idx {
                     let suppress = generate_java_suppress(source, code);
                     let new_line = format!("{}{}", indent, suppress);
-                    diffs.push(LineDiff {
-                        line_number: i + 1,
-                        old_content: String::new(),
-                        new_content: new_line.clone(),
-                    });
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
                     result_lines.push(new_line);
                     result_lines.push(line.to_string());
                 } else {
@@ -314,6 +427,34 @@ fn generate_cpp_nolint(source: &str, code: &str) -> String {
             "// NOLINT".to_string()
         } else {
             format!("// NOLINT({})", code)
+        }
+    }
+}
+
+/// Generate C/C++/ObjC NOLINTNEXTLINE comment (for previous line insertion)
+fn generate_cpp_nolintnextline(source: &str, code: &str) -> String {
+    let source_lower = source.to_lowercase();
+
+    if source_lower.contains("clang-tidy") || source_lower.contains("clang_tidy") {
+        // clang-tidy format
+        if code.is_empty() {
+            "// NOLINTNEXTLINE".to_string()
+        } else {
+            format!("// NOLINTNEXTLINE({})", code)
+        }
+    } else if source_lower.contains("cpplint") {
+        // cpplint format
+        if code.is_empty() {
+            "// NOLINTNEXTLINE".to_string()
+        } else {
+            format!("// NOLINTNEXTLINE({})", code)
+        }
+    } else {
+        // Generic NOLINTNEXTLINE
+        if code.is_empty() {
+            "// NOLINTNEXTLINE".to_string()
+        } else {
+            format!("// NOLINTNEXTLINE({})", code)
         }
     }
 }
