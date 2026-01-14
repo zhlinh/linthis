@@ -5007,7 +5007,118 @@ fn main() -> ExitCode {
 
             // Run interactive fix mode if --fix was used with -c
             if cli.fix.is_some() && !result.issues.is_empty() {
-                run_interactive(&result);
+                let interactive_result = run_interactive(&result);
+
+                // Recheck modified files if any changes were made
+                if !interactive_result.modified_files.is_empty() {
+                    use linthis::utils::language::language_from_path;
+                    use std::collections::HashMap;
+
+                    println!();
+                    println!("{}", "═".repeat(60).dimmed());
+                    println!("  {}", "Rechecking modified files...".bold());
+                    println!("{}", "─".repeat(60).dimmed());
+
+                    // Build a map of file -> language from original issues
+                    let mut file_languages: HashMap<PathBuf, Language> = HashMap::new();
+                    for issue in &result.issues {
+                        if let Some(lang) = issue.language {
+                            file_languages.insert(issue.file_path.clone(), lang);
+                        }
+                    }
+
+                    // Recheck each modified file
+                    let modified_count = interactive_result.modified_files.len();
+                    let mut recheck_issues = Vec::new();
+
+                    for (i, file) in interactive_result.modified_files.iter().enumerate() {
+                        if !cli.quiet {
+                            eprint!("\r⏳ Rechecking {}/{}...", i + 1, modified_count);
+                            use std::io::Write;
+                            std::io::stderr().flush().ok();
+                        }
+
+                        // Get language from original issues, or detect it
+                        let lang = file_languages
+                            .get(file)
+                            .copied()
+                            .or_else(|| language_from_path(file));
+
+                        if let Some(lang) = lang {
+                            // Use the internal function to check the file
+                            if let Some(checker) = linthis::get_checker(lang) {
+                                if checker.is_available() {
+                                    match checker.check(file) {
+                                        Ok(file_issues) => {
+                                            for mut issue in file_issues {
+                                                issue.language = Some(lang);
+                                                recheck_issues.push(issue);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            if cli.verbose {
+                                                eprintln!("\n  Check error for {}: {}", file.display(), e);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !cli.quiet {
+                        eprint!("\r");
+                        use std::io::Write;
+                        std::io::stderr().flush().ok();
+                    }
+
+                    // Print recheck results
+                    let remaining_count = recheck_issues.len();
+                    let fixed_count = interactive_result.edited + interactive_result.ignored;
+
+                    if remaining_count == 0 {
+                        println!(
+                            "  {} All issues in modified files have been resolved!",
+                            "✓".green().bold()
+                        );
+                        println!("  {} file(s) modified, {} issue(s) fixed", modified_count, fixed_count);
+                    } else {
+                        println!(
+                            "  {} {} remaining issue(s) in modified files",
+                            "⚠".yellow(),
+                            remaining_count
+                        );
+                        println!("  {} file(s) modified, {} issue(s) fixed", modified_count, fixed_count);
+                        println!();
+
+                        // Show remaining issues
+                        use linthis::utils::types::Severity;
+                        let errors = recheck_issues.iter().filter(|i| i.severity == Severity::Error).count();
+                        let warnings = recheck_issues.iter().filter(|i| i.severity == Severity::Warning).count();
+
+                        for issue in &recheck_issues {
+                            let severity_badge = match issue.severity {
+                                Severity::Error => "ERROR".red().bold(),
+                                Severity::Warning => "WARNING".yellow(),
+                                Severity::Info => "INFO".blue(),
+                            };
+
+                            let location = if let Some(col) = issue.column {
+                                format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
+                            } else {
+                                format!("{}:{}", issue.file_path.display(), issue.line)
+                            };
+
+                            println!("  {} {} {}", severity_badge, location, issue.message);
+                        }
+
+                        println!();
+                        println!("  Summary: {} error(s), {} warning(s)", errors, warnings);
+                    }
+
+                    println!("{}", "═".repeat(60).dimmed());
+                    println!();
+                }
             }
 
             // Save to file by default (unless --no-save-result is specified)

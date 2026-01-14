@@ -23,9 +23,15 @@ pub mod utils;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 use thiserror::Error;
+
+use rayon::prelude::*;
+
+/// Global progress counter for parallel checking
+static PROGRESS_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Track which tool warnings have been shown (to avoid duplicate warnings)
 static WARNED_TOOLS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
@@ -337,7 +343,7 @@ impl Default for RunOptions {
 }
 
 /// Get the checker for a given language.
-fn get_checker(lang: Language) -> Option<Box<dyn Checker>> {
+pub fn get_checker(lang: Language) -> Option<Box<dyn Checker>> {
     match lang {
         Language::Rust => Some(Box::new(RustChecker::new())),
         Language::Python => Some(Box::new(PythonChecker::new())),
@@ -567,66 +573,99 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // For RunMode::Both: lint → format → lint (only files with issues)
     if options.mode == RunMode::Both {
-        // Step 1: First lint pass (before formatting)
+        // Step 1: First lint pass (before formatting) - parallel processing
         if options.verbose {
             eprintln!("Step 1: Checking for issues...");
         }
+        let total_files = file_langs.len();
+        PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+
+        let check_results: Vec<(PathBuf, Vec<_>)> = file_langs
+            .par_iter()
+            .map(|(file, lang)| {
+                let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+                if !options.quiet && !options.verbose {
+                    let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
+                    print_progress(
+                        &format!("⏳ [1/3] Checking {}/{} ({}%)...", count + 1, total_files, percentage),
+                        false,
+                    );
+                }
+                let file_issues = run_checker_on_file(file, *lang, options.verbose);
+                ((*file).clone(), file_issues)
+            })
+            .collect();
+
+        // Collect results
         let mut issues_before = Vec::new();
         let mut files_with_issues: HashSet<PathBuf> = HashSet::new();
-        let total_files = file_langs.len();
-        for (idx, (file, lang)) in file_langs.iter().enumerate() {
-            print_progress(
-                &format!("⏳ [1/3] Checking ({}/{})...", idx + 1, total_files),
-                options.quiet || options.verbose,
-            );
-            let file_issues = run_checker_on_file(file, *lang, options.verbose);
+        for (file, file_issues) in check_results {
             if !file_issues.is_empty() {
-                files_with_issues.insert((*file).clone());
+                files_with_issues.insert(file);
             }
             issues_before.extend(file_issues);
         }
         result.issues_before_format = issues_before.len();
 
-        // Step 2: Format files (only files with issues to save time)
+        // Step 2: Format files (only files with issues to save time) - parallel processing
         if options.verbose {
             eprintln!(
                 "Step 2: Formatting {} files with issues...",
                 files_with_issues.len()
             );
         }
-        let mut formatted_files: HashSet<PathBuf> = HashSet::new();
         let files_to_format: Vec<_> = file_langs
             .iter()
             .filter(|(f, _)| files_with_issues.contains(*f))
             .collect();
         let format_total = files_to_format.len();
-        for (idx, (file, lang)) in files_to_format.iter().enumerate() {
-            print_progress(
-                &format!("⏳ [2/3] Formatting ({}/{})...", idx + 1, format_total),
-                options.quiet || options.verbose,
-            );
-            if let Some(formatter) = get_formatter(*lang) {
-                if formatter.is_available() {
-                    match formatter.format(file) {
-                        Ok(format_result) => {
-                            if format_result.changed {
-                                formatted_files.insert((*file).clone());
-                            }
-                            result.add_format_result(format_result);
-                        }
-                        Err(e) => {
-                            if options.verbose {
-                                eprintln!("Format error for {}: {}", file.display(), e);
-                            }
-                        }
-                    }
-                } else {
-                    warn_missing_tool("formatter", *lang, false);
+        PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+
+        let format_results: Vec<(PathBuf, Option<FormatResult>)> = files_to_format
+            .par_iter()
+            .map(|(file, lang)| {
+                let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+                if !options.quiet && !options.verbose {
+                    let percentage = ((count + 1) as f64 / format_total as f64 * 100.0) as usize;
+                    print_progress(
+                        &format!("⏳ [2/3] Formatting {}/{} ({}%)...", count + 1, format_total, percentage),
+                        false,
+                    );
                 }
+
+                let mut format_result = None;
+                if let Some(formatter) = get_formatter(*lang) {
+                    if formatter.is_available() {
+                        match formatter.format(file) {
+                            Ok(result) => {
+                                format_result = Some(result);
+                            }
+                            Err(e) => {
+                                if options.verbose {
+                                    eprintln!("Format error for {}: {}", file.display(), e);
+                                }
+                            }
+                        }
+                    } else {
+                        warn_missing_tool("formatter", *lang, false);
+                    }
+                }
+                ((*file).clone(), format_result)
+            })
+            .collect();
+
+        // Collect formatted files and add results
+        let mut formatted_files: HashSet<PathBuf> = HashSet::new();
+        for (file, format_result) in format_results {
+            if let Some(fr) = format_result {
+                if fr.changed {
+                    formatted_files.insert(file);
+                }
+                result.add_format_result(fr);
             }
         }
 
-        // Step 3: Second lint pass (only re-check files that were formatted)
+        // Step 3: Second lint pass (only re-check files that were formatted) - parallel processing
         if options.verbose {
             eprintln!(
                 "Step 3: Rechecking {} formatted files...",
@@ -661,20 +700,36 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         }
 
         let recheck_total = formatted_files.len();
-        let mut recheck_idx = 0;
-        for (file, lang) in &file_langs {
-            if formatted_files.contains(*file) {
-                recheck_idx += 1;
-                print_progress(
-                    &format!("⏳ [3/3] Rechecking ({}/{})...", recheck_idx, recheck_total),
-                    options.quiet || options.verbose,
-                );
-                // Re-check formatted files
-                for issue in run_checker_on_file(file, *lang, options.verbose) {
-                    result.add_issue(issue);
+        PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+
+        // Re-check formatted files in parallel
+        let recheck_issues: Vec<_> = file_langs
+            .par_iter()
+            .flat_map(|(file, lang)| {
+                if formatted_files.contains(*file) {
+                    let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    if !options.quiet && !options.verbose {
+                        let percentage = ((count + 1) as f64 / recheck_total as f64 * 100.0) as usize;
+                        print_progress(
+                            &format!("⏳ [3/3] Rechecking {}/{} ({}%)...", count + 1, recheck_total, percentage),
+                            false,
+                        );
+                    }
+                    run_checker_on_file(file, *lang, options.verbose)
+                } else {
+                    vec![]
                 }
-            } else if files_with_issues.contains(*file) {
-                // Keep original issues for files that weren't formatted
+            })
+            .collect();
+
+        // Add rechecked issues
+        for issue in recheck_issues {
+            result.add_issue(issue);
+        }
+
+        // Keep original issues for files that weren't formatted
+        for (file, _) in &file_langs {
+            if files_with_issues.contains(*file) && !formatted_files.contains(*file) {
                 let normalized_file = normalize_path(file);
                 for issue in &issues_before {
                     let normalized_issue_path = normalize_path(&issue.file_path);
@@ -683,7 +738,6 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     }
                 }
             }
-            // Files without issues: no need to add anything
         }
 
         // Clear progress line
@@ -701,39 +755,76 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         } else {
             "Checking"
         };
-        for (idx, (file, lang)) in file_langs.iter().enumerate() {
-            print_progress(
-                &format!("⏳ {} ({}/{})...", mode_name, idx + 1, total_files),
-                options.quiet || options.verbose,
-            );
-            if options.verbose {
-                eprintln!("Processing: {} ({})", file.display(), lang.name());
-            }
 
-            // Run formatter if needed
-            if options.mode == RunMode::FormatOnly {
-                if let Some(formatter) = get_formatter(*lang) {
-                    if formatter.is_available() {
-                        match formatter.format(file) {
-                            Ok(format_result) => {
-                                result.add_format_result(format_result);
-                            }
-                            Err(e) => {
-                                if options.verbose {
-                                    eprintln!("Format error for {}: {}", file.display(), e);
+        // CheckOnly mode: use parallel processing for better performance
+        if options.mode == RunMode::CheckOnly {
+            PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+
+            let all_issues: Vec<_> = file_langs
+                .par_iter()
+                .flat_map(|(file, lang)| {
+                    let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    if !options.quiet && !options.verbose {
+                        let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
+                        print_progress(
+                            &format!("⏳ {} {}/{} ({}%)...", mode_name, count + 1, total_files, percentage),
+                            false,
+                        );
+                    }
+                    if options.verbose {
+                        eprintln!("Processing: {} ({})", file.display(), lang.name());
+                    }
+                    run_checker_on_file(file, *lang, options.verbose)
+                })
+                .collect();
+
+            for issue in all_issues {
+                result.add_issue(issue);
+            }
+        } else {
+            // FormatOnly mode: parallel processing
+            PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+
+            let format_results: Vec<Option<FormatResult>> = file_langs
+                .par_iter()
+                .map(|(file, lang)| {
+                    let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    if !options.quiet && !options.verbose {
+                        let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
+                        print_progress(
+                            &format!("⏳ {} {}/{} ({}%)...", mode_name, count + 1, total_files, percentage),
+                            false,
+                        );
+                    }
+                    if options.verbose {
+                        eprintln!("Processing: {} ({})", file.display(), lang.name());
+                    }
+
+                    let mut format_result = None;
+                    if let Some(formatter) = get_formatter(*lang) {
+                        if formatter.is_available() {
+                            match formatter.format(file) {
+                                Ok(result) => {
+                                    format_result = Some(result);
+                                }
+                                Err(e) => {
+                                    if options.verbose {
+                                        eprintln!("Format error for {}: {}", file.display(), e);
+                                    }
                                 }
                             }
+                        } else {
+                            warn_missing_tool("formatter", *lang, false);
                         }
-                    } else {
-                        warn_missing_tool("formatter", *lang, false);
                     }
-                }
-            }
+                    format_result
+                })
+                .collect();
 
-            // Run checker if needed
-            if options.mode == RunMode::CheckOnly {
-                for issue in run_checker_on_file(file, *lang, options.verbose) {
-                    result.add_issue(issue);
+            // Add format results
+            for format_result in format_results {
+                if let Some(fr) = format_result {
+                    result.add_format_result(fr);
                 }
             }
         }

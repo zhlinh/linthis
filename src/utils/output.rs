@@ -165,11 +165,19 @@ pub fn format_summary_human(result: &RunResult) -> String {
             String::new()
         };
 
+        // Add duration
+        let duration_str = if result.duration_ms >= 1000 {
+            format!("{:.2}s", result.duration_ms as f64 / 1000.0)
+        } else {
+            format!("{}ms", result.duration_ms)
+        };
+
         return format!(
-            "{} {}{} (0 errors, 0 warnings)",
+            "{} {}{} (0 errors, 0 warnings)\nDone in {}",
             "✓".green(),
             msg.green().bold(),
-            file_stats
+            file_stats,
+            duration_str.cyan()
         );
     }
 
