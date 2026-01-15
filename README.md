@@ -54,17 +54,14 @@ linthis init
 # Create global configuration file
 linthis init -g
 
-# Create global git hook template (for all new repos)
-linthis init -g --hook-type git
-
-# Initialize with pre-commit hooks (project-level)
-linthis init --hook-type prek
-linthis init --hook-type pre-commit
-linthis init --hook-type git
+# Install pre-commit hooks (project-level)
+linthis hook install --type prek
+linthis hook install --type pre-commit
+linthis hook install --type git
 
 # Force overwrite existing files
 linthis init --force
-linthis init --hook-type prek -f
+linthis hook install --type prek --force
 ```
 
 ### Basic Usage
@@ -137,9 +134,13 @@ Plugins are automatically loaded when running linthis. After adding a plugin:
 linthis
 
 # Combine with other options
-linthis -l python -i src/
-linthis --check-only
-linthis --staged
+linthis -i src/
+# Check only
+linthis -c
+# Format only
+linthis -f
+# Check and format files staged
+linthis -s
 ```
 
 ### Remove Plugin
@@ -403,48 +404,48 @@ All modifications preserve TOML file format and comments.
 
 ### Main Command Options
 
-| Short | Long                    | Description                              | Example                 |
-| ----- | ----------------------- | ---------------------------------------- | ----------------------- |
-| `-i`  | `--include`             | Specify files or directories to check    | `-i src -i lib`         |
+| Short | Long                    | Description                                   | Example                 |
+| ----- | ----------------------- | --------------------------------------------- | ----------------------- |
+| `-i`  | `--include`             | Specify files or directories to check         | `-i src -i lib`         |
 | `-e`  | `--exclude`             | Exclude patterns (can be used multiple times) | `-e "*.test.js"`        |
-| `-c`  | `--check-only`          | Check only, no formatting                | `-c`                    |
-| `-f`  | `--format-only`         | Format only, no checking                 | `-f`                    |
-| `-s`  | `--staged`              | Check only Git staged files              | `-s`                    |
-| `-l`  | `--lang`                | Specify languages (comma-separated)      | `-l python,rust`        |
-| `-o`  | `--output`              | Output format: human, json, github-actions | `-o json`               |
-| `-v`  | `--verbose`             | Verbose output                           | `-v`                    |
-| `-q`  | `--quiet`               | Quiet mode (errors only)                 | `-q`                    |
-|       | `--config`              | Specify config file path                 | `--config custom.toml`  |
-|       | `--init`                | Initialize .linthis.toml config file     | `--init`                |
-|       | `--preset`              | Format preset                            | `--preset google`       |
-|       | `--no-default-excludes` | Disable default exclude rules            | `--no-default-excludes` |
-|       | `--no-gitignore`        | Disable .gitignore rules                 | `--no-gitignore`        |
-|       | `--no-plugin`           | Skip loading plugins, use default config | `--no-plugin`           |
+| `-c`  | `--check-only`          | Check only, no formatting                     | `-c`                    |
+| `-f`  | `--format-only`         | Format only, no checking                      | `-f`                    |
+| `-s`  | `--staged`              | Check only Git staged files                   | `-s`                    |
+| `-l`  | `--lang`                | Specify languages (comma-separated)           | `-l python,rust`        |
+| `-o`  | `--output`              | Output format: human, json, github-actions    | `-o json`               |
+| `-v`  | `--verbose`             | Verbose output                                | `-v`                    |
+| `-q`  | `--quiet`               | Quiet mode (errors only)                      | `-q`                    |
+|       | `--config`              | Specify config file path                      | `--config custom.toml`  |
+|       | `--init`                | Initialize .linthis.toml config file          | `--init`                |
+|       | `--preset`              | Format preset                                 | `--preset google`       |
+|       | `--no-default-excludes` | Disable default exclude rules                 | `--no-default-excludes` |
+|       | `--no-gitignore`        | Disable .gitignore rules                      | `--no-gitignore`        |
+|       | `--no-plugin`           | Skip loading plugins, use default config      | `--no-plugin`           |
 
 ### Plugin Management Subcommands
 
-| Command                    | Short | Long        | Description               |
-| -------------------------- | ----- | ----------- | ------------------------- |
-| `plugin add <alias> <url>` | `-g`  | `--global`  | Add to global config      |
-|                            |       | `--ref`     | Specify Git reference     |
-| `plugin remove <alias>`    | `-g`  | `--global`  | Remove from global config |
-| `plugin list`              | `-g`  | `--global`  | Show global config plugins|
-|                            | `-v`  | `--verbose` | Show detailed info        |
-| `plugin clean`             |       | `--all`     | Clean all caches          |
-| `plugin init <name>`       |       |             | Initialize new plugin     |
-| `plugin validate <path>`   |       |             | Validate plugin structure |
+| Command                    | Short | Long        | Description                |
+| -------------------------- | ----- | ----------- | -------------------------- |
+| `plugin add <alias> <url>` | `-g`  | `--global`  | Add to global config       |
+|                            |       | `--ref`     | Specify Git reference      |
+| `plugin remove <alias>`    | `-g`  | `--global`  | Remove from global config  |
+| `plugin list`              | `-g`  | `--global`  | Show global config plugins |
+|                            | `-v`  | `--verbose` | Show detailed info         |
+| `plugin clean`             |       | `--all`     | Clean all caches           |
+| `plugin init <name>`       |       |             | Initialize new plugin      |
+| `plugin validate <path>`   |       |             | Validate plugin structure  |
 
 ### Configuration Management Subcommands
 
-| Command                         | Short | Long        | Description                     |
-| ------------------------------- | ----- | ----------- | ------------------------------- |
-| `config add <field> <value>`    | `-g`  | `--global`  | Add value to array field        |
-| `config remove <field> <value>` | `-g`  | `--global`  | Remove value from array field   |
-| `config clear <field>`          | `-g`  | `--global`  | Clear array field               |
-| `config set <field> <value>`    | `-g`  | `--global`  | Set scalar field value          |
-| `config unset <field>`          | `-g`  | `--global`  | Remove scalar field             |
-| `config get <field>`            | `-g`  | `--global`  | Get field value                 |
-| `config list`                   | `-g`  | `--global`  | List all configuration          |
+| Command                         | Short | Long        | Description                                 |
+| ------------------------------- | ----- | ----------- | ------------------------------------------- |
+| `config add <field> <value>`    | `-g`  | `--global`  | Add value to array field                    |
+| `config remove <field> <value>` | `-g`  | `--global`  | Remove value from array field               |
+| `config clear <field>`          | `-g`  | `--global`  | Clear array field                           |
+| `config set <field> <value>`    | `-g`  | `--global`  | Set scalar field value                      |
+| `config unset <field>`          | `-g`  | `--global`  | Remove scalar field                         |
+| `config get <field>`            | `-g`  | `--global`  | Get field value                             |
+| `config list`                   | `-g`  | `--global`  | List all configuration                      |
 |                                 | `-v`  | `--verbose` | Show detailed info (including empty values) |
 
 **Supported array fields**: `includes`, `excludes`, `languages`
@@ -452,18 +453,32 @@ All modifications preserve TOML file format and comments.
 
 ### Init Subcommand
 
-| Command | Short | Long       | Description                        |
-| ------- | ----- | ---------- | ---------------------------------- |
-| `init`  | `-g`  | `--global` | Create global config file          |
-|         |       | `--hook`   | Initialize pre-commit hooks        |
-|         | `-i`  | `--interactive` | Interactive mode for hooks setup |
-|         | `-f`  | `--force`  | Force overwrite existing files     |
+| Command | Short | Long          | Description                      |
+| ------- | ----- | ------------- | -------------------------------- |
+| `init`  | `-g`  | `--global`    | Create global config file        |
+|         |       | `--with-hook` | Also install git hook after init |
+|         |       | `--force`     | Force overwrite existing files   |
 
 **Created configuration files**:
+
 - Without `-g`: Creates `.linthis.toml` (current directory)
 - With `-g`: Creates `~/.linthis/config.toml` (global config)
 
-**Hook options**:
+### Hook Subcommand
+
+| Command          | Short | Long            | Description                     |
+| ---------------- | ----- | --------------- | ------------------------------- |
+| `hook install`   |       | `--type`        | Hook type (prek/pre-commit/git) |
+|                  | `-c`  | `--check-only`  | Hook only runs check            |
+|                  | `-f`  | `--format-only` | Hook only runs format           |
+|                  |       | `--force`       | Force overwrite existing hook   |
+|                  | `-y`  | `--yes`         | Non-interactive mode            |
+| `hook uninstall` | `-y`  | `--yes`         | Non-interactive mode            |
+| `hook status`    |       |                 | Show git hook status            |
+| `hook check`     |       |                 | Check for hook conflicts        |
+
+**Hook types**:
+
 - `prek`: Rust-based pre-commit tool (faster)
 - `pre-commit`: Python-based standard tool
 - `git`: Traditional git hook
@@ -488,45 +503,7 @@ All modifications preserve TOML file format and comments.
 
 ### Pre-commit Hook
 
-#### Method 1: Global Hook Template (One-time Setup)
-
-Set up a global Git hook template that applies to all new repositories:
-
-```bash
-# Create global hook template
-linthis init -g --hook-type git
-
-# All new repos will automatically include the hook
-git init new-project
-cd new-project
-# .git/hooks/pre-commit is already set up!
-```
-
-For existing repositories:
-```bash
-cd existing-project
-git init  # Re-apply template
-```
-
-**Features:**
-- 🎯 **Smart Detection**: Only runs if project has linthis config
-- 🔗 **Hook Chaining**: Supports `.git/hooks/pre-commit.local` for project-specific hooks
-- 🚫 **Zero Interference**: Projects without linthis config are not affected
-- ⚡ **One-time Setup**: Works for all your new repositories
-
-**Pros:**
-- One-time setup for all your projects
-- No need to configure hooks per project
-- Perfect for personal development
-- Won't interfere with other projects or hook tools
-
-**Cons:**
-- Not shared with team members
-- Requires manual setup on each machine
-
-See [Global Hooks Guide](docs/GLOBAL_HOOKS.md) for details.
-
-#### Method 2: Using prek (Recommended for Teams)
+#### Method 1: Using prek (Recommended for Teams)
 
 [prek](https://prek.j178.dev) is a high-performance Git hooks manager written in Rust, fully compatible with pre-commit config format but much faster.
 
@@ -560,7 +537,7 @@ Install hook:
 prek install
 ```
 
-#### Method 3: Traditional Git Hook (Project-level)
+#### Method 2: Traditional Git Hook (Project-level)
 
 Add to `.git/hooks/pre-commit`:
 
@@ -570,11 +547,12 @@ linthis --staged --check-only
 ```
 
 Or use linthis to create it automatically:
+
 ```bash
-linthis init --hook-type git
+linthis hook install --type git
 ```
 
-#### Method 4: Using pre-commit Framework
+#### Method 3: Using pre-commit Framework
 
 Using the [pre-commit](https://pre-commit.com/) framework:
 
@@ -695,7 +673,7 @@ linthis -l python  # Only check Python files
 
 - macOS: `~/Library/Caches/linthis/plugins`
 - Linux: `~/.cache/linthis/plugins`
-- Windows: `%LOCALAPPDATA%\linthis\plugins`
+- Windows: `%LOCALAPPDATA%\linthis\cache\plugins`
 
 ### Q: How to update plugins?
 
