@@ -86,6 +86,85 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
     let line_idx = line_num - 1;
     let current_line = lines[line_idx];
 
+    // Debug: Print line information
+    eprintln!("[DEBUG] issue.line = {}, line_idx = {}, current_line = {:?}",
+              line_num, line_idx, current_line);
+    eprintln!("[DEBUG] issue.code_line = {:?}", issue.code_line);
+
+    // Verify the line content matches what was recorded during check
+    // This handles cases where line numbers shift due to previous modifications
+    let actual_line_idx = if let Some(ref expected_code) = issue.code_line {
+        let expected_trimmed = expected_code.trim();
+        let current_trimmed = current_line.trim();
+
+        // Check if current line matches expected content
+        if current_trimmed == expected_trimmed {
+            eprintln!("[DEBUG] Line content matches expected, using line {}", line_num);
+            line_idx
+        } else {
+            // Line content doesn't match - file was modified or line numbers shifted
+            eprintln!("[DEBUG] Line content mismatch!");
+            eprintln!("[DEBUG]   Expected: {:?}", expected_trimmed);
+            eprintln!("[DEBUG]   Current:  {:?}", current_trimmed);
+            eprintln!("[DEBUG] Searching for matching content...");
+
+            // Search within a reasonable range (±10 lines)
+            let search_start = line_idx.saturating_sub(10);
+            let search_end = (line_idx + 11).min(lines.len());
+
+            let mut found_idx = None;
+            let mut best_match_score: i32 = 0;
+
+            for i in search_start..search_end {
+                let line_trimmed = lines[i].trim();
+
+                // Calculate base similarity score
+                let base_score: i32 = if line_trimmed == expected_trimmed {
+                    // Exact match is best
+                    1000
+                } else if line_trimmed.contains(expected_trimmed) || expected_trimmed.contains(line_trimmed) {
+                    // Substring match
+                    500
+                } else {
+                    // Check common tokens
+                    let line_tokens: Vec<&str> = line_trimmed.split_whitespace().collect();
+                    let expected_tokens: Vec<&str> = expected_trimmed.split_whitespace().collect();
+                    let common_tokens = line_tokens.iter()
+                        .filter(|t| expected_tokens.contains(t))
+                        .count() as i32;
+                    common_tokens * 50
+                };
+
+                // Apply distance penalty (prefer lines closer to original position)
+                let distance = if i > line_idx { i - line_idx } else { line_idx - i } as i32;
+                let score = base_score - (distance * 5);
+
+                // Only consider matches with good score (>= 400 for high confidence)
+                if score > best_match_score && score >= 400 {
+                    best_match_score = score;
+                    found_idx = Some(i);
+                    eprintln!("[DEBUG] Found match at line {}: base_score={}, distance={}, final_score={}, content={:?}",
+                             i + 1, base_score, distance, score, lines[i]);
+                }
+            }
+
+            if let Some(idx) = found_idx {
+                eprintln!("[DEBUG] Using matched line {} instead of {}", idx + 1, line_num);
+                idx
+            } else {
+                eprintln!("[DEBUG] No good match found, using original line {}", line_num);
+                line_idx
+            }
+        }
+    } else {
+        // No code_line recorded, use original line number
+        eprintln!("[DEBUG] No code_line recorded, using original line {}", line_num);
+        line_idx
+    };
+
+    let line_idx = actual_line_idx;
+    let current_line = lines[line_idx];
+
     // Determine language and generate appropriate comment
     let lang = issue.language.unwrap_or_else(|| {
         Language::from_path(file_path).unwrap_or(Language::Cpp)

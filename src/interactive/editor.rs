@@ -13,6 +13,7 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use similar::{ChangeTag, TextDiff};
 
 /// Result of opening a file in an editor
 #[derive(Debug)]
@@ -192,27 +193,40 @@ pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> Editor
     }
 }
 
-/// Detect changes between two versions of file content
+/// Detect changes between two versions of file content using proper diff algorithm
 fn detect_changes(original: &str, new: &str) -> Vec<LineChange> {
-    let original_lines: Vec<&str> = original.lines().collect();
-    let new_lines: Vec<&str> = new.lines().collect();
-
     let mut changes = Vec::new();
 
-    // Simple line-by-line comparison
-    let max_lines = original_lines.len().max(new_lines.len());
+    // Use the similar crate's TextDiff to compute proper line-based diff
+    let diff = TextDiff::from_lines(original, new);
 
-    for i in 0..max_lines {
-        let old_line = original_lines.get(i).map(|s| s.to_string()).unwrap_or_default();
-        let new_line = new_lines.get(i).map(|s| s.to_string()).unwrap_or_default();
+    // Track current line number in new version
+    let mut new_line_num = 0;
 
-        // Line was modified, added, or deleted
-        if old_line != new_line {
-            changes.push(LineChange {
-                line_number: i + 1,
-                old_content: old_line,
-                new_content: new_line,
-            });
+    // Process each change operation
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Equal => {
+                // Line unchanged, just increment counter
+                new_line_num += 1;
+            }
+            ChangeTag::Delete => {
+                // Line deleted from old version
+                changes.push(LineChange {
+                    line_number: new_line_num + 1, // Position in new file where deletion occurred
+                    old_content: change.to_string().trim_end().to_string(),
+                    new_content: String::new(), // Deleted, so new content is empty
+                });
+            }
+            ChangeTag::Insert => {
+                // Line inserted in new version
+                new_line_num += 1;
+                changes.push(LineChange {
+                    line_number: new_line_num,
+                    old_content: String::new(), // Inserted, so old content is empty
+                    new_content: change.to_string().trim_end().to_string(),
+                });
+            }
         }
     }
 
