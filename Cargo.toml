@@ -42,6 +42,9 @@ regex = "1.8"
 # Glob pattern matching
 globset = "0.4"
 
+# Diff algorithm
+similar = "2.4"
+
 # Lazy initialization
 lazy_static = "1.4"
 
