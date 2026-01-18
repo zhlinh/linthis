@@ -72,6 +72,10 @@ const ALL_LANGUAGES: &[Language] = &[
     Language::Java,
     Language::Cpp,
     Language::ObjectiveC,
+    Language::Dart,
+    Language::Swift,
+    Language::Kotlin,
+    Language::Lua,
 ];
 
 /// Run the doctor command
@@ -176,6 +180,10 @@ fn get_tool_info(lang: Language, is_checker: bool) -> (String, String, &'static 
         (Language::Cpp, true) | (Language::ObjectiveC, true) => {
             ("cpplint".to_string(), "cpplint".to_string(), "--version")
         }
+        (Language::Dart, true) => ("dart-analyze".to_string(), "dart".to_string(), "--version"),
+        (Language::Swift, true) => ("swiftlint".to_string(), "swiftlint".to_string(), "version"),
+        (Language::Kotlin, true) => ("ktlint".to_string(), "ktlint".to_string(), "--version"),
+        (Language::Lua, true) => ("luacheck".to_string(), "luacheck".to_string(), "--version"),
 
         // Formatters
         (Language::Rust, false) => ("rustfmt".to_string(), "rustfmt".to_string(), "--version"),
@@ -188,6 +196,10 @@ fn get_tool_info(lang: Language, is_checker: bool) -> (String, String, &'static 
         (Language::Cpp, false) | (Language::ObjectiveC, false) => {
             ("clang-format".to_string(), "clang-format".to_string(), "--version")
         }
+        (Language::Dart, false) => ("dart-format".to_string(), "dart".to_string(), "--version"),
+        (Language::Swift, false) => ("swift-format".to_string(), "swift-format".to_string(), "--version"),
+        (Language::Kotlin, false) => ("ktlint".to_string(), "ktlint".to_string(), "--version"),
+        (Language::Lua, false) => ("stylua".to_string(), "stylua".to_string(), "--version"),
     }
 }
 
@@ -267,6 +279,22 @@ fn get_install_hint(lang: Language, is_checker: bool) -> String {
         (Language::Cpp, true) | (Language::ObjectiveC, true) => {
             "pip install cpplint".to_string()
         }
+        (Language::Dart, true) => "https://dart.dev/get-dart".to_string(),
+        (Language::Swift, true) => {
+            if cfg!(target_os = "macos") {
+                "brew install swiftlint".to_string()
+            } else {
+                "https://github.com/realm/SwiftLint".to_string()
+            }
+        }
+        (Language::Kotlin, true) => {
+            if cfg!(target_os = "macos") {
+                "brew install ktlint".to_string()
+            } else {
+                "https://github.com/pinterest/ktlint".to_string()
+            }
+        }
+        (Language::Lua, true) => "luarocks install luacheck".to_string(),
 
         // Formatters
         (Language::Rust, false) => "rustup component add rustfmt".to_string(),
@@ -291,6 +319,22 @@ fn get_install_hint(lang: Language, is_checker: bool) -> String {
                 "https://releases.llvm.org/download.html".to_string()
             }
         }
+        (Language::Dart, false) => "https://dart.dev/get-dart".to_string(),
+        (Language::Swift, false) => {
+            if cfg!(target_os = "macos") {
+                "brew install swift-format".to_string()
+            } else {
+                "https://github.com/apple/swift-format".to_string()
+            }
+        }
+        (Language::Kotlin, false) => {
+            if cfg!(target_os = "macos") {
+                "brew install ktlint".to_string()
+            } else {
+                "https://github.com/pinterest/ktlint".to_string()
+            }
+        }
+        (Language::Lua, false) => "cargo install stylua".to_string(),
     }
 }
 
