@@ -59,6 +59,12 @@ linthis hook install --type prek
 linthis hook install --type pre-commit
 linthis hook install --type git
 
+# Install pre-push hook
+linthis hook install --type git --event pre-push
+
+# Install commit-msg hook
+linthis hook install --type git --event commit-msg
+
 # Force overwrite existing files
 linthis init --force
 linthis hook install --type prek --force
@@ -375,6 +381,49 @@ linthis config add -g excludes "node_modules/**"
 linthis config add -g excludes ".git/**"
 ```
 
+### Configuration Migration
+
+linthis can automatically detect and migrate existing linter/formatter configurations to linthis format.
+
+#### Supported Tools
+
+| Tool     | Detected Files                                                                                |
+| -------- | --------------------------------------------------------------------------------------------- |
+| ESLint   | `.eslintrc.js`, `.eslintrc.json`, `.eslintrc.yml`, `.eslintrc`, `eslint.config.js`, `package.json[eslintConfig]` |
+| Prettier | `.prettierrc`, `.prettierrc.json`, `.prettierrc.yml`, `.prettierrc.js`, `prettier.config.js`, `package.json[prettier]` |
+| Black    | `pyproject.toml[tool.black]`                                                                  |
+| isort    | `pyproject.toml[tool.isort]`                                                                  |
+
+#### Migration Commands
+
+```bash
+# Auto-detect and migrate all configs
+linthis config migrate
+
+# Migrate specific tool only
+linthis config migrate --from eslint
+linthis config migrate --from prettier
+linthis config migrate --from black
+linthis config migrate --from isort
+
+# Preview changes without applying
+linthis config migrate --dry-run
+
+# Create backup of original files
+linthis config migrate --backup
+
+# Verbose output
+linthis config migrate --verbose
+```
+
+#### Migration Output
+
+Migrated configurations are placed in `.linthis/configs/{language}/`:
+
+- ESLint → `.linthis/configs/javascript/.eslintrc.js`
+- Prettier → `.linthis/configs/javascript/prettierrc.js`
+- Black/isort → `.linthis/configs/python/ruff.toml`
+
 ### Initialize Configuration File
 
 Use the `init` subcommand to explicitly create configuration files:
@@ -447,6 +496,10 @@ All modifications preserve TOML file format and comments.
 | `config get <field>`            | `-g`  | `--global`  | Get field value                             |
 | `config list`                   | `-g`  | `--global`  | List all configuration                      |
 |                                 | `-v`  | `--verbose` | Show detailed info (including empty values) |
+| `config migrate`                |       | `--from`    | Migrate from specific tool                  |
+|                                 |       | `--dry-run` | Preview changes without applying            |
+|                                 |       | `--backup`  | Create backup of original files             |
+|                                 | `-v`  | `--verbose` | Show detailed output                        |
 
 **Supported array fields**: `includes`, `excludes`, `languages`
 **Supported scalar fields**: `max_complexity`, `preset`, `verbose`
@@ -466,22 +519,30 @@ All modifications preserve TOML file format and comments.
 
 ### Hook Subcommand
 
-| Command          | Short | Long            | Description                     |
-| ---------------- | ----- | --------------- | ------------------------------- |
-| `hook install`   |       | `--type`        | Hook type (prek/pre-commit/git) |
-|                  | `-c`  | `--check-only`  | Hook only runs check            |
-|                  | `-f`  | `--format-only` | Hook only runs format           |
-|                  |       | `--force`       | Force overwrite existing hook   |
-|                  | `-y`  | `--yes`         | Non-interactive mode            |
-| `hook uninstall` | `-y`  | `--yes`         | Non-interactive mode            |
-| `hook status`    |       |                 | Show git hook status            |
-| `hook check`     |       |                 | Check for hook conflicts        |
+| Command          | Short | Long            | Description                            |
+| ---------------- | ----- | --------------- | -------------------------------------- |
+| `hook install`   |       | `--type`        | Hook type (prek/pre-commit/git)        |
+|                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg) |
+|                  | `-c`  | `--check-only`  | Hook only runs check                   |
+|                  | `-f`  | `--format-only` | Hook only runs format                  |
+|                  |       | `--force`       | Force overwrite existing hook          |
+|                  | `-y`  | `--yes`         | Non-interactive mode                   |
+| `hook uninstall` |       | `--event`       | Hook event to uninstall                |
+|                  | `-y`  | `--yes`         | Non-interactive mode                   |
+| `hook status`    |       |                 | Show git hook status                   |
+| `hook check`     |       |                 | Check for hook conflicts               |
 
 **Hook types**:
 
 - `prek`: Rust-based pre-commit tool (faster)
 - `pre-commit`: Python-based standard tool
 - `git`: Traditional git hook
+
+**Hook events**:
+
+- `pre-commit`: Run before commit (default, checks staged files)
+- `pre-push`: Run before push (checks all files)
+- `commit-msg`: Validate commit message format
 
 ## Supported Languages
 
