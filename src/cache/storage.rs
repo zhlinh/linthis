@@ -153,7 +153,7 @@ impl LintCache {
                 // Cache hit!
                 self.stats.cache_hits += 1;
                 let language = Language::from_path(file_path);
-                Some(entry.to_lint_issues(&file_path.to_path_buf(), language))
+                Some(entry.to_lint_issues(file_path, language))
             }
             Err(_) => {
                 // Can't check file, assume changed

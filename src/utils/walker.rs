@@ -27,6 +27,10 @@ pub struct WalkerConfig {
     pub max_depth: usize,
     /// Follow symbolic links
     pub follow_links: bool,
+    /// Large file threshold in bytes (0 = disabled)
+    pub large_file_threshold: u64,
+    /// Skip large files instead of just warning
+    pub skip_large_files: bool,
 }
 
 /// Build a GlobSet from patterns.
@@ -93,6 +97,26 @@ fn matches_language_filter(path: &Path, languages: &[Language]) -> bool {
     }
 }
 
+/// Check if a file exceeds the large file threshold.
+/// Returns Some(warning_message) if file is large, None otherwise.
+fn check_file_size(path: &Path, threshold: u64) -> Option<String> {
+    if threshold == 0 {
+        return None;
+    }
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let size = metadata.len();
+        if size > threshold {
+            let size_mb = size as f64 / 1024.0 / 1024.0;
+            return Some(format!(
+                "Large file ({:.1} MB): {}",
+                size_mb,
+                path.display()
+            ));
+        }
+    }
+    None
+}
+
 /// Walk a directory and collect files matching the criteria.
 pub fn walk_files(root: &Path, config: &WalkerConfig) -> Vec<PathBuf> {
     let glob_set = build_glob_set(&config.exclude_patterns);
@@ -149,10 +173,27 @@ pub fn walk_paths(paths: &[PathBuf], config: &WalkerConfig) -> (Vec<PathBuf>, Ve
                     path.display()
                 ));
             } else {
+                // Check for large file
+                if let Some(warning) = check_file_size(path, config.large_file_threshold) {
+                    warnings.push(warning);
+                    if config.skip_large_files {
+                        continue; // Skip this file
+                    }
+                }
                 result.push(path.clone());
             }
         } else if path.is_dir() {
-            result.extend(walk_files(path, config));
+            let dir_files = walk_files(path, config);
+            // Check each file for size
+            for file in dir_files {
+                if let Some(warning) = check_file_size(&file, config.large_file_threshold) {
+                    warnings.push(warning);
+                    if config.skip_large_files {
+                        continue; // Skip this file
+                    }
+                }
+                result.push(file);
+            }
         } else if !path.exists() {
             warnings.push(format!("Path '{}' does not exist", path.display()));
         }
