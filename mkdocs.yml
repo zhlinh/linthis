@@ -1,0 +1,78 @@
+site_name: linthis
+site_description: Fast, cross-platform multi-language linter and formatter
+site_url: https://linthis.readthedocs.io
+repo_url: https://github.com/user/linthis
+repo_name: linthis
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - admonition
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+  - Languages:
+    - Overview: languages/index.md
+    - Rust: languages/rust.md
+    - Python: languages/python.md
+    - TypeScript: languages/typescript.md
+    - JavaScript: languages/javascript.md
+    - Go: languages/go.md
+    - Java: languages/java.md
+    - C++: languages/cpp.md
+    - Swift: languages/swift.md
+    - Kotlin: languages/kotlin.md
+    - Objective-C: languages/objc.md
+    - Lua: languages/lua.md
+    - Dart: languages/dart.md
+    - Shell: languages/shell.md
+    - Ruby: languages/ruby.md
+    - PHP: languages/php.md
+    - Scala: languages/scala.md
+    - C#: languages/csharp.md
+  - Features:
+    - Plugin System: features/plugins.md
+    - Auto Sync: features/auto-sync.md
+    - Self Update: features/self-update.md
+    - Git Hooks: features/git-hooks.md
+    - Watch Mode: features/watch-mode.md
+  - Reference:
+    - CLI Commands: reference/cli.md
+    - Configuration: reference/configuration.md
+  - Development:
+    - Contributing: development/contributing.md
+    - Roadmap: development/roadmap.md
+    - Changelog: development/changelog.md
+    - Design Docs:
+      - Config CLI Design: config-cli-design.md
+      - Init Hooks Design: init-hooks-design.md
+      - Ruff Integration: plan-ruff-integration.md
+      - Tasks: tasks.md
