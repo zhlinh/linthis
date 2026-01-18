@@ -16,9 +16,10 @@
 //! - List configured plugins
 //! - Preserve TOML formatting using toml_edit
 
-use anyhow::{anyhow, Context, Result};
 use std::path::PathBuf;
 use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table};
+
+use super::{PluginError, Result};
 
 /// Manages plugin configuration in .linthis/config.toml files
 pub struct PluginConfigManager {
@@ -28,8 +29,7 @@ pub struct PluginConfigManager {
 impl PluginConfigManager {
     /// Create a manager for project-level configuration (.linthis/config.toml in current directory)
     pub fn project() -> Result<Self> {
-        let config_path = std::env::current_dir()
-            .context("Failed to get current directory")?
+        let config_path = std::env::current_dir()?
             .join(".linthis")
             .join("config.toml");
         Ok(Self { config_path })
@@ -40,7 +40,7 @@ impl PluginConfigManager {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map(std::path::PathBuf::from)
-            .map_err(|_| anyhow!("Cannot determine home directory"))?;
+            .map_err(|_| PluginError::HomeDirectoryError)?;
         let config_dir = home.join(".linthis");
         let config_path = config_dir.join("config.toml");
         Ok(Self { config_path })
@@ -58,29 +58,22 @@ impl PluginConfigManager {
             return Ok(DocumentMut::new());
         }
 
-        let content = std::fs::read_to_string(&self.config_path).with_context(|| {
-            format!("Failed to read config file: {}", self.config_path.display())
-        })?;
+        let content = std::fs::read_to_string(&self.config_path)?;
 
         content
             .parse::<DocumentMut>()
-            .with_context(|| format!("Failed to parse TOML: {}", self.config_path.display()))
+            .map_err(PluginError::from)
     }
 
     /// Write configuration document to file
     fn write_config(&self, doc: &DocumentMut) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = self.config_path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
+            std::fs::create_dir_all(parent)?;
         }
 
-        std::fs::write(&self.config_path, doc.to_string()).with_context(|| {
-            format!(
-                "Failed to write config file: {}",
-                self.config_path.display()
-            )
-        })
+        std::fs::write(&self.config_path, doc.to_string())?;
+        Ok(())
     }
 
     /// Add a plugin to the configuration
@@ -104,7 +97,9 @@ impl PluginConfigManager {
 
         let plugin_table = doc["plugin"]
             .as_table_mut()
-            .ok_or_else(|| anyhow!("'plugin' is not a table"))?;
+            .ok_or_else(|| PluginError::ConfigError {
+                message: "'plugin' is not a table".to_string(),
+            })?;
 
         // Ensure sources array exists
         if !plugin_table.contains_key("sources") {
@@ -113,15 +108,19 @@ impl PluginConfigManager {
 
         let sources = plugin_table["sources"]
             .as_array_mut()
-            .ok_or_else(|| anyhow!("'plugin.sources' is not an array"))?;
+            .ok_or_else(|| PluginError::ConfigError {
+                message: "'plugin.sources' is not an array".to_string(),
+            })?;
 
         // Check if alias already exists
         if self.alias_exists(sources, alias) {
-            return Err(anyhow!(
-                "Plugin alias '{}' already exists in {}",
-                alias,
-                self.config_path.display()
-            ));
+            return Err(PluginError::ConfigError {
+                message: format!(
+                    "Plugin alias '{}' already exists in {}",
+                    alias,
+                    self.config_path.display()
+                ),
+            });
         }
 
         // Create new plugin entry as inline table
@@ -152,12 +151,16 @@ impl PluginConfigManager {
         let plugin_table = doc
             .get_mut("plugin")
             .and_then(|item| item.as_table_mut())
-            .ok_or_else(|| anyhow!("No [plugin] section found in configuration"))?;
+            .ok_or_else(|| PluginError::ConfigError {
+                message: "No [plugin] section found in configuration".to_string(),
+            })?;
 
         let sources = plugin_table
             .get_mut("sources")
             .and_then(|item| item.as_array_mut())
-            .ok_or_else(|| anyhow!("No plugin.sources array found in configuration"))?;
+            .ok_or_else(|| PluginError::ConfigError {
+                message: "No plugin.sources array found in configuration".to_string(),
+            })?;
 
         let original_len = sources.len();
 

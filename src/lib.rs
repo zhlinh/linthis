@@ -19,6 +19,7 @@ pub mod interactive;
 pub mod plugin;
 pub mod presets;
 pub mod self_update;
+pub mod templates;
 pub mod utils;
 
 use std::collections::HashSet;
