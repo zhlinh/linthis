@@ -16,12 +16,13 @@
 //! - Multiple sync modes: auto, prompt, disabled
 //! - Timestamp-based tracking to avoid excessive syncs
 
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use super::{PluginError, Result};
 
 /// Auto-sync configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,13 +66,17 @@ impl AutoSyncConfig {
     /// Validate the configuration
     pub fn validate(&self) -> Result<()> {
         if !["auto", "prompt", "disabled"].contains(&self.mode.as_str()) {
-            anyhow::bail!(
-                "Invalid auto_sync.mode '{}'. Must be one of: auto, prompt, disabled",
-                self.mode
-            );
+            return Err(PluginError::ValidationError {
+                message: format!(
+                    "Invalid auto_sync.mode '{}'. Must be one of: auto, prompt, disabled",
+                    self.mode
+                ),
+            });
         }
         if self.interval_days == 0 {
-            anyhow::bail!("auto_sync.interval_days must be greater than 0");
+            return Err(PluginError::ValidationError {
+                message: "auto_sync.interval_days must be greater than 0".to_string(),
+            });
         }
         Ok(())
     }
@@ -98,7 +103,7 @@ impl AutoSyncManager {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map(PathBuf::from)
-            .context("Cannot determine home directory")?;
+            .map_err(|_| PluginError::HomeDirectoryError)?;
 
         let linthis_dir = home.join(".linthis");
         let timestamp_file = linthis_dir.join(".plugin_sync_last_check");
@@ -117,13 +122,14 @@ impl AutoSyncManager {
             return Ok(None);
         }
 
-        let content = fs::read_to_string(&self.timestamp_file)
-            .context("Failed to read last sync timestamp")?;
+        let content = fs::read_to_string(&self.timestamp_file)?;
 
         let timestamp = content
             .trim()
             .parse::<u64>()
-            .context("Invalid timestamp format in .plugin_sync_last_check file")?;
+            .map_err(|_| PluginError::ConfigError {
+                message: "Invalid timestamp format in .plugin_sync_last_check file".to_string(),
+            })?;
 
         Ok(Some(timestamp))
     }
@@ -132,16 +138,17 @@ impl AutoSyncManager {
     pub fn update_last_sync_time(&self) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = self.timestamp_file.parent() {
-            fs::create_dir_all(parent).context("Failed to create .linthis directory")?;
+            fs::create_dir_all(parent)?;
         }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .context("System time is before UNIX epoch")?
+            .map_err(|_| PluginError::ConfigError {
+                message: "System time is before UNIX epoch".to_string(),
+            })?
             .as_secs();
 
-        fs::write(&self.timestamp_file, now.to_string())
-            .context("Failed to write last sync timestamp")?;
+        fs::write(&self.timestamp_file, now.to_string())?;
 
         Ok(())
     }
@@ -150,7 +157,9 @@ impl AutoSyncManager {
     fn current_time() -> Result<u64> {
         Ok(SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .context("System time is before UNIX epoch")?
+            .map_err(|_| PluginError::ConfigError {
+                message: "System time is before UNIX epoch".to_string(),
+            })?
             .as_secs())
     }
 

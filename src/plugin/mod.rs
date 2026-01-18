@@ -68,6 +68,18 @@ pub enum PluginError {
 
     #[error("Config file not found in plugin: {path}")]
     ConfigNotFound { path: PathBuf },
+
+    #[error("Configuration error: {message}")]
+    ConfigError { message: String },
+
+    #[error("Validation error: {message}")]
+    ValidationError { message: String },
+
+    #[error("Cannot determine home directory")]
+    HomeDirectoryError,
+
+    #[error("TOML parse error: {0}")]
+    TomlParse(#[from] toml_edit::TomlError),
 }
 
 pub type Result<T> = std::result::Result<T, PluginError>;
