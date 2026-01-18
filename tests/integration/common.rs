@@ -90,6 +90,84 @@ pub fn has_git() -> bool {
     tool_available("git", &["--version"])
 }
 
+// Go tools
+/// Check if Go is available
+pub fn has_go() -> bool {
+    tool_available("go", &["version"])
+}
+
+/// Check if golangci-lint is available
+pub fn has_golangci_lint() -> bool {
+    tool_available("golangci-lint", &["--version"])
+}
+
+/// Check if goimports is available
+pub fn has_goimports() -> bool {
+    tool_available("goimports", &["--help"])
+}
+
+// TypeScript/JavaScript tools
+/// Check if eslint is available
+pub fn has_eslint() -> bool {
+    tool_available("eslint", &["--version"])
+}
+
+/// Check if prettier is available
+pub fn has_prettier() -> bool {
+    tool_available("prettier", &["--version"])
+}
+
+// C++ tools
+/// Check if cpplint is available
+pub fn has_cpplint() -> bool {
+    tool_available("cpplint", &["--version"])
+}
+
+/// Check if clang-format is available
+pub fn has_clang_format() -> bool {
+    tool_available("clang-format", &["--version"])
+}
+
+// Java tools
+/// Check if checkstyle is available
+pub fn has_checkstyle() -> bool {
+    tool_available("checkstyle", &["--version"])
+}
+
+// Dart tools
+/// Check if dart is available
+pub fn has_dart() -> bool {
+    tool_available("dart", &["--version"])
+}
+
+// Kotlin tools
+/// Check if ktlint is available
+pub fn has_ktlint() -> bool {
+    tool_available("ktlint", &["--version"])
+}
+
+// Lua tools
+/// Check if luacheck is available
+pub fn has_luacheck() -> bool {
+    tool_available("luacheck", &["--version"])
+}
+
+/// Check if stylua is available
+pub fn has_stylua() -> bool {
+    tool_available("stylua", &["--version"])
+}
+
+// Swift tools
+/// Check if swiftlint is available
+pub fn has_swiftlint() -> bool {
+    tool_available("swiftlint", &["--version"])
+}
+
+/// Check if swift-format is available
+pub fn has_swift_format() -> bool {
+    tool_available("swift-format", &["--version"])
+}
+
 /// Python fixture: good code (no lint errors)
 pub const PYTHON_GOOD: &str = r#""""A simple module with no lint errors."""
 
@@ -134,4 +212,134 @@ pub const RUST_BAD: &str = r#"fn main() {
 
 /// Rust fixture: unformatted code
 pub const RUST_UNFORMATTED: &str = r#"fn main(){println!("hello");let x=1;let y=2;}
+"#;
+
+// Go fixtures
+/// Go fixture: good code
+pub const GO_GOOD: &str = r#"package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello, World!")
+}
+"#;
+
+/// Go fixture: unformatted code
+pub const GO_UNFORMATTED: &str = r#"package main
+import "fmt"
+func main(){fmt.Println("Hello")}
+"#;
+
+// TypeScript fixtures
+/// TypeScript fixture: good code
+pub const TS_GOOD: &str = r#"function hello(name: string): string {
+  return `Hello, ${name}!`;
+}
+
+console.log(hello("World"));
+"#;
+
+/// TypeScript fixture: bad code (lint errors)
+pub const TS_BAD: &str = r#"var x = 1
+let unused = 42
+function foo(){console.log("hello")}
+"#;
+
+/// TypeScript fixture: unformatted code
+pub const TS_UNFORMATTED: &str = r#"function hello(name:string):string{return `Hello, ${name}!`}
+"#;
+
+// C++ fixtures
+/// C++ fixture: good code
+pub const CPP_GOOD: &str = r#"#include <iostream>
+
+int main() {
+  std::cout << "Hello, World!" << std::endl;
+  return 0;
+}
+"#;
+
+/// C++ fixture: bad code (lint errors)
+pub const CPP_BAD: &str = r#"#include <iostream>
+int main(){
+int x=1;
+std::cout<<"hello"<<std::endl;
+return 0;}
+"#;
+
+// Java fixtures
+/// Java fixture: good code
+pub const JAVA_GOOD: &str = r#"public class Hello {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
+"#;
+
+/// Java fixture: bad code (lint errors)
+pub const JAVA_BAD: &str = r#"public class Hello{
+public static void main(String[] args){
+int x=1;
+System.out.println("hello");}}
+"#;
+
+// Dart fixtures
+/// Dart fixture: good code
+pub const DART_GOOD: &str = r#"void main() {
+  print('Hello, World!');
+}
+"#;
+
+/// Dart fixture: bad code (lint errors)
+pub const DART_BAD: &str = r#"void main(){
+var x=1;
+print("hello");}
+"#;
+
+// Kotlin fixtures
+/// Kotlin fixture: good code
+pub const KOTLIN_GOOD: &str = r#"fun main() {
+    println("Hello, World!")
+}
+"#;
+
+/// Kotlin fixture: bad code (lint errors)
+pub const KOTLIN_BAD: &str = r#"fun main(){
+val x=1
+println("hello")}
+"#;
+
+// Lua fixtures
+/// Lua fixture: good code
+pub const LUA_GOOD: &str = r#"local function hello(name)
+    return "Hello, " .. name .. "!"
+end
+
+print(hello("World"))
+"#;
+
+/// Lua fixture: bad code (lint errors)
+pub const LUA_BAD: &str = r#"function hello(name)
+local unused = 1
+return "Hello, "..name.."!"
+end
+print(hello("World"))
+"#;
+
+// Swift fixtures
+/// Swift fixture: good code
+pub const SWIFT_GOOD: &str = r#"import Foundation
+
+func hello(name: String) -> String {
+    return "Hello, \(name)!"
+}
+
+print(hello(name: "World"))
+"#;
+
+/// Swift fixture: bad code (lint errors)
+pub const SWIFT_BAD: &str = r#"import Foundation
+func hello(name:String)->String{return "Hello, \(name)!"}
+print(hello(name:"World"))
 "#;
