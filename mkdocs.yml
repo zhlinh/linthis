@@ -35,6 +35,31 @@ plugins:
         - locale: zh
           name: 简体中文
           build: true
+          nav_translations:
+            Home: 首页
+            Getting Started: 快速入门
+            Installation: 安装
+            Quick Start: 快速开始
+            Configuration: 配置
+            Languages: 语言支持
+            Overview: 概览
+            Features: 功能特性
+            Plugin System: 插件系统
+            Auto Sync: 自动同步
+            Self Update: 自更新
+            Git Hooks: Git Hooks
+            Watch Mode: 监视模式
+            Reference: 参考文档
+            CLI Commands: CLI 命令
+            Development: 开发指南
+            Contributing: 贡献指南
+            Roadmap: 路线图
+            Changelog: 更新日志
+            Design Docs: 设计文档
+            Config CLI Design: 配置 CLI 设计
+            Init Hooks Design: 初始化 Hooks 设计
+            Ruff Integration: Ruff 集成
+            Tasks: 任务
 
 markdown_extensions:
   - pymdownx.highlight
