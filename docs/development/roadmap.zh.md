@@ -1,21 +1,21 @@
 # Linthis 路线图
 
-> 版本: v0.0.8 | 更新时间: 2025-01-18
+> 版本: v0.0.11 | 更新时间: 2025-01-18
 
 ## 项目现状总览
 
 | 模块 | 完成度 | 状态 |
 |------|--------|------|
-| 多语言检查器 | 90% | 8种语言支持 |
-| 多语言格式化器 | 90% | 8种语言支持 |
+| 多语言检查器 | 100% | 18种语言支持 |
+| 多语言格式化器 | 100% | 18种语言支持 |
 | 配置系统 | 95% | 3层级配置 |
 | 插件系统 | 100% | 完整实现 |
 | CLI界面 | 95% | 核心功能完成 |
 | 交互式模式 | 85% | 基础功能完成 |
 | 测试覆盖 | 70% | 264个单元测试 |
-| 文档 | 70% | README完成 |
+| 文档 | 90% | MkDocs 多语言支持 |
 
-**已支持语言**: Rust, Python, C++, TypeScript, JavaScript, Go, Java, Objective-C
+**已支持语言**: Rust, Python, C++, TypeScript, JavaScript, Go, Java, Objective-C, Swift, Kotlin, Lua, Dart, Shell, Ruby, PHP, Scala, C#
 
 ---
 
@@ -43,7 +43,7 @@
 - [ ] 配置文件解析错误提示
 
 ### 3. main.rs 重构
-- [ ] 拆分5373行的main.rs到独立模块
+- [ ] 拆分大型 main.rs 到独立模块
 - [ ] 抽取命令处理到 commands/ 模块
 - [ ] 分离业务逻辑和CLI逻辑
 
@@ -52,10 +52,10 @@
 ## P1 - High (下一版本)
 
 ### 4. 语言支持扩展
-- [ ] Swift 检查器/格式化器 (SwiftLint + swift-format)
-- [ ] Kotlin 检查器/格式化器 (Detekt + ktlint)
-- [ ] Lua 检查器/格式化器 (Luacheck + StyLua)
-- [ ] Dart 检查器/格式化器 (dart analyze + dart format)
+- [x] Swift 检查器/格式化器 (SwiftLint + swift-format) ✅
+- [x] Kotlin 检查器/格式化器 (Detekt + ktlint) ✅
+- [x] Lua 检查器/格式化器 (Luacheck + StyLua) ✅
+- [x] Dart 检查器/格式化器 (dart analyze + dart format) ✅
 
 ### 5. 性能优化
 - [ ] 增量检查支持 (只检查变更文件)
@@ -70,9 +70,9 @@
 - [ ] hook 失败原因详细报告
 
 ### 7. 配置迁移工具
-- [ ] 从 ESLint 配置迁移
-- [ ] 从 Prettier 配置迁移
-- [ ] 从 Black/isort 配置迁移
+- [x] 从 ESLint 配置迁移 ✅
+- [x] 从 Prettier 配置迁移 ✅
+- [x] 从 Black/isort 配置迁移 ✅
 - [ ] 配置校验和建议
 
 ---
@@ -99,13 +99,13 @@
 
 ### 11. 文档完善
 - [ ] API 文档生成
-- [ ] 配置项完整文档
-- [ ] 各语言使用指南
+- [x] 配置项完整文档 ✅
+- [x] 各语言使用指南 ✅
 - [ ] 插件开发指南
 
 ### 12. Watch 模式
-- [ ] 文件变更自动检查
-- [ ] 增量结果更新
+- [x] 文件变更自动检查 ✅
+- [x] 增量结果更新 ✅
 - [ ] 终端 TUI 界面
 - [ ] 通知集成
 
@@ -114,11 +114,11 @@
 ## P3 - Low (长期规划)
 
 ### 13. 额外语言支持
-- [ ] Ruby (RuboCop)
-- [ ] PHP (PHP_CodeSniffer)
-- [ ] C# (dotnet format)
-- [ ] Scala (Scalafmt)
-- [ ] Shell/Bash (ShellCheck)
+- [x] Ruby (RuboCop) ✅
+- [x] PHP (PHP_CodeSniffer + php-cs-fixer) ✅
+- [x] C# (dotnet format) ✅
+- [x] Scala (scalafix + scalafmt) ✅
+- [x] Shell/Bash (ShellCheck + shfmt) ✅
 
 ### 14. 高级功能
 - [ ] AI 辅助修复建议
@@ -148,30 +148,14 @@
 - 集成测试覆盖率 > 80%
 
 ### v0.2.0
-- 完成 P1 任务 4-5
-- Swift/Kotlin 语言支持
-- 增量检查功能
-
-### v0.3.0
-- 完成 P1 任务 6-7
+- 完成 P1 剩余任务
+- 性能优化
 - Git Hooks 增强
-- 配置迁移工具
 
 ### v1.0.0 (稳定版)
 - 完成 P2 核心任务
 - VS Code 扩展发布
 - 完整文档
-
----
-
-## 技术债务
-
-| 问题 | 严重程度 | 预计工作量 |
-|------|----------|-----------|
-| main.rs 过大 (5373行) | 高 | 3-5天 |
-| 未使用函数警告 | 低 | 1天 |
-| 部分边界情况未测试 | 中 | 2-3天 |
-| 错误类型不统一 | 中 | 2天 |
 
 ---
 
@@ -189,4 +173,5 @@
 
 ## 更新日志
 
+- **2025-01-18**: 更新路线图至 v0.0.11，标记已完成项目
 - **2025-01-18**: 初始 Roadmap 创建，基于 v0.0.8 版本分析
