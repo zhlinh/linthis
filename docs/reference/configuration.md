@@ -425,7 +425,7 @@ enabled = true
 interval_hours = 24
 ```
 
-See [Auto Sync Documentation](../AUTO_SYNC.md) for details.
+See [Auto Sync Documentation](../features/auto-sync.md) for details.
 
 ---
 
@@ -439,7 +439,7 @@ enabled = false
 check_interval_hours = 24
 ```
 
-See [Self Update Documentation](../SELF_UPDATE.md) for details.
+See [Self Update Documentation](../features/self-update.md) for details.
 
 ---
 

@@ -370,4 +370,3 @@ mv .git/hooks/pre-commit .git/hooks/pre-commit.backup
 ## 参考
 
 - [Git 文档 - init.templateDir](https://git-scm.com/docs/git-init#_template_directory)
-- [linthis Hook 集成设计](./init-hooks-design.md)
