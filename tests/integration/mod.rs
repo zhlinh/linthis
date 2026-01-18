@@ -3,6 +3,15 @@
 //! These tests verify the CLI interface by running the linthis binary
 //! and checking its output and exit codes.
 
+// Shared test utilities
+mod common;
+
+// Test modules
+mod check_tests;
+mod config_tests;
+mod format_tests;
+mod plugin_tests;
+
 use std::process::Command;
 
 /// Helper to get the path to the linthis binary
