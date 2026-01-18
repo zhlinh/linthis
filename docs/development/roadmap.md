@@ -1,192 +1,177 @@
 # Linthis Roadmap
 
-> 版本: v0.0.8 | 更新时间: 2025-01-18
+> Version: v0.0.11 | Updated: 2025-01-18
 
-## 项目现状总览
+## Project Status Overview
 
-| 模块 | 完成度 | 状态 |
-|------|--------|------|
-| 多语言检查器 | 90% | 8种语言支持 |
-| 多语言格式化器 | 90% | 8种语言支持 |
-| 配置系统 | 95% | 3层级配置 |
-| 插件系统 | 100% | 完整实现 |
-| CLI界面 | 95% | 核心功能完成 |
-| 交互式模式 | 85% | 基础功能完成 |
-| 测试覆盖 | 70% | 264个单元测试 |
-| 文档 | 70% | README完成 |
+| Module | Progress | Status |
+|--------|----------|--------|
+| Multi-language Linter | 100% | 18 languages supported |
+| Multi-language Formatter | 100% | 18 languages supported |
+| Configuration System | 95% | 3-tier configuration |
+| Plugin System | 100% | Fully implemented |
+| CLI Interface | 95% | Core features complete |
+| Interactive Mode | 85% | Basic features complete |
+| Test Coverage | 70% | 264 unit tests |
+| Documentation | 90% | MkDocs with i18n |
 
-**已支持语言**: Rust, Python, C++, TypeScript, JavaScript, Go, Java, Objective-C
-
----
-
-## 优先级定义
-
-- **P0 (Critical)**: 阻塞核心功能或发布的问题
-- **P1 (High)**: 重要功能或用户体验改进
-- **P2 (Medium)**: 增强功能，非紧急但有价值
-- **P3 (Low)**: 长期规划，nice-to-have
+**Supported Languages**: Rust, Python, C++, TypeScript, JavaScript, Go, Java, Objective-C, Swift, Kotlin, Lua, Dart, Shell, Ruby, PHP, Scala, C#
 
 ---
 
-## P0 - Critical (立即处理)
+## Priority Definitions
 
-### 1. 集成测试补全
-- [ ] 添加端到端集成测试
-- [ ] 各语言检查器真实环境测试
-- [ ] 插件系统集成测试
-- [ ] CI/CD 流水线完善
-
-### 2. 错误处理增强
-- [ ] 统一错误类型定义
-- [ ] 友好的错误提示信息
-- [ ] 工具缺失时的降级处理
-- [ ] 配置文件解析错误提示
-
-### 3. main.rs 重构
-- [ ] 拆分5373行的main.rs到独立模块
-- [ ] 抽取命令处理到 commands/ 模块
-- [ ] 分离业务逻辑和CLI逻辑
+- **P0 (Critical)**: Blocking core functionality or release
+- **P1 (High)**: Important features or UX improvements
+- **P2 (Medium)**: Enhancements, not urgent but valuable
+- **P3 (Low)**: Long-term planning, nice-to-have
 
 ---
 
-## P1 - High (下一版本)
+## P0 - Critical (Immediate)
 
-### 4. 语言支持扩展
-- [ ] Swift 检查器/格式化器 (SwiftLint + swift-format)
-- [ ] Kotlin 检查器/格式化器 (Detekt + ktlint)
-- [ ] Lua 检查器/格式化器 (Luacheck + StyLua)
-- [ ] Dart 检查器/格式化器 (dart analyze + dart format)
+### 1. Integration Test Completion
+- [ ] Add end-to-end integration tests
+- [ ] Real environment tests for each language checker
+- [ ] Plugin system integration tests
+- [ ] CI/CD pipeline improvements
 
-### 5. 性能优化
-- [ ] 增量检查支持 (只检查变更文件)
-- [ ] 文件级缓存机制
-- [ ] 大文件分块处理
-- [ ] 内存使用优化
+### 2. Error Handling Enhancement
+- [ ] Unified error type definitions
+- [ ] User-friendly error messages
+- [ ] Graceful degradation when tools are missing
+- [ ] Configuration file parsing error hints
 
-### 6. Git Hooks 增强
-- [ ] pre-push hook 支持
-- [ ] commit-msg hook 支持
-- [ ] hook 并行执行优化
-- [ ] hook 失败原因详细报告
-
-### 7. 配置迁移工具
-- [ ] 从 ESLint 配置迁移
-- [ ] 从 Prettier 配置迁移
-- [ ] 从 Black/isort 配置迁移
-- [ ] 配置校验和建议
+### 3. main.rs Refactoring
+- [ ] Split large main.rs into separate modules
+- [ ] Extract command handling to commands/ module
+- [ ] Separate business logic from CLI logic
 
 ---
 
-## P2 - Medium (后续版本)
+## P1 - High (Next Version)
 
-### 8. IDE 集成
-- [ ] VS Code 扩展
-- [ ] JetBrains 插件
-- [ ] Neovim/Vim 插件
-- [ ] LSP 服务器支持
+### 4. Language Support Extension
+- [x] Swift linter/formatter (SwiftLint + swift-format) ✅
+- [x] Kotlin linter/formatter (Detekt + ktlint) ✅
+- [x] Lua linter/formatter (Luacheck + StyLua) ✅
+- [x] Dart linter/formatter (dart analyze + dart format) ✅
 
-### 9. 报告与分析
-- [ ] HTML 报告生成
-- [ ] 代码质量趋势图
-- [ ] 问题分类统计
-- [ ] 团队代码风格一致性分析
+### 5. Performance Optimization
+- [ ] Incremental checking support (only check changed files)
+- [ ] File-level caching mechanism
+- [ ] Large file chunked processing
+- [ ] Memory usage optimization
 
-### 10. 自定义规则
-- [ ] 自定义正则规则支持
-- [ ] 规则禁用/启用细粒度控制
-- [ ] 项目特定规则配置
-- [ ] 规则严重级别自定义
+### 6. Git Hooks Enhancement
+- [ ] pre-push hook support
+- [ ] commit-msg hook support
+- [ ] Hook parallel execution optimization
+- [ ] Detailed hook failure reports
 
-### 11. 文档完善
-- [ ] API 文档生成
-- [ ] 配置项完整文档
-- [ ] 各语言使用指南
-- [ ] 插件开发指南
-
-### 12. Watch 模式
-- [ ] 文件变更自动检查
-- [ ] 增量结果更新
-- [ ] 终端 TUI 界面
-- [ ] 通知集成
+### 7. Configuration Migration Tools
+- [x] Migrate from ESLint configuration ✅
+- [x] Migrate from Prettier configuration ✅
+- [x] Migrate from Black/isort configuration ✅
+- [ ] Configuration validation and suggestions
 
 ---
 
-## P3 - Low (长期规划)
+## P2 - Medium (Future Versions)
 
-### 13. 额外语言支持
-- [ ] Ruby (RuboCop)
-- [ ] PHP (PHP_CodeSniffer)
-- [ ] C# (dotnet format)
-- [ ] Scala (Scalafmt)
-- [ ] Shell/Bash (ShellCheck)
+### 8. IDE Integration
+- [ ] VS Code extension
+- [ ] JetBrains plugin
+- [ ] Neovim/Vim plugin
+- [ ] LSP server support
 
-### 14. 高级功能
-- [ ] AI 辅助修复建议
-- [ ] 代码复杂度可视化
-- [ ] 依赖安全扫描
-- [ ] 许可证合规检查
+### 9. Reports & Analysis
+- [ ] HTML report generation
+- [ ] Code quality trend charts
+- [ ] Issue categorization statistics
+- [ ] Team code style consistency analysis
 
-### 15. 企业功能
-- [ ] 中央配置服务器
-- [ ] 团队共享规则集
-- [ ] 审计日志
-- [ ] LDAP/SSO 集成
+### 10. Custom Rules
+- [ ] Custom regex rule support
+- [ ] Fine-grained rule enable/disable control
+- [ ] Project-specific rule configuration
+- [ ] Custom rule severity levels
 
-### 16. 生态系统
+### 11. Documentation Completion
+- [ ] API documentation generation
+- [x] Complete configuration documentation ✅
+- [x] Language-specific usage guides ✅
+- [ ] Plugin development guide
+
+### 12. Watch Mode
+- [x] Auto-check on file changes ✅
+- [x] Incremental result updates ✅
+- [ ] Terminal TUI interface
+- [ ] Notification integration
+
+---
+
+## P3 - Low (Long-term Planning)
+
+### 13. Additional Language Support
+- [x] Ruby (RuboCop) ✅
+- [x] PHP (PHP_CodeSniffer + php-cs-fixer) ✅
+- [x] C# (dotnet format) ✅
+- [x] Scala (scalafix + scalafmt) ✅
+- [x] Shell/Bash (ShellCheck + shfmt) ✅
+
+### 14. Advanced Features
+- [ ] AI-assisted fix suggestions
+- [ ] Code complexity visualization
+- [ ] Dependency security scanning
+- [ ] License compliance checking
+
+### 15. Enterprise Features
+- [ ] Central configuration server
+- [ ] Team shared rule sets
+- [ ] Audit logging
+- [ ] LDAP/SSO integration
+
+### 16. Ecosystem
 - [ ] GitHub App
-- [ ] GitLab CI 模板
-- [ ] Jenkins 插件
-- [ ] Docker 镜像优化
+- [ ] GitLab CI templates
+- [ ] Jenkins plugin
+- [ ] Docker image optimization
 
 ---
 
-## 版本规划
+## Version Planning
 
-### v0.1.0 (下一个里程碑)
-- 完成 P0 所有任务
-- main.rs 重构完成
-- 集成测试覆盖率 > 80%
+### v0.1.0 (Next Milestone)
+- Complete all P0 tasks
+- main.rs refactoring complete
+- Integration test coverage > 80%
 
 ### v0.2.0
-- 完成 P1 任务 4-5
-- Swift/Kotlin 语言支持
-- 增量检查功能
+- Complete remaining P1 tasks
+- Performance optimization
+- Git Hooks enhancement
 
-### v0.3.0
-- 完成 P1 任务 6-7
-- Git Hooks 增强
-- 配置迁移工具
-
-### v1.0.0 (稳定版)
-- 完成 P2 核心任务
-- VS Code 扩展发布
-- 完整文档
+### v1.0.0 (Stable Release)
+- Complete P2 core tasks
+- VS Code extension release
+- Complete documentation
 
 ---
 
-## 技术债务
+## Contributing
 
-| 问题 | 严重程度 | 预计工作量 |
-|------|----------|-----------|
-| main.rs 过大 (5373行) | 高 | 3-5天 |
-| 未使用函数警告 | 低 | 1天 |
-| 部分边界情况未测试 | 中 | 2-3天 |
-| 错误类型不统一 | 中 | 2天 |
+Contributions welcome! Priority areas:
+1. P0/P1 tasks
+2. Test case additions
+3. Documentation improvements
+4. New language support
 
----
-
-## 贡献指南
-
-欢迎贡献！优先考虑以下方向：
-1. P0/P1 任务
-2. 测试用例补充
-3. 文档改进
-4. 新语言支持
-
-请在开始工作前先创建 Issue 讨论。
+Please create an Issue for discussion before starting work.
 
 ---
 
-## 更新日志
+## Changelog
 
-- **2025-01-18**: 初始 Roadmap 创建，基于 v0.0.8 版本分析
+- **2025-01-18**: Updated roadmap for v0.0.11, marked completed items
+- **2025-01-18**: Initial Roadmap created, based on v0.0.8 analysis
