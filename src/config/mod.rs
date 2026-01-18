@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::rules::RulesConfig;
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -79,6 +81,10 @@ pub struct Config {
     /// Git hooks settings
     #[serde(default)]
     pub hooks: HooksConfig,
+
+    /// Custom rules, rule disable, and severity overrides
+    #[serde(default)]
+    pub rules: RulesConfig,
 }
 
 /// Plugin configuration section
@@ -241,6 +247,9 @@ pub struct LanguageConfig {
     /// Max complexity override
     #[serde(default)]
     pub max_complexity: Option<u32>,
+    /// Language-specific rules configuration
+    #[serde(default)]
+    pub rules: Option<RulesConfig>,
 }
 
 /// C/C++/Objective-C language configuration with cpplint support
@@ -264,6 +273,9 @@ pub struct CppLanguageConfig {
     /// Clang-tidy checks to ignore (e.g., ["clang-analyzer-osx.cocoa.RetainCount"])
     #[serde(default)]
     pub clang_tidy_ignored_checks: Option<Vec<String>>,
+    /// Language-specific rules configuration
+    #[serde(default)]
+    pub rules: Option<RulesConfig>,
 }
 
 impl LanguageOverrides {
@@ -300,6 +312,7 @@ const KNOWN_FIELDS: &[&str] = &[
     "plugins",
     "self_auto_update",
     "plugin_auto_sync",
+    "rules",
     "rust",
     "python",
     "go",
@@ -418,6 +431,9 @@ impl Config {
         if other.plugins.is_some() {
             self.plugins = other.plugins;
         }
+
+        // Merge rules configuration
+        self.rules.merge(other.rules);
     }
 
     /// Get plugin sources from config, converting to PluginSource type
@@ -482,6 +498,20 @@ max_complexity = 20
 #     { name = "official" },
 #     { name = "myplugin", url = "https://github.com/zhlinh/linthis-plugin.git", ref = "main" }
 # ]
+
+# Rules configuration
+# [rules]
+# disable = ["E501", "whitespace/*"]  # Disable specific rules or prefixes
+#
+# [rules.severity]
+# "W0612" = "error"  # Override severity (error, warning, info, off)
+#
+# [[rules.custom]]
+# code = "custom/no-todo"
+# pattern = "TODO|FIXME"
+# message = "Found TODO/FIXME comment"
+# severity = "warning"
+# suggestion = "Address or convert to tracking issue"
 
 # Language-specific overrides
 # [rust]
