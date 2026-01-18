@@ -41,11 +41,12 @@ static WARNED_TOOLS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static UNAVAILABLE_TOOLS: Mutex<Option<Vec<utils::types::UnavailableTool>>> = Mutex::new(None);
 
 use checkers::{
-    Checker, CppChecker, GoChecker, JavaChecker, PythonChecker, RustChecker, TypeScriptChecker,
+    Checker, CppChecker, DartChecker, GoChecker, JavaChecker, KotlinChecker, LuaChecker,
+    PythonChecker, RustChecker, SwiftChecker, TypeScriptChecker,
 };
 use formatters::{
-    CppFormatter, Formatter, GoFormatter, JavaFormatter, PythonFormatter, RustFormatter,
-    TypeScriptFormatter,
+    CppFormatter, DartFormatter, Formatter, GoFormatter, JavaFormatter, KotlinFormatter,
+    LuaFormatter, PythonFormatter, RustFormatter, SwiftFormatter, TypeScriptFormatter,
 };
 use utils::types::RunResult;
 use utils::walker::{walk_paths, WalkerConfig};
@@ -95,6 +96,10 @@ pub enum Language {
     Go,
     JavaScript,
     TypeScript,
+    Dart,
+    Swift,
+    Kotlin,
+    Lua,
 }
 
 impl Language {
@@ -110,6 +115,10 @@ impl Language {
             "go" => Some(Language::Go),
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
+            "dart" => Some(Language::Dart),
+            "swift" => Some(Language::Swift),
+            "kt" | "kts" => Some(Language::Kotlin),
+            "lua" => Some(Language::Lua),
             _ => None,
         }
     }
@@ -256,6 +265,10 @@ impl Language {
             "go" | "golang" => Some(Language::Go),
             "javascript" | "js" => Some(Language::JavaScript),
             "typescript" | "ts" => Some(Language::TypeScript),
+            "dart" => Some(Language::Dart),
+            "swift" => Some(Language::Swift),
+            "kotlin" | "kt" => Some(Language::Kotlin),
+            "lua" => Some(Language::Lua),
             _ => None,
         }
     }
@@ -270,6 +283,10 @@ impl Language {
             Language::Go => "go",
             Language::JavaScript => "javascript",
             Language::TypeScript => "typescript",
+            Language::Dart => "dart",
+            Language::Swift => "swift",
+            Language::Kotlin => "kotlin",
+            Language::Lua => "lua",
         }
     }
 
@@ -284,6 +301,10 @@ impl Language {
             Language::Go => &["go"],
             Language::JavaScript => &["js", "jsx", "mjs", "cjs"],
             Language::TypeScript => &["ts", "tsx", "mts", "cts"],
+            Language::Dart => &["dart"],
+            Language::Swift => &["swift"],
+            Language::Kotlin => &["kt", "kts"],
+            Language::Lua => &["lua"],
         }
     }
 }
@@ -368,6 +389,10 @@ pub fn get_checker(lang: Language) -> Option<Box<dyn Checker>> {
         Language::Go => Some(Box::new(GoChecker::new())),
         Language::Java => Some(Box::new(JavaChecker::new())),
         Language::Cpp | Language::ObjectiveC => Some(Box::new(CppChecker::new())),
+        Language::Dart => Some(Box::new(DartChecker::new())),
+        Language::Swift => Some(Box::new(SwiftChecker::new())),
+        Language::Kotlin => Some(Box::new(KotlinChecker::new())),
+        Language::Lua => Some(Box::new(LuaChecker::new())),
     }
 }
 
@@ -385,6 +410,10 @@ fn get_formatter(lang: Language) -> Option<Box<dyn Formatter>> {
         Language::Go => Some(Box::new(GoFormatter::new())),
         Language::Java => Some(Box::new(JavaFormatter::new())),
         Language::Cpp | Language::ObjectiveC => Some(Box::new(CppFormatter::new())),
+        Language::Dart => Some(Box::new(DartFormatter::new())),
+        Language::Swift => Some(Box::new(SwiftFormatter::new())),
+        Language::Kotlin => Some(Box::new(KotlinFormatter::new())),
+        Language::Lua => Some(Box::new(LuaFormatter::new())),
     }
 }
 
@@ -423,6 +452,22 @@ fn get_checker_install_hint(lang: Language) -> String {
                 "Install: sudo apt install clang-tidy (Ubuntu/Debian)\n         Or: pip install cpplint".to_string()
             }
         }
+        Language::Dart => "Install: Dart SDK (includes dart analyze)\n         https://dart.dev/get-dart".to_string(),
+        Language::Swift => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install swiftlint".to_string()
+            } else {
+                "Install: https://github.com/realm/SwiftLint".to_string()
+            }
+        }
+        Language::Kotlin => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install ktlint".to_string()
+            } else {
+                "Install: https://github.com/pinterest/ktlint".to_string()
+            }
+        }
+        Language::Lua => "Install: luarocks install luacheck".to_string(),
     }
 }
 
@@ -454,6 +499,22 @@ fn get_formatter_install_hint(lang: Language) -> String {
                 "Install: sudo apt install clang-format (Ubuntu/Debian)".to_string()
             }
         }
+        Language::Dart => "Install: Dart SDK (includes dart format)\n         https://dart.dev/get-dart".to_string(),
+        Language::Swift => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install swift-format".to_string()
+            } else {
+                "Install: https://github.com/apple/swift-format".to_string()
+            }
+        }
+        Language::Kotlin => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install ktlint".to_string()
+            } else {
+                "Install: https://github.com/pinterest/ktlint".to_string()
+            }
+        }
+        Language::Lua => "Install: cargo install stylua".to_string(),
     }
 }
 
@@ -501,6 +562,13 @@ fn get_tool_name(lang: Language, is_checker: bool) -> String {
         (Language::Java, false) => "google-java-format".to_string(),
         (Language::Cpp, true) | (Language::ObjectiveC, true) => "cpplint".to_string(),
         (Language::Cpp, false) | (Language::ObjectiveC, false) => "clang-format".to_string(),
+        (Language::Dart, true) => "dart-analyze".to_string(),
+        (Language::Dart, false) => "dart-format".to_string(),
+        (Language::Swift, true) => "swiftlint".to_string(),
+        (Language::Swift, false) => "swift-format".to_string(),
+        (Language::Kotlin, true) | (Language::Kotlin, false) => "ktlint".to_string(),
+        (Language::Lua, true) => "luacheck".to_string(),
+        (Language::Lua, false) => "stylua".to_string(),
     }
 }
 

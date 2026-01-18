@@ -229,6 +229,19 @@ fn has_nolint_comment(line: &str, lang: Language, _source: &str) -> bool {
                 || line_upper.contains("NOPMD")
                 || line_upper.contains("CHECKSTYLE")
         }
+        // New languages - use generic ignore comment pattern
+        Language::Dart => {
+            line.contains("// ignore:") || line.contains("//ignore:")
+        }
+        Language::Swift => {
+            line.contains("swiftlint:disable") || line.contains("// swiftlint:")
+        }
+        Language::Kotlin => {
+            line.contains("@Suppress") || line_upper.contains("KTLINT-DISABLE")
+        }
+        Language::Lua => {
+            line.contains("-- luacheck:") || line.contains("--luacheck:")
+        }
     }
 }
 
@@ -475,6 +488,89 @@ fn generate_nolint_content(
                 }
             }
         }
+        Language::Dart => {
+            // Dart: Add // ignore: comment above
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let ignore = generate_dart_ignore(code);
+                    let new_line = format!("{}{}", indent, ignore);
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
+                    result_lines.push(new_line);
+                    result_lines.push(line.to_string());
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
+        Language::Swift => {
+            // Swift: Add // swiftlint:disable:next comment above
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let disable = generate_swift_disable(code);
+                    let new_line = format!("{}{}", indent, disable);
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
+                    result_lines.push(new_line);
+                    result_lines.push(line.to_string());
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
+        Language::Kotlin => {
+            // Kotlin: Add @Suppress annotation above
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let suppress = generate_kotlin_suppress(code);
+                    let new_line = format!("{}{}", indent, suppress);
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
+                    result_lines.push(new_line);
+                    result_lines.push(line.to_string());
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
+        Language::Lua => {
+            // Lua: Add -- luacheck: ignore comment at end of line
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let ignore = generate_lua_ignore(code);
+                    if line.trim().is_empty() {
+                        result_lines.push(line.to_string());
+                    } else {
+                        let new_line = format!("{} {}", line, ignore);
+                        diffs.push(create_diff_with_context(
+                            lines,
+                            i,
+                            i + 1,
+                            line.to_string(),
+                            new_line.clone(),
+                        ));
+                        result_lines.push(new_line);
+                    }
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
     }
 
     // Join with newlines, preserving original line ending style
@@ -618,6 +714,42 @@ fn generate_java_suppress(source: &str, code: &str) -> String {
     }
 }
 
+/// Generate Dart ignore comment
+fn generate_dart_ignore(code: &str) -> String {
+    if code.is_empty() {
+        "// ignore: all".to_string()
+    } else {
+        format!("// ignore: {}", code)
+    }
+}
+
+/// Generate Swift disable comment
+fn generate_swift_disable(code: &str) -> String {
+    if code.is_empty() {
+        "// swiftlint:disable:next all".to_string()
+    } else {
+        format!("// swiftlint:disable:next {}", code)
+    }
+}
+
+/// Generate Kotlin suppress annotation
+fn generate_kotlin_suppress(code: &str) -> String {
+    if code.is_empty() {
+        "@Suppress(\"all\")".to_string()
+    } else {
+        format!("@Suppress(\"{}\")", code)
+    }
+}
+
+/// Generate Lua ignore comment
+fn generate_lua_ignore(code: &str) -> String {
+    if code.is_empty() {
+        "-- luacheck: ignore".to_string()
+    } else {
+        format!("-- luacheck: ignore {}", code)
+    }
+}
+
 /// Get a human-readable description of what NOLINT comment will be added
 pub fn describe_nolint_action(issue: &LintIssue) -> String {
     let lang = issue.language.unwrap_or_else(|| {
@@ -644,6 +776,18 @@ pub fn describe_nolint_action(issue: &LintIssue) -> String {
         }
         Language::Java => {
             format!("Add: {}", generate_java_suppress(source, code))
+        }
+        Language::Dart => {
+            format!("Add: {}", generate_dart_ignore(code))
+        }
+        Language::Swift => {
+            format!("Add: {}", generate_swift_disable(code))
+        }
+        Language::Kotlin => {
+            format!("Add: {}", generate_kotlin_suppress(code))
+        }
+        Language::Lua => {
+            format!("Add: {}", generate_lua_ignore(code))
         }
     }
 }
