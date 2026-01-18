@@ -22,8 +22,8 @@ use cli::{
     handle_fix_from_file, handle_hook_command, handle_init_command, handle_plugin_command,
     handle_report_command, init_linter_configs, perform_auto_sync, perform_self_update,
     print_fix_hint, print_recheck_footer, print_recheck_header, print_recheck_summary,
-    recheck_modified_files, run_benchmark, strip_ansi_codes, Cli, Commands, PathCollectionOptions,
-    PathCollectionResult,
+    recheck_modified_files, run_benchmark, run_watch, strip_ansi_codes, Cli, Commands,
+    PathCollectionOptions, PathCollectionResult,
 };
 use linthis::interactive::run_interactive;
 use linthis::lsp::{run_lsp_server, LspMode};
@@ -96,6 +96,49 @@ fn main() -> ExitCode {
     // Handle report subcommand
     if let Some(Commands::Report { action }) = cli.command {
         return handle_report_command(action);
+    }
+
+    // Handle watch subcommand
+    if let Some(Commands::Watch {
+        paths,
+        check_only,
+        format_only,
+        debounce,
+        notify,
+        no_tui,
+        clear,
+        lang,
+        exclude,
+        verbose,
+    }) = cli.command
+    {
+        // Parse languages
+        let languages: Vec<Language> = lang
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|s| Language::from_name(s))
+            .collect();
+
+        let config = linthis::watch::WatchConfig {
+            paths,
+            check_only,
+            format_only,
+            debounce_ms: debounce,
+            notify,
+            no_tui,
+            clear,
+            verbose,
+            languages,
+            exclude_patterns: exclude.unwrap_or_default(),
+        };
+
+        match run_watch(config) {
+            Ok(_) => return ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{}: {}", "Error".red(), e);
+                return ExitCode::from(1);
+            }
+        }
     }
 
     // Handle --clear-cache flag

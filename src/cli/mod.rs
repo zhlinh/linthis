@@ -25,6 +25,7 @@ mod plugin;
 mod recheck;
 mod report;
 mod runner;
+mod watch;
 
 pub use cache::handle_cache_command;
 pub use commands::{Cli, Commands};
@@ -40,3 +41,4 @@ pub use recheck::{
 };
 pub use report::handle_report_command;
 pub use runner::{perform_auto_sync, perform_self_update};
+pub use watch::run_watch;

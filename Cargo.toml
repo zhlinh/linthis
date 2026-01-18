@@ -69,6 +69,20 @@ tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 
+# Watch mode - file system watching
+notify = "6.1"
+
+# TUI framework
+ratatui = "0.28"
+crossterm = "0.28"
+
+# Desktop notifications (optional)
+notify-rust = { version = "4.10", optional = true }
+
+[features]
+default = []
+notifications = ["dep:notify-rust"]
+
 [dev-dependencies]
 tempfile = "3"
 
