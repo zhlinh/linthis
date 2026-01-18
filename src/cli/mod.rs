@@ -23,6 +23,7 @@ mod init;
 mod paths;
 mod plugin;
 mod recheck;
+mod report;
 mod runner;
 
 pub use cache::handle_cache_command;
@@ -37,4 +38,5 @@ pub use plugin::handle_plugin_command;
 pub use recheck::{
     print_recheck_footer, print_recheck_header, print_recheck_summary, recheck_modified_files,
 };
+pub use report::handle_report_command;
 pub use runner::{perform_auto_sync, perform_self_update};

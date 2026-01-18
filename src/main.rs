@@ -20,9 +20,10 @@ use std::process::ExitCode;
 use cli::{
     collect_paths, handle_cache_command, handle_config_command, handle_doctor_command,
     handle_fix_from_file, handle_hook_command, handle_init_command, handle_plugin_command,
-    init_linter_configs, perform_auto_sync, perform_self_update, print_fix_hint,
-    print_recheck_footer, print_recheck_header, print_recheck_summary, recheck_modified_files,
-    run_benchmark, strip_ansi_codes, Cli, Commands, PathCollectionOptions, PathCollectionResult,
+    handle_report_command, init_linter_configs, perform_auto_sync, perform_self_update,
+    print_fix_hint, print_recheck_footer, print_recheck_header, print_recheck_summary,
+    recheck_modified_files, run_benchmark, strip_ansi_codes, Cli, Commands, PathCollectionOptions,
+    PathCollectionResult,
 };
 use linthis::interactive::run_interactive;
 use linthis::lsp::{run_lsp_server, LspMode};
@@ -90,6 +91,11 @@ fn main() -> ExitCode {
                 return ExitCode::from(1);
             }
         }
+    }
+
+    // Handle report subcommand
+    if let Some(Commands::Report { action }) = cli.command {
+        return handle_report_command(action);
     }
 
     // Handle --clear-cache flag
