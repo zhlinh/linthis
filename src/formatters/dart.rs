@@ -43,8 +43,9 @@ impl Formatter for DartFormatter {
 
     fn format(&self, path: &Path) -> Result<FormatResult> {
         // Read original content for comparison
-        let original = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
+        let original = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("dart format", path, format!("Failed to read file: {}", e))
+        })?;
 
         // Run dart format (in-place formatting)
         let output = Command::new("dart")
@@ -52,7 +53,7 @@ impl Formatter for DartFormatter {
             .arg(path)
             .output()
             .map_err(|e| {
-                crate::LintisError::Formatter(format!("Failed to run dart format: {}", e))
+                crate::LintisError::formatter("dart format", path, format!("Failed to run: {}", e))
             })?;
 
         if !output.status.success() {
@@ -65,7 +66,11 @@ impl Formatter for DartFormatter {
 
         // Read new content and compare
         let new_content = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to read formatted file: {}", e))
+            crate::LintisError::formatter(
+                "dart format",
+                path,
+                format!("Failed to read formatted file: {}", e),
+            )
         })?;
 
         if original == new_content {
@@ -82,7 +87,7 @@ impl Formatter for DartFormatter {
             .arg(path)
             .output()
             .map_err(|e| {
-                crate::LintisError::Formatter(format!("Failed to run dart format: {}", e))
+                crate::LintisError::formatter("dart format", path, format!("Failed to run: {}", e))
             })?;
 
         // Exit code 0 means file is formatted, non-zero means needs formatting

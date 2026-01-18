@@ -457,7 +457,9 @@ impl CppChecker {
 
         let output = cmd
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run clang-tidy: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::checker("clang-tidy", path, format!("Failed to run: {}", e))
+            })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -505,7 +507,9 @@ impl CppChecker {
 
         let output = cmd
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run cpplint: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::checker("cpplint", path, format!("Failed to run: {}", e))
+            })?;
 
         // cpplint outputs to stderr
         let stderr = String::from_utf8_lossy(&output.stderr);

@@ -43,15 +43,18 @@ impl Formatter for TypeScriptFormatter {
 
     fn format(&self, path: &Path) -> Result<FormatResult> {
         // Read original content for comparison
-        let original = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
+        let original = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("prettier", path, format!("Failed to read file: {}", e))
+        })?;
 
         // Run prettier
         let output = Command::new("prettier")
             .args(["--write"])
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to run prettier: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::formatter("prettier", path, format!("Failed to run: {}", e))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -63,7 +66,11 @@ impl Formatter for TypeScriptFormatter {
 
         // Read new content and compare
         let new_content = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to read formatted file: {}", e))
+            crate::LintisError::formatter(
+                "prettier",
+                path,
+                format!("Failed to read formatted file: {}", e),
+            )
         })?;
 
         if original == new_content {
@@ -79,7 +86,9 @@ impl Formatter for TypeScriptFormatter {
             .args(["--check"])
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to run prettier: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::formatter("prettier", path, format!("Failed to run: {}", e))
+            })?;
 
         // Exit code 0 means file is formatted, non-zero means needs formatting
         Ok(!output.status.success())

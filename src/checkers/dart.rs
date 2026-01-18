@@ -98,7 +98,9 @@ impl Checker for DartChecker {
             .args(["analyze", "--format=machine"])
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run dart analyze: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::checker("dart analyze", path, format!("Failed to run: {}", e))
+            })?;
 
         // dart analyze outputs to stderr in machine format
         let stderr = String::from_utf8_lossy(&output.stderr);

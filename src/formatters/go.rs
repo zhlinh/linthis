@@ -43,15 +43,18 @@ impl Formatter for GoFormatter {
 
     fn format(&self, path: &Path) -> Result<FormatResult> {
         // Read original content for comparison
-        let original = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
+        let original = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("gofmt", path, format!("Failed to read file: {}", e))
+        })?;
 
         // Run gofmt (writes to stdout by default, use -w to write to file)
         let output = Command::new("gofmt")
             .args(["-w"])
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to run gofmt: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::formatter("gofmt", path, format!("Failed to run: {}", e))
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -63,7 +66,11 @@ impl Formatter for GoFormatter {
 
         // Read new content and compare
         let new_content = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to read formatted file: {}", e))
+            crate::LintisError::formatter(
+                "gofmt",
+                path,
+                format!("Failed to read formatted file: {}", e),
+            )
         })?;
 
         if original == new_content {
@@ -79,7 +86,9 @@ impl Formatter for GoFormatter {
             .args(["-l"])
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to run gofmt: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::formatter("gofmt", path, format!("Failed to run: {}", e))
+            })?;
 
         // If output is non-empty, file needs formatting
         let stdout = String::from_utf8_lossy(&output.stdout);
