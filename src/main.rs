@@ -18,10 +18,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use cli::{
-    find_latest_result_file, handle_cache_command, handle_config_command, handle_doctor_command,
-    handle_hook_command, handle_init_command, handle_plugin_command, init_linter_configs,
-    perform_auto_sync, perform_self_update, print_fix_hint, run_benchmark, strip_ansi_codes, Cli,
-    Commands,
+    collect_paths, handle_cache_command, handle_config_command, handle_doctor_command,
+    handle_fix_from_file, handle_hook_command, handle_init_command, handle_plugin_command,
+    init_linter_configs, perform_auto_sync, perform_self_update, print_fix_hint,
+    print_recheck_footer, print_recheck_header, print_recheck_summary, recheck_modified_files,
+    run_benchmark, strip_ansi_codes, Cli, Commands, PathCollectionOptions, PathCollectionResult,
 };
 use linthis::interactive::run_interactive;
 use linthis::utils::output::{format_result_with_hook_type, OutputFormat};
@@ -83,170 +84,7 @@ fn main() -> ExitCode {
     if let Some(ref source) = cli.fix {
         // --fix without -c: load from file
         if !cli.check_only && !cli.format_only {
-            let path = if source == "last" {
-                match find_latest_result_file() {
-                    Some(p) => p,
-                    None => {
-                        eprintln!(
-                            "{}: No result files found in .linthis/result/",
-                            "Error".red()
-                        );
-                        eprintln!("  Run {} first to generate a result file.", "linthis -c".cyan());
-                        return ExitCode::from(1);
-                    }
-                }
-            } else {
-                PathBuf::from(source)
-            };
-
-            if !path.exists() {
-                eprintln!("{}: Result file not found: {}", "Error".red(), path.display());
-                return ExitCode::from(1);
-            }
-
-            println!(
-                "{} Loading results from: {}",
-                "→".cyan(),
-                path.display()
-            );
-
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str::<linthis::utils::types::RunResult>(&content) {
-                        Ok(result) => {
-                            if result.issues.is_empty() {
-                                println!("{}", "No issues in the saved result.".green());
-                                return ExitCode::SUCCESS;
-                            }
-                            println!(
-                                "  Found {} issue{} from previous run\n",
-                                result.issues.len(),
-                                if result.issues.len() == 1 { "" } else { "s" }
-                            );
-                            let interactive_result = run_interactive(&result);
-
-                            // Recheck modified files if any changes were made
-                            if !interactive_result.modified_files.is_empty() {
-                                use linthis::utils::language::language_from_path;
-                                use std::collections::HashMap;
-
-                                println!();
-                                println!("{}", "═".repeat(60).dimmed());
-                                println!("  {}", "Rechecking modified files...".bold());
-                                println!("{}", "─".repeat(60).dimmed());
-
-                                // Build a map of file -> language from original issues
-                                let mut file_languages: HashMap<PathBuf, Language> = HashMap::new();
-                                for issue in &result.issues {
-                                    if let Some(lang) = issue.language {
-                                        file_languages.insert(issue.file_path.clone(), lang);
-                                    }
-                                }
-
-                                // Recheck each modified file
-                                let modified_count = interactive_result.modified_files.len();
-                                let mut recheck_issues = Vec::new();
-
-                                for (i, file) in interactive_result.modified_files.iter().enumerate() {
-                                    eprint!("\r⏳ Rechecking {}/{}...", i + 1, modified_count);
-                                    use std::io::Write;
-                                    std::io::stderr().flush().ok();
-
-                                    let lang = file_languages
-                                        .get(file)
-                                        .copied()
-                                        .or_else(|| language_from_path(file));
-
-                                    if let Some(lang) = lang {
-                                        if let Some(checker) = linthis::get_checker(lang) {
-                                            if checker.is_available() {
-                                                match checker.check(file) {
-                                                    Ok(file_issues) => {
-                                                        for mut issue in file_issues {
-                                                            issue.language = Some(lang);
-                                                            recheck_issues.push(issue);
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        eprintln!("\n  Check error for {}: {}", file.display(), e);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                eprint!("\r");
-                                use std::io::Write;
-                                std::io::stderr().flush().ok();
-
-                                // Print recheck results
-                                let remaining_count = recheck_issues.len();
-                                let fixed_count = interactive_result.edited + interactive_result.ignored;
-
-                                if remaining_count == 0 {
-                                    println!(
-                                        "  {} All issues in modified files have been resolved!",
-                                        "✓".green().bold()
-                                    );
-                                    println!("  {} file(s) modified, {} issue(s) fixed", modified_count, fixed_count);
-                                } else {
-                                    println!(
-                                        "  {} {} remaining issue(s) in modified files",
-                                        "⚠".yellow(),
-                                        remaining_count
-                                    );
-                                    println!("  {} file(s) modified, {} issue(s) fixed", modified_count, fixed_count);
-                                    println!();
-
-                                    // Show remaining issues
-                                    use linthis::utils::types::Severity;
-                                    let errors = recheck_issues.iter().filter(|i| i.severity == Severity::Error).count();
-                                    let warnings = recheck_issues.iter().filter(|i| i.severity == Severity::Warning).count();
-
-                                    for issue in &recheck_issues {
-                                        let severity_badge = match issue.severity {
-                                            Severity::Error => "ERROR".red().bold(),
-                                            Severity::Warning => "WARNING".yellow(),
-                                            Severity::Info => "INFO".blue(),
-                                        };
-
-                                        let location = if let Some(col) = issue.column {
-                                            format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
-                                        } else {
-                                            format!("{}:{}", issue.file_path.display(), issue.line)
-                                        };
-
-                                        println!("  {} {} {}", severity_badge, location, issue.message);
-                                    }
-
-                                    println!();
-                                    println!("  Summary: {} error(s), {} warning(s)", errors, warnings);
-                                }
-
-                                println!("{}", "═".repeat(60).dimmed());
-                                println!();
-                            }
-
-                            return ExitCode::from(result.exit_code as u8);
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "{}: Failed to parse result file as JSON: {}",
-                                "Error".red(),
-                                e
-                            );
-                            eprintln!("  Result files are saved in JSON format by default.");
-                            eprintln!("  Make sure the file is a valid JSON result file.");
-                            return ExitCode::from(2);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{}: Failed to read result file: {}", "Error".red(), e);
-                    return ExitCode::from(2);
-                }
-            }
+            return handle_fix_from_file(source, cli.quiet, cli.verbose);
         }
     }
 
@@ -432,200 +270,30 @@ fn main() -> ExitCode {
         .filter_map(|s| Language::from_name(s))
         .collect();
 
-    // Build exclusion patterns FIRST (defaults + gitignore + user-specified)
-    // This must be done before getting staged files so we can filter them
-    let mut exclude_patterns: Vec<String> = if cli.no_default_excludes {
-        Vec::new()
-    } else {
-        linthis::utils::DEFAULT_EXCLUDES
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+    // Collect paths using the paths module
+    let path_options = PathCollectionOptions {
+        staged: cli.staged,
+        since: cli.since.clone(),
+        uncommitted: cli.uncommitted,
+        no_default_excludes: cli.no_default_excludes,
+        no_gitignore: cli.no_gitignore,
+        exclude: cli.exclude.clone().unwrap_or_default(),
+        paths: cli.paths.clone(),
+        verbose: cli.verbose,
     };
 
-    // Add .gitignore patterns if in a git repo and not disabled
-    if !cli.no_gitignore && linthis::utils::is_git_repo() {
-        let project_root = linthis::utils::get_project_root();
-        let gitignore_patterns = linthis::utils::get_gitignore_patterns(&project_root);
-        if cli.verbose && !gitignore_patterns.is_empty() {
-            eprintln!(
-                "Loaded {} patterns from .gitignore",
-                gitignore_patterns.len()
-            );
+    let (paths, exclude_patterns) = match collect_paths(&path_options) {
+        PathCollectionResult::Success(p, e) => (p, e),
+        PathCollectionResult::Empty(msg) => {
+            if !cli.quiet {
+                println!("{}", msg);
+            }
+            return ExitCode::SUCCESS;
         }
-        exclude_patterns.extend(gitignore_patterns);
-    }
-
-    exclude_patterns.extend(cli.exclude.unwrap_or_default());
-
-    // Add excludes from project config file
-    let project_root = linthis::utils::get_project_root();
-    if let Some(project_config) = linthis::config::Config::load_project_config(&project_root) {
-        if !project_config.excludes.is_empty() {
-            if cli.verbose {
-                eprintln!(
-                    "Loaded {} exclude patterns from config",
-                    project_config.excludes.len()
-                );
-            }
-            exclude_patterns.extend(project_config.excludes);
+        PathCollectionResult::Error(msg, code) => {
+            eprintln!("{}", msg);
+            return ExitCode::from(code as u8);
         }
-    }
-
-    // Helper function to filter files with exclusion patterns
-    fn filter_files_with_exclusions(
-        files: Vec<PathBuf>,
-        exclude_patterns: &[String],
-        project_root: &PathBuf,
-        verbose: bool,
-    ) -> Vec<PathBuf> {
-        use linthis::utils::walker::build_glob_set;
-        let glob_set = build_glob_set(exclude_patterns);
-        files
-            .into_iter()
-            .filter(|path| {
-                if let Some(ref gs) = glob_set {
-                    if let Ok(relative) = path.strip_prefix(project_root) {
-                        if gs.is_match(relative) {
-                            if verbose {
-                                eprintln!("Excluding: {}", relative.display());
-                            }
-                            return false;
-                        }
-                        let components: Vec<_> = relative.components().collect();
-                        for i in 0..components.len() {
-                            let subpath: PathBuf = components[i..].iter().collect();
-                            if gs.is_match(&subpath) {
-                                if verbose {
-                                    eprintln!(
-                                        "Excluding: {} (matches from subpath {})",
-                                        relative.display(),
-                                        subpath.display()
-                                    );
-                                }
-                                return false;
-                            }
-                        }
-                    }
-                }
-                true
-            })
-            .collect()
-    }
-
-    // Get paths (handle staged, since, uncommitted files) and apply exclusion filters
-    let paths = if cli.staged {
-        match linthis::utils::get_staged_files() {
-            Ok(files) => {
-                if files.is_empty() {
-                    if !cli.quiet {
-                        println!("{}", "No staged files to check".yellow());
-                    }
-                    return ExitCode::SUCCESS;
-                }
-                let filtered = filter_files_with_exclusions(
-                    files,
-                    &exclude_patterns,
-                    &project_root,
-                    cli.verbose,
-                );
-                if filtered.is_empty() {
-                    if !cli.quiet {
-                        println!("{}", "No staged files to check after exclusions".yellow());
-                    }
-                    return ExitCode::SUCCESS;
-                }
-                if cli.verbose {
-                    eprintln!("Checking {} staged file(s) after exclusions", filtered.len());
-                }
-                filtered
-            }
-            Err(e) => {
-                eprintln!("{}: {}", "Error getting staged files".red(), e);
-                return ExitCode::from(2);
-            }
-        }
-    } else if let Some(ref base_ref) = cli.since {
-        match linthis::utils::get_changed_files(Some(base_ref.as_str())) {
-            Ok(files) => {
-                if files.is_empty() {
-                    if !cli.quiet {
-                        println!(
-                            "{}",
-                            format!("No files changed since '{}'", base_ref).yellow()
-                        );
-                    }
-                    return ExitCode::SUCCESS;
-                }
-                let filtered = filter_files_with_exclusions(
-                    files,
-                    &exclude_patterns,
-                    &project_root,
-                    cli.verbose,
-                );
-                if filtered.is_empty() {
-                    if !cli.quiet {
-                        println!(
-                            "{}",
-                            format!("No files to check after exclusions (since '{}')", base_ref)
-                                .yellow()
-                        );
-                    }
-                    return ExitCode::SUCCESS;
-                }
-                if cli.verbose {
-                    eprintln!(
-                        "Checking {} file(s) changed since '{}' after exclusions",
-                        filtered.len(),
-                        base_ref
-                    );
-                }
-                filtered
-            }
-            Err(e) => {
-                eprintln!("{}: {}", "Error getting changed files".red(), e);
-                return ExitCode::from(2);
-            }
-        }
-    } else if cli.uncommitted {
-        match linthis::utils::get_uncommitted_files() {
-            Ok(files) => {
-                if files.is_empty() {
-                    if !cli.quiet {
-                        println!("{}", "No uncommitted files to check".yellow());
-                    }
-                    return ExitCode::SUCCESS;
-                }
-                let filtered = filter_files_with_exclusions(
-                    files,
-                    &exclude_patterns,
-                    &project_root,
-                    cli.verbose,
-                );
-                if filtered.is_empty() {
-                    if !cli.quiet {
-                        println!("{}", "No uncommitted files to check after exclusions".yellow());
-                    }
-                    return ExitCode::SUCCESS;
-                }
-                if cli.verbose {
-                    eprintln!(
-                        "Checking {} uncommitted file(s) after exclusions",
-                        filtered.len()
-                    );
-                }
-                filtered
-            }
-            Err(e) => {
-                eprintln!("{}: {}", "Error getting uncommitted files".red(), e);
-                return ExitCode::from(2);
-            }
-        }
-    } else if cli.paths.is_empty() {
-        // Default to current directory if no paths specified
-        vec![PathBuf::from(".")]
-    } else {
-        cli.paths
     };
 
     // Build options
@@ -663,10 +331,8 @@ fn main() -> ExitCode {
             let output = format_result_with_hook_type(&result, output_format, hook_type.as_deref());
 
             // Print to console
-            if !cli.quiet || result.exit_code != 0 {
-                if !output.is_empty() {
-                    println!("{}", output);
-                }
+            if (!cli.quiet || result.exit_code != 0) && !output.is_empty() {
+                println!("{}", output);
             }
 
             // Run interactive fix mode if --fix was used with -c
@@ -675,113 +341,18 @@ fn main() -> ExitCode {
 
                 // Recheck modified files if any changes were made
                 if !interactive_result.modified_files.is_empty() {
-                    use linthis::utils::language::language_from_path;
-                    use std::collections::HashMap;
+                    print_recheck_header();
 
-                    println!();
-                    println!("{}", "═".repeat(60).dimmed());
-                    println!("  {}", "Rechecking modified files...".bold());
-                    println!("{}", "─".repeat(60).dimmed());
+                    let recheck_result = recheck_modified_files(
+                        &interactive_result.modified_files,
+                        &result.issues,
+                        cli.quiet,
+                        cli.verbose,
+                    );
 
-                    // Build a map of file -> language from original issues
-                    let mut file_languages: HashMap<PathBuf, Language> = HashMap::new();
-                    for issue in &result.issues {
-                        if let Some(lang) = issue.language {
-                            file_languages.insert(issue.file_path.clone(), lang);
-                        }
-                    }
-
-                    // Recheck each modified file
-                    let modified_count = interactive_result.modified_files.len();
-                    let mut recheck_issues = Vec::new();
-
-                    for (i, file) in interactive_result.modified_files.iter().enumerate() {
-                        if !cli.quiet {
-                            eprint!("\r⏳ Rechecking {}/{}...", i + 1, modified_count);
-                            use std::io::Write;
-                            std::io::stderr().flush().ok();
-                        }
-
-                        // Get language from original issues, or detect it
-                        let lang = file_languages
-                            .get(file)
-                            .copied()
-                            .or_else(|| language_from_path(file));
-
-                        if let Some(lang) = lang {
-                            // Use the internal function to check the file
-                            if let Some(checker) = linthis::get_checker(lang) {
-                                if checker.is_available() {
-                                    match checker.check(file) {
-                                        Ok(file_issues) => {
-                                            for mut issue in file_issues {
-                                                issue.language = Some(lang);
-                                                recheck_issues.push(issue);
-                                            }
-                                        }
-                                        Err(e) => {
-                                            if cli.verbose {
-                                                eprintln!("\n  Check error for {}: {}", file.display(), e);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if !cli.quiet {
-                        eprint!("\r");
-                        use std::io::Write;
-                        std::io::stderr().flush().ok();
-                    }
-
-                    // Print recheck results
-                    let remaining_count = recheck_issues.len();
                     let fixed_count = interactive_result.edited + interactive_result.ignored;
-
-                    if remaining_count == 0 {
-                        println!(
-                            "  {} All issues in modified files have been resolved!",
-                            "✓".green().bold()
-                        );
-                        println!("  {} file(s) modified, {} issue(s) fixed", modified_count, fixed_count);
-                    } else {
-                        println!(
-                            "  {} {} remaining issue(s) in modified files",
-                            "⚠".yellow(),
-                            remaining_count
-                        );
-                        println!("  {} file(s) modified, {} issue(s) fixed", modified_count, fixed_count);
-                        println!();
-
-                        // Show remaining issues
-                        use linthis::utils::types::Severity;
-                        let errors = recheck_issues.iter().filter(|i| i.severity == Severity::Error).count();
-                        let warnings = recheck_issues.iter().filter(|i| i.severity == Severity::Warning).count();
-
-                        for issue in &recheck_issues {
-                            let severity_badge = match issue.severity {
-                                Severity::Error => "ERROR".red().bold(),
-                                Severity::Warning => "WARNING".yellow(),
-                                Severity::Info => "INFO".blue(),
-                            };
-
-                            let location = if let Some(col) = issue.column {
-                                format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
-                            } else {
-                                format!("{}:{}", issue.file_path.display(), issue.line)
-                            };
-
-                            println!("  {} {} {}", severity_badge, location, issue.message);
-                        }
-
-                        println!();
-                        println!("  Summary: {} error(s), {} warning(s)", errors, warnings);
-                    }
-
-                    println!("{}", "═".repeat(60).dimmed());
-                    println!();
+                    print_recheck_summary(&recheck_result, fixed_count);
+                    print_recheck_footer();
                 }
             }
 
