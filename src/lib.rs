@@ -21,6 +21,7 @@ pub mod lsp;
 pub mod plugin;
 pub mod presets;
 pub mod reports;
+pub mod rules;
 pub mod self_update;
 pub mod templates;
 pub mod utils;
@@ -52,6 +53,8 @@ use formatters::{
     LuaFormatter, PythonFormatter, RustFormatter, SwiftFormatter, TypeScriptFormatter,
 };
 use cache::LintCache;
+use config::Config;
+use rules::{CustomRulesChecker, RuleFilter};
 use utils::types::RunResult;
 use utils::walker::{walk_paths, WalkerConfig};
 
@@ -820,6 +823,30 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         None
     };
 
+    // Load config for custom rules and rule filtering
+    let config = Config::load_merged(&project_root);
+
+    // Create rule filter from config
+    let rule_filter = RuleFilter::from_config(&config.rules);
+
+    // Create custom rules checker if custom rules are defined
+    let custom_checker = if config.rules.has_custom_rules() {
+        match CustomRulesChecker::new(&config.rules.custom) {
+            Ok(checker) => {
+                if options.verbose {
+                    eprintln!("Loaded {} custom rules", checker.rule_count());
+                }
+                Some(checker)
+            }
+            Err(e) => {
+                eprintln!("\x1b[33mWarning\x1b[0m: Failed to load custom rules: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // For RunMode::Both: lint → format → lint (only files with issues)
     if options.mode == RunMode::Both {
         // Step 1: First lint pass (before formatting) - parallel processing
@@ -1134,6 +1161,38 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         print_progress("", options.quiet || options.verbose);
     }
 
+    // Run custom rules checker on all files (if defined)
+    if let Some(ref checker) = custom_checker {
+        if options.mode != RunMode::FormatOnly {
+            if options.verbose {
+                eprintln!("Running {} custom rules...", checker.rule_count());
+            }
+            for (file, lang) in &file_langs {
+                match checker.check(file, Some(lang.name())) {
+                    Ok(custom_issues) => {
+                        for mut issue in custom_issues {
+                            issue.language = Some(*lang);
+                            result.add_issue(issue);
+                        }
+                    }
+                    Err(e) => {
+                        if options.verbose {
+                            eprintln!("Custom rule error for {}: {}", file.display(), e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply rule filter to remove disabled rules and adjust severity
+    let original_count = result.issues.len();
+    result.issues = rule_filter.filter_issues(result.issues);
+    let filtered_count = original_count - result.issues.len();
+    if options.verbose && filtered_count > 0 {
+        eprintln!("Filtered out {} issues based on rules configuration", filtered_count);
+    }
+
     // Calculate final stats
     result.count_files_with_issues();
     result.calculate_exit_code();
@@ -1167,4 +1226,5 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 }
 
 // Re-export commonly used types
+pub use rules::{CustomRule, RulesConfig, SeverityOverride};
 pub use utils::types::{FormatResult, LintIssue, Severity};
