@@ -42,6 +42,22 @@ pub struct Cli {
     #[arg(short = 's', long)]
     pub staged: bool,
 
+    /// Check only files changed since a git ref (branch, tag, or commit)
+    #[arg(long, value_name = "REF")]
+    pub since: Option<String>,
+
+    /// Check only uncommitted files (staged + unstaged)
+    #[arg(long)]
+    pub uncommitted: bool,
+
+    /// Ignore cache and force re-checking all files
+    #[arg(long)]
+    pub no_cache: bool,
+
+    /// Clear the cache before running
+    #[arg(long)]
+    pub clear_cache: bool,
+
     /// Specify languages to check (comma-separated: rust,python,typescript)
     #[arg(short, long, value_delimiter = ',')]
     pub lang: Option<Vec<String>>,
@@ -150,6 +166,11 @@ pub enum Commands {
     Hook {
         #[command(subcommand)]
         action: HookCommands,
+    },
+    /// Cache management commands
+    Cache {
+        #[command(subcommand)]
+        action: CacheCommands,
     },
     /// Initialize configuration file
     Init {
@@ -374,4 +395,13 @@ impl ConfigField {
             ConfigField::Languages => "languages",
         }
     }
+}
+
+/// Cache subcommands
+#[derive(clap::Subcommand, Debug)]
+pub enum CacheCommands {
+    /// Clear the lint cache
+    Clear,
+    /// Show cache statistics
+    Status,
 }

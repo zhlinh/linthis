@@ -18,9 +18,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use cli::{
-    find_latest_result_file, handle_config_command, handle_doctor_command, handle_hook_command,
-    handle_init_command, handle_plugin_command, init_linter_configs, perform_auto_sync,
-    perform_self_update, print_fix_hint, run_benchmark, strip_ansi_codes, Cli, Commands,
+    find_latest_result_file, handle_cache_command, handle_config_command, handle_doctor_command,
+    handle_hook_command, handle_init_command, handle_plugin_command, init_linter_configs,
+    perform_auto_sync, perform_self_update, print_fix_hint, run_benchmark, strip_ansi_codes, Cli,
+    Commands,
 };
 use linthis::interactive::run_interactive;
 use linthis::utils::output::{format_result, OutputFormat};
@@ -54,6 +55,27 @@ fn main() -> ExitCode {
     // Handle doctor subcommand
     if let Some(Commands::Doctor { all, output }) = cli.command {
         return handle_doctor_command(all, &output);
+    }
+
+    // Handle cache subcommand
+    if let Some(Commands::Cache { action }) = cli.command {
+        return handle_cache_command(action);
+    }
+
+    // Handle --clear-cache flag
+    if cli.clear_cache {
+        let project_root = linthis::utils::get_project_root();
+        if let Err(e) = linthis::cache::LintCache::clear(&project_root) {
+            eprintln!("{}: {}", "Error clearing cache".red(), e);
+            return ExitCode::from(2);
+        }
+        if !cli.quiet {
+            println!("{} Cache cleared", "✓".green());
+        }
+        // If only --clear-cache is specified, exit
+        if cli.paths.is_empty() && !cli.check_only && !cli.format_only {
+            return ExitCode::SUCCESS;
+        }
     }
 
     // Handle --fix without -c: load result file and enter interactive mode
@@ -450,7 +472,48 @@ fn main() -> ExitCode {
         }
     }
 
-    // Get paths (handle staged files) and apply exclusion filters
+    // Helper function to filter files with exclusion patterns
+    fn filter_files_with_exclusions(
+        files: Vec<PathBuf>,
+        exclude_patterns: &[String],
+        project_root: &PathBuf,
+        verbose: bool,
+    ) -> Vec<PathBuf> {
+        use linthis::utils::walker::build_glob_set;
+        let glob_set = build_glob_set(exclude_patterns);
+        files
+            .into_iter()
+            .filter(|path| {
+                if let Some(ref gs) = glob_set {
+                    if let Ok(relative) = path.strip_prefix(project_root) {
+                        if gs.is_match(relative) {
+                            if verbose {
+                                eprintln!("Excluding: {}", relative.display());
+                            }
+                            return false;
+                        }
+                        let components: Vec<_> = relative.components().collect();
+                        for i in 0..components.len() {
+                            let subpath: PathBuf = components[i..].iter().collect();
+                            if gs.is_match(&subpath) {
+                                if verbose {
+                                    eprintln!(
+                                        "Excluding: {} (matches from subpath {})",
+                                        relative.display(),
+                                        subpath.display()
+                                    );
+                                }
+                                return false;
+                            }
+                        }
+                    }
+                }
+                true
+            })
+            .collect()
+    }
+
+    // Get paths (handle staged, since, uncommitted files) and apply exclusion filters
     let paths = if cli.staged {
         match linthis::utils::get_staged_files() {
             Ok(files) => {
@@ -460,57 +523,101 @@ fn main() -> ExitCode {
                     }
                     return ExitCode::SUCCESS;
                 }
-
-                // Filter staged files using exclusion patterns
-                use linthis::utils::walker::build_glob_set;
-                let glob_set = build_glob_set(&exclude_patterns);
-                let filtered_files: Vec<PathBuf> = files
-                    .into_iter()
-                    .filter(|path| {
-                        // Check if file should be excluded
-                        if let Some(ref gs) = glob_set {
-                            // Check relative path from git root
-                            if let Ok(relative) = path.strip_prefix(&project_root) {
-                                if gs.is_match(relative) {
-                                    if cli.verbose {
-                                        eprintln!("Excluding: {}", relative.display());
-                                    }
-                                    return false;
-                                }
-
-                                // Check all subpaths starting from each component
-                                // This handles patterns like "third_party/**" matching "vpncomm/third_party/..."
-                                let components: Vec<_> = relative.components().collect();
-                                for i in 0..components.len() {
-                                    let subpath: PathBuf = components[i..].iter().collect();
-                                    if gs.is_match(&subpath) {
-                                        if cli.verbose {
-                                            eprintln!("Excluding: {} (matches from subpath {})", relative.display(), subpath.display());
-                                        }
-                                        return false;
-                                    }
-                                }
-                            }
-                        }
-                        true
-                    })
-                    .collect();
-
-                if filtered_files.is_empty() {
+                let filtered = filter_files_with_exclusions(
+                    files,
+                    &exclude_patterns,
+                    &project_root,
+                    cli.verbose,
+                );
+                if filtered.is_empty() {
                     if !cli.quiet {
                         println!("{}", "No staged files to check after exclusions".yellow());
                     }
                     return ExitCode::SUCCESS;
                 }
-
                 if cli.verbose {
-                    eprintln!("Checking {} staged file(s) after exclusions", filtered_files.len());
+                    eprintln!("Checking {} staged file(s) after exclusions", filtered.len());
                 }
-
-                filtered_files
+                filtered
             }
             Err(e) => {
                 eprintln!("{}: {}", "Error getting staged files".red(), e);
+                return ExitCode::from(2);
+            }
+        }
+    } else if let Some(ref base_ref) = cli.since {
+        match linthis::utils::get_changed_files(Some(base_ref.as_str())) {
+            Ok(files) => {
+                if files.is_empty() {
+                    if !cli.quiet {
+                        println!(
+                            "{}",
+                            format!("No files changed since '{}'", base_ref).yellow()
+                        );
+                    }
+                    return ExitCode::SUCCESS;
+                }
+                let filtered = filter_files_with_exclusions(
+                    files,
+                    &exclude_patterns,
+                    &project_root,
+                    cli.verbose,
+                );
+                if filtered.is_empty() {
+                    if !cli.quiet {
+                        println!(
+                            "{}",
+                            format!("No files to check after exclusions (since '{}')", base_ref)
+                                .yellow()
+                        );
+                    }
+                    return ExitCode::SUCCESS;
+                }
+                if cli.verbose {
+                    eprintln!(
+                        "Checking {} file(s) changed since '{}' after exclusions",
+                        filtered.len(),
+                        base_ref
+                    );
+                }
+                filtered
+            }
+            Err(e) => {
+                eprintln!("{}: {}", "Error getting changed files".red(), e);
+                return ExitCode::from(2);
+            }
+        }
+    } else if cli.uncommitted {
+        match linthis::utils::get_uncommitted_files() {
+            Ok(files) => {
+                if files.is_empty() {
+                    if !cli.quiet {
+                        println!("{}", "No uncommitted files to check".yellow());
+                    }
+                    return ExitCode::SUCCESS;
+                }
+                let filtered = filter_files_with_exclusions(
+                    files,
+                    &exclude_patterns,
+                    &project_root,
+                    cli.verbose,
+                );
+                if filtered.is_empty() {
+                    if !cli.quiet {
+                        println!("{}", "No uncommitted files to check after exclusions".yellow());
+                    }
+                    return ExitCode::SUCCESS;
+                }
+                if cli.verbose {
+                    eprintln!(
+                        "Checking {} uncommitted file(s) after exclusions",
+                        filtered.len()
+                    );
+                }
+                filtered
+            }
+            Err(e) => {
+                eprintln!("{}: {}", "Error getting uncommitted files".red(), e);
                 return ExitCode::from(2);
             }
         }
@@ -530,6 +637,7 @@ fn main() -> ExitCode {
         verbose: cli.verbose,
         quiet: cli.quiet,
         plugins: loaded_plugins,
+        no_cache: cli.no_cache,
     };
 
     // Parse output format

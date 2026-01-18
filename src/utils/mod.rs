@@ -94,6 +94,99 @@ pub fn get_staged_files() -> crate::Result<Vec<std::path::PathBuf>> {
     Ok(files)
 }
 
+/// Get files changed since a git ref (branch, tag, or commit).
+///
+/// Example: `get_changed_files(Some("main"))` returns files changed since main branch.
+pub fn get_changed_files(base: Option<&str>) -> crate::Result<Vec<std::path::PathBuf>> {
+    let base_ref = base.unwrap_or("HEAD");
+
+    // Get files that differ from the base ref
+    let output = Command::new("git")
+        .args(["diff", "--name-only", "--diff-filter=d", base_ref])
+        .output()
+        .map_err(crate::LintisError::Io)?;
+
+    if !output.status.success() {
+        // Try with merge-base for branches
+        let merge_base = Command::new("git")
+            .args(["merge-base", "HEAD", base_ref])
+            .output()
+            .map_err(crate::LintisError::Io)?;
+
+        if merge_base.status.success() {
+            let base_commit = String::from_utf8_lossy(&merge_base.stdout)
+                .trim()
+                .to_string();
+            let output = Command::new("git")
+                .args(["diff", "--name-only", "--diff-filter=d", &base_commit])
+                .output()
+                .map_err(crate::LintisError::Io)?;
+
+            if output.status.success() {
+                return parse_git_file_list(&output.stdout);
+            }
+        }
+        return Ok(Vec::new());
+    }
+
+    parse_git_file_list(&output.stdout)
+}
+
+/// Get uncommitted files (both staged and unstaged changes).
+pub fn get_uncommitted_files() -> crate::Result<Vec<std::path::PathBuf>> {
+    use std::collections::HashSet;
+
+    let mut files: HashSet<std::path::PathBuf> = HashSet::new();
+
+    // Get staged files
+    let staged = get_staged_files()?;
+    files.extend(staged);
+
+    // Get unstaged modified files
+    let output = Command::new("git")
+        .args(["diff", "--name-only", "--diff-filter=d"])
+        .output()
+        .map_err(crate::LintisError::Io)?;
+
+    if output.status.success() {
+        if let Ok(parsed) = parse_git_file_list(&output.stdout) {
+            files.extend(parsed);
+        }
+    }
+
+    // Get untracked files
+    let output = Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .output()
+        .map_err(crate::LintisError::Io)?;
+
+    if output.status.success() {
+        if let Ok(parsed) = parse_git_file_list(&output.stdout) {
+            files.extend(parsed);
+        }
+    }
+
+    Ok(files.into_iter().collect())
+}
+
+/// Parse git command output into file paths.
+fn parse_git_file_list(output: &[u8]) -> crate::Result<Vec<std::path::PathBuf>> {
+    let git_root = get_project_root();
+    let stdout = String::from_utf8_lossy(output);
+
+    let files = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let relative_path = std::path::PathBuf::from(line.trim());
+            git_root.join(relative_path)
+        })
+        .filter(|p| p.exists()) // Filter out deleted files
+        .collect();
+
+    Ok(files)
+}
+
 /// Check if a path matches any of the ignore patterns.
 pub fn should_ignore(path: &Path, patterns: &[regex::Regex]) -> bool {
     let path_str = path.to_string_lossy();

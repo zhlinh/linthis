@@ -11,6 +11,7 @@
 //! Linthis - A fast, cross-platform multi-language linter and formatter.
 
 pub mod benchmark;
+pub mod cache;
 pub mod checkers;
 pub mod config;
 pub mod fixers;
@@ -67,6 +68,15 @@ pub enum LintisError {
 
     #[error("Unsupported language: {0}")]
     UnsupportedLanguage(String),
+
+    #[error("Cache error: {0}")]
+    Cache(String),
+}
+
+impl From<serde_json::Error> for LintisError {
+    fn from(err: serde_json::Error) -> Self {
+        LintisError::Cache(err.to_string())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, LintisError>;
@@ -350,6 +360,8 @@ pub struct RunOptions {
     pub quiet: bool,
     /// Active plugins (name only, for display)
     pub plugins: Vec<String>,
+    /// Disable cache (force re-check all files)
+    pub no_cache: bool,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -362,6 +374,7 @@ impl std::fmt::Debug for RunOptions {
             .field("verbose", &self.verbose)
             .field("quiet", &self.quiet)
             .field("plugins", &self.plugins)
+            .field("no_cache", &self.no_cache)
             .finish()
     }
 }
@@ -376,6 +389,7 @@ impl Default for RunOptions {
             verbose: false,
             quiet: false,
             plugins: Vec::new(),
+            no_cache: false,
         }
     }
 }
