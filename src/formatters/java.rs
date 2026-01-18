@@ -72,8 +72,9 @@ impl Formatter for JavaFormatter {
 
     fn format(&self, path: &Path) -> Result<FormatResult> {
         // Read original content for comparison
-        let original = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
+        let original = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("clang-format", path, format!("Failed to read file: {}", e))
+        })?;
 
         // Build clang-format command
         let mut cmd = Command::new("clang-format");
@@ -87,12 +88,9 @@ impl Formatter for JavaFormatter {
             cmd.arg("--style=Google");
         }
 
-        let output = cmd
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::Formatter(format!("Failed to run clang-format: {}", e))
-            })?;
+        let output = cmd.arg(path).output().map_err(|e| {
+            crate::LintisError::formatter("clang-format", path, format!("Failed to run: {}", e))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -104,7 +102,11 @@ impl Formatter for JavaFormatter {
 
         // Read new content and compare
         let new_content = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to read formatted file: {}", e))
+            crate::LintisError::formatter(
+                "clang-format",
+                path,
+                format!("Failed to read formatted file: {}", e),
+            )
         })?;
 
         if original == new_content {
@@ -116,8 +118,9 @@ impl Formatter for JavaFormatter {
 
     fn check(&self, path: &Path) -> Result<bool> {
         // Read current content
-        let current = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
+        let current = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("clang-format", path, format!("Failed to read file: {}", e))
+        })?;
 
         // Build clang-format command (without -i to output to stdout)
         let mut cmd = Command::new("clang-format");
@@ -130,12 +133,9 @@ impl Formatter for JavaFormatter {
             cmd.arg("--style=Google");
         }
 
-        let output = cmd
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::Formatter(format!("Failed to run clang-format: {}", e))
-            })?;
+        let output = cmd.arg(path).output().map_err(|e| {
+            crate::LintisError::formatter("clang-format", path, format!("Failed to run: {}", e))
+        })?;
 
         let formatted = String::from_utf8_lossy(&output.stdout);
 

@@ -61,7 +61,7 @@ impl RustChecker {
             .current_dir(project_root)
             .output()
             .map_err(|e| {
-                crate::LintisError::Checker(format!("Failed to run cargo clippy: {}", e))
+                crate::LintisError::checker("clippy", project_root, format!("Failed to run: {}", e))
             })?;
 
         let stderr = String::from_utf8_lossy(&output.stderr);

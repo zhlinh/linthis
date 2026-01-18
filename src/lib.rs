@@ -61,22 +61,95 @@ pub enum LintisError {
     #[error("Configuration error: {0}")]
     Config(String),
 
-    #[error("Checker error: {0}")]
-    Checker(String),
+    #[error("{tool} error for '{file}': {message}")]
+    Checker {
+        tool: String,
+        file: PathBuf,
+        message: String,
+    },
 
-    #[error("Formatter error: {0}")]
-    Formatter(String),
+    #[error("{tool} error for '{file}': {message}")]
+    Formatter {
+        tool: String,
+        file: PathBuf,
+        message: String,
+    },
 
     #[error("Unsupported language: {0}")]
     UnsupportedLanguage(String),
 
-    #[error("Cache error: {0}")]
-    Cache(String),
+    #[error("Cache error ({operation}): {message}")]
+    Cache { operation: String, message: String },
+
+    #[error("Tool not available: {tool} ({language})")]
+    ToolNotAvailable {
+        tool: String,
+        language: String,
+        install_hint: String,
+    },
+}
+
+impl LintisError {
+    /// Create a checker error with tool, file, and message context.
+    pub fn checker(tool: &str, file: &Path, message: impl Into<String>) -> Self {
+        LintisError::Checker {
+            tool: tool.to_string(),
+            file: file.to_path_buf(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a formatter error with tool, file, and message context.
+    pub fn formatter(tool: &str, file: &Path, message: impl Into<String>) -> Self {
+        LintisError::Formatter {
+            tool: tool.to_string(),
+            file: file.to_path_buf(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a cache error with operation and message context.
+    pub fn cache(operation: &str, message: impl Into<String>) -> Self {
+        LintisError::Cache {
+            operation: operation.to_string(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a tool not available error with installation hint.
+    pub fn tool_not_available(tool: &str, language: &str, hint: &str) -> Self {
+        LintisError::ToolNotAvailable {
+            tool: tool.to_string(),
+            language: language.to_string(),
+            install_hint: hint.to_string(),
+        }
+    }
+
+    /// Get numeric error code for programmatic handling.
+    pub fn error_code(&self) -> i32 {
+        match self {
+            LintisError::Io(_) => 10,
+            LintisError::Config(_) => 20,
+            LintisError::Checker { .. } => 30,
+            LintisError::Formatter { .. } => 40,
+            LintisError::UnsupportedLanguage(_) => 50,
+            LintisError::Cache { .. } => 60,
+            LintisError::ToolNotAvailable { .. } => 70,
+        }
+    }
+
+    /// Check if error allows graceful degradation.
+    pub fn is_recoverable(&self) -> bool {
+        matches!(
+            self,
+            LintisError::ToolNotAvailable { .. } | LintisError::Cache { .. }
+        )
+    }
 }
 
 impl From<serde_json::Error> for LintisError {
     fn from(err: serde_json::Error) -> Self {
-        LintisError::Cache(err.to_string())
+        LintisError::cache("json_parse", err.to_string())
     }
 }
 

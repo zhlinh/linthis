@@ -43,8 +43,13 @@ impl Formatter for SwiftFormatter {
 
     fn format(&self, path: &Path) -> Result<FormatResult> {
         // Read original content for comparison
-        let original = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
+        let original = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter(
+                "swift-format",
+                path,
+                format!("Failed to read file: {}", e),
+            )
+        })?;
 
         // Run swift-format in-place
         let output = Command::new("swift-format")
@@ -52,7 +57,7 @@ impl Formatter for SwiftFormatter {
             .arg(path)
             .output()
             .map_err(|e| {
-                crate::LintisError::Formatter(format!("Failed to run swift-format: {}", e))
+                crate::LintisError::formatter("swift-format", path, format!("Failed to run: {}", e))
             })?;
 
         if !output.status.success() {
@@ -65,7 +70,11 @@ impl Formatter for SwiftFormatter {
 
         // Read new content and compare
         let new_content = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to read formatted file: {}", e))
+            crate::LintisError::formatter(
+                "swift-format",
+                path,
+                format!("Failed to read formatted file: {}", e),
+            )
         })?;
 
         if original == new_content {
@@ -78,7 +87,11 @@ impl Formatter for SwiftFormatter {
     fn check(&self, path: &Path) -> Result<bool> {
         // swift-format doesn't have a built-in check mode, so we compare output
         let original = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to read file: {}", e))
+            crate::LintisError::formatter(
+                "swift-format",
+                path,
+                format!("Failed to read file: {}", e),
+            )
         })?;
 
         // Run swift-format and capture output (without --in-place)
@@ -86,7 +99,7 @@ impl Formatter for SwiftFormatter {
             .arg(path)
             .output()
             .map_err(|e| {
-                crate::LintisError::Formatter(format!("Failed to run swift-format: {}", e))
+                crate::LintisError::formatter("swift-format", path, format!("Failed to run: {}", e))
             })?;
 
         if !output.status.success() {

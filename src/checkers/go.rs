@@ -91,7 +91,11 @@ impl GoChecker {
             .current_dir(module_root)
             .output()
             .map_err(|e| {
-                crate::LintisError::Checker(format!("Failed to run golangci-lint: {}", e))
+                crate::LintisError::checker(
+                    "golangci-lint",
+                    module_root,
+                    format!("Failed to run: {}", e),
+                )
             })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -106,7 +110,9 @@ impl GoChecker {
             .args(["vet", "./..."])
             .current_dir(module_root)
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run go vet: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::checker("go vet", module_root, format!("Failed to run: {}", e))
+            })?;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         let issues = Self::parse_go_vet_output(&stderr, module_root);

@@ -203,7 +203,7 @@ impl Checker for PythonChecker {
         let output = cmd
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run ruff: {}", e)))?;
+            .map_err(|e| crate::LintisError::checker("ruff", path, format!("Failed to run: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let issues = self.parse_ruff_json_output(&stdout, path);

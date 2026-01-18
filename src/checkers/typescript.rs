@@ -148,7 +148,9 @@ impl Checker for TypeScriptChecker {
         let output = cmd
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run eslint: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::checker("eslint", path, format!("Failed to run: {}", e))
+            })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let issues = self.parse_eslint_output(&stdout, path);

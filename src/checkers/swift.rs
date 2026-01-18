@@ -95,7 +95,9 @@ impl Checker for SwiftChecker {
             .args(["lint", "--reporter", "json", "--path"])
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run swiftlint: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::checker("swiftlint", path, format!("Failed to run: {}", e))
+            })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let issues = self.parse_swiftlint_output(&stdout);

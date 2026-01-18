@@ -93,7 +93,9 @@ impl Checker for LuaChecker {
             .args(["--formatter", "plain", "--codes", "--no-color"])
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run luacheck: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::checker("luacheck", path, format!("Failed to run: {}", e))
+            })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let issues = self.parse_luacheck_output(&stdout);

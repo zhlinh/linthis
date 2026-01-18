@@ -264,7 +264,7 @@ impl CppFormatter {
         }
 
         let output = cmd.output().map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to run clang-tidy --fix: {}", e))
+            crate::LintisError::formatter("clang-tidy", path, format!("Failed to run --fix: {}", e))
         })?;
 
         // clang-tidy returns non-zero if there are unfixable issues, but fix still works
@@ -300,8 +300,9 @@ impl Formatter for CppFormatter {
         let language = Self::detect_language(path);
 
         // Read original content for comparison
-        let original = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
+        let original = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("clang-format", path, format!("Failed to read file: {}", e))
+        })?;
 
         // Step 1: Run cpplint fixer (fixes header guards, TODOs, copyright)
         // For OC files, we still run the fixer but it will skip unsafe categories
@@ -331,7 +332,7 @@ impl Formatter for CppFormatter {
         }
 
         let output = cmd.arg(path).output().map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to run clang-format: {}", e))
+            crate::LintisError::formatter("clang-format", path, format!("Failed to run: {}", e))
         })?;
 
         if !output.status.success() {
@@ -364,7 +365,11 @@ impl Formatter for CppFormatter {
 
         // Read new content and compare
         let new_content = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to read formatted file: {}", e))
+            crate::LintisError::formatter(
+                "clang-format",
+                path,
+                format!("Failed to read formatted file: {}", e),
+            )
         })?;
 
         if original == new_content {
@@ -379,8 +384,9 @@ impl Formatter for CppFormatter {
         let language = Self::detect_language(path);
 
         // Read current content
-        let current = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Formatter(format!("Failed to read file: {}", e)))?;
+        let current = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("clang-format", path, format!("Failed to read file: {}", e))
+        })?;
 
         // Run clang-format to get formatted output (without -i)
         let mut cmd = Command::new("clang-format");
@@ -393,7 +399,7 @@ impl Formatter for CppFormatter {
         }
 
         let output = cmd.arg(path).output().map_err(|e| {
-            crate::LintisError::Formatter(format!("Failed to run clang-format: {}", e))
+            crate::LintisError::formatter("clang-format", path, format!("Failed to run: {}", e))
         })?;
 
         let formatted = String::from_utf8_lossy(&output.stdout);

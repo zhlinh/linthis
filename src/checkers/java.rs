@@ -157,7 +157,9 @@ impl Checker for JavaChecker {
             .args(&config_arg)
             .arg(path)
             .output()
-            .map_err(|e| crate::LintisError::Checker(format!("Failed to run checkstyle: {}", e)))?;
+            .map_err(|e| {
+                crate::LintisError::checker("checkstyle", path, format!("Failed to run: {}", e))
+            })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
