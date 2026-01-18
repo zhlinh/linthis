@@ -428,6 +428,21 @@ pub enum ConfigCommands {
         #[arg(short, long)]
         global: bool,
     },
+    /// Migrate existing linter/formatter configs to linthis format
+    Migrate {
+        /// Only migrate from specific tool (eslint, prettier, black, isort)
+        #[arg(long = "from")]
+        from_tool: Option<String>,
+        /// Preview changes without applying them
+        #[arg(long)]
+        dry_run: bool,
+        /// Create backup of original config files
+        #[arg(long)]
+        backup: bool,
+        /// Show detailed output
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 /// Configuration field types for CLI operations

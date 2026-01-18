@@ -43,6 +43,148 @@ pub fn handle_config_command(action: ConfigCommands) -> ExitCode {
         ConfigCommands::Unset { field, global } => cli::handle_config_unset(&field, global),
         ConfigCommands::Get { field, global } => cli::handle_config_get(&field, global),
         ConfigCommands::List { verbose, global } => cli::handle_config_list(verbose, global),
+        ConfigCommands::Migrate {
+            from_tool,
+            dry_run,
+            backup,
+            verbose,
+        } => handle_config_migrate(from_tool, dry_run, backup, verbose),
+    }
+}
+
+/// Handle config migrate subcommand
+fn handle_config_migrate(
+    from_tool: Option<String>,
+    dry_run: bool,
+    backup: bool,
+    verbose: bool,
+) -> ExitCode {
+    use linthis::config::migrate::{migrate_configs, MigrationOptions, Tool, WarningSeverity};
+
+    let project_root = std::env::current_dir().unwrap_or_default();
+
+    // Parse tool filter
+    let tool_filter = match from_tool.as_ref() {
+        Some(t) => match Tool::from_str(t) {
+            Some(tool) => Some(tool),
+            None => {
+                eprintln!(
+                    "{}: Unknown tool '{}'. Supported: eslint, prettier, black, isort",
+                    "Error".red(),
+                    t
+                );
+                return ExitCode::from(1);
+            }
+        },
+        None => None,
+    };
+
+    let options = MigrationOptions {
+        dry_run,
+        backup,
+        tool_filter,
+        verbose,
+    };
+
+    println!(
+        "{}",
+        if dry_run {
+            "Analyzing configuration files (dry run)...".cyan()
+        } else {
+            "Migrating configuration files...".cyan()
+        }
+    );
+
+    match migrate_configs(&project_root, &options) {
+        Ok(result) => {
+            let mut has_errors = false;
+
+            // Print warnings
+            for warning in &result.warnings {
+                let prefix = match warning.severity {
+                    WarningSeverity::Info => "Info".cyan(),
+                    WarningSeverity::Warning => "Warning".yellow(),
+                    WarningSeverity::Error => {
+                        has_errors = true;
+                        "Error".red()
+                    }
+                };
+                println!("  {} [{}]: {}", prefix, warning.source, warning.message);
+            }
+
+            if dry_run {
+                // Show preview of changes
+                println!();
+                println!("{}", "Changes that would be made:".bold());
+                if result.config_changes.is_empty() {
+                    println!("  {}", "(no changes)".dimmed());
+                } else {
+                    for change in &result.config_changes {
+                        println!("  {} {}", "→".cyan(), change);
+                    }
+                }
+            } else {
+                // Show actual results
+                if !result.backed_up_files.is_empty() {
+                    println!();
+                    println!("{}", "Backed up files:".bold());
+                    for path in &result.backed_up_files {
+                        println!("  {} {}", "✓".green(), path.display());
+                    }
+                }
+
+                if !result.created_files.is_empty() {
+                    println!();
+                    println!("{}", "Created files:".bold());
+                    for path in &result.created_files {
+                        println!("  {} {}", "✓".green(), path.display());
+                    }
+                }
+            }
+
+            // Print suggestions
+            if !result.suggestions.is_empty() {
+                println!();
+                println!("{}", "Suggestions:".bold());
+                for suggestion in &result.suggestions {
+                    println!("  {} {}", "💡", suggestion);
+                }
+            }
+
+            // Summary
+            println!();
+            if dry_run {
+                let change_count = result.config_changes.len();
+                if change_count > 0 {
+                    println!(
+                        "{} Dry run complete. {} change(s) would be made.",
+                        "✓".green(),
+                        change_count
+                    );
+                    println!("  Run without {} to apply changes.", "--dry-run".cyan());
+                } else {
+                    println!("{} No configuration files to migrate.", "ℹ".blue());
+                }
+            } else if result.created_files.is_empty() && !has_errors {
+                println!("{} No configuration files to migrate.", "ℹ".blue());
+            } else if !has_errors {
+                println!(
+                    "{} Migration complete! {} file(s) created.",
+                    "✓".green(),
+                    result.created_files.len()
+                );
+            }
+
+            if has_errors {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red(), e);
+            ExitCode::from(1)
+        }
     }
 }
 
