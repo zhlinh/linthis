@@ -24,7 +24,7 @@ use cli::{
     Commands,
 };
 use linthis::interactive::run_interactive;
-use linthis::utils::output::{format_result, OutputFormat};
+use linthis::utils::output::{format_result_with_hook_type, OutputFormat};
 use linthis::{run, Language, RunMode, RunOptions};
 
 fn main() -> ExitCode {
@@ -640,8 +640,12 @@ fn main() -> ExitCode {
         no_cache: cli.no_cache,
     };
 
-    // Parse output format
-    let output_format = OutputFormat::parse(&cli.output).unwrap_or(OutputFormat::Human);
+    // Parse output format (hook_mode overrides output format)
+    let (output_format, hook_type) = if let Some(ref hook) = cli.hook_mode {
+        (OutputFormat::Hook, Some(hook.clone()))
+    } else {
+        (OutputFormat::parse(&cli.output).unwrap_or(OutputFormat::Human), None)
+    };
 
     if cli.verbose {
         eprintln!(
@@ -656,7 +660,7 @@ fn main() -> ExitCode {
     match run(&options) {
         Ok(result) => {
             // Output results
-            let output = format_result(&result, output_format);
+            let output = format_result_with_hook_type(&result, output_format, hook_type.as_deref());
 
             // Print to console
             if !cli.quiet || result.exit_code != 0 {

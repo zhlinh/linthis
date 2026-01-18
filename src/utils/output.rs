@@ -19,6 +19,7 @@ pub enum OutputFormat {
     Human,
     Json,
     GithubActions,
+    Hook,
 }
 
 impl OutputFormat {
@@ -27,6 +28,7 @@ impl OutputFormat {
             "human" => Some(OutputFormat::Human),
             "json" => Some(OutputFormat::Json),
             "github-actions" | "github" | "ga" => Some(OutputFormat::GithubActions),
+            "hook" => Some(OutputFormat::Hook),
             _ => None,
         }
     }
@@ -374,12 +376,140 @@ pub fn format_result_github_actions(result: &RunResult) -> String {
         .join("\n")
 }
 
+/// Format the entire run result for git hook output.
+/// Compact format with summary at top, error list, and fix instructions.
+pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String {
+    let hook_name = match hook_type {
+        Some("pre-push") => "Pre-push",
+        Some("commit-msg") => "Commit-msg",
+        _ => "Pre-commit",
+    };
+    let skip_command = match hook_type {
+        Some("pre-push") => "git push --no-verify",
+        _ => "git commit --no-verify",
+    };
+    let error_count = result
+        .issues
+        .iter()
+        .filter(|i| i.severity == Severity::Error)
+        .count();
+    let warning_count = result
+        .issues
+        .iter()
+        .filter(|i| i.severity == Severity::Warning)
+        .count();
+    let total_issues = result.issues.len();
+
+    // If no issues, show success
+    if total_issues == 0 {
+        let mut output = String::new();
+        output.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".green()));
+        output.push_str(&format!("{}\n", format!("│ 🟢 {} Hook Passed{} │", hook_name, " ".repeat(18 - hook_name.len())).green()));
+        output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".green()));
+        output.push_str(&format!("│ {}                                    │\n", "All checks passed!".green()));
+        output.push_str("│                                        │\n");
+        output.push_str(&format!(
+            "│ Files checked: {:>3}                     │\n",
+            result.total_files
+        ));
+        output.push_str(&format!(
+            "│ Files formatted: {:>3}                   │\n",
+            result.files_formatted
+        ));
+        output.push_str(&format!("{}", "╰────────────────────────────────────────╯".green()));
+        return output;
+    }
+
+    let mut output = String::new();
+
+    // Header
+    output.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".red()));
+    output.push_str(&format!("{}\n", format!("│ 🔴 {} Hook Failed{} │", hook_name, " ".repeat(18 - hook_name.len())).red()));
+    output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
+
+    // Summary line
+    output.push_str(&format!(
+        "│ {} error{}, {} warning{} in {} file{}         │\n",
+        error_count,
+        if error_count == 1 { "" } else { "s" },
+        warning_count,
+        if warning_count == 1 { "" } else { "s" },
+        result.files_with_issues,
+        if result.files_with_issues == 1 { "" } else { "s" }
+    ));
+    output.push_str("│                                        │\n");
+
+    // List issues (compact format: file:line message)
+    let max_issues = 8; // Limit to avoid too long output
+    for issue in result.issues.iter().take(max_issues) {
+        let filename = issue.file_path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let location = format!("{}:{}", filename, issue.line);
+        let severity_icon = match issue.severity {
+            Severity::Error => "❌",
+            Severity::Warning => "⚠️",
+            Severity::Info => "ℹ️",
+        };
+        // Truncate location if too long
+        let location_display = if location.len() > 20 {
+            format!("{}...", &location[..17])
+        } else {
+            location
+        };
+        // Truncate message if too long
+        let msg = if issue.message.len() > 30 {
+            format!("{}...", &issue.message[..27])
+        } else {
+            issue.message.clone()
+        };
+        output.push_str(&format!(
+            "│  {} {:<20} {}│\n",
+            severity_icon,
+            location_display,
+            msg
+        ));
+        // Show code if available (optional)
+        if let Some(code) = &issue.code {
+            output.push_str(&format!("│     [{}]│\n", code.dimmed()));
+        }
+    }
+
+    if total_issues > max_issues {
+        output.push_str(&format!(
+            "│  ... and {} more issue{}                  │\n",
+            total_issues - max_issues,
+            if total_issues - max_issues == 1 { "" } else { "s" }
+        ));
+    }
+
+    output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
+
+    // Fix instructions
+    output.push_str("│ To fix automatically:                  │\n");
+    output.push_str(&format!("│   {}                          │\n", "linthis -c -f".cyan()));
+    output.push_str("│                                        │\n");
+    output.push_str("│ To skip this check:                    │\n");
+    // Pad the skip command to fit in the box
+    let skip_padding = 22_usize.saturating_sub(skip_command.len());
+    output.push_str(&format!("│   {}{}│\n", skip_command.cyan(), " ".repeat(skip_padding)));
+    output.push_str(&format!("{}", "╰────────────────────────────────────────╯".red()));
+
+    output
+}
+
 /// Format result according to the specified output format.
 pub fn format_result(result: &RunResult, format: OutputFormat) -> String {
+    format_result_with_hook_type(result, format, None)
+}
+
+/// Format result with optional hook type for hook output.
+pub fn format_result_with_hook_type(result: &RunResult, format: OutputFormat, hook_type: Option<&str>) -> String {
     match format {
         OutputFormat::Human => format_result_human(result),
         OutputFormat::Json => format_result_json(result),
         OutputFormat::GithubActions => format_result_github_actions(result),
+        OutputFormat::Hook => format_result_hook(result, hook_type),
     }
 }
 

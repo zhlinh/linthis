@@ -132,6 +132,12 @@ pub struct Cli {
     #[arg(long)]
     pub no_plugin: bool,
 
+    /// Hook mode: enable compact output format for git hooks
+    /// Shows summary at top, lists errors with file:line, and provides fix commands
+    /// Optional value specifies hook type: pre-commit (default), pre-push, commit-msg
+    #[arg(long, hide = true, value_name = "HOOK_TYPE", num_args = 0..=1, default_missing_value = "pre-commit")]
+    pub hook_mode: Option<String>,
+
     /// Plugin subcommands (init, list, clean)
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -147,6 +153,39 @@ pub enum HookTool {
     PreCommit,
     /// Traditional git hook
     Git,
+}
+
+/// Git hook event types
+#[derive(Clone, Debug, Default, clap::ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum HookEvent {
+    /// Pre-commit hook (runs before commit is created)
+    #[default]
+    PreCommit,
+    /// Pre-push hook (runs before push to remote)
+    PrePush,
+    /// Commit-msg hook (validates commit message format)
+    CommitMsg,
+}
+
+impl HookEvent {
+    /// Get the git hook file name for this event
+    pub fn hook_filename(&self) -> &'static str {
+        match self {
+            HookEvent::PreCommit => "pre-commit",
+            HookEvent::PrePush => "pre-push",
+            HookEvent::CommitMsg => "commit-msg",
+        }
+    }
+
+    /// Get human-readable description
+    pub fn description(&self) -> &'static str {
+        match self {
+            HookEvent::PreCommit => "pre-commit (runs before commit)",
+            HookEvent::PrePush => "pre-push (runs before push)",
+            HookEvent::CommitMsg => "commit-msg (validates commit message)",
+        }
+    }
 }
 
 /// Top-level subcommands
@@ -201,11 +240,15 @@ pub enum Commands {
 /// Hook subcommands
 #[derive(clap::Subcommand, Debug)]
 pub enum HookCommands {
-    /// Install git pre-commit hook
+    /// Install git hook (pre-commit, pre-push, or commit-msg)
     Install {
-        /// Hook type to install
+        /// Hook tool to use (git, prek, or pre-commit)
         #[arg(long = "type", value_name = "TYPE")]
         hook_type: Option<HookTool>,
+
+        /// Git hook event type (pre-commit, pre-push, commit-msg)
+        #[arg(long = "hook", value_name = "HOOK", default_value = "pre-commit")]
+        hook_event: HookEvent,
 
         /// Hook only runs check (no formatting)
         #[arg(short = 'c', long = "check-only")]
@@ -223,8 +266,16 @@ pub enum HookCommands {
         #[arg(short = 'y', long)]
         yes: bool,
     },
-    /// Uninstall git pre-commit hook
+    /// Uninstall git hook
     Uninstall {
+        /// Git hook event type to uninstall (pre-commit, pre-push, commit-msg)
+        #[arg(long = "hook", value_name = "HOOK")]
+        hook_event: Option<HookEvent>,
+
+        /// Uninstall all hooks
+        #[arg(long)]
+        all: bool,
+
         /// Non-interactive mode
         #[arg(short = 'y', long)]
         yes: bool,
@@ -233,6 +284,11 @@ pub enum HookCommands {
     Status,
     /// Check for hook conflicts
     Check,
+    /// Validate commit message format (used by commit-msg hook)
+    CommitMsgCheck {
+        /// Path to the commit message file
+        msg_file: PathBuf,
+    },
 }
 
 /// Plugin subcommands
