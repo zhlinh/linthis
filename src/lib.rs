@@ -35,7 +35,7 @@
 //! ## Features
 //!
 //! - **Multi-language support**: Rust, Python, TypeScript, JavaScript, Go, Java,
-//!   C++, Objective-C, Swift, Kotlin, Lua, Dart
+//!   C++, Objective-C, Swift, Kotlin, Lua, Dart, Shell, Ruby, PHP, Scala, C#
 //! - **Unified configuration**: Single `.linthis/config.toml` for all languages
 //! - **Custom regex rules**: Define project-specific lint rules
 //! - **Plugin system**: Extend with community or custom plugins
@@ -295,6 +295,11 @@ pub enum Language {
     Swift,
     Kotlin,
     Lua,
+    Shell,
+    Ruby,
+    Php,
+    Scala,
+    CSharp,
 }
 
 impl Language {
@@ -314,6 +319,11 @@ impl Language {
             "swift" => Some(Language::Swift),
             "kt" | "kts" => Some(Language::Kotlin),
             "lua" => Some(Language::Lua),
+            "sh" | "bash" | "zsh" | "ksh" => Some(Language::Shell),
+            "rb" | "rake" | "gemspec" => Some(Language::Ruby),
+            "php" | "phtml" => Some(Language::Php),
+            "scala" | "sc" => Some(Language::Scala),
+            "cs" | "csx" => Some(Language::CSharp),
             _ => None,
         }
     }
@@ -464,6 +474,11 @@ impl Language {
             "swift" => Some(Language::Swift),
             "kotlin" | "kt" => Some(Language::Kotlin),
             "lua" => Some(Language::Lua),
+            "shell" | "sh" | "bash" | "zsh" => Some(Language::Shell),
+            "ruby" | "rb" => Some(Language::Ruby),
+            "php" => Some(Language::Php),
+            "scala" => Some(Language::Scala),
+            "csharp" | "c#" | "cs" => Some(Language::CSharp),
             _ => None,
         }
     }
@@ -482,6 +497,11 @@ impl Language {
             Language::Swift => "swift",
             Language::Kotlin => "kotlin",
             Language::Lua => "lua",
+            Language::Shell => "shell",
+            Language::Ruby => "ruby",
+            Language::Php => "php",
+            Language::Scala => "scala",
+            Language::CSharp => "csharp",
         }
     }
 
@@ -500,6 +520,11 @@ impl Language {
             Language::Swift => &["swift"],
             Language::Kotlin => &["kt", "kts"],
             Language::Lua => &["lua"],
+            Language::Shell => &["sh", "bash", "zsh", "ksh"],
+            Language::Ruby => &["rb", "rake", "gemspec"],
+            Language::Php => &["php", "phtml"],
+            Language::Scala => &["scala", "sc"],
+            Language::CSharp => &["cs", "csx"],
         }
     }
 }
@@ -592,6 +617,11 @@ pub fn get_checker(lang: Language) -> Option<Box<dyn Checker>> {
         Language::Swift => Some(Box::new(SwiftChecker::new())),
         Language::Kotlin => Some(Box::new(KotlinChecker::new())),
         Language::Lua => Some(Box::new(LuaChecker::new())),
+        Language::Shell => Some(Box::new(checkers::ShellChecker::new())),
+        Language::Ruby => Some(Box::new(checkers::RubyChecker::new())),
+        Language::Php => Some(Box::new(checkers::PhpChecker::new())),
+        Language::Scala => Some(Box::new(checkers::ScalaChecker::new())),
+        Language::CSharp => Some(Box::new(checkers::CSharpChecker::new())),
     }
 }
 
@@ -613,6 +643,11 @@ fn get_formatter(lang: Language) -> Option<Box<dyn Formatter>> {
         Language::Swift => Some(Box::new(SwiftFormatter::new())),
         Language::Kotlin => Some(Box::new(KotlinFormatter::new())),
         Language::Lua => Some(Box::new(LuaFormatter::new())),
+        Language::Shell => Some(Box::new(formatters::ShellFormatter::new())),
+        Language::Ruby => Some(Box::new(formatters::RubyFormatter::new())),
+        Language::Php => Some(Box::new(formatters::PhpFormatter::new())),
+        Language::Scala => Some(Box::new(formatters::ScalaFormatter::new())),
+        Language::CSharp => Some(Box::new(formatters::CSharpFormatter::new())),
     }
 }
 
@@ -667,6 +702,25 @@ fn get_checker_install_hint(lang: Language) -> String {
             }
         }
         Language::Lua => "Install: luarocks install luacheck".to_string(),
+        Language::Shell => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install shellcheck".to_string()
+            } else if cfg!(target_os = "windows") {
+                "Install: choco install shellcheck\n         Or: scoop install shellcheck".to_string()
+            } else {
+                "Install: sudo apt install shellcheck (Ubuntu/Debian)".to_string()
+            }
+        }
+        Language::Ruby => "Install: gem install rubocop".to_string(),
+        Language::Php => "Install: composer global require squizlabs/php_codesniffer".to_string(),
+        Language::Scala => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install scalafix\n         Or: cs install scalafix".to_string()
+            } else {
+                "Install: cs install scalafix\n         https://scalacenter.github.io/scalafix/".to_string()
+            }
+        }
+        Language::CSharp => "Install: dotnet tool install -g dotnet-format".to_string(),
     }
 }
 
@@ -714,6 +768,25 @@ fn get_formatter_install_hint(lang: Language) -> String {
             }
         }
         Language::Lua => "Install: cargo install stylua".to_string(),
+        Language::Shell => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install shfmt".to_string()
+            } else if cfg!(target_os = "windows") {
+                "Install: choco install shfmt\n         Or: scoop install shfmt".to_string()
+            } else {
+                "Install: sudo apt install shfmt (Ubuntu/Debian)\n         Or: go install mvdan.cc/sh/v3/cmd/shfmt@latest".to_string()
+            }
+        }
+        Language::Ruby => "Install: gem install rubocop".to_string(),
+        Language::Php => "Install: composer global require friendsofphp/php-cs-fixer".to_string(),
+        Language::Scala => {
+            if cfg!(target_os = "macos") {
+                "Install: brew install scalafmt\n         Or: cs install scalafmt".to_string()
+            } else {
+                "Install: cs install scalafmt\n         https://scalameta.org/scalafmt/".to_string()
+            }
+        }
+        Language::CSharp => "Install: dotnet tool install -g dotnet-format".to_string(),
     }
 }
 
@@ -768,6 +841,14 @@ fn get_tool_name(lang: Language, is_checker: bool) -> String {
         (Language::Kotlin, true) | (Language::Kotlin, false) => "ktlint".to_string(),
         (Language::Lua, true) => "luacheck".to_string(),
         (Language::Lua, false) => "stylua".to_string(),
+        (Language::Shell, true) => "shellcheck".to_string(),
+        (Language::Shell, false) => "shfmt".to_string(),
+        (Language::Ruby, true) | (Language::Ruby, false) => "rubocop".to_string(),
+        (Language::Php, true) => "phpcs".to_string(),
+        (Language::Php, false) => "php-cs-fixer".to_string(),
+        (Language::Scala, true) => "scalafix".to_string(),
+        (Language::Scala, false) => "scalafmt".to_string(),
+        (Language::CSharp, true) | (Language::CSharp, false) => "dotnet-format".to_string(),
     }
 }
 

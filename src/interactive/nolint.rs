@@ -242,6 +242,21 @@ fn has_nolint_comment(line: &str, lang: Language, _source: &str) -> bool {
         Language::Lua => {
             line.contains("-- luacheck:") || line.contains("--luacheck:")
         }
+        Language::Shell => {
+            line.contains("# shellcheck disable") || line.contains("#shellcheck disable")
+        }
+        Language::Ruby => {
+            line.contains("# rubocop:disable") || line.contains("#rubocop:disable")
+        }
+        Language::Php => {
+            line.contains("// phpcs:ignore") || line.contains("//phpcs:ignore")
+        }
+        Language::Scala => {
+            line.contains("// scalafix:ok") || line.contains("//scalafix:ok")
+        }
+        Language::CSharp => {
+            line.contains("#pragma warning disable") || line.contains("// ReSharper disable")
+        }
     }
 }
 
@@ -571,6 +586,109 @@ fn generate_nolint_content(
                 }
             }
         }
+        Language::Shell => {
+            // Shell: Add # shellcheck disable=SCXXXX comment on previous line
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let new_line = format!("{}# shellcheck disable={}", indent, code);
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
+                    result_lines.push(new_line);
+                    result_lines.push(line.to_string());
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
+        Language::Ruby => {
+            // Ruby: Add # rubocop:disable CopName comment at end of line
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let ignore = generate_ruby_disable(code);
+                    if line.trim().is_empty() {
+                        result_lines.push(line.to_string());
+                    } else {
+                        let new_line = format!("{} {}", line, ignore);
+                        diffs.push(create_diff_with_context(
+                            lines,
+                            i,
+                            i + 1,
+                            line.to_string(),
+                            new_line.clone(),
+                        ));
+                        result_lines.push(new_line);
+                    }
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
+        Language::Php => {
+            // PHP: Add // phpcs:ignore comment on previous line
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let new_line = format!("{}// phpcs:ignore {}", indent, code);
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
+                    result_lines.push(new_line);
+                    result_lines.push(line.to_string());
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
+        Language::Scala => {
+            // Scala: Add // scalafix:ok RuleName comment at end of line
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let ignore = generate_scala_ok(code);
+                    if line.trim().is_empty() {
+                        result_lines.push(line.to_string());
+                    } else {
+                        let new_line = format!("{} {}", line, ignore);
+                        diffs.push(create_diff_with_context(
+                            lines,
+                            i,
+                            i + 1,
+                            line.to_string(),
+                            new_line.clone(),
+                        ));
+                        result_lines.push(new_line);
+                    }
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
+        Language::CSharp => {
+            // C#: Add #pragma warning disable XXXX on previous line
+            for (i, line) in lines.iter().enumerate() {
+                if i == line_idx {
+                    let new_line = format!("{}#pragma warning disable {}", indent, code);
+                    diffs.push(create_diff_with_context(
+                        lines,
+                        i,
+                        i + 1,
+                        String::new(),
+                        new_line.clone(),
+                    ));
+                    result_lines.push(new_line);
+                    result_lines.push(line.to_string());
+                } else {
+                    result_lines.push(line.to_string());
+                }
+            }
+        }
     }
 
     // Join with newlines, preserving original line ending style
@@ -750,6 +868,24 @@ fn generate_lua_ignore(code: &str) -> String {
     }
 }
 
+/// Generate Ruby rubocop:disable comment
+fn generate_ruby_disable(code: &str) -> String {
+    if code.is_empty() {
+        "# rubocop:disable all".to_string()
+    } else {
+        format!("# rubocop:disable {}", code)
+    }
+}
+
+/// Generate Scala scalafix:ok comment
+fn generate_scala_ok(code: &str) -> String {
+    if code.is_empty() {
+        "// scalafix:ok".to_string()
+    } else {
+        format!("// scalafix:ok {}", code)
+    }
+}
+
 /// Get a human-readable description of what NOLINT comment will be added
 pub fn describe_nolint_action(issue: &LintIssue) -> String {
     let lang = issue.language.unwrap_or_else(|| {
@@ -788,6 +924,21 @@ pub fn describe_nolint_action(issue: &LintIssue) -> String {
         }
         Language::Lua => {
             format!("Add: {}", generate_lua_ignore(code))
+        }
+        Language::Shell => {
+            format!("Add: # shellcheck disable={}", code)
+        }
+        Language::Ruby => {
+            format!("Add: {}", generate_ruby_disable(code))
+        }
+        Language::Php => {
+            format!("Add: // phpcs:ignore {}", code)
+        }
+        Language::Scala => {
+            format!("Add: {}", generate_scala_ok(code))
+        }
+        Language::CSharp => {
+            format!("Add: #pragma warning disable {}", code)
         }
     }
 }
