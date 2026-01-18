@@ -128,7 +128,9 @@ pub mod reports;
 pub mod rules;
 pub mod self_update;
 pub mod templates;
+pub mod tui;
 pub mod utils;
+pub mod watch;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

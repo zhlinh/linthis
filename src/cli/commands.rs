@@ -267,6 +267,58 @@ pub enum Commands {
         #[command(subcommand)]
         action: ReportCommands,
     },
+    /// Watch files for changes and auto-lint
+    ///
+    /// Monitors directories for file changes and automatically runs lint checks
+    /// when files are modified. Supports a rich TUI interface or simple stdout mode.
+    ///
+    /// Example usage:
+    ///   linthis watch                    # Watch current directory with TUI
+    ///   linthis watch src/               # Watch specific directory
+    ///   linthis watch --no-tui           # Watch with simple stdout output
+    ///   linthis watch -c                 # Watch with check-only mode
+    ///   linthis watch --notify           # Enable desktop notifications
+    Watch {
+        /// Paths to watch (defaults to current directory)
+        #[arg(default_value = ".")]
+        paths: Vec<PathBuf>,
+
+        /// Only check, don't format
+        #[arg(short = 'c', long)]
+        check_only: bool,
+
+        /// Only format, don't check
+        #[arg(short = 'f', long)]
+        format_only: bool,
+
+        /// Debounce delay in milliseconds
+        #[arg(long, default_value = "300")]
+        debounce: u64,
+
+        /// Enable desktop notifications
+        #[arg(long)]
+        notify: bool,
+
+        /// Disable TUI (use simple stdout output)
+        #[arg(long)]
+        no_tui: bool,
+
+        /// Clear screen before each run
+        #[arg(long)]
+        clear: bool,
+
+        /// Specify languages to check (comma-separated)
+        #[arg(short, long, value_delimiter = ',')]
+        lang: Option<Vec<String>>,
+
+        /// Exclude patterns (glob patterns)
+        #[arg(short, long)]
+        exclude: Option<Vec<String>>,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 /// Hook subcommands
