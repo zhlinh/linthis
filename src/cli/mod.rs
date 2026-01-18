@@ -13,6 +13,7 @@
 //! This module contains the command definitions and handlers for the
 //! linthis CLI application.
 
+mod cache;
 mod commands;
 mod doctor;
 mod helpers;
@@ -21,6 +22,7 @@ mod init;
 mod plugin;
 mod runner;
 
+pub use cache::handle_cache_command;
 pub use commands::{Cli, Commands};
 pub use doctor::handle_doctor_command;
 pub use helpers::{find_latest_result_file, print_fix_hint, run_benchmark, strip_ansi_codes};

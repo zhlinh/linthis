@@ -48,6 +48,9 @@ similar = "2.4"
 # Lazy initialization
 lazy_static = "1.4"
 
+# Fast hashing (for file cache)
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
 # Logging
 log = "0.4"
 env_logger = "0.10"
