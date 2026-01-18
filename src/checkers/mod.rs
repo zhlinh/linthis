@@ -29,6 +29,11 @@
 //! | Kotlin | [`KotlinChecker`] | ktlint, detekt | - |
 //! | Dart | [`DartChecker`] | dart analyze | - |
 //! | Lua | [`LuaChecker`] | luacheck | - |
+//! | Shell/Bash | [`ShellChecker`] | shellcheck | - |
+//! | Ruby | [`RubyChecker`] | rubocop | - |
+//! | PHP | [`PhpChecker`] | phpcs | - |
+//! | Scala | [`ScalaChecker`] | scalafix | - |
+//! | C# | [`CSharpChecker`] | dotnet-format | - |
 //!
 //! ## Checker Trait
 //!
@@ -66,25 +71,35 @@
 //! ```
 
 pub mod cpp;
+pub mod csharp;
 pub mod dart;
 pub mod go;
 pub mod java;
 pub mod kotlin;
 pub mod lua;
+pub mod php;
 pub mod python;
+pub mod ruby;
 pub mod rust;
+pub mod scala;
+pub mod shell;
 pub mod swift;
 pub mod traits;
 pub mod typescript;
 
 pub use cpp::CppChecker;
+pub use csharp::CSharpChecker;
 pub use dart::DartChecker;
 pub use go::GoChecker;
 pub use java::JavaChecker;
 pub use kotlin::KotlinChecker;
 pub use lua::LuaChecker;
+pub use php::PhpChecker;
 pub use python::PythonChecker;
+pub use ruby::RubyChecker;
 pub use rust::RustChecker;
+pub use scala::ScalaChecker;
+pub use shell::ShellChecker;
 pub use swift::SwiftChecker;
 pub use traits::Checker;
 pub use typescript::TypeScriptChecker;

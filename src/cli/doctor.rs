@@ -184,6 +184,11 @@ fn get_tool_info(lang: Language, is_checker: bool) -> (String, String, &'static 
         (Language::Swift, true) => ("swiftlint".to_string(), "swiftlint".to_string(), "version"),
         (Language::Kotlin, true) => ("ktlint".to_string(), "ktlint".to_string(), "--version"),
         (Language::Lua, true) => ("luacheck".to_string(), "luacheck".to_string(), "--version"),
+        (Language::Shell, true) => ("shellcheck".to_string(), "shellcheck".to_string(), "--version"),
+        (Language::Ruby, true) => ("rubocop".to_string(), "rubocop".to_string(), "--version"),
+        (Language::Php, true) => ("phpcs".to_string(), "phpcs".to_string(), "--version"),
+        (Language::Scala, true) => ("scalafix".to_string(), "scalafix".to_string(), "--version"),
+        (Language::CSharp, true) => ("dotnet-format".to_string(), "dotnet".to_string(), "format --version"),
 
         // Formatters
         (Language::Rust, false) => ("rustfmt".to_string(), "rustfmt".to_string(), "--version"),
@@ -200,6 +205,11 @@ fn get_tool_info(lang: Language, is_checker: bool) -> (String, String, &'static 
         (Language::Swift, false) => ("swift-format".to_string(), "swift-format".to_string(), "--version"),
         (Language::Kotlin, false) => ("ktlint".to_string(), "ktlint".to_string(), "--version"),
         (Language::Lua, false) => ("stylua".to_string(), "stylua".to_string(), "--version"),
+        (Language::Shell, false) => ("shfmt".to_string(), "shfmt".to_string(), "--version"),
+        (Language::Ruby, false) => ("rubocop".to_string(), "rubocop".to_string(), "--version"),
+        (Language::Php, false) => ("php-cs-fixer".to_string(), "php-cs-fixer".to_string(), "--version"),
+        (Language::Scala, false) => ("scalafmt".to_string(), "scalafmt".to_string(), "--version"),
+        (Language::CSharp, false) => ("dotnet-format".to_string(), "dotnet".to_string(), "format --version"),
     }
 }
 
@@ -295,6 +305,19 @@ fn get_install_hint(lang: Language, is_checker: bool) -> String {
             }
         }
         (Language::Lua, true) => "luarocks install luacheck".to_string(),
+        (Language::Shell, true) => {
+            if cfg!(target_os = "macos") {
+                "brew install shellcheck".to_string()
+            } else if cfg!(target_os = "windows") {
+                "choco install shellcheck".to_string()
+            } else {
+                "apt install shellcheck".to_string()
+            }
+        }
+        (Language::Ruby, true) => "gem install rubocop".to_string(),
+        (Language::Php, true) => "composer global require squizlabs/php_codesniffer".to_string(),
+        (Language::Scala, true) => "cs install scalafix".to_string(),
+        (Language::CSharp, true) => "dotnet tool install -g dotnet-format".to_string(),
 
         // Formatters
         (Language::Rust, false) => "rustup component add rustfmt".to_string(),
@@ -335,6 +358,19 @@ fn get_install_hint(lang: Language, is_checker: bool) -> String {
             }
         }
         (Language::Lua, false) => "cargo install stylua".to_string(),
+        (Language::Shell, false) => {
+            if cfg!(target_os = "macos") {
+                "brew install shfmt".to_string()
+            } else if cfg!(target_os = "windows") {
+                "choco install shfmt".to_string()
+            } else {
+                "go install mvdan.cc/sh/v3/cmd/shfmt@latest".to_string()
+            }
+        }
+        (Language::Ruby, false) => "gem install rubocop".to_string(),
+        (Language::Php, false) => "composer global require friendsofphp/php-cs-fixer".to_string(),
+        (Language::Scala, false) => "cs install scalafmt".to_string(),
+        (Language::CSharp, false) => "dotnet tool install -g dotnet-format".to_string(),
     }
 }
 

@@ -11,25 +11,35 @@
 //! Language-specific formatter implementations.
 
 pub mod cpp;
+pub mod csharp;
 pub mod dart;
 pub mod go;
 pub mod java;
 pub mod kotlin;
 pub mod lua;
+pub mod php;
 pub mod python;
+pub mod ruby;
 pub mod rust;
+pub mod scala;
+pub mod shell;
 pub mod swift;
 pub mod traits;
 pub mod typescript;
 
 pub use cpp::CppFormatter;
+pub use csharp::CSharpFormatter;
 pub use dart::DartFormatter;
 pub use go::GoFormatter;
 pub use java::JavaFormatter;
 pub use kotlin::KotlinFormatter;
 pub use lua::LuaFormatter;
+pub use php::PhpFormatter;
 pub use python::PythonFormatter;
+pub use ruby::RubyFormatter;
 pub use rust::RustFormatter;
+pub use scala::ScalaFormatter;
+pub use shell::ShellFormatter;
 pub use swift::SwiftFormatter;
 pub use traits::Formatter;
 pub use typescript::TypeScriptFormatter;
