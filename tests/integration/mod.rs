@@ -7,9 +7,12 @@
 mod common;
 
 // Test modules
+mod cache_tests;
 mod check_tests;
 mod config_tests;
+mod error_tests;
 mod format_tests;
+mod language_tests;
 mod plugin_tests;
 
 use std::process::Command;
