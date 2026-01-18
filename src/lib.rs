@@ -37,6 +37,9 @@ static PROGRESS_COUNTER: AtomicUsize = AtomicUsize::new(0);
 /// Track which tool warnings have been shown (to avoid duplicate warnings)
 static WARNED_TOOLS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// Track unavailable tools for reporting in RunResult
+static UNAVAILABLE_TOOLS: Mutex<Option<Vec<utils::types::UnavailableTool>>> = Mutex::new(None);
+
 use checkers::{
     Checker, CppChecker, GoChecker, JavaChecker, PythonChecker, RustChecker, TypeScriptChecker,
 };
@@ -66,6 +69,19 @@ pub enum LintisError {
 }
 
 pub type Result<T> = std::result::Result<T, LintisError>;
+
+impl From<plugin::PluginError> for LintisError {
+    fn from(err: plugin::PluginError) -> Self {
+        match err {
+            plugin::PluginError::Io(e) => LintisError::Io(e),
+            plugin::PluginError::ConfigError { message } => LintisError::Config(message),
+            plugin::PluginError::ConfigNotFound { path } => {
+                LintisError::Config(format!("Config file not found: {}", path.display()))
+            }
+            _ => LintisError::Config(err.to_string()),
+        }
+    }
+}
 
 /// Supported programming languages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -355,6 +371,11 @@ pub fn get_checker(lang: Language) -> Option<Box<dyn Checker>> {
     }
 }
 
+/// Check if the formatter for a given language is available.
+pub fn get_formatter_availability(lang: Language) -> bool {
+    get_formatter(lang).map(|f| f.is_available()).unwrap_or(false)
+}
+
 /// Get the formatter for a given language.
 fn get_formatter(lang: Language) -> Option<Box<dyn Formatter>> {
     match lang {
@@ -436,7 +457,7 @@ fn get_formatter_install_hint(lang: Language) -> String {
     }
 }
 
-/// Warn about missing tool (once per tool)
+/// Warn about missing tool (once per tool) and record for reporting
 fn warn_missing_tool(tool_type: &str, lang: Language, is_checker: bool) {
     let tool_key = format!("{}-{}", tool_type, lang.name());
     if should_warn_tool(&tool_key) {
@@ -445,6 +466,16 @@ fn warn_missing_tool(tool_type: &str, lang: Language, is_checker: bool) {
         } else {
             get_formatter_install_hint(lang)
         };
+
+        // Record the unavailable tool
+        let tool_name = get_tool_name(lang, is_checker);
+        record_unavailable_tool(utils::types::UnavailableTool::new(
+            &tool_name,
+            lang.name(),
+            tool_type,
+            &hint,
+        ));
+
         eprintln!(
             "\x1b[33mWarning\x1b[0m: No {} {} available for {} files",
             lang.name(),
@@ -454,6 +485,44 @@ fn warn_missing_tool(tool_type: &str, lang: Language, is_checker: bool) {
         eprintln!("  {}", hint);
         eprintln!();
     }
+}
+
+/// Get the name of the tool for a language
+fn get_tool_name(lang: Language, is_checker: bool) -> String {
+    match (lang, is_checker) {
+        (Language::Rust, true) => "clippy".to_string(),
+        (Language::Rust, false) => "rustfmt".to_string(),
+        (Language::Python, true) | (Language::Python, false) => "ruff".to_string(),
+        (Language::Go, true) => "golangci-lint".to_string(),
+        (Language::Go, false) => "gofmt".to_string(),
+        (Language::TypeScript, true) | (Language::JavaScript, true) => "eslint".to_string(),
+        (Language::TypeScript, false) | (Language::JavaScript, false) => "prettier".to_string(),
+        (Language::Java, true) => "checkstyle".to_string(),
+        (Language::Java, false) => "google-java-format".to_string(),
+        (Language::Cpp, true) | (Language::ObjectiveC, true) => "cpplint".to_string(),
+        (Language::Cpp, false) | (Language::ObjectiveC, false) => "clang-format".to_string(),
+    }
+}
+
+/// Record an unavailable tool for later reporting
+fn record_unavailable_tool(tool: utils::types::UnavailableTool) {
+    let mut tools = UNAVAILABLE_TOOLS.lock().unwrap();
+    if tools.is_none() {
+        *tools = Some(Vec::new());
+    }
+    if let Some(ref mut list) = *tools {
+        // Only add if not already present (by tool name + language)
+        let exists = list.iter().any(|t| t.tool == tool.tool && t.language == tool.language);
+        if !exists {
+            list.push(tool);
+        }
+    }
+}
+
+/// Collect and clear all recorded unavailable tools
+fn collect_unavailable_tools() -> Vec<utils::types::UnavailableTool> {
+    let mut tools = UNAVAILABLE_TOOLS.lock().unwrap();
+    tools.take().unwrap_or_default()
 }
 
 /// Check if we've already warned about a tool
@@ -837,6 +906,9 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     result.count_files_with_issues();
     result.calculate_exit_code();
     result.duration_ms = start.elapsed().as_millis() as u64;
+
+    // Collect unavailable tools for reporting
+    result.unavailable_tools = collect_unavailable_tools();
 
     Ok(result)
 }

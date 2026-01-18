@@ -76,19 +76,24 @@ fn format_issue_quickfix(issue: &LintIssue) -> String {
 /// # Returns
 /// * `Ok(())` on success
 /// * `Err(String)` on failure
-pub fn write_quickfix_file(issues: &[LintIssue], path: &Path) -> Result<(), String> {
+pub fn write_quickfix_file(issues: &[LintIssue], path: &Path) -> super::InteractiveResult<()> {
+    use super::InteractiveError;
+
     let content = generate_quickfix(issues);
 
-    let mut file = File::create(path)
-        .map_err(|e| format!("Failed to create quickfix file: {}", e))?;
+    let mut file = File::create(path).map_err(|e| {
+        InteractiveError::QuickfixWrite(format!("Failed to create file: {}", e))
+    })?;
 
-    file.write_all(content.as_bytes())
-        .map_err(|e| format!("Failed to write quickfix file: {}", e))?;
+    file.write_all(content.as_bytes()).map_err(|e| {
+        InteractiveError::QuickfixWrite(format!("Failed to write content: {}", e))
+    })?;
 
     // Ensure trailing newline
     if !content.is_empty() && !content.ends_with('\n') {
-        file.write_all(b"\n")
-            .map_err(|e| format!("Failed to write quickfix file: {}", e))?;
+        file.write_all(b"\n").map_err(|e| {
+            InteractiveError::QuickfixWrite(format!("Failed to write newline: {}", e))
+        })?;
     }
 
     Ok(())

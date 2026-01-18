@@ -42,7 +42,7 @@ pub enum NolintResult {
     /// File was not modified (e.g., comment already exists)
     AlreadyIgnored,
     /// Failed to add comment
-    Error(String),
+    Error(super::InteractiveError),
 }
 
 /// Add a NOLINT comment to suppress the given issue.
@@ -63,24 +63,31 @@ pub enum NolintResult {
 /// # Returns
 /// * `NolintResult` indicating success, already-ignored, or error
 pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
+    use super::InteractiveError;
+
     let file_path = &issue.file_path;
     let line_num = issue.line;
 
     // Read file content
     let content = match fs::read_to_string(file_path) {
         Ok(c) => c,
-        Err(e) => return NolintResult::Error(format!("Failed to read file: {}", e)),
+        Err(e) => {
+            return NolintResult::Error(InteractiveError::FileOperation(format!(
+                "Failed to read file '{}': {}",
+                file_path.display(),
+                e
+            )))
+        }
     };
 
     let lines: Vec<&str> = content.lines().collect();
 
     // Validate line number
     if line_num == 0 || line_num > lines.len() {
-        return NolintResult::Error(format!(
-            "Invalid line number {} (file has {} lines)",
-            line_num,
-            lines.len()
-        ));
+        return NolintResult::Error(InteractiveError::InvalidLineNumber {
+            line: line_num,
+            total: lines.len(),
+        });
     }
 
     let line_idx = line_num - 1;
@@ -187,7 +194,11 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
     // Write back to file
     match fs::write(file_path, new_content) {
         Ok(_) => NolintResult::Success(diffs),
-        Err(e) => NolintResult::Error(format!("Failed to write file: {}", e)),
+        Err(e) => NolintResult::Error(super::InteractiveError::FileOperation(format!(
+            "Failed to write file '{}': {}",
+            file_path.display(),
+            e
+        ))),
     }
 }
 
@@ -259,7 +270,7 @@ fn generate_nolint_content(
     lang: Language,
     source: &str,
     code: &str,
-) -> Result<(String, Vec<LineDiff>), String> {
+) -> Result<(String, Vec<LineDiff>), super::InteractiveError> {
     let mut result_lines: Vec<String> = Vec::with_capacity(lines.len() + 1);
     let mut diffs: Vec<LineDiff> = Vec::new();
 

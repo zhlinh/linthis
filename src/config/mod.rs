@@ -203,6 +203,28 @@ impl LanguageOverrides {
     }
 }
 
+/// Known configuration field names for suggestions
+const KNOWN_FIELDS: &[&str] = &[
+    "languages",
+    "includes",
+    "excludes",
+    "max_complexity",
+    "preset",
+    "verbose",
+    "quiet",
+    "plugins",
+    "self_auto_update",
+    "plugin_auto_sync",
+    "rust",
+    "python",
+    "go",
+    "typescript",
+    "javascript",
+    "java",
+    "cpp",
+    "oc",
+];
+
 impl Config {
     /// Create a new empty configuration
     pub fn new() -> Self {
@@ -211,20 +233,28 @@ impl Config {
 
     /// Load configuration from a file
     pub fn load(path: &Path) -> crate::Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::Config(format!("Failed to read config: {}", e)))?;
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::Config(format!(
+                "Failed to read config file '{}': {}",
+                path.display(),
+                e
+            ))
+        })?;
 
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         match ext {
-            "yml" | "yaml" => serde_yaml::from_str(&content)
-                .map_err(|e| crate::LintisError::Config(format!("Failed to parse YAML: {}", e))),
-            "toml" => toml::from_str(&content)
-                .map_err(|e| crate::LintisError::Config(format!("Failed to parse TOML: {}", e))),
-            "json" => serde_json::from_str(&content)
-                .map_err(|e| crate::LintisError::Config(format!("Failed to parse JSON: {}", e))),
+            "yml" | "yaml" => serde_yaml::from_str(&content).map_err(|e| {
+                crate::LintisError::Config(format_yaml_error(path, &e))
+            }),
+            "toml" => toml::from_str(&content).map_err(|e| {
+                crate::LintisError::Config(format_toml_error(path, &content, &e))
+            }),
+            "json" => serde_json::from_str(&content).map_err(|e| {
+                crate::LintisError::Config(format_json_error(path, &e))
+            }),
             _ => Err(crate::LintisError::Config(format!(
-                "Unsupported config format: {}",
+                "Unsupported config format: '{}'\n\nSupported formats: toml, yaml, json",
                 ext
             ))),
         }
@@ -381,6 +411,187 @@ max_complexity = 20
     /// Get the path for a new project config file
     pub fn project_config_path(project_dir: &Path) -> PathBuf {
         project_dir.join(".linthis").join("config.toml")
+    }
+}
+
+/// Format a TOML error with helpful context and suggestions
+fn format_toml_error(path: &Path, content: &str, err: &toml::de::Error) -> String {
+    let mut msg = format!("Invalid TOML in '{}'", path.display());
+
+    // Try to extract line information from the error message
+    let err_str = err.to_string();
+
+    // Check for unknown field errors
+    if err_str.contains("unknown field") {
+        if let Some(field) = extract_unknown_field(&err_str) {
+            msg.push_str(&format!("\n\nUnknown field: '{}'", field));
+
+            // Suggest similar field names
+            if let Some(suggestion) = find_similar_field(&field, KNOWN_FIELDS) {
+                msg.push_str(&format!("\n\nDid you mean: '{}'?", suggestion));
+            } else {
+                msg.push_str("\n\nValid top-level fields: languages, includes, excludes, preset, verbose, quiet, plugins");
+            }
+        }
+    }
+
+    // Try to extract line number from error message
+    // TOML errors often include "at line X column Y" or similar patterns
+    if let Some(line_info) = extract_line_from_error(&err_str) {
+        msg.push_str(&format!("\n\nError at line {}", line_info));
+
+        // Show the problematic line if we can parse the line number
+        if let Ok(line_num) = line_info.parse::<usize>() {
+            if let Some(line) = content.lines().nth(line_num.saturating_sub(1)) {
+                msg.push_str(&format!(":\n  {} | {}", line_num, line.trim()));
+            }
+        }
+    }
+
+    // Add the original error message
+    msg.push_str(&format!("\n\nDetails: {}", err));
+
+    // Add hint for common issues
+    msg.push_str(&format!("\n\nHint: {}", get_toml_hint(&err_str)));
+
+    msg
+}
+
+/// Extract line number from error message
+fn extract_line_from_error(err_str: &str) -> Option<String> {
+    // Pattern: "at line X" or "line X"
+    let patterns = ["at line ", "line "];
+    for pattern in patterns {
+        if let Some(start) = err_str.find(pattern) {
+            let remaining = &err_str[start + pattern.len()..];
+            let end = remaining
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(remaining.len());
+            if end > 0 {
+                return Some(remaining[..end].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Format a YAML error with helpful context
+fn format_yaml_error(path: &Path, err: &serde_yaml::Error) -> String {
+    let mut msg = format!("Invalid YAML in '{}'", path.display());
+
+    if let Some(location) = err.location() {
+        msg.push_str(&format!(
+            "\n\nError at line {}, column {}",
+            location.line(),
+            location.column()
+        ));
+    }
+
+    msg.push_str(&format!("\n\nDetails: {}", err));
+    msg.push_str("\n\nHint: Check indentation and ensure proper YAML syntax");
+
+    msg
+}
+
+/// Format a JSON error with helpful context
+fn format_json_error(path: &Path, err: &serde_json::Error) -> String {
+    let mut msg = format!("Invalid JSON in '{}'", path.display());
+
+    msg.push_str(&format!(
+        "\n\nError at line {}, column {}",
+        err.line(),
+        err.column()
+    ));
+
+    msg.push_str(&format!("\n\nDetails: {}", err));
+    msg.push_str("\n\nHint: Check for missing commas, unclosed brackets, or trailing commas");
+
+    msg
+}
+
+/// Extract the unknown field name from a TOML error message
+fn extract_unknown_field(err_str: &str) -> Option<String> {
+    // Pattern: "unknown field `fieldname`"
+    if let Some(start) = err_str.find("unknown field `") {
+        let remaining = &err_str[start + 15..];
+        if let Some(end) = remaining.find('`') {
+            return Some(remaining[..end].to_string());
+        }
+    }
+    None
+}
+
+/// Find a similar field name using Levenshtein distance
+fn find_similar_field(input: &str, candidates: &[&str]) -> Option<String> {
+    let input_lower = input.to_lowercase();
+    let mut best_match = None;
+    let mut best_distance = usize::MAX;
+
+    for &candidate in candidates {
+        let distance = levenshtein_distance(&input_lower, &candidate.to_lowercase());
+        // Only suggest if the distance is small (max 3 edits)
+        if distance < best_distance && distance <= 3 {
+            best_distance = distance;
+            best_match = Some(candidate.to_string());
+        }
+    }
+
+    best_match
+}
+
+/// Calculate Levenshtein distance between two strings
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let m = a_chars.len();
+    let n = b_chars.len();
+
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+
+    let mut dp = vec![vec![0usize; n + 1]; m + 1];
+
+    for i in 0..=m {
+        dp[i][0] = i;
+    }
+    for j in 0..=n {
+        dp[0][j] = j;
+    }
+
+    for i in 1..=m {
+        for j in 1..=n {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
+            dp[i][j] = (dp[i - 1][j] + 1)
+                .min(dp[i][j - 1] + 1)
+                .min(dp[i - 1][j - 1] + cost);
+        }
+    }
+
+    dp[m][n]
+}
+
+/// Get a helpful hint based on the error type
+fn get_toml_hint(err_str: &str) -> &'static str {
+    if err_str.contains("expected") && err_str.contains("found") {
+        "Check the value type - strings need quotes, arrays use [], tables use [section]"
+    } else if err_str.contains("missing field") {
+        "Some required fields may be missing from your configuration"
+    } else if err_str.contains("duplicate key") {
+        "Remove the duplicate field definition"
+    } else if err_str.contains("invalid type") {
+        "Check that the value type matches what's expected (string, number, boolean, array, etc.)"
+    } else if err_str.contains("unknown field") {
+        "Check spelling or remove the unrecognized field"
+    } else {
+        "Run 'linthis init' to generate a valid configuration file"
     }
 }
 

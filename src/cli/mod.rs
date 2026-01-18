@@ -14,6 +14,7 @@
 //! linthis CLI application.
 
 mod commands;
+mod doctor;
 mod helpers;
 mod hook;
 mod init;
@@ -21,6 +22,7 @@ mod plugin;
 mod runner;
 
 pub use commands::{Cli, Commands};
+pub use doctor::handle_doctor_command;
 pub use helpers::{find_latest_result_file, print_fix_hint, run_benchmark, strip_ansi_codes};
 pub use hook::handle_hook_command;
 pub use init::{handle_config_command, handle_init_command, init_linter_configs};

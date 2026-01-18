@@ -84,6 +84,18 @@ pub enum PluginError {
 
 pub type Result<T> = std::result::Result<T, PluginError>;
 
+impl From<crate::LintisError> for PluginError {
+    fn from(err: crate::LintisError) -> Self {
+        match err {
+            crate::LintisError::Io(e) => PluginError::Io(e),
+            crate::LintisError::Config(msg) => PluginError::ConfigError { message: msg },
+            _ => PluginError::ConfigError {
+                message: err.to_string(),
+            },
+        }
+    }
+}
+
 /// Plugin source specification from config or CLI
 #[derive(Debug, Clone)]
 pub struct PluginSource {
