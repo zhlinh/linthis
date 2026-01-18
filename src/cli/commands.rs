@@ -235,6 +235,23 @@ pub enum Commands {
         #[arg(short, long, default_value = "human")]
         output: String,
     },
+    /// Start the Language Server Protocol (LSP) server
+    ///
+    /// The LSP server provides real-time linting diagnostics to editors
+    /// like VS Code, Neovim, and other LSP-compatible clients.
+    ///
+    /// Example usage:
+    ///   linthis lsp              # Start in stdio mode (default)
+    ///   linthis lsp --mode tcp   # Start in TCP mode on port 9257
+    Lsp {
+        /// Communication mode: stdio (default) or tcp
+        #[arg(long, default_value = "stdio")]
+        mode: String,
+
+        /// TCP port (only used when mode is tcp)
+        #[arg(long, default_value = "9257")]
+        port: u16,
+    },
 }
 
 /// Hook subcommands

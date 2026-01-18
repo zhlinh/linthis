@@ -17,6 +17,7 @@ pub mod config;
 pub mod fixers;
 pub mod formatters;
 pub mod interactive;
+pub mod lsp;
 pub mod plugin;
 pub mod presets;
 pub mod self_update;
