@@ -25,6 +25,7 @@ use cli::{
     run_benchmark, strip_ansi_codes, Cli, Commands, PathCollectionOptions, PathCollectionResult,
 };
 use linthis::interactive::run_interactive;
+use linthis::lsp::{run_lsp_server, LspMode};
 use linthis::utils::output::{format_result_with_hook_type, OutputFormat};
 use linthis::{run, Language, RunMode, RunOptions};
 
@@ -61,6 +62,34 @@ fn main() -> ExitCode {
     // Handle cache subcommand
     if let Some(Commands::Cache { action }) = cli.command {
         return handle_cache_command(action);
+    }
+
+    // Handle lsp subcommand
+    if let Some(Commands::Lsp { mode, port }) = cli.command {
+        let lsp_mode = match mode.parse::<LspMode>() {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("{}: {}", "Error".red(), e);
+                return ExitCode::from(1);
+            }
+        };
+
+        // Run LSP server using tokio runtime
+        let runtime = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("{}: Failed to create async runtime: {}", "Error".red(), e);
+                return ExitCode::from(1);
+            }
+        };
+
+        match runtime.block_on(run_lsp_server(lsp_mode, port)) {
+            Ok(_) => return ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{}: LSP server error: {}", "Error".red(), e);
+                return ExitCode::from(1);
+            }
+        }
     }
 
     // Handle --clear-cache flag
