@@ -1,22 +1,22 @@
-# 全局 Git Hook 模板
+# Global Git Hook Template
 
-## 概述
+## Overview
 
-linthis 支持创建全局 Git hook 模板，让所有新创建的 Git 仓库自动包含 linthis pre-commit hook，实现"一次配置，终身受益"。
+linthis supports creating global Git hook templates, allowing all newly created Git repositories to automatically include linthis pre-commit hooks - "configure once, benefit forever".
 
-## 快速开始
+## Quick Start
 
-### 1. 创建全局 hook 模板
+### 1. Create Global Hook Template
 
 ```bash
-# 创建全局配置 + Git hook 模板
+# Create global config + Git hook template
 linthis init -g --hook-type git
 
-# 或者简写（-g 默认创建 git hook 模板）
+# Or shorthand (-g defaults to git hook template)
 linthis init -g
 ```
 
-输出：
+Output:
 ```
 ✓ Created /Users/username/.linthis/config.toml
 ✓ Created /Users/username/.linthis/.git-template/hooks/pre-commit
@@ -29,57 +29,53 @@ Next steps:
   • Or manually copy the hook to .git/hooks/pre-commit
 ```
 
-### 2. 自动生效
+### 2. Automatic Application
 
-创建新仓库时，hook 会自动包含：
+When creating new repositories, hooks are automatically included:
 
 ```bash
-# 创建新仓库
+# Create new repository
 mkdir my-project
 cd my-project
 git init
 
-# hook 已经自动创建
-ls .git/hooks/pre-commit  # ✓ 存在
+# Hook is already created
+ls .git/hooks/pre-commit  # ✓ exists
 ```
 
-### 3. 应用到现有仓库
+### 3. Apply to Existing Repositories
 
-对于已存在的仓库，运行 `git init` 重新应用模板：
+For existing repositories, run `git init` to reapply the template:
 
 ```bash
 cd existing-project
-git init  # 会复制模板中的 hooks
+git init  # Copies template hooks
 ```
 
-## 详细说明
+## Directory Structure
 
-### 目录结构
-
-全局 hook 模板存放在：
+Global hook template is stored at:
 ```
 ~/.linthis/
-├── config.toml              # 全局配置
-└── .git-template/           # Git 模板目录
+├── config.toml              # Global config
+└── .git-template/           # Git template directory
     └── hooks/
-        └── pre-commit       # pre-commit hook 模板
+        └── pre-commit       # Pre-commit hook template
 ```
 
-### Git 配置
+## Git Configuration
 
-linthis 会自动配置 Git 全局设置：
+linthis automatically configures Git global settings:
 
 ```bash
-# 查看配置
+# View configuration
 git config --global --get init.templateDir
-# 输出: /Users/username/.linthis/.git-template
+# Output: /Users/username/.linthis/.git-template
 ```
 
-这个配置让 `git init` 和 `git clone` 自动应用模板。
+This setting makes `git init` and `git clone` automatically apply the template.
 
-### Hook 内容
-
-默认创建的 hook 内容：
+## Default Hook Content
 
 ```bash
 #!/bin/sh
@@ -87,213 +83,213 @@ git config --global --get init.templateDir
 linthis -s -c -f -w
 ```
 
-参数说明：
-- `-s`: 仅检查暂存文件
-- `-c`: 运行检查
-- `-f`: 运行格式化
-- `-w`: 警告视为错误（严格模式）
+Parameters:
+- `-s`: Check staged files only
+- `-c`: Run checks
+- `-f`: Run formatting
+- `-w`: Treat warnings as errors (strict mode)
 
-## 高级用法
+## Advanced Usage
 
-### 自定义 Hook 行为
+### Custom Hook Behavior
 
-#### 仅检查模式
+#### Check-Only Mode
 
 ```bash
 linthis init -g --hook-type git --hook-check-only
 ```
 
-生成的 hook：
+Generated hook:
 ```bash
 #!/bin/sh
 # linthis pre-commit hook (global template)
 linthis -s -c -w
 ```
 
-#### 仅格式化模式
+#### Format-Only Mode
 
 ```bash
 linthis init -g --hook-type git --hook-format-only
 ```
 
-生成的 hook：
+Generated hook:
 ```bash
 #!/bin/sh
 # linthis pre-commit hook (global template)
 linthis -s -f -w
 ```
 
-### 强制覆盖
+### Force Overwrite
 
-如果模板已存在，使用 `--force` 覆盖：
+If template already exists, use `--force` to overwrite:
 
 ```bash
 linthis init -g --hook-type git --force
 ```
 
-### 禁用 Hook 创建
+### Disable Hook Creation
 
-只创建全局配置，不创建 hook 模板：
+Create only global config without hook template:
 
 ```bash
 linthis init -g --no-hook
 ```
 
-## 与项目级 Hook 的区别
+## Global vs Project-Level Hooks
 
-| 特性 | 全局模板 (`-g`) | 项目级 Hook |
-|------|----------------|-------------|
-| 作用范围 | 所有新仓库 | 当前项目 |
-| 配置位置 | `~/.linthis/.git-template/` | `.git/hooks/` |
-| 可提交到仓库 | ❌ 否 | ❌ 否（.git 不被跟踪） |
-| 团队共享 | ❌ 否 | 需要 prek/pre-commit |
-| 适用场景 | 个人开发环境 | 单个项目 |
+| Feature | Global Template (`-g`) | Project-Level Hook |
+|---------|------------------------|-------------------|
+| Scope | All new repositories | Current project only |
+| Location | `~/.linthis/.git-template/` | `.git/hooks/` |
+| Committable | No | No (.git not tracked) |
+| Team sharing | No | Requires prek/pre-commit |
+| Use case | Personal dev environment | Single project |
 
-## 团队协作建议
+## Team Collaboration Recommendations
 
-### 个人开发者
+### Individual Developers
 
-使用全局模板：
+Use global template:
 ```bash
 linthis init -g
 ```
 
-### 团队项目
+### Team Projects
 
-使用 prek 或 pre-commit（配置可提交）：
+Use prek or pre-commit (config is committable):
 
 ```bash
-# 在项目目录
+# In project directory
 linthis init --hook-type prek
-# 或
+# Or
 linthis init --hook-type pre-commit
 ```
 
-这样配置文件可以提交到仓库，团队成员共享。
+This way, config files can be committed to the repository for team sharing.
 
-## 常见问题
+## FAQ
 
-### Q1: 如何卸载全局 hook 模板？
+### Q1: How to uninstall global hook template?
 
 ```bash
-# 删除模板目录
+# Delete template directory
 rm -rf ~/.linthis/.git-template
 
-# 取消 git 配置
+# Unset git config
 git config --global --unset init.templateDir
 ```
 
-### Q2: 现有仓库不想使用这个 hook 怎么办？
+### Q2: How to skip linthis for certain repositories?
 
-**方法 1**（推荐）：不创建 linthis 配置文件
+**Method 1** (Recommended): Don't create linthis config file
 
-Hook 会自动检测，如果项目没有 linthis 配置文件，就不会运行 linthis。
+The hook auto-detects; if no linthis config exists, linthis won't run.
 
-**方法 2**：删除 hook
+**Method 2**: Delete the hook
 
 ```bash
-# 删除项目中的 hook
+# Delete hook in project
 cd my-project
 rm .git/hooks/pre-commit
 ```
 
-### Q3: 可以同时使用全局模板和项目级 prek 吗？
+### Q3: Can I use both global template and project-level prek?
 
-可以，但不推荐。建议：
-- 个人项目：使用全局模板
-- 团队项目：使用项目级 prek/pre-commit
+Yes, but not recommended. Suggested approach:
+- Personal projects: Use global template
+- Team projects: Use project-level prek/pre-commit
 
-### Q4: hook 不执行怎么办？
+### Q4: Hook not executing?
 
-检查权限：
+Check permissions:
 ```bash
 ls -l ~/.linthis/.git-template/hooks/pre-commit
-# 应该显示 -rwxr-xr-x (可执行)
+# Should show -rwxr-xr-x (executable)
 
-# 如果不可执行，手动设置
+# If not executable, set manually
 chmod +x ~/.linthis/.git-template/hooks/pre-commit
 ```
 
-### Q5: 为什么 `-g --hook-type prek` 会警告？
+### Q5: Why does `-g --hook-type prek` show a warning?
 
-全局模板只支持 git hook 类型，因为：
-- prek/pre-commit 需要在项目目录运行 `prek install`
-- 它们的配置文件（.pre-commit-config.yaml）是项目级的
+Global template only supports git hook type because:
+- prek/pre-commit requires running `prek install` in project directory
+- Their config files (.pre-commit-config.yaml) are project-level
 
-如果需要 prek/pre-commit，请在项目目录使用：
+For prek/pre-commit, use in project directory:
 ```bash
 linthis init --hook-type prek
 ```
 
-### Q6: 如何与其他 hook 工具（husky、pre-commit）共存？
+### Q6: How to coexist with other hook tools (husky, pre-commit)?
 
-**方案 1**：使用 `.git/hooks/pre-commit.local`
+**Option 1**: Use `.git/hooks/pre-commit.local`
 
-全局 hook 会自动链式调用 `.local` 文件：
+Global hook automatically chains to `.local` file:
 
 ```bash
-# 将其他工具的命令放到 .local 文件
+# Put other tool commands in .local file
 cat > .git/hooks/pre-commit.local << 'EOF'
 #!/bin/sh
-# 运行其他检查
+# Run other checks
 npm run lint
 pytest
 EOF
 chmod +x .git/hooks/pre-commit.local
 ```
 
-执行顺序：
-1. linthis（如果有配置）
-2. .local 中的命令
+Execution order:
+1. linthis (if config exists)
+2. Commands in .local
 
-**方案 2**：禁用全局 hook，使用工具自己的 hook
+**Option 2**: Disable global hook, use tool's own hook
 
 ```bash
-# 项目中不创建 linthis 配置
-# 全局 hook 会自动跳过，不影响其他工具
+# Don't create linthis config in project
+# Global hook will skip, won't affect other tools
 ```
 
-### Q7: 会不会影响不使用 linthis 的项目？
+### Q7: Will it affect projects not using linthis?
 
-**不会！** Hook 使用智能检测：
+**No!** Hook uses smart detection:
 
-- 只有存在 linthis 配置文件时才运行
-- 没有配置文件的项目完全不受影响
-- 测试验证：创建新项目不添加 linthis 配置，hook 不会执行任何 linthis 命令
+- Only runs if linthis config file exists
+- Projects without config are completely unaffected
+- Verified: Creating new project without linthis config, hook doesn't execute any linthis commands
 
-## 智能执行机制
+## Smart Execution Mechanism
 
-全局 hook 模板使用**智能条件执行**，不会干扰其他项目：
+The global hook template uses **smart conditional execution**, never interfering with other projects:
 
-### 工作流程
+### Workflow
 
-1. **创建模板**：linthis 在 `~/.linthis/.git-template/hooks/` 创建智能 pre-commit
-2. **配置 Git**：设置 `git config --global init.templateDir`
-3. **自动应用**：`git init` 时 Git 会复制模板目录的内容到 `.git/`
-4. **Hook 执行**：提交时 Git 自动运行 `.git/hooks/pre-commit`
+1. **Create template**: linthis creates smart pre-commit in `~/.linthis/.git-template/hooks/`
+2. **Configure Git**: Sets `git config --global init.templateDir`
+3. **Auto-apply**: `git init` copies template directory content to `.git/`
+4. **Hook execution**: Git automatically runs `.git/hooks/pre-commit` on commit
 
-### 智能检测逻辑
+### Smart Detection Logic
 
-Hook 会按以下顺序执行：
+Hook executes in this order:
 
 ```bash
-1. 检查项目是否有 linthis 配置文件：
+1. Check if project has linthis config:
    - .linthis/config.toml
    - .linthis.toml
    - linthis.toml
 
-2. 如果有配置 → 运行 linthis
-   如果没有配置 → 跳过 linthis（不影响项目）
+2. If config exists → Run linthis
+   If no config → Skip linthis (no impact)
 
-3. 检查是否有项目特定 hook：
+3. Check for project-specific hook:
    - .git/hooks/pre-commit.local
 
-4. 如果存在 → 链式调用执行
+4. If exists → Chain execute
 ```
 
-### Hook 源码
+### Hook Source Code
 
-生成的智能 hook 内容：
+Generated smart hook content:
 
 ```bash
 #!/bin/sh
@@ -313,60 +309,60 @@ if [ -f ".git/hooks/pre-commit.local" ]; then
 fi
 ```
 
-### 场景示例
+## Usage Scenarios
 
-#### 场景 1：使用 linthis 的项目
+### Scenario 1: Project Using linthis
 
 ```bash
 my-rust-project/
 ├── .linthis/
-│   └── config.toml     # ✓ 有配置文件
+│   └── config.toml     # ✓ Has config
 └── .git/
     └── hooks/
-        └── pre-commit  # 会运行 linthis
+        └── pre-commit  # Will run linthis
 ```
 
-**结果**：提交时自动运行 linthis 检查和格式化
+**Result**: Automatically runs linthis check and format on commit
 
-#### 场景 2：不使用 linthis 的项目
+### Scenario 2: Project Not Using linthis
 
 ```bash
 other-project/
 └── .git/
     └── hooks/
-        └── pre-commit  # ✗ 没有 linthis 配置
+        └── pre-commit  # ✗ No linthis config
 ```
 
-**结果**：hook 跳过 linthis，不影响项目
+**Result**: Hook skips linthis, no impact on project
 
-#### 场景 3：有额外 hook 需求的项目
+### Scenario 3: Project with Additional Hook Needs
 
 ```bash
 complex-project/
 ├── .linthis/
-│   └── config.toml       # ✓ 有配置文件
+│   └── config.toml       # ✓ Has config
 └── .git/
     └── hooks/
-        ├── pre-commit        # 运行 linthis
-        └── pre-commit.local  # 然后运行这个
+        ├── pre-commit        # Runs linthis
+        └── pre-commit.local  # Then runs this
 ```
 
-**结果**：先运行 linthis，再运行项目特定的检查
+**Result**: Runs linthis first, then project-specific checks
 
-#### 场景 4：使用其他 hook 工具的项目
+### Scenario 4: Project Using Other Hook Tools
 
-如果项目使用 husky、pre-commit 等工具：
+If project uses husky, pre-commit, etc.:
 
 ```bash
-# 方案 1：移除全局 hook，使用工具自己的 hook
+# Option 1: Remove global hook, use tool's own hook
 rm .git/hooks/pre-commit
-# 然后 husky/pre-commit 会创建自己的 hook
+# Then husky/pre-commit will create its own hook
 
-# 方案 2：将工具的命令放到 pre-commit.local
+# Option 2: Put tool commands in pre-commit.local
 mv .git/hooks/pre-commit .git/hooks/pre-commit.backup
-# 创建 pre-commit.local 调用其他工具
+# Create pre-commit.local to call other tools
 ```
 
-## 参考
+## References
 
-- [Git 文档 - init.templateDir](https://git-scm.com/docs/git-init#_template_directory)
+- [Git documentation - init.templateDir](https://git-scm.com/docs/git-init#_template_directory)
