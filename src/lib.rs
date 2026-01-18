@@ -20,6 +20,7 @@ pub mod interactive;
 pub mod lsp;
 pub mod plugin;
 pub mod presets;
+pub mod reports;
 pub mod self_update;
 pub mod templates;
 pub mod utils;

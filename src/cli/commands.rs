@@ -252,6 +252,21 @@ pub enum Commands {
         #[arg(long, default_value = "9257")]
         port: u16,
     },
+    /// Generate reports and analyze lint results
+    ///
+    /// Generate HTML reports, view statistics, analyze trends over time,
+    /// and check code consistency across your codebase.
+    ///
+    /// Example usage:
+    ///   linthis report stats              # Show statistics from last run
+    ///   linthis report html               # Generate HTML report
+    ///   linthis report html --with-trends # Include trend analysis
+    ///   linthis report trends -n 20       # Analyze last 20 runs
+    ///   linthis report consistency        # Check code consistency
+    Report {
+        #[command(subcommand)]
+        action: ReportCommands,
+    },
 }
 
 /// Hook subcommands
@@ -492,4 +507,69 @@ pub enum CacheCommands {
     Clear,
     /// Show cache statistics
     Status,
+}
+
+/// Report subcommands
+#[derive(clap::Subcommand, Debug)]
+pub enum ReportCommands {
+    /// Generate an HTML report from lint results
+    ///
+    /// Creates a self-contained HTML file with charts, statistics,
+    /// and detailed issue listings. Optionally includes trend analysis.
+    Html {
+        /// Source of lint results: "last" (default), "current", or a file path
+        #[arg(default_value = "last")]
+        source: String,
+
+        /// Output file path (default: .linthis/reports/report-{timestamp}.html)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Include historical trend analysis in the report
+        #[arg(long)]
+        with_trends: bool,
+
+        /// Number of historical runs to include in trends (default: 10)
+        #[arg(short = 'n', long, default_value = "10")]
+        trend_count: usize,
+    },
+    /// Show statistics from lint results
+    ///
+    /// Displays issue counts by severity, language, tool, and rule.
+    /// Also shows top problematic files and summary metrics.
+    Stats {
+        /// Source of lint results: "last" (default), "current", or a file path
+        #[arg(default_value = "last")]
+        source: String,
+
+        /// Output format: human (default), json
+        #[arg(short, long, default_value = "human")]
+        format: String,
+    },
+    /// Analyze code quality trends over time
+    ///
+    /// Examines historical lint results to identify trends in code quality.
+    /// Shows whether issues are improving, stable, or degrading.
+    Trends {
+        /// Number of historical runs to analyze (default: 10)
+        #[arg(short = 'n', long, default_value = "10")]
+        count: usize,
+
+        /// Output format: human (default), json
+        #[arg(short, long, default_value = "human")]
+        format: String,
+    },
+    /// Analyze team code style consistency
+    ///
+    /// Identifies repeated patterns, outlier files, and systematic issues
+    /// to help improve code consistency across the codebase.
+    Consistency {
+        /// Source of lint results: "last" (default), "current", or a file path
+        #[arg(default_value = "last")]
+        source: String,
+
+        /// Output format: human (default), json
+        #[arg(short, long, default_value = "human")]
+        format: String,
+    },
 }
