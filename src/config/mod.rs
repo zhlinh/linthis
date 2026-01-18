@@ -19,6 +19,7 @@
 //! 4. Built-in defaults (lowest)
 
 pub mod cli;
+pub mod migrate;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
