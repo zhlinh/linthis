@@ -16,7 +16,7 @@
 use colored::Colorize;
 use std::process::ExitCode;
 
-use super::commands::{ConfigCommands, HookCommands};
+use super::commands::{ConfigCommands, HookCommands, HookEvent};
 use super::handle_hook_command;
 
 /// Handle config subcommands
@@ -119,11 +119,12 @@ pub fn handle_init_command(
             // Install hook for project
             println!();
             let exit_code = handle_hook_command(HookCommands::Install {
-                hook_type: None,   // Use default hook type (Git)
-                check_only: false, // Not check-only
-                format_only: false, // Not format-only
-                force,             // Use force flag from init
-                yes: true,         // Non-interactive mode
+                hook_type: None,           // Use default hook type (Git)
+                hook_event: HookEvent::PreCommit, // Default to pre-commit hook
+                check_only: false,         // Not check-only
+                format_only: false,        // Not format-only
+                force,                     // Use force flag from init
+                yes: true,                 // Non-interactive mode
             });
             if exit_code != ExitCode::SUCCESS {
                 return exit_code;

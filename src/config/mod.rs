@@ -74,6 +74,10 @@ pub struct Config {
     /// Performance settings
     #[serde(default)]
     pub performance: PerformanceConfig,
+
+    /// Git hooks settings
+    #[serde(default)]
+    pub hooks: HooksConfig,
 }
 
 /// Plugin configuration section
@@ -134,6 +138,50 @@ fn default_large_file_threshold() -> u64 {
 
 fn default_cache_max_age_days() -> u32 {
     7
+}
+
+/// Git hooks configuration section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HooksConfig {
+    /// Hook timeout in seconds (default: 60)
+    #[serde(default = "default_hook_timeout")]
+    pub timeout: u32,
+    /// Enable parallel execution in hooks (default: true)
+    #[serde(default = "default_hook_parallel")]
+    pub parallel: bool,
+    /// Commit message validation pattern (conventional commits by default)
+    #[serde(default = "default_commit_msg_pattern")]
+    pub commit_msg_pattern: String,
+    /// Require ticket reference in commit messages (e.g., [JIRA-123])
+    #[serde(default)]
+    pub require_ticket: bool,
+    /// Ticket pattern regex (e.g., r"\[\w+-\d+\]")
+    #[serde(default)]
+    pub ticket_pattern: Option<String>,
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            timeout: default_hook_timeout(),
+            parallel: default_hook_parallel(),
+            commit_msg_pattern: default_commit_msg_pattern(),
+            require_ticket: false,
+            ticket_pattern: None,
+        }
+    }
+}
+
+fn default_hook_timeout() -> u32 {
+    60 // 60 seconds
+}
+
+fn default_hook_parallel() -> bool {
+    true
+}
+
+fn default_commit_msg_pattern() -> String {
+    r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}".to_string()
 }
 
 /// Source path configuration (CodeCC compatibility)

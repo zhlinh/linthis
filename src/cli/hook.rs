@@ -17,16 +17,16 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use super::commands::{HookCommands, HookTool};
+use super::commands::{HookCommands, HookEvent, HookTool};
 
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
-        HookCommands::Install { hook_type, check_only, format_only, force, yes } => {
-            handle_hook_install(hook_type, check_only, format_only, force, yes)
+        HookCommands::Install { hook_type, hook_event, check_only, format_only, force, yes } => {
+            handle_hook_install(hook_type, hook_event, check_only, format_only, force, yes)
         }
-        HookCommands::Uninstall { yes } => {
-            handle_hook_uninstall(yes)
+        HookCommands::Uninstall { hook_event, all, yes } => {
+            handle_hook_uninstall(hook_event, all, yes)
         }
         HookCommands::Status => {
             handle_hook_status()
@@ -34,12 +34,16 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
         HookCommands::Check => {
             handle_hook_check()
         }
+        HookCommands::CommitMsgCheck { msg_file } => {
+            handle_commit_msg_check(&msg_file)
+        }
     }
 }
 
-/// Install git pre-commit hook
+/// Install git hook (pre-commit, pre-push, or commit-msg)
 fn handle_hook_install(
     hook_type: Option<HookTool>,
+    hook_event: HookEvent,
     check_only: bool,
     format_only: bool,
     force: bool,
@@ -57,7 +61,8 @@ fn handle_hook_install(
         }
     };
 
-    let hook_path = git_root.join(".git/hooks/pre-commit");
+    let hook_filename = hook_event.hook_filename();
+    let hook_path = git_root.join(".git/hooks").join(hook_filename);
 
     // Check for existing hook
     if hook_path.exists() && !force {
@@ -100,30 +105,30 @@ fn handle_hook_install(
                 match choice.trim() {
                     "1" => {
                         // Replace: use force flag internally
-                        return handle_hook_install_impl(hook_type, check_only, format_only, true, false);
+                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, true, false);
                     }
                     "2" => {
                         // Append
-                        return handle_hook_install_impl(hook_type, check_only, format_only, false, true);
+                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, false, true);
                     }
                     "3" => {
                         // Backup and replace
-                        let backup_path = hook_path.with_extension("pre-commit.backup");
+                        let backup_path = hook_path.with_extension(format!("{}.backup", hook_filename));
                         if let Err(e) = std::fs::copy(&hook_path, &backup_path) {
                             eprintln!("{}: Failed to create backup: {}", "Error".red(), e);
                             return ExitCode::from(2);
                         }
                         println!("{} Created backup at {}", "✓".green(), backup_path.display());
-                        return handle_hook_install_impl(hook_type, check_only, format_only, true, false);
+                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, true, false);
                     }
-                    "4" | _ => {
+                    _ => {
                         println!("Installation cancelled");
                         return ExitCode::SUCCESS;
                     }
                 }
             } else {
                 // Non-interactive mode: append by default
-                return handle_hook_install_impl(hook_type, check_only, format_only, false, true);
+                return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, false, true);
             }
         }
 
@@ -132,12 +137,13 @@ fn handle_hook_install(
     }
 
     // No existing hook or force mode - create new hook
-    handle_hook_install_impl(hook_type, check_only, format_only, force, false)
+    handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, force, false)
 }
 
 /// Internal implementation of hook installation
 fn handle_hook_install_impl(
     hook_type: Option<HookTool>,
+    hook_event: &HookEvent,
     check_only: bool,
     format_only: bool,
     force: bool,
@@ -148,13 +154,11 @@ fn handle_hook_install_impl(
     // For append mode, we need to modify create_hook_config to support appending
     if append {
         // For now, use create_hook_config which already handles appending for git hooks
-        if let Err(exit_code) = create_hook_config(&tool, check_only, format_only, false) {
+        if let Err(exit_code) = create_hook_config(&tool, hook_event, check_only, format_only, false) {
             return exit_code;
         }
-    } else {
-        if let Err(exit_code) = create_hook_config(&tool, check_only, format_only, force) {
-            return exit_code;
-        }
+    } else if let Err(exit_code) = create_hook_config(&tool, hook_event, check_only, format_only, force) {
+        return exit_code;
     }
 
     ExitCode::SUCCESS
@@ -171,43 +175,49 @@ fn handle_hook_status() -> ExitCode {
         }
     };
 
-    let hook_path = git_root.join(".git/hooks/pre-commit");
     let prek_config = std::path::Path::new(".pre-commit-config.yaml");
 
     println!("{}", "Git Hook Status".bold());
     println!("Repository: {}", git_root.display());
     println!();
 
-    // Check pre-commit hook
-    if hook_path.exists() {
-        println!("{} {}", "✓".green(), hook_path.display());
+    // Check all hook types
+    let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
+    let mut any_hook_installed = false;
 
-        if let Ok(content) = std::fs::read_to_string(&hook_path) {
-            let has_linthis = content.contains("linthis");
-            let has_prek = content.contains("prek");
-            let has_precommit = content.contains("pre-commit");
-            let has_husky = content.contains("husky");
+    for event in &hook_events {
+        let hook_path = git_root.join(".git/hooks").join(event.hook_filename());
 
-            println!("\nHook contains:");
-            if has_linthis {
-                println!("  {} linthis", "✓".green());
-            }
-            if has_prek {
-                println!("  {} prek", "ℹ".cyan());
-            }
-            if has_precommit {
-                println!("  {} pre-commit", "ℹ".cyan());
-            }
-            if has_husky {
-                println!("  {} husky", "ℹ".cyan());
-            }
+        if hook_path.exists() {
+            any_hook_installed = true;
+            println!("{} {} ({})", "✓".green(), event.hook_filename(), event.description());
 
-            if !has_linthis && !has_prek && !has_precommit && !has_husky {
-                println!("  {} Custom hook", "ℹ".cyan());
+            if let Ok(content) = std::fs::read_to_string(&hook_path) {
+                let has_linthis = content.contains("linthis");
+                let has_prek = content.contains("prek");
+                let has_precommit = content.contains("pre-commit");
+                let has_husky = content.contains("husky");
+
+                if has_linthis {
+                    println!("    {} linthis", "✓".green());
+                }
+                if has_prek {
+                    println!("    {} prek", "ℹ".cyan());
+                }
+                if has_precommit {
+                    println!("    {} pre-commit", "ℹ".cyan());
+                }
+                if has_husky {
+                    println!("    {} husky", "ℹ".cyan());
+                }
+
+                if !has_linthis && !has_prek && !has_precommit && !has_husky {
+                    println!("    {} Custom hook", "ℹ".cyan());
+                }
             }
+        } else {
+            println!("{} {} (not installed)", "✗".red(), event.hook_filename());
         }
-    } else {
-        println!("{} No pre-commit hook installed", "✗".red());
     }
 
     // Check for prek/pre-commit config
@@ -223,22 +233,27 @@ fn handle_hook_status() -> ExitCode {
         }
     }
 
-    println!("\n{}", "Next steps:".bold());
-    if !hook_path.exists() {
-        println!("  Run {} to install hook", "linthis hook install".cyan());
-    } else if let Ok(content) = std::fs::read_to_string(&hook_path) {
-        if !content.contains("linthis") {
-            println!("  Run {} to add linthis to existing hook", "linthis hook install".cyan());
-        }
+    println!("\n{}", "Available hooks:".bold());
+    println!("  {} - runs before each commit", "pre-commit".cyan());
+    println!("  {} - runs before push to remote", "pre-push".cyan());
+    println!("  {} - validates commit message format", "commit-msg".cyan());
+
+    println!("\n{}", "Commands:".bold());
+    if !any_hook_installed {
+        println!("  Install pre-commit:  {}", "linthis hook install".cyan());
+        println!("  Install pre-push:    {}", "linthis hook install --hook pre-push".cyan());
+        println!("  Install commit-msg:  {}", "linthis hook install --hook commit-msg".cyan());
+    } else {
+        println!("  Install hook:   {}", "linthis hook install --hook <hook-type>".cyan());
+        println!("  Uninstall hook: {}", "linthis hook uninstall --hook <hook-type>".cyan());
+        println!("  Uninstall all:  {}", "linthis hook uninstall --all".cyan());
     }
 
     ExitCode::SUCCESS
 }
 
-/// Uninstall git pre-commit hook
-fn handle_hook_uninstall(yes: bool) -> ExitCode {
-    use std::io::{self, Write};
-
+/// Uninstall git hook (specific event or all)
+fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool) -> ExitCode {
     // Find git root
     let git_root = match find_git_root() {
         Some(root) => root,
@@ -248,11 +263,38 @@ fn handle_hook_uninstall(yes: bool) -> ExitCode {
         }
     };
 
-    let hook_path = git_root.join(".git/hooks/pre-commit");
+    if all {
+        // Uninstall all hooks
+        let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
+        let mut any_uninstalled = false;
+
+        for event in &hook_events {
+            let result = uninstall_single_hook(&git_root, event, yes);
+            if result == ExitCode::SUCCESS {
+                any_uninstalled = true;
+            }
+        }
+
+        if !any_uninstalled {
+            println!("{}: No hooks with linthis found", "Info".cyan());
+        }
+
+        return ExitCode::SUCCESS;
+    }
+
+    // Uninstall specific hook (default to pre-commit)
+    let event = hook_event.unwrap_or(HookEvent::PreCommit);
+    uninstall_single_hook(&git_root, &event, yes)
+}
+
+/// Uninstall a single hook
+fn uninstall_single_hook(git_root: &std::path::Path, hook_event: &HookEvent, yes: bool) -> ExitCode {
+    use std::io::{self, Write};
+
+    let hook_path = git_root.join(".git/hooks").join(hook_event.hook_filename());
 
     if !hook_path.exists() {
-        println!("{}: No pre-commit hook found", "Info".cyan());
-        return ExitCode::SUCCESS;
+        return ExitCode::from(1); // Not an error, just not installed
     }
 
     // Read existing hook
@@ -275,9 +317,7 @@ fn handle_hook_uninstall(yes: bool) -> ExitCode {
         });
 
     if !has_linthis {
-        println!("{}: Hook does not contain linthis", "Info".cyan());
-        println!("  Nothing to uninstall");
-        return ExitCode::SUCCESS;
+        return ExitCode::from(1); // Not an error, just no linthis
     }
 
     if !yes {
@@ -336,7 +376,7 @@ fn handle_hook_uninstall(yes: bool) -> ExitCode {
                 }
                 println!("{} Deleted {}", "✓".green(), hook_path.display());
             }
-            "3" | _ => {
+            _ => {
                 println!("Uninstall cancelled");
                 return ExitCode::SUCCESS;
             }
@@ -354,13 +394,13 @@ fn handle_hook_uninstall(yes: bool) -> ExitCode {
                 eprintln!("{}: Failed to update hook: {}", "Error".red(), e);
                 return ExitCode::from(2);
             }
-            println!("{} Removed linthis from hook", "✓".green());
+            println!("{} Removed linthis from {} hook", "✓".green(), hook_event.hook_filename());
         } else {
             if let Err(e) = std::fs::remove_file(&hook_path) {
                 eprintln!("{}: Failed to delete hook: {}", "Error".red(), e);
                 return ExitCode::from(2);
             }
-            println!("{} Deleted hook", "✓".green());
+            println!("{} Deleted {} hook", "✓".green(), hook_event.hook_filename());
         }
     }
 
@@ -424,12 +464,10 @@ fn handle_hook_check() -> ExitCode {
     // Check for prek/pre-commit config without hook
     if prek_config.exists() {
         if let Ok(content) = std::fs::read_to_string(prek_config) {
-            if content.contains("linthis") {
-                if !hook_path.exists() {
-                    has_conflicts = true;
-                    println!("{} {} exists but no hook installed", "⚠".yellow(), prek_config.display());
-                    warnings.push("Run 'prek install' or 'pre-commit install' to activate hooks");
-                }
+            if content.contains("linthis") && !hook_path.exists() {
+                has_conflicts = true;
+                println!("{} {} exists but no hook installed", "⚠".yellow(), prek_config.display());
+                warnings.push("Run 'prek install' or 'pre-commit install' to activate hooks");
             }
         }
     }
@@ -472,7 +510,7 @@ fn is_command_available(command: &str) -> bool {
 }
 
 /// Install hooks using the specified tool
-fn install_hooks(tool: &HookTool) -> Result<(), String> {
+fn install_hooks(tool: &HookTool, hook_event: &HookEvent) -> Result<(), String> {
     use std::process::Command;
 
     let (cmd, tool_name) = match tool {
@@ -481,8 +519,12 @@ fn install_hooks(tool: &HookTool) -> Result<(), String> {
         HookTool::Git => return Ok(()), // Git hooks don't need install step
     };
 
+    let hook_type_arg = hook_event.hook_filename();
+
     let output = Command::new(cmd)
         .arg("install")
+        .arg("--hook-type")
+        .arg(hook_type_arg)
         .output()
         .map_err(|e| format!("Failed to execute {} install: {}", tool_name, e))?;
 
@@ -514,11 +556,13 @@ pub fn find_git_root() -> Option<PathBuf> {
     }
 }
 
-/// Create hook configuration file based on the selected tool
-fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: bool, force: bool) -> Result<(), ExitCode> {
+/// Create hook configuration file based on the selected tool and event
+fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: bool, hook_format_only: bool, force: bool) -> Result<(), ExitCode> {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    let hook_filename = hook_event.hook_filename();
 
     match tool {
         HookTool::Prek | HookTool::PreCommit => {
@@ -533,25 +577,26 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
                 return Ok(());
             }
 
-            // Build hook command based on options
-            let hook_cmd = if hook_check_only {
-                "linthis -s -c -w"
-            } else if hook_format_only {
-                "linthis -s -f -w"
-            } else {
-                // Default: run both check and format, fail on warnings
-                "linthis -s -c -f -w"
+            // Build hook command based on options and event type
+            let hook_cmd = build_hook_command(hook_event, hook_check_only, hook_format_only);
+
+            // For prek/pre-commit, we need to specify the stage for different hook types
+            let stage = match hook_event {
+                HookEvent::PreCommit => "pre-commit",
+                HookEvent::PrePush => "pre-push",
+                HookEvent::CommitMsg => "commit-msg",
             };
 
             let content = format!(r#"repos:
   - repo: local
     hooks:
-      - id: linthis
-        name: linthis
+      - id: linthis-{}
+        name: linthis ({})
         entry: {}
         language: system
+        stages: [{}]
         pass_filenames: false
-"#, hook_cmd);
+"#, hook_filename, hook_event.description(), hook_cmd, stage);
 
             match fs::write(&config_path, content) {
                 Ok(_) => {
@@ -574,16 +619,16 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
                         print!("{} Installing hooks... ", "→".cyan());
                         std::io::Write::flush(&mut std::io::stdout()).ok();
 
-                        match install_hooks(tool) {
+                        match install_hooks(tool, hook_event) {
                             Ok(_) => {
                                 println!("{}", "✓".green());
-                                println!("\n{} Pre-commit hooks are ready!", "✓".green().bold());
-                                println!("  Hooks will run automatically on {}", "git commit".cyan());
+                                println!("\n{} {} hooks are ready!", "✓".green().bold(), hook_filename);
+                                println!("  Hooks will run automatically on {}", format!("git {}", hook_action(hook_event)).cyan());
                             }
                             Err(e) => {
                                 println!("{}", "✗".red());
                                 eprintln!("{}: {}", "Warning".yellow(), e);
-                                println!("\nPlease run manually: {}", format!("{} install", tool_name).cyan());
+                                println!("\nPlease run manually: {}", format!("{} install --hook-type {}", tool_name, hook_filename).cyan());
                             }
                         }
                     } else {
@@ -592,10 +637,10 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
                         println!("\nNext steps:");
                         if matches!(tool, HookTool::Prek) {
                             println!("  1. Install prek: {}", "pip install prek".cyan());
-                            println!("  2. Set up hooks: {}", "prek install".cyan());
+                            println!("  2. Set up hooks: {}", format!("prek install --hook-type {}", hook_filename).cyan());
                         } else {
                             println!("  1. Install pre-commit: {}", "pip install pre-commit".cyan());
-                            println!("  2. Set up hooks: {}", "pre-commit install".cyan());
+                            println!("  2. Set up hooks: {}", format!("pre-commit install --hook-type {}", hook_filename).cyan());
                         }
                     }
                     Ok(())
@@ -617,15 +662,16 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
                 Some(root) => root,
                 None => {
                     eprintln!(
-                        "{}: Not in a git repository, cannot create .git/hooks/pre-commit",
-                        "Error".red()
+                        "{}: Not in a git repository, cannot create .git/hooks/{}",
+                        "Error".red(),
+                        hook_filename
                     );
                     return Err(ExitCode::from(1));
                 }
             };
 
             let git_hooks_dir = git_root.join(".git/hooks");
-            let hook_path = git_hooks_dir.join("pre-commit");
+            let hook_path = git_hooks_dir.join(hook_filename);
 
             // Create hooks directory if it doesn't exist
             if !git_hooks_dir.exists() {
@@ -640,15 +686,8 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
                 }
             }
 
-            // Build hook command based on options
-            let linthis_hook_line = if hook_check_only {
-                "linthis -s -c -w"
-            } else if hook_format_only {
-                "linthis -s -f -w"
-            } else {
-                // Default: run both check and format, fail on warnings
-                "linthis -s -c -f -w"
-            };
+            // Build hook command based on options and event type
+            let linthis_hook_line = build_hook_command(hook_event, hook_check_only, hook_format_only);
 
             // Check if hook file already exists
             if hook_path.exists() {
@@ -666,7 +705,7 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
                 };
 
                 // Check if linthis is already in the hook
-                if existing_content.contains(linthis_hook_line) {
+                if existing_content.contains(&linthis_hook_line) {
                     println!(
                         "{}: linthis hook already exists in {}",
                         "Info".cyan(),
@@ -681,7 +720,7 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
                     new_content.push('\n');
                 }
                 new_content.push_str("\n# linthis hook\n");
-                new_content.push_str(linthis_hook_line);
+                new_content.push_str(&linthis_hook_line);
                 new_content.push('\n');
 
                 match fs::write(&hook_path, new_content) {
@@ -730,7 +769,7 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
                         {
                             println!("\nNext steps:");
                             println!("  Make sure the hook is executable:");
-                            println!("    {}", "chmod +x .git/hooks/pre-commit".cyan());
+                            println!("    {}", format!("chmod +x .git/hooks/{}", hook_filename).cyan());
                         }
                         Ok(())
                     }
@@ -747,4 +786,146 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
             }
         }
     }
+}
+
+/// Build the linthis command for a hook based on event type and options
+fn build_hook_command(hook_event: &HookEvent, hook_check_only: bool, hook_format_only: bool) -> String {
+    match hook_event {
+        HookEvent::PreCommit => {
+            // For pre-commit: check staged files with hook mode output
+            if hook_check_only {
+                "linthis -s -c -w --hook-mode=pre-commit".to_string()
+            } else if hook_format_only {
+                "linthis -s -f -w --hook-mode=pre-commit".to_string()
+            } else {
+                "linthis -s -c -f -w --hook-mode=pre-commit".to_string()
+            }
+        }
+        HookEvent::PrePush => {
+            // For pre-push: check all files (more comprehensive) with hook mode output
+            if hook_check_only {
+                "linthis -c -w --hook-mode=pre-push".to_string()
+            } else if hook_format_only {
+                "linthis -f -w --hook-mode=pre-push".to_string()
+            } else {
+                "linthis -c -f -w --hook-mode=pre-push".to_string()
+            }
+        }
+        HookEvent::CommitMsg => {
+            // For commit-msg: validate commit message using the msg file passed as $1
+            "linthis hook commit-msg-check \"$1\"".to_string()
+        }
+    }
+}
+
+/// Get the git action for a hook event
+fn hook_action(hook_event: &HookEvent) -> &'static str {
+    match hook_event {
+        HookEvent::PreCommit => "commit",
+        HookEvent::PrePush => "push",
+        HookEvent::CommitMsg => "commit",
+    }
+}
+
+/// Handle commit message validation
+pub fn handle_commit_msg_check(msg_file: &std::path::Path) -> ExitCode {
+    use linthis::config::Config;
+    use regex::Regex;
+    use std::fs;
+
+    // Load config to get hooks settings
+    let project_root = linthis::utils::get_project_root();
+    let config = Config::load_merged(&project_root);
+
+    // Read the commit message from file
+    let commit_msg = match fs::read_to_string(msg_file) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("{}: Failed to read commit message file: {}", "Error".red(), e);
+            return ExitCode::from(1);
+        }
+    };
+
+    // Skip if empty (allows empty commits with --allow-empty-message)
+    let first_line = commit_msg.lines().next().unwrap_or("").trim();
+    if first_line.is_empty() || first_line.starts_with('#') {
+        return ExitCode::SUCCESS;
+    }
+
+    // Use pattern from config
+    let pattern = &config.hooks.commit_msg_pattern;
+
+    let regex = match Regex::new(pattern) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{}: Invalid commit message pattern in config: {}", "Error".red(), e);
+            return ExitCode::from(2);
+        }
+    };
+
+    // Check main pattern
+    if !regex.is_match(first_line) {
+        print_commit_msg_error(first_line);
+        return ExitCode::from(1);
+    }
+
+    // Check for ticket reference if required
+    if config.hooks.require_ticket {
+        let ticket_pattern = config.hooks.ticket_pattern.as_deref()
+            .unwrap_or(r"\[\w+-\d+\]");
+        let ticket_regex = match Regex::new(ticket_pattern) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("{}: Invalid ticket pattern in config: {}", "Error".red(), e);
+                return ExitCode::from(2);
+            }
+        };
+
+        if !ticket_regex.is_match(first_line) {
+            eprintln!("{}", "╭────────────────────────────────────────╮".red());
+            eprintln!("{}", "│ 🔴 Ticket Reference Required          │".red());
+            eprintln!("{}", "├────────────────────────────────────────┤".red());
+            eprintln!("│ Your message:                          │");
+            eprintln!("│   {}", first_line);
+            eprintln!("│                                        │");
+            eprintln!("│ Ticket reference is required.          │");
+            eprintln!("│ Pattern: {}                            │", ticket_pattern);
+            eprintln!("│                                        │");
+            eprintln!("│ Example:                               │");
+            eprintln!("│   feat: [PROJ-123] add feature         │");
+            eprintln!("{}", "├────────────────────────────────────────┤".red());
+            eprintln!("│ To skip this check:                    │");
+            eprintln!("│   git commit --no-verify               │");
+            eprintln!("{}", "╰────────────────────────────────────────╯".red());
+            return ExitCode::from(1);
+        }
+    }
+
+    println!("{} Commit message format is valid", "✓".green());
+    ExitCode::SUCCESS
+}
+
+/// Print commit message validation error
+fn print_commit_msg_error(first_line: &str) {
+    eprintln!("{}", "╭────────────────────────────────────────╮".red());
+    eprintln!("{}", "│ 🔴 Commit Message Validation Failed   │".red());
+    eprintln!("{}", "├────────────────────────────────────────┤".red());
+    eprintln!("│ Your message:                          │");
+    eprintln!("│   {}", first_line);
+    eprintln!("│                                        │");
+    eprintln!("│ Expected format (Conventional Commits):│");
+    eprintln!("│   type(scope)?: description            │");
+    eprintln!("│                                        │");
+    eprintln!("│ Valid types:                           │");
+    eprintln!("│   feat, fix, docs, style, refactor,   │");
+    eprintln!("│   perf, test, build, ci, chore, revert │");
+    eprintln!("│                                        │");
+    eprintln!("│ Examples:                              │");
+    eprintln!("│   feat: add user authentication        │");
+    eprintln!("│   fix(api): handle null response       │");
+    eprintln!("│   docs: update README                  │");
+    eprintln!("{}", "├────────────────────────────────────────┤".red());
+    eprintln!("│ To skip this check:                    │");
+    eprintln!("│   git commit --no-verify               │");
+    eprintln!("{}", "╰────────────────────────────────────────╯".red());
 }
