@@ -9,6 +9,61 @@
 // substantial portions of the Software.
 
 //! Language-specific linter implementations.
+//!
+//! This module provides checker implementations for each supported language.
+//! Each checker wraps one or more external linting tools and normalizes their
+//! output to the common [`LintIssue`](crate::utils::types::LintIssue) format.
+//!
+//! ## Supported Languages and Tools
+//!
+//! | Language | Checker | Primary Tool | Fallback |
+//! |----------|---------|--------------|----------|
+//! | Rust | [`RustChecker`] | clippy | rustc |
+//! | Python | [`PythonChecker`] | ruff | - |
+//! | TypeScript/JS | [`TypeScriptChecker`] | eslint | - |
+//! | Go | [`GoChecker`] | golangci-lint | go vet |
+//! | Java | [`JavaChecker`] | checkstyle | - |
+//! | C++/C | [`CppChecker`] | cpplint, clang-tidy | - |
+//! | Objective-C | [`CppChecker`] | cpplint, clang-tidy | - |
+//! | Swift | [`SwiftChecker`] | swiftlint | - |
+//! | Kotlin | [`KotlinChecker`] | ktlint, detekt | - |
+//! | Dart | [`DartChecker`] | dart analyze | - |
+//! | Lua | [`LuaChecker`] | luacheck | - |
+//!
+//! ## Checker Trait
+//!
+//! All checkers implement the [`Checker`] trait:
+//!
+//! ```rust,ignore
+//! pub trait Checker: Send + Sync {
+//!     /// Returns the checker name (e.g., "rust", "python")
+//!     fn name(&self) -> &str;
+//!
+//!     /// Check if the underlying tool is available
+//!     fn is_available(&self) -> bool;
+//!
+//!     /// Run the checker on a file
+//!     fn check(&self, path: &Path) -> Result<Vec<LintIssue>>;
+//! }
+//! ```
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use linthis::checkers::{Checker, RustChecker};
+//! use std::path::Path;
+//!
+//! let checker = RustChecker::new();
+//!
+//! if checker.is_available() {
+//!     let issues = checker.check(Path::new("src/main.rs")).unwrap();
+//!     for issue in issues {
+//!         println!("{}:{}: {}", issue.file_path.display(), issue.line, issue.message);
+//!     }
+//! } else {
+//!     eprintln!("Clippy not available. Install with: rustup component add clippy");
+//! }
+//! ```
 
 pub mod cpp;
 pub mod dart;

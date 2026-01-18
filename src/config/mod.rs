@@ -10,13 +10,60 @@
 
 //! Configuration system for linthis with hierarchical precedence.
 //!
+//! This module provides configuration loading, parsing, and merging for linthis.
+//! Configuration files support TOML, YAML, and JSON formats.
+//!
+//! ## Configuration Precedence
+//!
 //! Configuration is loaded and merged from multiple sources with the following precedence
 //! (higher precedence overrides lower):
 //!
-//! 1. CLI arguments (highest)
-//! 2. Project config (.linthis/config.toml in project root)
-//! 3. User config (~/.linthis/config.toml)
-//! 4. Built-in defaults (lowest)
+//! 1. **CLI arguments** (highest) - Command-line flags
+//! 2. **Project config** - `.linthis/config.toml` in project root
+//! 3. **User config** - `~/.linthis/config.toml` for global settings
+//! 4. **Built-in defaults** (lowest) - Sensible defaults
+//!
+//! ## Example Configuration
+//!
+//! ```toml
+//! # .linthis/config.toml
+//!
+//! # Languages to check (empty = auto-detect)
+//! languages = ["rust", "python"]
+//!
+//! # File patterns to exclude
+//! excludes = ["vendor/**", "*.generated.*"]
+//!
+//! # Maximum cyclomatic complexity
+//! max_complexity = 20
+//!
+//! # Rules configuration
+//! [rules]
+//! disable = ["E501"]
+//!
+//! # Language-specific settings
+//! [rust]
+//! max_complexity = 15
+//!
+//! [python]
+//! excludes = ["*_test.py"]
+//! ```
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use linthis::config::Config;
+//! use std::path::Path;
+//!
+//! // Load merged config from all sources
+//! let config = Config::load_merged(Path::new("."));
+//!
+//! // Load from specific file
+//! let config = Config::load(Path::new(".linthis/config.toml")).unwrap();
+//!
+//! // Generate default config
+//! let default_toml = Config::generate_default_toml();
+//! ```
 
 pub mod cli;
 pub mod migrate;
@@ -27,7 +74,24 @@ use std::path::{Path, PathBuf};
 
 use crate::rules::RulesConfig;
 
-/// Main configuration structure
+/// Main configuration structure for linthis.
+///
+/// Contains all configuration options for controlling lint behavior,
+/// formatting, language-specific settings, and plugin configuration.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use linthis::config::Config;
+/// use std::path::Path;
+///
+/// // Load from project directory
+/// let config = Config::load_merged(Path::new("."));
+///
+/// // Access configuration values
+/// println!("Max complexity: {:?}", config.max_complexity);
+/// println!("Excluded patterns: {:?}", config.excludes);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     /// Languages to check (empty = auto-detect)

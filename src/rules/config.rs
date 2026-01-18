@@ -161,7 +161,7 @@ pub enum SeverityOverride {
 }
 
 impl SeverityOverride {
-    /// Convert to Option<Severity>, returning None for Off.
+    /// Convert to `Option<Severity>`, returning None for Off.
     pub fn to_severity(self) -> Option<Severity> {
         match self {
             SeverityOverride::Error => Some(Severity::Error),
