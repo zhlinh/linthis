@@ -91,10 +91,10 @@ impl PluginCache {
         &self.cache_dir
     }
 
-    /// Convert a plugin URL to a cache path
+    /// Convert a plugin URL to a cache path.
     ///
-    /// Example: https://github.com/zhlinh/linthis-config.git
-    ///       -> ~/.cache/linthis/plugins/github.com/zhlinh/linthis-config
+    /// Example: `https://github.com/zhlinh/linthis-config.git`
+    ///       -> `~/.cache/linthis/plugins/github.com/zhlinh/linthis-config`
     pub fn url_to_cache_path(&self, url: &str) -> PathBuf {
         let clean_url = url
             .trim_start_matches("https://")

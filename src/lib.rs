@@ -8,7 +8,111 @@
 // notice shall be included in all copies or
 // substantial portions of the Software.
 
-//! Linthis - A fast, cross-platform multi-language linter and formatter.
+//! # linthis
+//!
+//! A fast, cross-platform multi-language linting aggregator that unifies
+//! various language-specific linters under a single configuration.
+//!
+//! ## Quick Start
+//!
+//! ```bash
+//! # Run linting and formatting on current directory
+//! linthis
+//!
+//! # Check specific files (lint only)
+//! linthis -c src/main.rs
+//!
+//! # Format only
+//! linthis -f src/
+//!
+//! # Output as JSON
+//! linthis --output json
+//!
+//! # Skip cache for fresh results
+//! linthis --no-cache
+//! ```
+//!
+//! ## Features
+//!
+//! - **Multi-language support**: Rust, Python, TypeScript, JavaScript, Go, Java,
+//!   C++, Objective-C, Swift, Kotlin, Lua, Dart
+//! - **Unified configuration**: Single `.linthis/config.toml` for all languages
+//! - **Custom regex rules**: Define project-specific lint rules
+//! - **Plugin system**: Extend with community or custom plugins
+//! - **Git hooks integration**: Pre-commit and pre-push hooks
+//! - **Intelligent caching**: Skip unchanged files for faster runs
+//! - **Parallel processing**: Leverage multiple cores for speed
+//!
+//! ## Library Usage
+//!
+//! ```rust,no_run
+//! use linthis::{run, RunOptions, RunMode, Language};
+//! use std::path::PathBuf;
+//!
+//! // Run with default options (current directory)
+//! let options = RunOptions::default();
+//! let result = run(&options).expect("Lint run failed");
+//!
+//! println!("Found {} issues in {} files", result.issues.len(), result.total_files);
+//!
+//! // Custom options
+//! let options = RunOptions {
+//!     paths: vec![PathBuf::from("src/")],
+//!     mode: RunMode::CheckOnly,
+//!     languages: vec![Language::Rust],
+//!     verbose: true,
+//!     ..Default::default()
+//! };
+//! let result = run(&options).expect("Lint run failed");
+//! ```
+//!
+//! ## Configuration
+//!
+//! Configuration files are loaded with the following precedence:
+//!
+//! 1. CLI arguments (highest)
+//! 2. Project config (`.linthis/config.toml`)
+//! 3. User config (`~/.linthis/config.toml`)
+//! 4. Built-in defaults (lowest)
+//!
+//! Example configuration:
+//!
+//! ```toml
+//! # .linthis/config.toml
+//! excludes = ["vendor/**", "*.generated.*"]
+//! max_complexity = 20
+//!
+//! [rules]
+//! disable = ["E501", "whitespace/*"]
+//!
+//! [[rules.custom]]
+//! code = "custom/no-todo"
+//! pattern = "TODO|FIXME"
+//! message = "Found TODO comment"
+//! severity = "warning"
+//!
+//! [rust]
+//! max_complexity = 15
+//! ```
+//!
+//! ## Modules
+//!
+//! - [`config`]: Configuration loading and merging
+//! - [`checkers`]: Language-specific lint checkers
+//! - [`formatters`]: Language-specific code formatters
+//! - [`rules`]: Custom rules and rule filtering
+//! - [`plugin`]: Plugin system for extensions
+//! - [`cache`]: Result caching for performance
+//! - [`reports`]: Output formatting (text, JSON, SARIF)
+//!
+//! ## Error Handling
+//!
+//! The library uses [`LintisError`] for all error types, which includes:
+//!
+//! - I/O errors (file access)
+//! - Configuration errors (invalid TOML/YAML)
+//! - Checker errors (tool execution failures)
+//! - Tool availability errors (missing linters)
 
 pub mod benchmark;
 pub mod cache;

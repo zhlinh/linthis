@@ -10,11 +10,69 @@
 
 //! Plugin system for linthis configuration management.
 //!
-//! This module provides functionality for:
-//! - Fetching configuration plugins from Git repositories
-//! - Caching plugins locally for offline use
-//! - Loading and merging plugin configurations
-//! - Managing plugin lifecycle (init, list, clean, update)
+//! Plugins allow extending linthis with community or custom lint configurations,
+//! additional rules, and shared presets. Plugins are Git repositories containing
+//! a `linthis-plugin.toml` manifest.
+//!
+//! ## Features
+//!
+//! - **Git-based distribution**: Plugins are fetched from Git repositories
+//! - **Local caching**: Plugins are cached for offline use and faster startup
+//! - **Version pinning**: Pin plugins to specific tags, branches, or commits
+//! - **Auto-sync**: Optionally auto-update plugins on schedule
+//! - **Registry lookup**: Use short names for well-known plugins
+//!
+//! ## Plugin Configuration
+//!
+//! ```toml
+//! # .linthis/config.toml
+//! [plugins]
+//! sources = [
+//!     { name = "official" },                                    # Registry lookup
+//!     { name = "company", url = "https://github.com/co/plugin.git" },  # Direct URL
+//!     { name = "pinned", url = "...", ref = "v1.0.0" },         # Pinned version
+//! ]
+//! ```
+//!
+//! ## Plugin Manifest
+//!
+//! Each plugin must contain a `linthis-plugin.toml` manifest:
+//!
+//! ```toml
+//! [plugin]
+//! name = "my-plugin"
+//! version = "1.0.0"
+//! description = "Custom lint rules for my project"
+//! min_linthis_version = "0.1.0"
+//!
+//! [config]
+//! path = "config.toml"  # Plugin's configuration file
+//! ```
+//!
+//! ## CLI Commands
+//!
+//! ```bash
+//! # Initialize plugins from config
+//! linthis plugin init
+//!
+//! # List installed plugins
+//! linthis plugin list
+//!
+//! # Update all plugins
+//! linthis plugin update
+//!
+//! # Clean plugin cache
+//! linthis plugin clean
+//! ```
+//!
+//! ## Module Structure
+//!
+//! - [`fetcher`]: Git clone/pull operations
+//! - [`cache`]: Local plugin caching
+//! - [`loader`]: Plugin configuration loading
+//! - [`manifest`]: Plugin manifest parsing
+//! - [`registry`]: Well-known plugin registry
+//! - [`auto_sync`]: Automatic plugin updates
 
 pub mod auto_sync;
 pub mod cache;
