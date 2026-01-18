@@ -123,6 +123,30 @@ impl LintIssue {
     }
 }
 
+/// Information about an unavailable tool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnavailableTool {
+    /// The name of the tool (e.g., "clippy", "ruff")
+    pub tool: String,
+    /// The language this tool is for
+    pub language: String,
+    /// Whether this is a checker (linter) or formatter
+    pub tool_type: String,
+    /// Installation hint for the user
+    pub install_hint: String,
+}
+
+impl UnavailableTool {
+    pub fn new(tool: &str, language: &str, tool_type: &str, install_hint: &str) -> Self {
+        Self {
+            tool: tool.to_string(),
+            language: language.to_string(),
+            tool_type: tool_type.to_string(),
+            install_hint: install_hint.to_string(),
+        }
+    }
+}
+
 /// Result of formatting a single file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormatResult {
@@ -203,6 +227,9 @@ pub struct RunResult {
     pub exit_code: i32,
     /// Run mode for appropriate output messages
     pub run_mode: RunModeKind,
+    /// Tools that were not available during the run
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unavailable_tools: Vec<UnavailableTool>,
 }
 
 impl RunResult {

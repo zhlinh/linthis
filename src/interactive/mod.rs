@@ -21,6 +21,33 @@ mod menu;
 mod nolint;
 mod quickfix;
 
+use thiserror::Error;
+
+/// Errors that can occur during interactive mode operations
+#[derive(Error, Debug)]
+pub enum InteractiveError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to write quickfix file: {0}")]
+    QuickfixWrite(String),
+
+    #[error("Failed to launch editor '{editor}': {message}")]
+    EditorLaunch { editor: String, message: String },
+
+    #[error("File operation failed: {0}")]
+    FileOperation(String),
+
+    #[error("Invalid line number {line} (file has {total} lines)")]
+    InvalidLineNumber { line: usize, total: usize },
+
+    #[error("File not found: {0}")]
+    FileNotFound(String),
+}
+
+/// Result type for interactive operations
+pub type InteractiveResult<T> = std::result::Result<T, InteractiveError>;
+
 pub use editor::open_in_editor;
 pub use menu::{run_interactive, InteractiveAction};
 pub use nolint::add_nolint_comment;

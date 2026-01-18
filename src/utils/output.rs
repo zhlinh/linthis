@@ -333,6 +333,29 @@ pub fn format_result_human(result: &RunResult) -> String {
 
     output.push_str(&format_summary_human(result));
 
+    // Show unavailable tools warning
+    if !result.unavailable_tools.is_empty() {
+        output.push_str("\n\n");
+        output.push_str(&format!(
+            "{} {} tool(s) were not available:",
+            "⚠".yellow(),
+            result.unavailable_tools.len()
+        ));
+        for tool in &result.unavailable_tools {
+            output.push_str(&format!(
+                "\n  {} {} ({}) - {}",
+                "•".dimmed(),
+                tool.tool,
+                tool.language,
+                tool.install_hint
+            ));
+        }
+        output.push_str(&format!(
+            "\n\n{}",
+            "Run 'linthis doctor' for detailed tool status.".dimmed()
+        ));
+    }
+
     output
 }
 

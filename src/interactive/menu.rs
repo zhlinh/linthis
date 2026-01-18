@@ -422,13 +422,20 @@ fn print_code_context(issue: &LintIssue) {
 }
 
 /// Open all issues in vim quickfix
-fn open_quickfix(issues: &[LintIssue]) -> Result<(), String> {
+fn open_quickfix(issues: &[LintIssue]) -> super::InteractiveResult<()> {
+    use super::InteractiveError;
+
     let path = default_quickfix_path();
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            InteractiveError::FileOperation(format!(
+                "Failed to create directory '{}': {}",
+                parent.display(),
+                e
+            ))
+        })?;
     }
 
     write_quickfix_file(issues, &path)?;
@@ -530,7 +537,8 @@ fn which_exists(cmd: &str) -> bool {
 }
 
 /// Launch editor with quickfix file
-fn launch_quickfix_editor(editor: &str, path: &std::path::Path) -> Result<(), String> {
+fn launch_quickfix_editor(editor: &str, path: &std::path::Path) -> super::InteractiveResult<()> {
+    use super::InteractiveError;
     use std::process::Command;
 
     let mut cmd = Command::new(editor);
@@ -541,13 +549,16 @@ fn launch_quickfix_editor(editor: &str, path: &std::path::Path) -> Result<(), St
             if status.success() {
                 Ok(())
             } else {
-                Err(format!(
-                    "Editor exited with status: {}",
-                    status.code().unwrap_or(-1)
-                ))
+                Err(InteractiveError::EditorLaunch {
+                    editor: editor.to_string(),
+                    message: format!("exited with status: {}", status.code().unwrap_or(-1)),
+                })
             }
         }
-        Err(e) => Err(format!("Failed to launch editor: {}", e)),
+        Err(e) => Err(InteractiveError::EditorLaunch {
+            editor: editor.to_string(),
+            message: e.to_string(),
+        }),
     }
 }
 

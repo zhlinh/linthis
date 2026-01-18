@@ -18,9 +18,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use cli::{
-    find_latest_result_file, handle_config_command, handle_hook_command, handle_init_command,
-    handle_plugin_command, init_linter_configs, perform_auto_sync, perform_self_update,
-    print_fix_hint, run_benchmark, strip_ansi_codes, Cli, Commands,
+    find_latest_result_file, handle_config_command, handle_doctor_command, handle_hook_command,
+    handle_init_command, handle_plugin_command, init_linter_configs, perform_auto_sync,
+    perform_self_update, print_fix_hint, run_benchmark, strip_ansi_codes, Cli, Commands,
 };
 use linthis::interactive::run_interactive;
 use linthis::utils::output::{format_result, OutputFormat};
@@ -49,6 +49,11 @@ fn main() -> ExitCode {
     // Handle init subcommand
     if let Some(Commands::Init { global, with_hook, force }) = cli.command {
         return handle_init_command(global, with_hook, force);
+    }
+
+    // Handle doctor subcommand
+    if let Some(Commands::Doctor { all, output }) = cli.command {
+        return handle_doctor_command(all, &output);
     }
 
     // Handle --fix without -c: load result file and enter interactive mode

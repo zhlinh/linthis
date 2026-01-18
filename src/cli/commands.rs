@@ -165,6 +165,16 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Check tool availability and configuration health
+    Doctor {
+        /// Check all languages instead of only detected ones
+        #[arg(long)]
+        all: bool,
+
+        /// Output format: human, json
+        #[arg(short, long, default_value = "human")]
+        output: String,
+    },
 }
 
 /// Hook subcommands
