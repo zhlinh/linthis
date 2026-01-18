@@ -70,6 +70,10 @@ pub struct Config {
     /// Self auto-update configuration
     #[serde(default)]
     pub self_auto_update: Option<crate::self_update::SelfUpdateConfig>,
+
+    /// Performance settings
+    #[serde(default)]
+    pub performance: PerformanceConfig,
 }
 
 /// Plugin configuration section
@@ -98,6 +102,38 @@ pub struct PluginSourceConfig {
 
 fn default_enabled() -> bool {
     true
+}
+
+/// Performance configuration section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceConfig {
+    /// Large file threshold in bytes (default: 1MB = 1048576)
+    #[serde(default = "default_large_file_threshold")]
+    pub large_file_threshold: u64,
+    /// Skip large files instead of warning
+    #[serde(default)]
+    pub skip_large_files: bool,
+    /// Cache max age in days (default: 7)
+    #[serde(default = "default_cache_max_age_days")]
+    pub cache_max_age_days: u32,
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            large_file_threshold: default_large_file_threshold(),
+            skip_large_files: false,
+            cache_max_age_days: default_cache_max_age_days(),
+        }
+    }
+}
+
+fn default_large_file_threshold() -> u64 {
+    1048576 // 1MB
+}
+
+fn default_cache_max_age_days() -> u32 {
+    7
 }
 
 /// Source path configuration (CodeCC compatibility)

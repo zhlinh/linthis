@@ -49,6 +49,7 @@ use formatters::{
     CppFormatter, DartFormatter, Formatter, GoFormatter, JavaFormatter, KotlinFormatter,
     LuaFormatter, PythonFormatter, RustFormatter, SwiftFormatter, TypeScriptFormatter,
 };
+use cache::LintCache;
 use utils::types::RunResult;
 use utils::walker::{walk_paths, WalkerConfig};
 
@@ -684,10 +685,11 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         let _ = std::io::stderr().flush();
     }
 
-    // Configure walker
+    // Configure walker with large file detection (default: 1MB threshold)
     let walker_config = WalkerConfig {
         exclude_patterns: options.exclude_patterns.clone(),
         languages: options.languages.clone(),
+        large_file_threshold: 1048576, // 1MB default
         ..Default::default()
     };
 
@@ -723,6 +725,26 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     // Set total_files to actual processable files count
     result.total_files = file_langs.len();
 
+    // Load cache if enabled (only for check modes)
+    let project_root = utils::get_project_root();
+    let cache = if !options.no_cache && options.mode != RunMode::FormatOnly {
+        match LintCache::load(&project_root) {
+            Ok(mut c) => {
+                c.prune(None); // Clean old entries
+                c.reset_stats();
+                Some(Mutex::new(c))
+            }
+            Err(e) => {
+                if options.verbose {
+                    eprintln!("Cache load failed: {}, starting fresh", e);
+                }
+                Some(Mutex::new(LintCache::new()))
+            }
+        }
+    } else {
+        None
+    };
+
     // For RunMode::Both: lint → format → lint (only files with issues)
     if options.mode == RunMode::Both {
         // Step 1: First lint pass (before formatting) - parallel processing
@@ -743,7 +765,33 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                         false,
                     );
                 }
+
+                // Check cache first
+                if let Some(ref cache_mutex) = cache {
+                    let mut cache_guard = cache_mutex.lock().unwrap();
+                    if let Some(cached_issues) = cache_guard.check_file(
+                        lang.name(),
+                        file,
+                        &project_root,
+                    ) {
+                        return ((*file).clone(), cached_issues);
+                    }
+                }
+
+                // Cache miss - run actual check
                 let file_issues = run_checker_on_file(file, *lang, options.verbose);
+
+                // Update cache with results
+                if let Some(ref cache_mutex) = cache {
+                    let mut cache_guard = cache_mutex.lock().unwrap();
+                    let _ = cache_guard.update_file(
+                        lang.name(),
+                        file,
+                        &project_root,
+                        &file_issues,
+                    );
+                }
+
                 ((*file).clone(), file_issues)
             })
             .collect();
@@ -908,7 +956,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
             "Checking"
         };
 
-        // CheckOnly mode: use parallel processing for better performance
+        // CheckOnly mode: use parallel processing for better performance with cache support
         if options.mode == RunMode::CheckOnly {
             PROGRESS_COUNTER.store(0, Ordering::Relaxed);
 
@@ -926,7 +974,34 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     if options.verbose {
                         eprintln!("Processing: {} ({})", file.display(), lang.name());
                     }
-                    run_checker_on_file(file, *lang, options.verbose)
+
+                    // Check cache first
+                    if let Some(ref cache_mutex) = cache {
+                        let mut cache_guard = cache_mutex.lock().unwrap();
+                        if let Some(cached_issues) = cache_guard.check_file(
+                            lang.name(),
+                            file,
+                            &project_root,
+                        ) {
+                            return cached_issues;
+                        }
+                    }
+
+                    // Cache miss - run actual check
+                    let issues = run_checker_on_file(file, *lang, options.verbose);
+
+                    // Update cache with results
+                    if let Some(ref cache_mutex) = cache {
+                        let mut cache_guard = cache_mutex.lock().unwrap();
+                        let _ = cache_guard.update_file(
+                            lang.name(),
+                            file,
+                            &project_root,
+                            &issues,
+                        );
+                    }
+
+                    issues
                 })
                 .collect();
 
@@ -991,6 +1066,27 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // Collect unavailable tools for reporting
     result.unavailable_tools = collect_unavailable_tools();
+
+    // Save cache and show stats
+    if let Some(cache_mutex) = cache {
+        let cache_guard = cache_mutex.lock().unwrap();
+        let stats = cache_guard.stats();
+
+        if !options.quiet && stats.total() > 0 {
+            eprintln!(
+                "Cache: {} hits, {} misses ({:.1}% hit rate)",
+                stats.cache_hits,
+                stats.cache_misses,
+                stats.hit_rate()
+            );
+        }
+
+        if let Err(e) = cache_guard.save(&project_root) {
+            if options.verbose {
+                eprintln!("Warning: Failed to save cache: {}", e);
+            }
+        }
+    }
 
     Ok(result)
 }
