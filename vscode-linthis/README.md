@@ -33,7 +33,7 @@ Multi-language linter and formatter extension for Visual Studio Code.
 
 ## Requirements
 
-- [linthis](https://github.com/user/linthis) CLI must be installed and available in PATH
+- [linthis](https://github.com/zhlinh/linthis) CLI must be installed and available in PATH
 - Respective language tools (linters/formatters) should be installed
 
 ## Installation

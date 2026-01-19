@@ -49,7 +49,10 @@ pub fn to_diagnostic(issue: &LintIssue) -> Diagnostic {
         severity: Some(to_lsp_severity(issue.severity)),
         code: issue.code.clone().map(NumberOrString::String),
         code_description: None,
-        source: Some(issue.source.clone().unwrap_or_else(|| "linthis".to_string())),
+        source: Some(match &issue.source {
+            Some(s) => format!("linthis-{}", s),
+            None => "linthis".to_string(),
+        }),
         message: format_message(issue),
         related_information: None,
         tags: None,

@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/user/linthis"
+    "url": "https://github.com/zhlinh/linthis"
   },
   "engines": {
     "vscode": "^1.75.0"
@@ -32,14 +32,14 @@
     "multi-language"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "*"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "linthis.lint",
-        "title": "Linthis: Run Lint"
+        "title": "Linthis: Lint Document"
       },
       {
         "command": "linthis.format",
@@ -61,7 +61,7 @@
         "linthis.lintOnSave": {
           "type": "boolean",
           "default": true,
-          "description": "Run lint on file save"
+          "description": "Lint document on save"
         },
         "linthis.formatOnSave": {
           "type": "boolean",
@@ -99,14 +99,21 @@
     "build": "webpack --mode production",
     "watch": "webpack --mode development --watch",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "pretest": "npm run compile-tests",
+    "compile-tests": "tsc -p . --outDir out",
+    "test": "node ./out/test/runTest.js",
+    "test-compile": "tsc -p ./"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.75.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-electron": "^2.3.0",
     "eslint": "^8.57.0",
+    "glob": "^10.3.0",
+    "mocha": "^10.2.0",
     "ts-loader": "^9.5.0",
     "typescript": "^5.4.0",
     "webpack": "^5.90.0",

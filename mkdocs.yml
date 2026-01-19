@@ -1,7 +1,7 @@
 site_name: linthis
 site_description: Fast, cross-platform multi-language linter and formatter
 site_url: https://linthis.readthedocs.io
-repo_url: https://github.com/user/linthis
+repo_url: https://github.com/zhlinh/linthis
 repo_name: linthis
 
 theme:
