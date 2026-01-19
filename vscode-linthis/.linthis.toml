@@ -1,0 +1,13 @@
+# Linthis Configuration for Testing
+
+[languages.python]
+linter = "ruff"
+formatter = "ruff"
+
+[languages.typescript]
+linter = "eslint"
+formatter = "prettier"
+
+[languages.rust]
+linter = "clippy"
+formatter = "rustfmt"

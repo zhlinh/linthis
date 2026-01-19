@@ -120,7 +120,7 @@ verbose = true
 [plugins]
 sources = [
     { name = "official" },
-    { name = "custom-rules", url = "https://github.com/user/linthis-plugin.git", ref = "main" }
+    { name = "custom-rules", url = "https://github.com/user/lts-plugin.git", ref = "main" }
 ]
 ```
 
