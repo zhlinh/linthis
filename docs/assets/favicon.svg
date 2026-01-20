@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background -->
+  <rect width="64" height="64" fill="#2196f3" rx="8"/>
+
+  <!-- Code lines (top left) -->
+  <g stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.7">
+    <line x1="8" y1="12" x2="28" y2="12"/>
+    <line x1="8" y1="18" x2="35" y2="18"/>
+    <line x1="8" y1="24" x2="25" y2="24"/>
+  </g>
+
+  <!-- Check mark (✓) - centered -->
+  <path d="M 18 38 L 28 48 L 48 26"
+        fill="none" stroke="white" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Format lines (bottom right) -->
+  <g stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.7">
+    <line x1="36" y1="42" x2="56" y2="42"/>
+    <line x1="36" y1="36" x2="56" y2="36"/>
+  </g>
+
+  <!-- "LTS" text at bottom -->
+  <text x="32" y="62" font-family="Arial, sans-serif" font-size="10"
+        font-weight="bold" text-anchor="middle" fill="white" opacity="0.9">LTS</text>
+</svg>
