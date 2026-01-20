@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Linthis Logo Preview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            padding: 40px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+
+        .section {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            color: #2196f3;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #2196f3;
+            padding-bottom: 10px;
+        }
+
+        .logo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+            margin-top: 20px;
+        }
+
+        .logo-item {
+            text-align: center;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+
+        .logo-item h3 {
+            margin: 15px 0 10px;
+            color: #555;
+            font-size: 16px;
+        }
+
+        .logo-item p {
+            color: #888;
+            font-size: 14px;
+        }
+
+        .light-bg {
+            background: #ffffff;
+        }
+
+        .dark-bg {
+            background: #263238;
+        }
+
+        .color-swatch {
+            display: inline-block;
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+            margin: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .color-info {
+            display: inline-block;
+            vertical-align: top;
+            margin-left: 10px;
+        }
+
+        .color-section {
+            margin: 20px 0;
+        }
+
+        .favicon-preview {
+            display: inline-block;
+            width: 64px;
+            height: 64px;
+            margin: 0 10px;
+        }
+
+        .usage-example {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Linthis Brand Assets</h1>
+
+        <!-- Logo Preview Section -->
+        <div class="section">
+            <h2>Main Logo (logo.svg)</h2>
+            <div class="logo-grid">
+                <div class="logo-item light-bg">
+                    <img src="logo.svg" width="200" height="200" alt="Linthis Logo">
+                    <h3>Light Background</h3>
+                    <p>Primary usage</p>
+                </div>
+                <div class="logo-item dark-bg">
+                    <img src="logo.svg" width="200" height="200" alt="Linthis Logo">
+                    <h3>Dark Background</h3>
+                    <p>Dark mode</p>
+                </div>
+                <div class="logo-item light-bg">
+                    <img src="logo.svg" width="100" height="100" alt="Linthis Logo">
+                    <h3>Small Size</h3>
+                    <p>100×100px</p>
+                </div>
+                <div class="logo-item light-bg">
+                    <img src="logo.svg" width="50" height="50" alt="Linthis Logo">
+                    <h3>Icon Size</h3>
+                    <p>50×50px</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Favicon Preview Section -->
+        <div class="section">
+            <h2>Favicon (favicon.svg)</h2>
+            <div style="text-align: center; padding: 20px;">
+                <div style="display: inline-block; margin: 0 20px;">
+                    <h3 style="margin-bottom: 15px;">64×64px (Standard)</h3>
+                    <img src="favicon.svg" class="favicon-preview" alt="Favicon">
+                </div>
+                <div style="display: inline-block; margin: 0 20px;">
+                    <h3 style="margin-bottom: 15px;">32×32px (Small)</h3>
+                    <img src="favicon.svg" width="32" height="32" alt="Favicon Small">
+                </div>
+                <div style="display: inline-block; margin: 0 20px;">
+                    <h3 style="margin-bottom: 15px;">16×16px (Tiny)</h3>
+                    <img src="favicon.svg" width="16" height="16" alt="Favicon Tiny">
+                </div>
+            </div>
+        </div>
+
+        <!-- Design Elements Section -->
+        <div class="section">
+            <h2>Design Elements</h2>
+            <div style="padding: 20px;">
+                <h3 style="margin: 20px 0 10px;">✓ Check Mark</h3>
+                <p>Represents code linting and validation</p>
+
+                <h3 style="margin: 20px 0 10px;">― Code Lines</h3>
+                <p>Top: Unformatted code | Bottom: Formatted code</p>
+
+                <h3 style="margin: 20px 0 10px;">○ Circle Frame</h3>
+                <p>Professional, complete, unified design</p>
+            </div>
+        </div>
+
+        <!-- Color Palette Section -->
+        <div class="section">
+            <h2>Color Palette</h2>
+            <div class="color-section">
+                <div style="margin: 20px 0;">
+                    <div class="color-swatch" style="background: #2196f3;"></div>
+                    <div class="color-info">
+                        <h3>Primary Blue</h3>
+                        <p><strong>#2196f3</strong></p>
+                        <p>Main logo color, borders, text</p>
+                    </div>
+                </div>
+                <div style="margin: 20px 0;">
+                    <div class="color-swatch" style="background: #64b5f6;"></div>
+                    <div class="color-info">
+                        <h3>Light Blue</h3>
+                        <p><strong>#64b5f6</strong></p>
+                        <p>Secondary elements, accents</p>
+                    </div>
+                </div>
+                <div style="margin: 20px 0;">
+                    <div class="color-swatch" style="background: rgba(33, 150, 243, 0.1); border: 1px solid #ddd;"></div>
+                    <div class="color-info">
+                        <h3>Background Tint</h3>
+                        <p><strong>#2196f3 @ 10% opacity</strong></p>
+                        <p>Subtle background circle</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Usage Examples Section -->
+        <div class="section">
+            <h2>Usage in MkDocs</h2>
+            <div class="usage-example">
+theme:<br>
+&nbsp;&nbsp;name: material<br>
+&nbsp;&nbsp;logo: assets/logo.svg<br>
+&nbsp;&nbsp;favicon: assets/favicon.svg<br>
+&nbsp;&nbsp;palette:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;- scheme: default<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;primary: blue<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;accent: light blue
+            </div>
+        </div>
+
+        <!-- Browser Tab Preview -->
+        <div class="section">
+            <h2>Browser Tab Preview</h2>
+            <div style="padding: 20px; text-align: center;">
+                <div style="display: inline-block; border: 1px solid #ddd; border-radius: 8px 8px 0 0; padding: 10px 20px; background: #f5f5f5;">
+                    <img src="favicon.svg" width="16" height="16" style="vertical-align: middle; margin-right: 8px;" alt="Tab Icon">
+                    <span style="font-size: 14px; color: #333;">linthis - Fast multi-language linter</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
