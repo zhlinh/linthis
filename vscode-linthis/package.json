@@ -2,7 +2,7 @@
   "name": "linthis",
   "displayName": "Linthis",
   "description": "Multi-language linter and formatter for VS Code",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "linthis",
   "license": "MIT",
   "icon": "icon.png",
