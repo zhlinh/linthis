@@ -60,6 +60,7 @@ pub struct CachedIssue {
     pub severity: Severity,
     pub code: Option<String>,
     pub source: Option<String>,
+    pub suggestion: Option<String>,
 }
 
 impl CachedIssue {
@@ -72,6 +73,7 @@ impl CachedIssue {
             severity: issue.severity,
             code: issue.code.clone(),
             source: issue.source.clone(),
+            suggestion: issue.suggestion.clone(),
         }
     }
 
@@ -86,6 +88,9 @@ impl CachedIssue {
         }
         if let Some(ref source) = self.source {
             issue = issue.with_source(source.clone());
+        }
+        if let Some(ref suggestion) = self.suggestion {
+            issue = issue.with_suggestion(suggestion.clone());
         }
         if let Some(lang) = language {
             issue = issue.with_language(lang);

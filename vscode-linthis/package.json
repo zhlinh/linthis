@@ -80,6 +80,11 @@
           "default": true,
           "description": "Lint document on save"
         },
+        "linthis.lintOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lint document when opening a file"
+        },
         "linthis.formatOnSave": {
           "type": "boolean",
           "default": false,
