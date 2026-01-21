@@ -1,0 +1,142 @@
+*linthis.txt*  Multi-language linter and formatter for Neovim
+
+Author:  linthis team
+License: MIT
+
+==============================================================================
+CONTENTS                                                    *linthis-contents*
+
+  1. Introduction ............................ |linthis-introduction|
+  2. Requirements ............................ |linthis-requirements|
+  3. Installation ............................ |linthis-installation|
+  4. Configuration ........................... |linthis-configuration|
+  5. Commands ................................ |linthis-commands|
+  6. Lua API ................................. |linthis-api|
+
+==============================================================================
+1. INTRODUCTION                                         *linthis-introduction*
+
+linthis.nvim is a Neovim plugin that integrates with the linthis LSP server
+to provide linting and formatting for 18+ programming languages.
+
+Supported languages: Rust, Python, TypeScript, JavaScript, Go, Java, C, C++,
+Objective-C, Swift, Kotlin, Lua, Dart, Shell, Ruby, PHP, Scala, C#
+
+==============================================================================
+2. REQUIREMENTS                                         *linthis-requirements*
+
+- Neovim >= 0.10.0
+- linthis executable installed and in PATH
+  Install: `cargo install linthis` or download from releases
+
+==============================================================================
+3. INSTALLATION                                         *linthis-installation*
+
+Using lazy.nvim: >lua
+  {
+    "linthis/nvim-linthis",
+    opts = {
+      -- your configuration
+    },
+  }
+<
+
+Using packer.nvim: >lua
+  use {
+    "linthis/nvim-linthis",
+    config = function()
+      require("linthis").setup({
+        -- your configuration
+      })
+    end,
+  }
+<
+
+==============================================================================
+4. CONFIGURATION                                       *linthis-configuration*
+
+Default configuration: >lua
+  require("linthis").setup({
+    -- Path to linthis executable
+    cmd = { "linthis", "lsp" },
+
+    -- Filetypes to attach to
+    filetypes = {
+      "rust", "python", "typescript", "javascript",
+      "typescriptreact", "javascriptreact", "go", "java",
+      "c", "cpp", "objc", "swift", "kotlin", "lua",
+      "dart", "sh", "bash", "zsh", "ruby", "php", "scala", "cs",
+    },
+
+    -- Root directory patterns
+    root_markers = {
+      ".linthis.toml", ".git", "Cargo.toml",
+      "pyproject.toml", "package.json", "go.mod",
+    },
+
+    -- Auto-start LSP when opening supported files
+    autostart = true,
+
+    -- Format on save
+    format_on_save = false,
+
+    -- Lint on save
+    lint_on_save = true,
+
+    -- Show notifications
+    notifications = true,
+
+    -- Log level: "debug", "info", "warn", "error"
+    log_level = "warn",
+  })
+<
+
+==============================================================================
+5. COMMANDS                                                 *linthis-commands*
+
+                                                             *:LinthisFormat*
+:LinthisFormat          Format current buffer using linthis.
+
+                                                               *:LinthisLint*
+:LinthisLint            Lint current buffer and refresh diagnostics.
+
+                                                            *:LinthisRestart*
+:LinthisRestart         Restart linthis LSP server.
+
+                                                               *:LinthisInfo*
+:LinthisInfo            Show linthis LSP information.
+
+==============================================================================
+6. LUA API                                                       *linthis-api*
+
+                                                          *linthis.setup()*
+linthis.setup({opts})
+    Initialize linthis with the given configuration options.
+    See |linthis-configuration| for available options.
+
+                                                         *linthis.format()*
+linthis.format({opts})
+    Format the current buffer or specified buffer.
+    Options:
+      - bufnr: Buffer number (default: current buffer)
+      - async: Async formatting (default: false)
+      - timeout_ms: Timeout in milliseconds (default: 5000)
+      - silent: Suppress notifications (default: false)
+
+                                                           *linthis.lint()*
+linthis.lint({opts})
+    Lint the current buffer and refresh diagnostics.
+    Options:
+      - bufnr: Buffer number (default: current buffer)
+      - silent: Suppress notifications (default: false)
+
+                                                        *linthis.restart()*
+linthis.restart()
+    Restart the linthis LSP server for the current buffer.
+
+                                                           *linthis.info()*
+linthis.info()
+    Print information about the linthis LSP client.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
