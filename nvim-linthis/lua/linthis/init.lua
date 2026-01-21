@@ -60,21 +60,46 @@ local function setup_lsp()
   vim.lsp.enable("linthis")
 end
 
--- Format current buffer
+-- Format current buffer using linthis CLI (like VSCode plugin)
 function M.format(opts)
   opts = opts or {}
   local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
 
-  -- Use LSP formatting
-  vim.lsp.buf.format({
-    bufnr = bufnr,
-    name = "linthis",
-    async = opts.async or false,
-    timeout_ms = opts.timeout_ms or 5000,
-  })
+  if filepath == "" then
+    if config.get().notifications then
+      vim.notify("linthis: cannot format unsaved buffer", vim.log.levels.WARN)
+    end
+    return false
+  end
 
-  if config.get().notifications and not opts.silent then
-    vim.notify("linthis: formatted", vim.log.levels.INFO)
+  -- Save buffer first if modified
+  if vim.bo[bufnr].modified then
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("silent write")
+    end)
+  end
+
+  -- Run linthis -f -i (format in-place)
+  local cmd = config.get().cmd[1]
+  local result = vim.fn.system({ cmd, "-f", "-i", filepath })
+  local exit_code = vim.v.shell_error
+
+  if exit_code == 0 then
+    -- Reload buffer to show formatted content
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("silent edit!")
+    end)
+
+    if config.get().notifications and not opts.silent then
+      vim.notify("linthis: formatted", vim.log.levels.INFO)
+    end
+    return true
+  else
+    if config.get().notifications and not opts.silent then
+      vim.notify("linthis: format failed - " .. vim.trim(result), vim.log.levels.ERROR)
+    end
+    return false
   end
 end
 
@@ -153,15 +178,26 @@ local function setup_autocmds()
   local opts = config.get()
   local group = vim.api.nvim_create_augroup("linthis", { clear = true })
 
-  -- Format on save
+  -- Format on save (use BufWritePost to avoid conflicts)
   if opts.format_on_save then
-    vim.api.nvim_create_autocmd("BufWritePre", {
+    vim.api.nvim_create_autocmd("BufWritePost", {
       group = group,
       pattern = "*",
       callback = function(args)
         local ft = vim.bo[args.buf].filetype
         if vim.tbl_contains(opts.filetypes, ft) then
-          M.format({ bufnr = args.buf, silent = true })
+          -- Run format after save, then reload
+          local filepath = vim.api.nvim_buf_get_name(args.buf)
+          local cmd = config.get().cmd[1]
+          local result = vim.fn.system({ cmd, "-f", "-i", filepath })
+          local exit_code = vim.v.shell_error
+
+          if exit_code == 0 then
+            -- Reload buffer to show formatted content
+            vim.api.nvim_buf_call(args.buf, function()
+              vim.cmd("silent edit!")
+            end)
+          end
         end
       end,
     })
