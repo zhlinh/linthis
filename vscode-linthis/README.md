@@ -40,11 +40,12 @@ Multi-language linter and formatter extension for Visual Studio Code.
 
 1. Install linthis CLI:
    ```bash
-   # Using cargo
+   # using pip
+   pip install linthis
+
+   # Or Using cargo
    cargo install linthis
 
-   # Or using pip
-   pip install linthis
    ```
 
 2. Install this extension from the VS Code Marketplace

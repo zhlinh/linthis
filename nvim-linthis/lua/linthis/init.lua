@@ -133,20 +133,37 @@ function M.lint(opts)
     end)
   end
 
+  -- Get or create linthis namespace
+  local ns = vim.api.nvim_create_namespace("linthis")
+
+  -- Clear previous linthis diagnostics for this buffer first
+  vim.diagnostic.set(ns, bufnr, {})
+
   -- Run linthis -c (check only, no format)
   local cmd = config.get().cmd[1]
   local result = vim.fn.system({ cmd, "-c", "-i", filepath })
 
+  -- Strip ANSI escape codes from output
+  result = result:gsub("\27%[[%d;]*[mKHJ]", "")
+  result = result:gsub("\27%[%?%d+[hl]", "")
+
   -- Parse output and set diagnostics
   local diagnostics = {}
-  local ns = vim.api.nvim_create_namespace("linthis")
 
   -- Parse linthis output format: [E1][lang][tool] file:line:col: severity: message (code)
   -- Example: [E1][python][ruff] /tmp/test.py:1:8: error: `os` imported but unused (F401)
+  --   --> Remove unused import: `os`
+  local lines = {}
   for line in result:gmatch("[^\r\n]+") do
+    table.insert(lines, line)
+  end
+
+  local i = 1
+  while i <= #lines do
+    local line = lines[i]
     -- Match: [idx][lang][tool] file:line:col: severity: message
     local tool, file, lnum, col, severity, msg =
-      line:match("^%[%w+%]%[%w+%]%[(%w+)%]%s+(.+):(%d+):(%d+):%s*(%w+):%s*(.+)$")
+      line:match("^%[E?%d+%]%[%w+%]%[(%w+)%]%s+(.+):(%d+):(%d+):%s*(%w+):%s*(.+)$")
 
     if tool and lnum and msg then
       local sev = vim.diagnostic.severity.WARN
@@ -162,18 +179,37 @@ function M.lint(opts)
         message = msg
       end
 
+      -- Check next line for suggestion (starts with "  --> ")
+      local suggestion = nil
+      if i + 1 <= #lines then
+        local next_line = lines[i + 1]
+        local sugg = next_line:match("^%s*%-%->%s*(.+)$")
+        if sugg then
+          suggestion = sugg
+          i = i + 1 -- Skip the suggestion line
+        end
+      end
+
+      -- Include source prefix directly in message for reliable display
+      local source_name = "linthis-" .. tool
+      local display_message = string.format("[%s] %s", source_name, message)
+      if suggestion then
+        display_message = display_message .. " | Suggestion: " .. suggestion
+      end
+
       table.insert(diagnostics, {
         lnum = tonumber(lnum) - 1,
         col = tonumber(col) - 1,
-        message = message,
+        message = display_message,
         severity = sev,
-        source = "linthis-" .. tool, -- e.g., "linthis-ruff"
+        source = source_name,
         code = code,
       })
     end
+    i = i + 1
   end
 
-  -- Set diagnostics
+  -- Set linthis diagnostics (this replaces any existing linthis diagnostics for this buffer)
   vim.diagnostic.set(ns, bufnr, diagnostics)
 
   if config.get().notifications and not opts.silent then
@@ -202,6 +238,62 @@ function M.restart()
       vim.notify("linthis: LSP restarted", vim.log.levels.INFO)
     end
   end, 500)
+end
+
+-- Debug lint output
+function M.debug_lint()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+
+  if filepath == "" then
+    print("linthis debug: no file")
+    return
+  end
+
+  local cmd = config.get().cmd[1]
+  local result = vim.fn.system({ cmd, "-c", "-i", filepath })
+
+  print("=== Raw output ===")
+  print(result)
+  print("=== End raw output ===")
+
+  -- Strip ANSI
+  result = result:gsub("\27%[[%d;]*[mKHJ]", "")
+  result = result:gsub("\27%[%?%d+[hl]", "")
+
+  print("=== Parsed lines ===")
+  local lines = {}
+  for line in result:gmatch("[^\r\n]+") do
+    table.insert(lines, line)
+    print(string.format("Line %d: [%s]", #lines, line))
+  end
+
+  print("=== Matching ===")
+  local i = 1
+  while i <= #lines do
+    local line = lines[i]
+    local tool, file, lnum, col, severity, msg =
+      line:match("^%[E?%d+%]%[%w+%]%[(%w+)%]%s+(.+):(%d+):(%d+):%s*(%w+):%s*(.+)$")
+
+    if tool then
+      print(string.format("Issue: tool=%s, msg=%s", tool, msg))
+
+      -- Check next line for suggestion
+      if i + 1 <= #lines then
+        local next_line = lines[i + 1]
+        print(string.format("  Next line: [%s]", next_line))
+        local sugg = next_line:match("^%s*%-%->%s*(.+)$")
+        if sugg then
+          print(string.format("  Suggestion found: %s", sugg))
+          i = i + 1
+        else
+          print("  No suggestion match")
+        end
+      end
+    end
+    i = i + 1
+  end
+  print("=== Done ===")
 end
 
 -- Get LSP info
@@ -263,6 +355,27 @@ local function setup_autocmds()
       end,
     })
   end
+
+  -- Lint on open
+  if opts.lint_on_open then
+    vim.api.nvim_create_autocmd("FileType", {
+      group = group,
+      pattern = opts.filetypes,
+      callback = function(args)
+        -- Delay to let other LSPs attach and report diagnostics first
+        -- Then run linthis lint to show our diagnostics
+        vim.defer_fn(function()
+          if vim.api.nvim_buf_is_valid(args.buf) then
+            local filepath = vim.api.nvim_buf_get_name(args.buf)
+            -- Only lint if file exists on disk
+            if filepath ~= "" and vim.fn.filereadable(filepath) == 1 then
+              M.lint({ bufnr = args.buf, silent = true })
+            end
+          end
+        end, 1000)
+      end,
+    })
+  end
 end
 
 -- Setup user commands
@@ -282,6 +395,10 @@ local function setup_commands()
   vim.api.nvim_create_user_command("LinthisInfo", function()
     M.info()
   end, { desc = "Show linthis info" })
+
+  vim.api.nvim_create_user_command("LinthisDebug", function()
+    M.debug_lint()
+  end, { desc = "Debug linthis lint output" })
 end
 
 -- Main setup function

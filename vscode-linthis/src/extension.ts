@@ -222,6 +222,44 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
+  // Register lint on open
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(async (document) => {
+      // Check if lint on open is enabled
+      const currentConfig = vscode.workspace.getConfiguration('linthis');
+      if (!currentConfig.get<boolean>('lintOnOpen', true)) {
+        return;
+      }
+
+      // Only lint supported file types
+      if (!SUPPORTED_LANGUAGES.includes(document.languageId)) {
+        return;
+      }
+
+      // Only lint real files
+      if (document.uri.scheme !== 'file') {
+        return;
+      }
+
+      outputChannel.appendLine(`[info] Lint on open: ${document.uri.fsPath}`);
+
+      // Delay to let LSP attach and then trigger diagnostics refresh
+      setTimeout(async () => {
+        if (client && client.isRunning()) {
+          // Send a didSave notification to trigger LSP diagnostics
+          // This is a workaround since LSP should already send diagnostics on open
+          try {
+            await client.sendNotification('textDocument/didSave', {
+              textDocument: { uri: document.uri.toString() },
+            });
+          } catch (error) {
+            outputChannel.appendLine(`[error] Lint on open failed: ${error}`);
+          }
+        }
+      }, 500);
+    })
+  );
+
   // Log initial state
   if (config.get<boolean>('formatOnSave', false)) {
     outputChannel.appendLine('[info] Format on save is enabled');
@@ -230,6 +268,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     outputChannel.appendLine('[info] Lint on save is enabled');
   } else {
     outputChannel.appendLine('[info] Lint on save is disabled');
+  }
+  if (config.get<boolean>('lintOnOpen', true)) {
+    outputChannel.appendLine('[info] Lint on open is enabled');
+  } else {
+    outputChannel.appendLine('[info] Lint on open is disabled');
   }
 
   // Watch for configuration changes

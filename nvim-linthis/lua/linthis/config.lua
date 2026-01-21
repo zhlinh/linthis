@@ -54,6 +54,9 @@ M.defaults = {
   -- Lint on save (trigger diagnostics refresh)
   lint_on_save = true,
 
+  -- Lint on open (run lint when opening a file)
+  lint_on_open = true,
+
   -- Show notifications
   notifications = true,
 
