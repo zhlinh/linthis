@@ -560,6 +560,120 @@ All modifications preserve TOML file format and comments.
 | Lua        | luacheck             | stylua             |
 | Dart       | dart analyze         | dart format        |
 
+## Editor Plugins
+
+linthis provides official plugins for popular editors, offering seamless integration with format-on-save, manual lint/format commands, and configurable settings.
+
+### VSCode
+
+Install from [VS Marketplace](https://marketplace.visualstudio.com/items?itemName=zhlinh.linthis) or search "linthis" in VSCode Extensions.
+
+**Features:**
+- Format on Save (configurable)
+- Manual Lint/Format commands via Command Palette
+- Configurable executable path and additional arguments
+- Status bar integration
+
+**Installation via Command Palette:**
+```
+ext install zhlinh.linthis
+```
+
+**Configuration (settings.json):**
+```json
+{
+  "linthis.formatOnSave": true,
+  "linthis.executable.path": "",
+  "linthis.executable.additionalArguments": ""
+}
+```
+
+📁 Source: [vscode-linthis](./vscode-linthis/)
+
+### JetBrains (IntelliJ IDEA, WebStorm, PyCharm, etc.)
+
+Install from [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/XXXXX-linthis) or search "linthis" in IDE Settings → Plugins.
+
+**Features:**
+- Format on Save (configurable)
+- Manual Lint/Format via Tools menu
+- Configurable executable path and additional arguments
+- Settings UI in Preferences → Tools → Linthis
+
+**Installation:**
+1. Open Settings/Preferences → Plugins
+2. Search for "linthis"
+3. Click Install and restart IDE
+
+**Configuration:**
+- Settings → Tools → Linthis
+- Enable/disable Format on Save
+- Set custom executable path
+- Add additional command-line arguments
+
+📁 Source: [jetbrains-linthis](./jetbrains-linthis/)
+
+### Neovim
+
+Install using your favorite plugin manager. Distributed via GitHub.
+
+#### lazy.nvim (Recommended)
+
+```lua
+-- For monorepo (plugin in subdirectory)
+{
+  "zhlinh/linthis",
+  subdir = "nvim-linthis",
+  config = function()
+    require("linthis").setup()
+  end,
+}
+
+-- For standalone repository
+{
+  "zhlinh/nvim-linthis",
+  config = function()
+    require("linthis").setup()
+  end,
+}
+```
+
+#### packer.nvim
+
+```lua
+-- For monorepo
+use {
+  "zhlinh/linthis",
+  rtp = "nvim-linthis",
+  config = function()
+    require("linthis").setup()
+  end,
+}
+```
+
+#### vim-plug
+
+```vim
+" For monorepo
+Plug 'zhlinh/linthis', { 'rtp': 'nvim-linthis' }
+```
+
+**Features:**
+- Format on Save (configurable)
+- Commands: `:LinthisLint`, `:LinthisFormat`, `:LinthisLintFormat`
+- Configurable via `setup()` options
+
+**Configuration:**
+```lua
+require("linthis").setup({
+  format_on_save = true,
+  executable = "linthis",
+  additional_args = {},
+})
+```
+
+📁 Source: [nvim-linthis](./nvim-linthis/)
+
 ## Usage Scenarios
 
 ### Pre-commit Hook
