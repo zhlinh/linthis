@@ -133,34 +133,42 @@ function M.lint(opts)
     end)
   end
 
-  -- Run linthis (lint only)
+  -- Run linthis -c (check only, no format)
   local cmd = config.get().cmd[1]
-  local result = vim.fn.system({ cmd, filepath })
-  local exit_code = vim.v.shell_error
+  local result = vim.fn.system({ cmd, "-c", "-i", filepath })
 
   -- Parse output and set diagnostics
   local diagnostics = {}
   local ns = vim.api.nvim_create_namespace("linthis")
 
-  -- Parse linthis output format: file:line:col: [severity] message
+  -- Parse linthis output format: [E1][lang][tool] file:line:col: severity: message (code)
+  -- Example: [E1][python][ruff] /tmp/test.py:1:8: error: `os` imported but unused (F401)
   for line in result:gmatch("[^\r\n]+") do
-    local file, lnum, col, severity, msg = line:match("^(.+):(%d+):(%d+):%s*%[(%w+)%]%s*(.+)$")
-    if lnum and msg then
+    -- Match: [idx][lang][tool] file:line:col: severity: message
+    local tool, file, lnum, col, severity, msg =
+      line:match("^%[%w+%]%[%w+%]%[(%w+)%]%s+(.+):(%d+):(%d+):%s*(%w+):%s*(.+)$")
+
+    if tool and lnum and msg then
       local sev = vim.diagnostic.severity.WARN
       if severity == "error" then
         sev = vim.diagnostic.severity.ERROR
-      elseif severity == "hint" then
+      elseif severity == "hint" or severity == "info" then
         sev = vim.diagnostic.severity.HINT
-      elseif severity == "info" then
-        sev = vim.diagnostic.severity.INFO
+      end
+
+      -- Extract code from message if present (e.g., "message (F401)")
+      local message, code = msg:match("^(.+)%s+%(([^)]+)%)$")
+      if not message then
+        message = msg
       end
 
       table.insert(diagnostics, {
         lnum = tonumber(lnum) - 1,
         col = tonumber(col) - 1,
-        message = msg,
+        message = message,
         severity = sev,
-        source = "linthis",
+        source = "linthis-" .. tool, -- e.g., "linthis-ruff"
+        code = code,
       })
     end
   end
