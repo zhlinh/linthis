@@ -52,10 +52,6 @@ tasks {
         privateKey.set(System.getenv("PRIVATE_KEY"))
         password.set(System.getenv("PRIVATE_KEY_PASSWORD"))
     }
-
-    publishPlugin {
-        token.set(System.getenv("PUBLISH_TOKEN"))
-    }
 }
 
 intellijPlatform {
@@ -65,5 +61,10 @@ intellijPlatform {
             sinceBuild = "241"
             untilBuild = "251.*"
         }
+    }
+
+    publishing {
+        // Get token from: https://plugins.jetbrains.com/author/me/tokens
+        token.set(System.getenv("JETBRAINS_MARKETPLACE_TOKEN"))
     }
 }
