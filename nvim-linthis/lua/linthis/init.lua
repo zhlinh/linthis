@@ -20,14 +20,13 @@ local function check_executable()
 end
 
 -- Find root directory
-local function find_root(bufnr)
+local function find_root(fname)
   local markers = config.get().root_markers
-  local path = vim.api.nvim_buf_get_name(bufnr)
-  if path == "" then
-    return nil
+  if not fname or fname == "" then
+    return vim.fn.getcwd()
   end
 
-  local root = vim.fs.root(bufnr, markers)
+  local root = vim.fs.root(fname, markers)
   return root or vim.fn.getcwd()
 end
 
@@ -40,8 +39,8 @@ local function setup_lsp()
     name = "linthis",
     cmd = opts.cmd,
     filetypes = opts.filetypes,
-    root_dir = function(fname, bufnr)
-      return find_root(bufnr or vim.fn.bufnr())
+    root_dir = function(fname)
+      return find_root(fname)
     end,
     settings = {},
     init_options = {},
