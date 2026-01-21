@@ -30,37 +30,47 @@ local function find_root(fname)
   return root or vim.fn.getcwd()
 end
 
--- Setup LSP client
-local function setup_lsp()
+-- Start LSP client for buffer
+local function start_lsp(bufnr)
   local opts = config.get()
+  local fname = vim.api.nvim_buf_get_name(bufnr)
 
-  -- Create LSP client configuration
-  local lsp_config = {
-    name = "linthis",
-    cmd = opts.cmd,
-    filetypes = opts.filetypes,
-    root_dir = function(fname)
-      return find_root(fname)
-    end,
-    settings = {},
-    init_options = {},
-    capabilities = vim.lsp.protocol.make_client_capabilities(),
-  }
-
-  -- Try to enhance capabilities with cmp-nvim-lsp if available
-  local ok, cmp_lsp = pcall(require, "cmp_nvim_lsp")
-  if ok then
-    lsp_config.capabilities = cmp_lsp.default_capabilities(lsp_config.capabilities)
+  -- Check if already attached
+  local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "linthis" })
+  if #clients > 0 then
+    return clients[1]
   end
 
-  -- Register the LSP configuration
-  vim.lsp.config.linthis = lsp_config
+  -- Start new client
+  local client_id = vim.lsp.start({
+    name = "linthis",
+    cmd = opts.cmd,
+    root_dir = find_root(fname),
+    capabilities = vim.lsp.protocol.make_client_capabilities(),
+  }, {
+    bufnr = bufnr,
+  })
 
-  -- Enable the LSP for configured filetypes
-  vim.lsp.enable("linthis")
+  return client_id
 end
 
--- Format current buffer using linthis CLI (like VSCode plugin)
+-- Setup LSP autocommand
+local function setup_lsp()
+  local opts = config.get()
+  local group = vim.api.nvim_create_augroup("linthis_lsp", { clear = true })
+
+  vim.api.nvim_create_autocmd("FileType", {
+    group = group,
+    pattern = opts.filetypes,
+    callback = function(args)
+      if opts.autostart then
+        start_lsp(args.buf)
+      end
+    end,
+  })
+end
+
+-- Format current buffer using linthis CLI
 function M.format(opts)
   opts = opts or {}
   local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
@@ -103,37 +113,68 @@ function M.format(opts)
   end
 end
 
--- Lint current buffer (refresh diagnostics)
+-- Lint current buffer using linthis CLI
 function M.lint(opts)
   opts = opts or {}
   local bufnr = opts.bufnr or vim.api.nvim_get_current_buf()
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
 
-  -- Force diagnostic refresh by sending didChange notification
-  local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "linthis" })
-  if #clients == 0 then
+  if filepath == "" then
     if config.get().notifications then
-      vim.notify("linthis: LSP not attached to this buffer", vim.log.levels.WARN)
+      vim.notify("linthis: cannot lint unsaved buffer", vim.log.levels.WARN)
     end
     return
   end
 
-  -- Trigger diagnostics refresh
-  vim.diagnostic.reset(nil, bufnr)
-  for _, client in ipairs(clients) do
-    local params = vim.lsp.util.make_text_document_params(bufnr)
-    client:notify("textDocument/didSave", params)
+  -- Save buffer first if modified
+  if vim.bo[bufnr].modified then
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("silent write")
+    end)
   end
 
-  if config.get().notifications and not opts.silent then
-    vim.schedule(function()
-      local diagnostics = vim.diagnostic.get(bufnr)
-      local count = #diagnostics
-      if count > 0 then
-        vim.notify(string.format("linthis: %d issue(s) found", count), vim.log.levels.INFO)
-      else
-        vim.notify("linthis: no issues found", vim.log.levels.INFO)
+  -- Run linthis (lint only)
+  local cmd = config.get().cmd[1]
+  local result = vim.fn.system({ cmd, filepath })
+  local exit_code = vim.v.shell_error
+
+  -- Parse output and set diagnostics
+  local diagnostics = {}
+  local ns = vim.api.nvim_create_namespace("linthis")
+
+  -- Parse linthis output format: file:line:col: [severity] message
+  for line in result:gmatch("[^\r\n]+") do
+    local file, lnum, col, severity, msg = line:match("^(.+):(%d+):(%d+):%s*%[(%w+)%]%s*(.+)$")
+    if lnum and msg then
+      local sev = vim.diagnostic.severity.WARN
+      if severity == "error" then
+        sev = vim.diagnostic.severity.ERROR
+      elseif severity == "hint" then
+        sev = vim.diagnostic.severity.HINT
+      elseif severity == "info" then
+        sev = vim.diagnostic.severity.INFO
       end
-    end)
+
+      table.insert(diagnostics, {
+        lnum = tonumber(lnum) - 1,
+        col = tonumber(col) - 1,
+        message = msg,
+        severity = sev,
+        source = "linthis",
+      })
+    end
+  end
+
+  -- Set diagnostics
+  vim.diagnostic.set(ns, bufnr, diagnostics)
+
+  if config.get().notifications and not opts.silent then
+    local count = #diagnostics
+    if count > 0 then
+      vim.notify(string.format("linthis: %d issue(s) found", count), vim.log.levels.INFO)
+    else
+      vim.notify("linthis: no issues found", vim.log.levels.INFO)
+    end
   end
 end
 
@@ -148,7 +189,7 @@ function M.restart()
 
   -- Restart after a short delay
   vim.defer_fn(function()
-    vim.cmd("edit")
+    start_lsp(bufnr)
     if config.get().notifications then
       vim.notify("linthis: LSP restarted", vim.log.levels.INFO)
     end
@@ -159,17 +200,19 @@ end
 function M.info()
   local bufnr = vim.api.nvim_get_current_buf()
   local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "linthis" })
+  local cmd = config.get().cmd[1]
+
+  print("linthis info:")
+  print(string.format("  Executable: %s", cmd))
+  print(string.format("  Executable found: %s", vim.fn.executable(cmd) == 1 and "yes" or "no"))
 
   if #clients == 0 then
-    print("linthis: LSP not attached")
-    return
-  end
-
-  for _, client in ipairs(clients) do
-    print(string.format("linthis LSP:"))
-    print(string.format("  Client ID: %d", client.id))
-    print(string.format("  Root: %s", client.config.root_dir or "none"))
-    print(string.format("  Cmd: %s", table.concat(client.config.cmd, " ")))
+    print("  LSP: not attached")
+  else
+    for _, client in ipairs(clients) do
+      print(string.format("  LSP Client ID: %d", client.id))
+      print(string.format("  LSP Root: %s", client.config.root_dir or "none"))
+    end
   end
 end
 
@@ -178,7 +221,7 @@ local function setup_autocmds()
   local opts = config.get()
   local group = vim.api.nvim_create_augroup("linthis", { clear = true })
 
-  -- Format on save (use BufWritePost to avoid conflicts)
+  -- Format on save
   if opts.format_on_save then
     vim.api.nvim_create_autocmd("BufWritePost", {
       group = group,
@@ -186,18 +229,28 @@ local function setup_autocmds()
       callback = function(args)
         local ft = vim.bo[args.buf].filetype
         if vim.tbl_contains(opts.filetypes, ft) then
-          -- Run format after save, then reload
           local filepath = vim.api.nvim_buf_get_name(args.buf)
           local cmd = config.get().cmd[1]
-          local result = vim.fn.system({ cmd, "-f", "-i", filepath })
-          local exit_code = vim.v.shell_error
-
-          if exit_code == 0 then
-            -- Reload buffer to show formatted content
+          vim.fn.system({ cmd, "-f", "-i", filepath })
+          if vim.v.shell_error == 0 then
             vim.api.nvim_buf_call(args.buf, function()
               vim.cmd("silent edit!")
             end)
           end
+        end
+      end,
+    })
+  end
+
+  -- Lint on save
+  if opts.lint_on_save then
+    vim.api.nvim_create_autocmd("BufWritePost", {
+      group = group,
+      pattern = "*",
+      callback = function(args)
+        local ft = vim.bo[args.buf].filetype
+        if vim.tbl_contains(opts.filetypes, ft) then
+          M.lint({ bufnr = args.buf, silent = true })
         end
       end,
     })
@@ -220,7 +273,7 @@ local function setup_commands()
 
   vim.api.nvim_create_user_command("LinthisInfo", function()
     M.info()
-  end, { desc = "Show linthis LSP info" })
+  end, { desc = "Show linthis info" })
 end
 
 -- Main setup function
