@@ -1,6 +1,6 @@
 <!-- Plugin Configuration File -->
 <idea-plugin>
-    <id>com.linthis.plugin</id>
+    <id>com.mojeter.linthis.plugin</id>
     <name>Linthis</name>
     <vendor email="zhlinh@gmail.com" url="https://github.com/zhlinh/linthis">zhlinh</vendor>
 
@@ -65,7 +65,7 @@
         <!-- LSP Server descriptor -->
         <server id="linthisServer"
                 name="Linthis"
-                factoryClass="com.linthis.plugin.LinthisLanguageServerFactory">
+                factoryClass="com.mojeter.linthis.plugin.LinthisLanguageServerFactory">
             <description><![CDATA[
             Linthis Language Server provides linting and formatting for multiple languages.
             ]]></description>
@@ -113,7 +113,7 @@
     </extensions>
 
     <applicationListeners>
-        <listener class="com.linthis.plugin.LinthisStartupListener"
+        <listener class="com.mojeter.linthis.plugin.LinthisStartupListener"
                   topic="com.intellij.ide.AppLifecycleListener"/>
     </applicationListeners>
 </idea-plugin>
