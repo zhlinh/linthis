@@ -15,16 +15,16 @@ import java.io.File
 /**
  * Startup listener for the Linthis plugin.
  *
- * Checks if the linthis executable is available and notifies the user
- * if it's not found.
+ * Checks if the linthis CLI is available and notifies the user
+ * with helpful installation instructions if not found.
  */
 class LinthisStartupListener : AppLifecycleListener {
 
     override fun appFrameCreated(commandLineArgs: MutableList<String>) {
-        // Check if linthis is installed
         ApplicationManager.getApplication().executeOnPooledThread {
+            // Check if linthis CLI is installed
             if (!isLinthisInstalled()) {
-                showInstallationNotification()
+                showLinthisCliNotification()
             }
         }
     }
@@ -64,18 +64,20 @@ class LinthisStartupListener : AppLifecycleListener {
         return false
     }
 
-    private fun showInstallationNotification() {
+    private fun showLinthisCliNotification() {
         ApplicationManager.getApplication().invokeLater {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup("Linthis Notifications")
                 .createNotification(
-                    "Linthis not found",
+                    "linthis CLI not found",
                     """
-                    The linthis executable was not found. Please install it:
+                    The <b>linthis</b> command-line tool was not found. Please install it:
                     <br><br>
                     <code>pip install linthis</code>
                     <br>or<br>
                     <code>cargo install linthis</code>
+                    <br><br>
+                    After installation, restart the IDE.
                     """.trimIndent(),
                     NotificationType.WARNING
                 )
