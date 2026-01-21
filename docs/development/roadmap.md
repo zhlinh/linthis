@@ -80,9 +80,9 @@
 ## P2 - Medium (Future Versions) ✅ COMPLETED
 
 ### 8. IDE Integration
-- [ ] VS Code extension
-- [ ] JetBrains plugin
-- [ ] Neovim/Vim plugin
+- [x] VS Code extension (`vscode-linthis/`) ✅
+- [x] JetBrains plugin (`jetbrains-linthis/`) ✅
+- [x] Neovim/Vim plugin (`nvim-linthis/`) ✅
 - [x] LSP server support (`src/lsp/`) ✅
 
 ### 9. Reports & Analysis

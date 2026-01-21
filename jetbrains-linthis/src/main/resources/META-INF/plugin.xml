@@ -1,0 +1,119 @@
+<!-- Plugin Configuration File -->
+<idea-plugin>
+    <id>com.linthis.plugin</id>
+    <name>Linthis</name>
+    <vendor email="zhlinh@gmail.com" url="https://github.com/zhlinh/linthis">zhlinh</vendor>
+
+    <description><![CDATA[
+    <h2>Linthis - Multi-language Linter and Formatter</h2>
+    <p>
+        A unified linting and formatting tool for multiple programming languages,
+        powered by the Linthis Language Server Protocol (LSP) server.
+    </p>
+
+    <h3>Supported Languages</h3>
+    <ul>
+        <li>Rust (clippy, rustfmt)</li>
+        <li>Python (ruff, black, isort)</li>
+        <li>TypeScript/JavaScript (ESLint, Prettier)</li>
+        <li>Go (golangci-lint, gofmt)</li>
+        <li>Java (checkstyle, google-java-format)</li>
+        <li>C/C++ (clang-tidy, clang-format)</li>
+        <li>Swift (SwiftLint, swift-format)</li>
+        <li>Kotlin (detekt, ktlint)</li>
+        <li>And more...</li>
+    </ul>
+
+    <h3>Features</h3>
+    <ul>
+        <li>Real-time diagnostics via LSP</li>
+        <li>Format on save</li>
+        <li>Quick fixes and suggestions</li>
+        <li>Configurable via .linthis.toml</li>
+    </ul>
+
+    <h3>Requirements</h3>
+    <p>
+        Install the <code>linthis</code> CLI tool:
+        <pre>pip install linthis</pre>
+        or
+        <pre>cargo install linthis</pre>
+    </p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <h3>0.0.1</h3>
+    <ul>
+        <li>Initial release</li>
+        <li>LSP integration for linting and formatting</li>
+        <li>Support for 18+ programming languages</li>
+    </ul>
+    ]]></change-notes>
+
+    <!-- Product and calculation compatibility -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.redhat.devtools.lsp4ij</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Notification group for linthis messages -->
+        <notificationGroup id="Linthis Notifications"
+                           displayType="BALLOON"
+                           key="notification.group.linthis"/>
+    </extensions>
+
+    <extensions defaultExtensionNs="com.redhat.devtools.lsp4ij">
+        <!-- LSP Server descriptor -->
+        <server id="linthisServer"
+                name="Linthis"
+                factoryClass="com.linthis.plugin.LinthisLanguageServerFactory">
+            <description><![CDATA[
+            Linthis Language Server provides linting and formatting for multiple languages.
+            ]]></description>
+        </server>
+
+        <!-- Language mappings - map file types to the LSP server -->
+        <languageMapping language="JAVA" serverId="linthisServer"/>
+        <languageMapping language="kotlin" serverId="linthisServer"/>
+        <languageMapping language="Python" serverId="linthisServer"/>
+        <languageMapping language="JavaScript" serverId="linthisServer"/>
+        <languageMapping language="TypeScript" serverId="linthisServer"/>
+        <languageMapping language="Go" serverId="linthisServer"/>
+        <languageMapping language="Rust" serverId="linthisServer"/>
+        <languageMapping language="ObjectiveC" serverId="linthisServer"/>
+        <languageMapping language="Swift" serverId="linthisServer"/>
+        <languageMapping language="C" serverId="linthisServer"/>
+        <languageMapping language="C++" serverId="linthisServer"/>
+        <languageMapping language="Lua" serverId="linthisServer"/>
+        <languageMapping language="Dart" serverId="linthisServer"/>
+        <languageMapping language="Shell Script" serverId="linthisServer"/>
+        <languageMapping language="Ruby" serverId="linthisServer"/>
+        <languageMapping language="PHP" serverId="linthisServer"/>
+        <languageMapping language="Scala" serverId="linthisServer"/>
+        <languageMapping language="C#" serverId="linthisServer"/>
+
+        <!-- File pattern mappings for additional file types -->
+        <fileNamePatternMapping patterns="*.rs" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.py;*.pyi" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.ts;*.tsx" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.js;*.jsx;*.mjs;*.cjs" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.go" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.java" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.kt;*.kts" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.swift" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.m;*.mm" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.c;*.h" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.cpp;*.cc;*.cxx;*.hpp;*.hh;*.hxx" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.lua" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.dart" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.sh;*.bash;*.zsh" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.rb" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.php" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.scala;*.sc" serverId="linthisServer"/>
+        <fileNamePatternMapping patterns="*.cs" serverId="linthisServer"/>
+    </extensions>
+
+    <applicationListeners>
+        <listener class="com.linthis.plugin.LinthisStartupListener"
+                  topic="com.intellij.ide.AppLifecycleListener"/>
+    </applicationListeners>
+</idea-plugin>

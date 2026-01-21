@@ -1,0 +1,147 @@
+# Linthis for JetBrains IDEs
+
+Multi-language linter and formatter plugin for JetBrains IDEs (IntelliJ IDEA, PyCharm, WebStorm, GoLand, CLion, etc.).
+
+## Features
+
+- **Real-time Diagnostics**: See linting issues as you type
+- **Format on Save**: Automatically format code when saving files
+- **Multi-language Support**: 18+ programming languages supported
+- **Quick Fixes**: Apply suggestions from linters
+- **Configurable**: Customize via `.linthis.toml`
+
+## Supported Languages
+
+| Language | Linter | Formatter |
+|----------|--------|-----------|
+| Rust | clippy | rustfmt |
+| Python | ruff | ruff/black |
+| TypeScript/JavaScript | ESLint | Prettier |
+| Go | golangci-lint | gofmt |
+| Java | checkstyle | google-java-format |
+| C/C++ | clang-tidy | clang-format |
+| Swift | SwiftLint | swift-format |
+| Kotlin | detekt | ktlint |
+| Lua | luacheck | stylua |
+| Dart | dart analyze | dart format |
+| Shell | shellcheck | shfmt |
+| Ruby | rubocop | rubocop |
+| PHP | phpcs | php-cs-fixer |
+| Scala | scalafix | scalafmt |
+| C# | dotnet format | dotnet format |
+
+## Requirements
+
+### 1. Install Linthis CLI
+
+```bash
+# Using pip (recommended)
+pip install linthis
+
+# Or using cargo
+cargo install linthis
+```
+
+### 2. Install LSP4IJ Plugin
+
+This plugin requires the [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) plugin for Language Server Protocol support.
+
+Install from JetBrains Marketplace:
+1. Open Settings/Preferences → Plugins
+2. Search for "LSP4IJ"
+3. Click Install
+
+### 3. Install Linthis Plugin
+
+#### From JetBrains Marketplace (Coming Soon)
+1. Open Settings/Preferences → Plugins
+2. Search for "Linthis"
+3. Click Install
+
+#### From Local Build
+1. Build the plugin: `./gradlew buildPlugin`
+2. Install from disk: Settings → Plugins → ⚙️ → Install Plugin from Disk
+3. Select `build/distributions/jetbrains-linthis-*.zip`
+
+## Configuration
+
+Create a `.linthis.toml` file in your project root:
+
+```toml
+[global]
+# Enabled languages
+enabled_languages = ["rust", "python", "typescript"]
+
+# Format on save
+format_on_save = true
+
+# Cache settings
+cache_enabled = true
+
+[python]
+# Python-specific settings
+lint_tool = "ruff"
+format_tool = "ruff"
+
+[rust]
+# Rust-specific settings
+lint_tool = "clippy"
+format_tool = "rustfmt"
+```
+
+## Usage
+
+Once installed, the plugin will automatically:
+
+1. **Start the LSP server** when you open a supported file
+2. **Show diagnostics** in the editor gutter and Problems view
+3. **Format on save** (if enabled in configuration)
+
+### Manual Actions
+
+- **Format File**: Code → Reformat Code (or `Ctrl+Alt+L` / `Cmd+Alt+L`)
+- **Show Problems**: View → Tool Windows → Problems
+
+## Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/zhlinh/linthis.git
+cd linthis/jetbrains-linthis
+
+# Build the plugin
+./gradlew buildPlugin
+
+# Run in a sandbox IDE for testing
+./gradlew runIde
+```
+
+## Troubleshooting
+
+### Linthis not found
+
+If you see "Linthis not found" notification:
+
+1. Verify linthis is installed: `linthis --version`
+2. Ensure linthis is in your PATH
+3. Restart the IDE
+
+### No diagnostics showing
+
+1. Check if the file type is supported
+2. Verify `.linthis.toml` configuration
+3. View → Tool Windows → Language Servers to check server status
+
+### LSP server not starting
+
+1. Open Help → Diagnostic Tools → Debug Log Settings
+2. Add `#com.linthis` to enable debug logging
+3. Check idea.log for errors
+
+## License
+
+MIT License - see [LICENSE](../LICENSE) for details.
+
+## Contributing
+
+Contributions are welcome! Please see the [main repository](https://github.com/zhlinh/linthis) for guidelines.
