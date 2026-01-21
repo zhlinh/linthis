@@ -19,8 +19,16 @@
         <li>Go (golangci-lint, gofmt)</li>
         <li>Java (checkstyle, google-java-format)</li>
         <li>C/C++ (clang-tidy, clang-format)</li>
+        <li>Objective-C (clang-tidy, clang-format)</li>
         <li>Swift (SwiftLint, swift-format)</li>
         <li>Kotlin (detekt, ktlint)</li>
+        <li>Lua (luacheck, stylua)</li>
+        <li>Dart (dart analyze, dart format)</li>
+        <li>Shell/Bash (shellcheck, shfmt)</li>
+        <li>Ruby (rubocop)</li>
+        <li>PHP (phpcs, php-cs-fixer)</li>
+        <li>Scala (scalafix, scalafmt)</li>
+        <li>C# (dotnet format)</li>
         <li>And more...</li>
     </ul>
 

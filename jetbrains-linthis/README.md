@@ -20,15 +20,17 @@ Multi-language linter and formatter plugin for JetBrains IDEs (IntelliJ IDEA, Py
 | Go | golangci-lint | gofmt |
 | Java | checkstyle | google-java-format |
 | C/C++ | clang-tidy | clang-format |
+| Objective-C | clang-tidy | clang-format |
 | Swift | SwiftLint | swift-format |
 | Kotlin | detekt | ktlint |
 | Lua | luacheck | stylua |
 | Dart | dart analyze | dart format |
-| Shell | shellcheck | shfmt |
+| Shell/Bash | shellcheck | shfmt |
 | Ruby | rubocop | rubocop |
 | PHP | phpcs | php-cs-fixer |
 | Scala | scalafix | scalafmt |
 | C# | dotnet format | dotnet format |
+| And more... | | |
 
 ## Requirements
 
