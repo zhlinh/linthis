@@ -9,6 +9,10 @@ version = "0.0.1"
 
 repositories {
     mavenCentral()
+    // FalsePattern repository for LSP4IJ
+    maven {
+        url = uri("https://mvn.falsepattern.com/releases/")
+    }
     intellijPlatform {
         defaultRepositories()
     }
@@ -20,11 +24,12 @@ dependencies {
         bundledPlugin("com.intellij.java")
         pluginVerifier()
         zipSigner()
-        instrumentationTools()
     }
 
-    // LSP4IJ - Language Server Protocol support for IntelliJ
-    implementation("com.redhat.devtools.lsp4ij:lsp4ij:0.8.1")
+    // LSP4IJ library from FalsePattern repository
+    compileOnly("com.redhat.devtools.intellij:lsp4ij:0.13.0")
+    // Eclipse LSP4J (LSP4IJ's dependency)
+    compileOnly("org.eclipse.lsp4j:org.eclipse.lsp4j:0.23.1")
 }
 
 tasks {
