@@ -95,6 +95,7 @@ pub fn border_style(focused: bool) -> Style {
 }
 
 /// Format a file path for display
+#[allow(dead_code)]
 pub fn format_path(path: &std::path::Path, max_len: usize) -> String {
     let s = path.display().to_string();
     if s.len() <= max_len {

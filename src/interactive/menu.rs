@@ -695,22 +695,6 @@ fn read_line() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Language;
-    use std::path::PathBuf;
-
-    fn make_test_issue(severity: Severity) -> LintIssue {
-        LintIssue::new(
-            PathBuf::from("test.cpp"),
-            42,
-            "Test message".to_string(),
-            severity,
-        )
-        .with_column(10)
-        .with_code("TEST001".to_string())
-        .with_source("test-linter".to_string())
-        .with_language(Language::Cpp)
-        .with_code_line("    int x = 42;".to_string())
-    }
 
     #[test]
     fn test_interactive_result_default() {

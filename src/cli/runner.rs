@@ -55,13 +55,12 @@ pub fn perform_self_update(self_update_config: Option<&linthis::self_update::Sel
     let latest = manager.get_latest_version().unwrap_or_else(|| "unknown".to_string());
 
     // Prompt user if needed
-    if config.should_prompt() {
-        if !manager.prompt_user(&current, &latest) {
+    if config.should_prompt()
+        && !manager.prompt_user(&current, &latest) {
             // User declined, update timestamp to avoid repeated prompts
             let _ = manager.update_last_check_time();
             return false;
         }
-    }
 
     // Perform upgrade
     match manager.upgrade() {

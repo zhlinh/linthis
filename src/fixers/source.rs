@@ -92,9 +92,7 @@ impl SourceFixer {
         loop {
             // Find next // starting from search_start
             let rest = &line[search_start..];
-            let Some(rel_pos) = rest.find("//") else {
-                return None;
-            };
+            let rel_pos = rest.find("//")?;
 
             let abs_pos = search_start + rel_pos;
             let before_comment = &line[..abs_pos];
@@ -217,8 +215,8 @@ impl SourceFixer {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
-            if line.starts_with("author ") {
-                return Some(line[7..].to_string());
+            if let Some(author) = line.strip_prefix("author ") {
+                return Some(author.to_string());
             }
         }
 

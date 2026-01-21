@@ -20,8 +20,10 @@ use tower_lsp::lsp_types::Url;
 #[derive(Debug, Clone)]
 pub struct DocumentState {
     /// The URI of the document.
+    #[allow(dead_code)]
     pub uri: Url,
     /// The file path on disk.
+    #[allow(dead_code)]
     pub path: PathBuf,
     /// The document version (incremented on each change).
     pub version: i32,
@@ -82,18 +84,21 @@ impl DocumentManager {
     }
 
     /// Get the state of a document.
+    #[allow(dead_code)]
     pub async fn get(&self, uri: &Url) -> Option<DocumentState> {
         let docs = self.documents.read().await;
         docs.get(uri).cloned()
     }
 
     /// Get the file path for a document URI.
+    #[allow(dead_code)]
     pub async fn get_path(&self, uri: &Url) -> Option<PathBuf> {
         let docs = self.documents.read().await;
         docs.get(uri).map(|s| s.path.clone())
     }
 
     /// Get all open document URIs.
+    #[allow(dead_code)]
     pub async fn all_uris(&self) -> Vec<Url> {
         let docs = self.documents.read().await;
         docs.keys().cloned().collect()

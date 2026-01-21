@@ -521,7 +521,7 @@ impl CppFormatter {
             if bytes[i] == b'N' && bytes[i + 1] == b'S' {
                 let next_char = bytes[i + 2];
                 // Check if next char is uppercase A-Z (ASCII 65-90)
-                if (b'A'..=b'Z').contains(&next_char) {
+                if next_char.is_ascii_uppercase() {
                     // Make sure it's not part of a longer identifier before "NS"
                     // (i.e., NS should be at word boundary)
                     if i == 0 || !is_identifier_char(bytes[i - 1]) {

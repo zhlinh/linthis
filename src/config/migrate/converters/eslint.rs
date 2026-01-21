@@ -88,11 +88,12 @@ pub(crate) fn convert(
 
 /// Generate ESLint JavaScript config file content
 fn generate_eslint_js(config: &ESLintConfig) -> String {
-    let mut lines = Vec::new();
-    lines.push("// Migrated from existing ESLint config by linthis".to_string());
-    lines.push("// Review and adjust as needed".to_string());
-    lines.push(String::new());
-    lines.push("module.exports = {".to_string());
+    let mut lines = vec![
+        "// Migrated from existing ESLint config by linthis".to_string(),
+        "// Review and adjust as needed".to_string(),
+        String::new(),
+        "module.exports = {".to_string(),
+    ];
 
     // Add env
     if !config.env.is_empty() {

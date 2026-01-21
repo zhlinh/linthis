@@ -122,8 +122,8 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
             let mut found_idx = None;
             let mut best_match_score: i32 = 0;
 
-            for i in search_start..search_end {
-                let line_trimmed = lines[i].trim();
+            for (i, line) in lines.iter().enumerate().skip(search_start).take(search_end - search_start) {
+                let line_trimmed = line.trim();
 
                 // Calculate base similarity score
                 let base_score: i32 = if line_trimmed == expected_trimmed {
@@ -143,7 +143,7 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
                 };
 
                 // Apply distance penalty (prefer lines closer to original position)
-                let distance = if i > line_idx { i - line_idx } else { line_idx - i } as i32;
+                let distance = i.abs_diff(line_idx) as i32;
                 let score = base_score - (distance * 5);
 
                 // Only consider matches with good score (>= 400 for high confidence)
@@ -151,7 +151,7 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
                     best_match_score = score;
                     found_idx = Some(i);
                     eprintln!("[DEBUG] Found match at line {}: base_score={}, distance={}, final_score={}, content={:?}",
-                             i + 1, base_score, distance, score, lines[i]);
+                             i + 1, base_score, distance, score, line);
                 }
             }
 

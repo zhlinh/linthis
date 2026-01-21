@@ -140,7 +140,7 @@ impl CpplintFixer {
 
             // Run pip install with progress output
             let mut child = match Command::new(pip_cmd)
-                .args(&["install", "cpplint", "--upgrade"])
+                .args(["install", "cpplint", "--upgrade"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -155,7 +155,7 @@ impl CpplintFixer {
             // Read and display output
             if let Some(stderr) = child.stderr.take() {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     // Filter and display relevant progress information
                     if line.contains("Collecting")
                         || line.contains("Downloading")
@@ -398,11 +398,10 @@ impl CpplintFixer {
                             }
                             modified = true;
                         }
-                    } else if self.config.header_guard_mode == HeaderGuardMode::PragmaOnce {
-                        if self.convert_to_pragma_once(&mut lines) {
+                    } else if self.config.header_guard_mode == HeaderGuardMode::PragmaOnce
+                        && self.convert_to_pragma_once(&mut lines) {
                             modified = true;
                         }
-                    }
                 }
                 "readability/todo" => {
                     if self.fix_todo_from_error(&mut lines, error) {
@@ -631,7 +630,7 @@ impl CpplintFixer {
 
         // Add #endif at the end
         // Ensure there's an empty line before #endif
-        if !lines.last().map_or(true, |l| l.trim().is_empty()) {
+        if !lines.last().is_none_or(|l| l.trim().is_empty()) {
             lines.push(String::new());
         }
         lines.push(format!("#endif  // {}", guard_name));
@@ -854,9 +853,7 @@ impl CpplintFixer {
         loop {
             // Find next // starting from search_start
             let rest = &line[search_start..];
-            let Some(rel_pos) = rest.find("//") else {
-                return None;
-            };
+            let rel_pos = rest.find("//")?;
 
             let abs_pos = search_start + rel_pos;
             let before_comment = &line[..abs_pos];
@@ -963,7 +960,7 @@ impl CpplintFixer {
 
         // Find the position of the lone semicolon (only whitespace before it)
         // Pattern: start with whitespace, then a semicolon, optionally followed by comment or whitespace
-        if let Some(re) = Regex::new(r"^(\s*);(\s*(?://.*)?)?$").ok() {
+        if let Ok(re) = Regex::new(r"^(\s*);(\s*(?://.*)?)?$") {
             if let Some(caps) = re.captures(line) {
                 let indent = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                 let suffix = caps.get(2).map(|m| m.as_str()).unwrap_or("");
@@ -1038,7 +1035,7 @@ impl CpplintFixer {
         // Use regex to find = without proper spacing
         // Match: not preceded by space + = + not followed by space or =
         // But avoid ==, !=, <=, >=, +=, -=, etc.
-        if let Some(re) = Regex::new(r"([^\s=!<>+\-*/%&|^])=([^=\s])").ok() {
+        if let Ok(re) = Regex::new(r"([^\s=!<>+\-*/%&|^])=([^=\s])") {
             let result = re.replace_all(line, "$1 = $2").to_string();
             if result != *line {
                 lines[line_idx] = result;
