@@ -719,6 +719,7 @@ fn find_similar_field(input: &str, candidates: &[&str]) -> Option<String> {
 }
 
 /// Calculate Levenshtein distance between two strings
+#[allow(clippy::needless_range_loop)]
 fn levenshtein_distance(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
     let b_chars: Vec<char> = b.chars().collect();

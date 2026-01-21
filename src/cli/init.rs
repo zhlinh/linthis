@@ -65,7 +65,7 @@ fn handle_config_migrate(
 
     // Parse tool filter
     let tool_filter = match from_tool.as_ref() {
-        Some(t) => match Tool::from_str(t) {
+        Some(t) => match Tool::parse(t) {
             Some(tool) => Some(tool),
             None => {
                 eprintln!(
@@ -147,7 +147,7 @@ fn handle_config_migrate(
                 println!();
                 println!("{}", "Suggestions:".bold());
                 for suggestion in &result.suggestions {
-                    println!("  {} {}", "💡", suggestion);
+                    println!("  💡 {}", suggestion);
                 }
             }
 

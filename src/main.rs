@@ -259,8 +259,8 @@ fn main() -> ExitCode {
                                 if std::fs::create_dir_all(&lang_dir).is_ok() {
                                     let target = lang_dir.join(filename);
                                     // Always update to latest plugin config
-                                    if std::fs::copy(&config.config_path, &target).is_ok() {
-                                        if cli.verbose {
+                                    if std::fs::copy(&config.config_path, &target).is_ok()
+                                        && cli.verbose {
                                             eprintln!(
                                                 "  - {}/{}: {} -> .linthis/configs/{}/{}",
                                                 config.language,
@@ -270,7 +270,6 @@ fn main() -> ExitCode {
                                                 filename.to_string_lossy()
                                             );
                                         }
-                                    }
                                 }
                             }
                         }

@@ -59,15 +59,15 @@ pub(crate) fn convert(
 
 /// Generate Prettier JavaScript config file content
 fn generate_prettier_js(config: &prettier::PrettierConfig) -> String {
-    let mut lines = Vec::new();
-    lines.push("// Migrated from existing Prettier config by linthis".to_string());
-    lines.push("// Review and adjust as needed".to_string());
-    lines.push(String::new());
-    lines.push("module.exports = ".to_string());
-    lines.push(config.to_js_object());
-    lines.push(";".to_string());
-
-    lines.join("\n")
+    [
+        "// Migrated from existing Prettier config by linthis",
+        "// Review and adjust as needed",
+        "",
+        "module.exports = ",
+        &config.to_js_object(),
+        ";",
+    ]
+    .join("\n")
 }
 
 #[cfg(test)]

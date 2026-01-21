@@ -18,6 +18,7 @@ use std::process::Command;
 
 /// Cpplint configuration for different languages
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct CpplintConfig {
     /// Line length limit
     pub linelength: Option<u32>,
@@ -25,14 +26,6 @@ pub struct CpplintConfig {
     pub filter: Option<String>,
 }
 
-impl Default for CpplintConfig {
-    fn default() -> Self {
-        Self {
-            linelength: None,
-            filter: None,
-        }
-    }
-}
 
 /// C/C++ checker using clang-tidy (preferred) or cpplint.
 pub struct CppChecker {

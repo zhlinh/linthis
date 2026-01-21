@@ -158,39 +158,39 @@ fn parse_js(content: &str) -> Result<PrettierConfig, String> {
 }
 
 fn extract_prettier_config(value: &serde_json::Value) -> Result<PrettierConfig, String> {
-    let mut config = PrettierConfig::default();
-
-    config.tab_width = value
-        .get("tabWidth")
-        .and_then(|v| v.as_u64())
-        .map(|n| n as u32);
-    config.use_tabs = value
-        .get("useTabs")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    config.semi = value.get("semi").and_then(|v| v.as_bool());
-    config.single_quote = value.get("singleQuote").and_then(|v| v.as_bool());
-    config.trailing_comma = value
-        .get("trailingComma")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    config.bracket_spacing = value.get("bracketSpacing").and_then(|v| v.as_bool());
-    config.print_width = value
-        .get("printWidth")
-        .and_then(|v| v.as_u64())
-        .map(|n| n as u32);
-    config.arrow_parens = value
-        .get("arrowParens")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    config.end_of_line = value
-        .get("endOfLine")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    config.prose_wrap = value
-        .get("proseWrap")
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let config = PrettierConfig {
+        tab_width: value
+            .get("tabWidth")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
+        use_tabs: value
+            .get("useTabs")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        semi: value.get("semi").and_then(|v| v.as_bool()),
+        single_quote: value.get("singleQuote").and_then(|v| v.as_bool()),
+        trailing_comma: value
+            .get("trailingComma")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        bracket_spacing: value.get("bracketSpacing").and_then(|v| v.as_bool()),
+        print_width: value
+            .get("printWidth")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
+        arrow_parens: value
+            .get("arrowParens")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        end_of_line: value
+            .get("endOfLine")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        prose_wrap: value
+            .get("proseWrap")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+    };
 
     Ok(config)
 }

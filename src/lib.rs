@@ -192,7 +192,7 @@ pub enum LintisError {
     #[error("Cache error ({operation}): {message}")]
     Cache { operation: String, message: String },
 
-    #[error("Tool not available: {tool} ({language})")]
+    #[error("Tool not available: {tool} ({language}). {install_hint}")]
     ToolNotAvailable {
         tool: String,
         language: String,
@@ -443,7 +443,7 @@ impl Language {
             if bytes[i] == b'N' && bytes[i + 1] == b'S' {
                 let next_char = bytes[i + 2];
                 // Check if next char is uppercase A-Z (ASCII 65-90)
-                if (b'A'..=b'Z').contains(&next_char) {
+                if next_char.is_ascii_uppercase() {
                     // Make sure it's not part of a longer identifier before "NS"
                     // (i.e., NS should be at word boundary)
                     if i == 0 || !Self::is_identifier_char(bytes[i - 1]) {
@@ -1338,10 +1338,8 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 .collect();
 
             // Add format results
-            for format_result in format_results {
-                if let Some(fr) = format_result {
-                    result.add_format_result(fr);
-                }
+            for fr in format_results.into_iter().flatten() {
+                result.add_format_result(fr);
             }
         }
         // Clear progress line

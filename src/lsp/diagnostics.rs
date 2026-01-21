@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(diag.range.start.character, 4); // 0-indexed
         assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
         assert_eq!(diag.code, Some(NumberOrString::String("W0612".to_string())));
-        assert_eq!(diag.source, Some("ruff".to_string()));
+        assert_eq!(diag.source, Some("linthis-ruff".to_string()));
         assert!(diag.message.contains("Unused variable"));
     }
 
