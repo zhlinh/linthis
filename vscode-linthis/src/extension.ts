@@ -6,8 +6,72 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node';
 import { execSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 let client: LanguageClient | undefined;
+
+/**
+ * Find linthis executable in common locations
+ */
+function findLinthisExecutable(): string {
+  const isWindows = process.platform === 'win32';
+  const executableName = isWindows ? 'linthis.exe' : 'linthis';
+
+  // Common installation paths
+  const homeDir = os.homedir();
+  const possiblePaths = [
+    path.join(homeDir, '.cargo', 'bin', executableName),
+    path.join(homeDir, '.local', 'bin', executableName),
+    '/opt/homebrew/bin/linthis',
+    '/usr/local/bin/linthis',
+    '/usr/bin/linthis',
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  // Check PATH
+  const pathEnv = process.env.PATH || '';
+  const pathDirs = pathEnv.split(path.delimiter);
+
+  for (const dir of pathDirs) {
+    const fullPath = path.join(dir, executableName);
+    if (fs.existsSync(fullPath)) {
+      return fullPath;
+    }
+  }
+
+  // Default to just "linthis" and hope it's in PATH
+  return 'linthis';
+}
+
+/**
+ * Get the linthis executable path from config or auto-detect
+ */
+function getLinthisPath(config: vscode.WorkspaceConfiguration): string {
+  const configuredPath = config.get<string>('executable.path', '');
+  if (configuredPath && configuredPath.trim() !== '') {
+    return configuredPath;
+  }
+  return findLinthisExecutable();
+}
+
+/**
+ * Parse additional arguments string into array
+ */
+function parseAdditionalArguments(config: vscode.WorkspaceConfiguration): string[] {
+  const argsString = config.get<string>('executable.additionalArguments', '');
+  if (!argsString || argsString.trim() === '') {
+    return [];
+  }
+  // Split by whitespace, filter empty strings
+  return argsString.trim().split(/\s+/).filter(arg => arg.length > 0);
+}
 
 // Supported languages matching the LSP server
 const SUPPORTED_LANGUAGES = [
@@ -40,7 +104,8 @@ async function formatDocument(
   outputChannel: vscode.OutputChannel,
   showMessages: boolean = true
 ): Promise<boolean> {
-  const executablePath = config.get<string>('executablePath', 'linthis');
+  const executablePath = getLinthisPath(config);
+  const additionalArgs = parseAdditionalArguments(config);
 
   try {
     if (showMessages) {
@@ -48,7 +113,11 @@ async function formatDocument(
     }
 
     // Run linthis format-only
-    const result = execSync(`"${executablePath}" -f -i "${filePath}"`, {
+    const args = ['-f', '-i', filePath, ...additionalArgs];
+    const command = `"${executablePath}" ${args.map(a => `"${a}"`).join(' ')}`;
+    outputChannel.appendLine(`[info] Running: ${command}`);
+
+    const result = execSync(command, {
       encoding: 'utf-8',
       cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
       timeout: 10000,
@@ -198,10 +267,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       outputChannel.appendLine(`[info] Format on save: ${filePath}`);
 
       // Format the file using linthis -f -i (in-place)
-      const executablePath = currentConfig.get<string>('executablePath', 'linthis');
+      const executablePath = getLinthisPath(currentConfig);
+      const additionalArgs = parseAdditionalArguments(currentConfig);
+      const args = ['-f', '-i', filePath, ...additionalArgs];
+      const command = `"${executablePath}" ${args.map(a => `"${a}"`).join(' ')}`;
 
       try {
-        const result = execSync(`"${executablePath}" -f -i "${filePath}"`, {
+        const result = execSync(command, {
           encoding: 'utf-8',
           cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
           timeout: 10000,
@@ -367,15 +439,15 @@ function createLanguageClient(
   config: vscode.WorkspaceConfiguration,
   outputChannel: vscode.OutputChannel
 ): LanguageClient {
-  const executablePath = config.get<string>('executablePath', 'linthis');
-  const extraArgs = config.get<string[]>('extraArgs', []);
+  const executablePath = getLinthisPath(config);
+  const additionalArgs = parseAdditionalArguments(config);
 
   outputChannel.appendLine(`[info] Using linthis executable: ${executablePath}`);
-  outputChannel.appendLine(`[info] LSP arguments: lsp ${extraArgs.join(' ')}`);
+  outputChannel.appendLine(`[info] LSP arguments: lsp ${additionalArgs.join(' ')}`);
 
   const serverOptions: ServerOptions = {
     command: executablePath,
-    args: ['lsp', ...extraArgs],
+    args: ['lsp', ...additionalArgs],
   };
 
   const documentSelector = SUPPORTED_LANGUAGES.map((language) => ({
