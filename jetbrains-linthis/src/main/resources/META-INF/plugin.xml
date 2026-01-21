@@ -1,14 +1,14 @@
 <!-- Plugin Configuration File -->
 <idea-plugin>
     <id>com.mojeter.linthis.plugin</id>
-    <name>Linthis</name>
+    <name>linthis</name>
     <vendor email="zhlinh@gmail.com" url="https://github.com/zhlinh/linthis">zhlinh</vendor>
 
     <description><![CDATA[
-    <h2>Linthis - Multi-language Linter and Formatter</h2>
+    <h2>linthis - Multi-language Linter and Formatter</h2>
     <p>
         A unified linting and formatting tool for multiple programming languages,
-        powered by the Linthis Language Server Protocol (LSP) server.
+        powered by the linthis Language Server Protocol (LSP) server.
     </p>
 
     <h3>Supported Languages</h3>
@@ -40,13 +40,46 @@
         <li>Configurable via .linthis.toml</li>
     </ul>
 
-    <h3>Requirements</h3>
+    <h3>Usage</h3>
     <p>
-        Install the <code>linthis</code> CLI tool:
-        <pre>pip install linthis</pre>
-        or
-        <pre>cargo install linthis</pre>
+        Access linthis actions from <b>Tools → Linthis</b> menu:
     </p>
+    <ul>
+        <li><b>Lint Current File</b> - Run linter on the current file</li>
+        <li><b>Format Current File</b> - Format the current file</li>
+    </ul>
+    <p>
+        <img src="https://raw.githubusercontent.com/linthis-group/linthis/master/jetbrains-linthis/docs/images/tools-menu.png" alt="Linthis Tools Menu" width="400"/>
+    </p>
+
+    <h3>Configuration</h3>
+    <p>
+        Configure linthis in <b>Settings → Tools → Linthis</b>:
+    </p>
+    <ul>
+        <li><b>Lint on file open</b> - Run linter when opening files</li>
+        <li><b>Lint on save</b> - Run linter when saving files</li>
+        <li><b>Format on save</b> - Auto-format files when saving</li>
+        <li><b>Linthis path</b> - Custom path to linthis executable (leave empty for auto-detect)</li>
+        <li><b>Additional arguments</b> - Extra CLI arguments for linthis</li>
+    </ul>
+    <p>
+        <img src="https://raw.githubusercontent.com/linthis-group/linthis/master/jetbrains-linthis/docs/images/settings.png" alt="Linthis Settings" width="600"/>
+    </p>
+
+    <h3>Requirements</h3>
+    <ol>
+        <li>
+            <b>LSP4IJ plugin</b> (required):
+            <br>Install from <a href="https://plugins.jetbrains.com/plugin/23257-lsp4ij">JetBrains Marketplace</a>
+        </li>
+        <li>
+            <b>linthis CLI tool</b>:
+            <pre>pip install linthis</pre>
+            or
+            <pre>cargo install linthis</pre>
+        </li>
+    </ol>
     ]]></description>
 
     <change-notes><![CDATA[
@@ -58,8 +91,9 @@
     </ul>
     ]]></change-notes>
 
-    <!-- Product and calculation compatibility -->
+    <!-- Product and platform compatibility -->
     <depends>com.intellij.modules.platform</depends>
+    <!-- LSP4IJ is required for LSP-based linting -->
     <depends>com.redhat.devtools.lsp4ij</depends>
 
     <extensions defaultExtensionNs="com.intellij">
@@ -67,7 +101,46 @@
         <notificationGroup id="Linthis Notifications"
                            displayType="BALLOON"
                            key="notification.group.linthis"/>
+
+        <!-- Settings configurable -->
+        <projectConfigurable
+                parentId="tools"
+                instance="com.mojeter.linthis.plugin.settings.LinthisSettingsConfigurable"
+                id="com.mojeter.linthis.settings"
+                displayName="Linthis"
+                nonDefaultProject="true"/>
+
+        <!-- Project service for settings -->
+        <projectService
+                serviceImplementation="com.mojeter.linthis.plugin.settings.LinthisSettings"/>
     </extensions>
+
+    <!-- Actions -->
+    <actions>
+        <group id="Linthis.ActionGroup" text="Linthis" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+
+            <action id="Linthis.Lint"
+                    class="com.mojeter.linthis.plugin.actions.LinthisLintAction"
+                    text="Lint Current File"
+                    description="Run linthis linter on the current file">
+                <!-- No default shortcut to avoid conflicts. Users can configure in Settings → Keymap → Linthis -->
+            </action>
+
+            <action id="Linthis.Format"
+                    class="com.mojeter.linthis.plugin.actions.LinthisFormatAction"
+                    text="Format Current File"
+                    description="Format the current file using linthis">
+                <!-- No default shortcut to avoid conflicts. Users can configure in Settings → Keymap → Linthis -->
+            </action>
+        </group>
+    </actions>
+
+    <!-- Project-level listeners -->
+    <projectListeners>
+        <listener class="com.mojeter.linthis.plugin.listeners.LinthisFileOpenListener"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+    </projectListeners>
 
     <extensions defaultExtensionNs="com.redhat.devtools.lsp4ij">
         <!-- LSP Server descriptor -->
@@ -123,5 +196,7 @@
     <applicationListeners>
         <listener class="com.mojeter.linthis.plugin.LinthisStartupListener"
                   topic="com.intellij.ide.AppLifecycleListener"/>
+        <listener class="com.mojeter.linthis.plugin.listeners.LinthisDocumentListener"
+                  topic="com.intellij.openapi.fileEditor.FileDocumentManagerListener"/>
     </applicationListeners>
 </idea-plugin>

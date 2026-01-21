@@ -60,7 +60,7 @@ tasks {
 
 intellijPlatform {
     pluginConfiguration {
-        name = "Linthis"
+        name = "linthis"
         ideaVersion {
             sinceBuild = "241"
             untilBuild = "251.*"

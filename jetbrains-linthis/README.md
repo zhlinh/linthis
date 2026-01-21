@@ -91,18 +91,43 @@ lint_tool = "clippy"
 format_tool = "rustfmt"
 ```
 
+## Plugin Settings
+
+Open **Settings/Preferences → Tools → Linthis** to configure:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Lint on file open | On | Run linter when opening a file |
+| Lint on save | On | Run linter when saving a file |
+| Format on save | Off | Auto-format file when saving |
+| Linthis path | (auto) | Custom path to linthis executable |
+| Additional arguments | (empty) | Extra arguments passed to linthis |
+
 ## Usage
 
 Once installed, the plugin will automatically:
 
 1. **Start the LSP server** when you open a supported file
 2. **Show diagnostics** in the editor gutter and Problems view
-3. **Format on save** (if enabled in configuration)
+3. **Format on save** (if enabled in settings)
 
-### Manual Actions
+### Keyboard Shortcuts
 
-- **Format File**: Code → Reformat Code (or `Ctrl+Alt+L` / `Cmd+Alt+L`)
-- **Show Problems**: View → Tool Windows → Problems
+To configure shortcuts:
+1. Open **Settings/Preferences → Keymap**
+2. Search for "Linthis"
+3. Right-click on an action and select "Add Keyboard Shortcut"
+
+Suggested shortcuts (not set by default to avoid conflicts):
+- Lint Current File: `Ctrl+Shift+;` / `Cmd+Shift+;`
+- Format Current File: `Ctrl+Shift+'` / `Cmd+Shift+'`
+
+### Menu Actions
+
+- **Tools → Linthis → Lint Current File**: Manually trigger linting
+- **Tools → Linthis → Format Current File**: Manually format the file
+- **Code → Reformat Code**: Also triggers LSP-based formatting
+- **View → Tool Windows → Problems**: Show all diagnostics
 
 ## Building from Source
 
