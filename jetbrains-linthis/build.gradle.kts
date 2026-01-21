@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.2.1"
 }
 
-group = "com.linthis"
+group = "com.mojeter.linthis"
 version = "0.0.1"
 
 repositories {

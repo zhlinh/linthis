@@ -4,7 +4,7 @@
 //
 // https://opensource.org/license/MIT
 
-package com.linthis.plugin
+package com.mojeter.linthis.plugin
 
 import com.intellij.ide.AppLifecycleListener
 import com.intellij.notification.NotificationGroupManager

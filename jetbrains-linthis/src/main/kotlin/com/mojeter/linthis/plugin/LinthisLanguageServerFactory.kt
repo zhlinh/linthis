@@ -4,7 +4,7 @@
 //
 // https://opensource.org/license/MIT
 
-package com.linthis.plugin
+package com.mojeter.linthis.plugin
 
 import com.intellij.openapi.project.Project
 import com.redhat.devtools.lsp4ij.LanguageServerFactory
