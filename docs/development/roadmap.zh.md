@@ -80,9 +80,9 @@
 ## P2 - Medium (后续版本) ✅ 已完成
 
 ### 8. IDE 集成
-- [ ] VS Code 扩展
-- [ ] JetBrains 插件
-- [ ] Neovim/Vim 插件
+- [x] VS Code 扩展 (`vscode-linthis/`) ✅
+- [x] JetBrains 插件 (`jetbrains-linthis/`) ✅
+- [x] Neovim/Vim 插件 (`nvim-linthis/`) ✅
 - [x] LSP 服务器支持 (`src/lsp/`) ✅
 
 ### 9. 报告与分析
