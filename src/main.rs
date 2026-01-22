@@ -18,12 +18,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use cli::{
-    collect_paths, handle_cache_command, handle_config_command, handle_doctor_command,
-    handle_fix_from_file, handle_hook_command, handle_init_command, handle_plugin_command,
-    handle_report_command, init_linter_configs, perform_auto_sync, perform_self_update,
+    collect_paths, handle_cache_command, handle_complexity_command, handle_config_command,
+    handle_doctor_command, handle_fix_from_file, handle_hook_command, handle_init_command,
+    handle_license_command, handle_plugin_command, handle_report_command, handle_security_command,
+    handle_suggest_command, init_linter_configs, perform_auto_sync, perform_self_update,
     print_fix_hint, print_recheck_footer, print_recheck_header, print_recheck_summary,
     recheck_modified_files, run_benchmark, run_watch, strip_ansi_codes, Cli, Commands,
-    PathCollectionOptions, PathCollectionResult,
+    ComplexityCommandOptions, PathCollectionOptions, PathCollectionResult, SuggestCommandOptions,
 };
 use linthis::interactive::run_interactive;
 use linthis::lsp::{run_lsp_server, LspMode};
@@ -63,6 +64,109 @@ fn main() -> ExitCode {
     // Handle cache subcommand
     if let Some(Commands::Cache { action }) = cli.command {
         return handle_cache_command(action);
+    }
+
+    // Handle security subcommand
+    if let Some(Commands::Security {
+        path,
+        severity,
+        include_dev,
+        fix,
+        ignore,
+        format,
+        sbom,
+        fail_on,
+        verbose,
+    }) = cli.command
+    {
+        return handle_security_command(
+            path, severity, include_dev, fix, ignore, format, sbom, fail_on, verbose,
+        );
+    }
+
+    // Handle license subcommand
+    if let Some(Commands::License {
+        path,
+        policy,
+        policy_file,
+        include_dev,
+        format,
+        sbom,
+        fail_on_violation,
+        verbose,
+    }) = cli.command
+    {
+        return handle_license_command(
+            path, policy, policy_file, include_dev, format, sbom, fail_on_violation, verbose,
+        );
+    }
+
+    // Handle complexity subcommand
+    if let Some(Commands::Complexity {
+        path,
+        include,
+        exclude,
+        threshold,
+        preset,
+        format,
+        with_trends,
+        trend_count,
+        only_high,
+        sort,
+        no_parallel,
+        fail_on_high,
+        verbose,
+    }) = cli.command
+    {
+        return handle_complexity_command(ComplexityCommandOptions {
+            path,
+            include,
+            exclude,
+            threshold,
+            preset,
+            format,
+            with_trends,
+            trend_count,
+            only_high,
+            sort,
+            no_parallel,
+            fail_on_high,
+            verbose,
+        });
+    }
+
+    // Handle suggest subcommand
+    if let Some(Commands::Suggest {
+        source,
+        file,
+        line,
+        message,
+        rule,
+        provider,
+        model,
+        max_suggestions,
+        interactive,
+        auto_apply,
+        format,
+        with_context,
+        verbose,
+    }) = cli.command
+    {
+        return handle_suggest_command(SuggestCommandOptions {
+            source,
+            file,
+            line,
+            message,
+            rule,
+            provider,
+            model,
+            max_suggestions,
+            interactive,
+            auto_apply,
+            format,
+            with_context,
+            verbose,
+        });
     }
 
     // Handle lsp subcommand

@@ -211,6 +211,160 @@ pub enum Commands {
         #[command(subcommand)]
         action: CacheCommands,
     },
+    /// Security vulnerability scanning
+    ///
+    /// Scan project dependencies for known security vulnerabilities.
+    /// Supports Rust (cargo-audit), JavaScript (npm audit), Python (pip-audit),
+    /// Go (govulncheck), and Java (dependency-check).
+    ///
+    /// Example usage:
+    ///   linthis security                    # Scan current directory
+    ///   linthis security --severity high    # Only show high+ severity
+    ///   linthis security --fix              # Show fix suggestions
+    ///   linthis security --format json      # Output as JSON
+    Security {
+        /// Path to scan (defaults to current directory)
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Minimum severity to report (critical, high, medium, low)
+        #[arg(long, short = 's')]
+        severity: Option<String>,
+
+        /// Include dev dependencies
+        #[arg(long)]
+        include_dev: bool,
+
+        /// Show fix suggestions
+        #[arg(long)]
+        fix: bool,
+
+        /// Vulnerability IDs to ignore (can be specified multiple times)
+        #[arg(long, short = 'i')]
+        ignore: Option<Vec<String>>,
+
+        /// Output format: human, json, sarif
+        #[arg(short, long, default_value = "human")]
+        format: String,
+
+        /// Generate SBOM (Software Bill of Materials)
+        #[arg(long)]
+        sbom: bool,
+
+        /// Exit with error if vulnerabilities meet severity threshold
+        #[arg(long)]
+        fail_on: Option<String>,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// License compliance checking
+    ///
+    /// Scan project dependencies for license information and check compliance
+    /// against configurable policies.
+    ///
+    /// Example usage:
+    ///   linthis license                     # Scan current directory
+    ///   linthis license --policy strict     # Use strict policy
+    ///   linthis license --format json       # Output as JSON
+    ///   linthis license --sbom              # Generate SBOM
+    License {
+        /// Path to scan (defaults to current directory)
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Policy preset: default, strict, permissive
+        #[arg(long, short = 'p', default_value = "default")]
+        policy: String,
+
+        /// Custom policy file path
+        #[arg(long)]
+        policy_file: Option<PathBuf>,
+
+        /// Include dev dependencies
+        #[arg(long)]
+        include_dev: bool,
+
+        /// Output format: human, json, spdx
+        #[arg(short, long, default_value = "human")]
+        format: String,
+
+        /// Generate SBOM (Software Bill of Materials)
+        #[arg(long)]
+        sbom: bool,
+
+        /// Exit with error if policy violations found
+        #[arg(long)]
+        fail_on_violation: bool,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Code complexity analysis
+    ///
+    /// Analyze code complexity metrics across your codebase including cyclomatic
+    /// complexity, cognitive complexity, nesting depth, and function length.
+    ///
+    /// Example usage:
+    ///   linthis complexity                  # Analyze current directory
+    ///   linthis complexity src/             # Analyze specific directory
+    ///   linthis complexity --format html    # Generate HTML report
+    ///   linthis complexity --threshold 15   # Custom complexity threshold
+    Complexity {
+        /// Path to analyze (defaults to current directory)
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// File patterns to include (glob patterns)
+        #[arg(long, short = 'i')]
+        include: Option<Vec<String>>,
+
+        /// File patterns to exclude (glob patterns)
+        #[arg(long, short = 'e')]
+        exclude: Option<Vec<String>>,
+
+        /// Complexity threshold for warnings (cyclomatic)
+        #[arg(long, short = 't')]
+        threshold: Option<u32>,
+
+        /// Threshold preset: default, strict, lenient
+        #[arg(long, default_value = "default")]
+        preset: String,
+
+        /// Output format: human, json, markdown, html
+        #[arg(short, long, default_value = "human")]
+        format: String,
+
+        /// Include trend analysis from previous runs
+        #[arg(long)]
+        with_trends: bool,
+
+        /// Number of historical runs for trends (default: 10)
+        #[arg(short = 'n', long, default_value = "10")]
+        trend_count: usize,
+
+        /// Only show functions exceeding threshold
+        #[arg(long)]
+        only_high: bool,
+
+        /// Sort output by: cyclomatic, cognitive, lines, name
+        #[arg(long, default_value = "cyclomatic")]
+        sort: String,
+
+        /// Disable parallel processing
+        #[arg(long)]
+        no_parallel: bool,
+
+        /// Exit with error if any file exceeds threshold
+        #[arg(long)]
+        fail_on_high: bool,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Initialize configuration file
     Init {
         /// Create global configuration (~/.linthis/config.toml)
@@ -314,6 +468,69 @@ pub enum Commands {
         /// Exclude patterns (glob patterns)
         #[arg(short, long)]
         exclude: Option<Vec<String>>,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// AI-assisted fix suggestions
+    ///
+    /// Get intelligent fix suggestions for lint issues using AI.
+    /// Supports Claude, OpenAI, and local LLM providers.
+    ///
+    /// Example usage:
+    ///   linthis suggest                      # Suggest fixes for last run results
+    ///   linthis suggest --file src/main.rs   # Suggest for specific file
+    ///   linthis suggest --provider openai    # Use OpenAI instead of Claude
+    ///   linthis suggest --interactive        # Interactive mode
+    Suggest {
+        /// Source of lint results: "last" (default) or a result file path
+        #[arg(default_value = "last")]
+        source: String,
+
+        /// Specific file to get suggestions for
+        #[arg(short = 'f', long)]
+        file: Option<PathBuf>,
+
+        /// Specific line number (requires --file)
+        #[arg(short = 'l', long)]
+        line: Option<u32>,
+
+        /// Issue message (optional, for context)
+        #[arg(short = 'm', long)]
+        message: Option<String>,
+
+        /// Rule ID (optional, for context)
+        #[arg(short = 'r', long)]
+        rule: Option<String>,
+
+        /// AI provider: claude (default), openai, local, mock
+        #[arg(long, default_value = "claude")]
+        provider: String,
+
+        /// Model name (defaults to provider's default)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Maximum suggestions per issue
+        #[arg(long, default_value = "3")]
+        max_suggestions: usize,
+
+        /// Interactive mode: review suggestions one by one
+        #[arg(short = 'I', long)]
+        interactive: bool,
+
+        /// Apply suggestions automatically (dangerous!)
+        #[arg(long)]
+        auto_apply: bool,
+
+        /// Output format: human, json, diff
+        #[arg(short = 'o', long, default_value = "human")]
+        format: String,
+
+        /// Include code context in output
+        #[arg(long)]
+        with_context: bool,
 
         /// Verbose output
         #[arg(short, long)]
