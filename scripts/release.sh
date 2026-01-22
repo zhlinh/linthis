@@ -135,10 +135,10 @@ main() {
 	echo "  1. Review changes: git diff"
 	echo "  2. Commit: git add Cargo.toml pyproject.toml Cargo.lock && git commit -m 'chore: release v$new_version'"
 	echo "  3. Tag: git tag v$new_version"
-	echo "  4. Push: git push && git push origin v$new_version"
+	echo "  4. Push: git push origin master && git push origin v$new_version"
 	echo ""
 	echo "One-liner:"
-	echo "  git add Cargo.toml pyproject.toml Cargo.lock && git commit -m 'chore: release v$new_version' && git tag v$new_version && git push && git push origin v$new_version"
+	echo "  git add Cargo.toml pyproject.toml Cargo.lock && git commit -m 'chore: release v$new_version' && git tag v$new_version && git push origin master && git push origin v$new_version"
 	echo ""
 
 	# Determine whether to push
@@ -164,7 +164,7 @@ main() {
 		git tag "v$new_version"
 
 		echo "Pushing to remote..."
-		git push
+		git push origin master
 		git push origin "v$new_version"
 
 		echo ""
