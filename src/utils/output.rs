@@ -413,7 +413,7 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
     if total_issues == 0 {
         let mut output = String::new();
         output.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".green()));
-        let header = format!("{} {} Hook Passed", "✓", hook_name);
+        let header = format!("{} Linthis {} Hook Passed", "✓", hook_name);
         output.push_str(&format!("{}\n", pad_line(&header, 0).green()));
         output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".green()));
         output.push_str(&format!("{}\n", pad_line("All checks passed!", 0).green()));
@@ -428,7 +428,7 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
 
     // Header
     output.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".red()));
-    let header = format!("X {} Hook Failed", hook_name);
+    let header = format!("X Linthis {} Hook Failed", hook_name);
     output.push_str(&format!("{}\n", pad_line(&header, 0).red()));
     output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
 
