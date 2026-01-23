@@ -70,7 +70,7 @@
     <h3>Requirements</h3>
     <ol>
         <li>
-            <b>LSP4IJ plugin</b> (required):
+            <b>LSP4IJ plugin</b> (version 0.11.0 or later required):
             <br>Install from <a href="https://plugins.jetbrains.com/plugin/23257-lsp4ij">JetBrains Marketplace</a>
         </li>
         <li>

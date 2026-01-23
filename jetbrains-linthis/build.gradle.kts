@@ -22,13 +22,14 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity("2024.1")
         bundledPlugin("com.intellij.java")
+        // LSP4IJ plugin from JetBrains Marketplace (required dependency)
+        // The plugin() declaration makes LSP4IJ classes available for compilation
+        plugin("com.redhat.devtools.lsp4ij", "0.11.0")
         pluginVerifier()
         zipSigner()
     }
 
-    // LSP4IJ library from FalsePattern repository
-    compileOnly("com.redhat.devtools.intellij:lsp4ij:0.13.0")
-    // Eclipse LSP4J (LSP4IJ's dependency)
+    // Eclipse LSP4J (LSP4IJ's transitive dependency, needed for LSP types)
     compileOnly("org.eclipse.lsp4j:org.eclipse.lsp4j:0.23.1")
 }
 
