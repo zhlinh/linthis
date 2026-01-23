@@ -172,6 +172,7 @@ struct NpmAuditOutput {
 #[derive(Debug, Deserialize)]
 struct NpmVulnerability {
     name: String,
+    #[allow(dead_code)]
     severity: String,
     range: String,
     #[serde(default)]
@@ -188,6 +189,7 @@ struct NpmVulnerability {
 #[serde(untagged)]
 enum ViaEntry {
     Advisory(NpmAdvisory),
+    #[allow(dead_code)]
     PackageName(String),
 }
 
@@ -212,6 +214,7 @@ struct NpmCvss {
 
 #[derive(Debug, Deserialize)]
 struct FixAvailable {
+    #[allow(dead_code)]
     name: String,
     version: String,
 }

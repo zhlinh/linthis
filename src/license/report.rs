@@ -13,7 +13,7 @@
 use colored::Colorize;
 use serde::Serialize;
 
-use super::policy::{LicensePolicy, PolicyViolation, ViolationType};
+use super::policy::{PolicyViolation, ViolationType};
 use super::scanner::ScanResult;
 use super::spdx::SpdxLicense;
 
