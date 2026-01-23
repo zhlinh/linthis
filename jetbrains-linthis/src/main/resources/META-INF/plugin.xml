@@ -48,9 +48,6 @@
         <li><b>Lint Current File</b> - Run linter on the current file</li>
         <li><b>Format Current File</b> - Format the current file</li>
     </ul>
-    <p>
-        <img src="https://raw.githubusercontent.com/zhlinh/linthis/master/jetbrains-linthis/docs/images/tools-menu.png" alt="Linthis Tools Menu" width="400"/>
-    </p>
 
     <h3>Configuration</h3>
     <p>
@@ -63,9 +60,6 @@
         <li><b>Linthis path</b> - Custom path to linthis executable (leave empty for auto-detect)</li>
         <li><b>Additional arguments</b> - Extra CLI arguments for linthis</li>
     </ul>
-    <p>
-        <img src="https://raw.githubusercontent.com/zhlinh/linthis/master/jetbrains-linthis/docs/images/settings.png" alt="Linthis Settings" width="600"/>
-    </p>
 
     <h3>Requirements</h3>
     <ol>
