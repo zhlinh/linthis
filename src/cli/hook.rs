@@ -794,21 +794,21 @@ fn build_hook_command(hook_event: &HookEvent, hook_check_only: bool, hook_format
         HookEvent::PreCommit => {
             // For pre-commit: check staged files with hook mode output
             if hook_check_only {
-                "linthis -s -c -w --hook-mode=pre-commit".to_string()
+                "linthis -s -c --hook-mode=pre-commit".to_string()
             } else if hook_format_only {
-                "linthis -s -f -w --hook-mode=pre-commit".to_string()
+                "linthis -s -f --hook-mode=pre-commit".to_string()
             } else {
-                "linthis -s -c -f -w --hook-mode=pre-commit".to_string()
+                "linthis -s -c -f --hook-mode=pre-commit".to_string()
             }
         }
         HookEvent::PrePush => {
             // For pre-push: check all files (more comprehensive) with hook mode output
             if hook_check_only {
-                "linthis -c -w --hook-mode=pre-push".to_string()
+                "linthis -c --hook-mode=pre-push".to_string()
             } else if hook_format_only {
-                "linthis -f -w --hook-mode=pre-push".to_string()
+                "linthis -f --hook-mode=pre-push".to_string()
             } else {
-                "linthis -c -f -w --hook-mode=pre-push".to_string()
+                "linthis -c -f --hook-mode=pre-push".to_string()
             }
         }
         HookEvent::CommitMsg => {
