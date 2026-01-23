@@ -400,22 +400,26 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
         .count();
     let total_issues = result.issues.len();
 
+    // Helper to pad content to fixed width (38 chars for content, accounting for emoji width)
+    // Box width: 42 total, 40 inside borders, we use "│ " prefix and " │" suffix = 38 for content
+    let pad_line = |content: &str, emoji_count: usize| -> String {
+        // Each emoji displays as ~2 chars but counts as 1 in len(), so we subtract emoji_count
+        let visual_len = content.chars().count() + emoji_count;
+        let padding = 38_usize.saturating_sub(visual_len);
+        format!("│ {}{} │", content, " ".repeat(padding))
+    };
+
     // If no issues, show success
     if total_issues == 0 {
         let mut output = String::new();
         output.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".green()));
-        output.push_str(&format!("{}\n", format!("│ 🟢 {} Hook Passed{} │", hook_name, " ".repeat(18 - hook_name.len())).green()));
+        let header = format!("{} {} Hook Passed", "✓", hook_name);
+        output.push_str(&format!("{}\n", pad_line(&header, 0).green()));
         output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".green()));
-        output.push_str(&format!("│ {}                                    │\n", "All checks passed!".green()));
-        output.push_str("│                                        │\n");
-        output.push_str(&format!(
-            "│ Files checked: {:>3}                     │\n",
-            result.total_files
-        ));
-        output.push_str(&format!(
-            "│ Files formatted: {:>3}                   │\n",
-            result.files_formatted
-        ));
+        output.push_str(&format!("{}\n", pad_line("All checks passed!", 0).green()));
+        output.push_str(&format!("{}\n", pad_line("", 0)));
+        output.push_str(&format!("{}\n", pad_line(&format!("Files checked:   {:>3}", result.total_files), 0)));
+        output.push_str(&format!("{}\n", pad_line(&format!("Files formatted: {:>3}", result.files_formatted), 0)));
         output.push_str(&format!("{}", "╰────────────────────────────────────────╯".green()));
         return output;
     }
@@ -424,20 +428,22 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
 
     // Header
     output.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".red()));
-    output.push_str(&format!("{}\n", format!("│ 🔴 {} Hook Failed{} │", hook_name, " ".repeat(18 - hook_name.len())).red()));
+    let header = format!("X {} Hook Failed", hook_name);
+    output.push_str(&format!("{}\n", pad_line(&header, 0).red()));
     output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
 
     // Summary line
-    output.push_str(&format!(
-        "│ {} error{}, {} warning{} in {} file{}         │\n",
+    let summary = format!(
+        "{} error{}, {} warning{} in {} file{}",
         error_count,
         if error_count == 1 { "" } else { "s" },
         warning_count,
         if warning_count == 1 { "" } else { "s" },
         result.files_with_issues,
         if result.files_with_issues == 1 { "" } else { "s" }
-    ));
-    output.push_str("│                                        │\n");
+    );
+    output.push_str(&format!("{}\n", pad_line(&summary, 0)));
+    output.push_str(&format!("{}\n", pad_line("", 0)));
 
     // List issues (compact format: file:line message)
     let max_issues = 8; // Limit to avoid too long output
@@ -446,53 +452,44 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
             .unwrap_or_default()
             .to_string_lossy();
         let location = format!("{}:{}", filename, issue.line);
-        let severity_icon = match issue.severity {
-            Severity::Error => "❌",
-            Severity::Warning => "⚠️",
-            Severity::Info => "ℹ️",
+        let severity_char = match issue.severity {
+            Severity::Error => "E",
+            Severity::Warning => "W",
+            Severity::Info => "I",
         };
         // Truncate location if too long
-        let location_display = if location.len() > 20 {
-            format!("{}...", &location[..17])
+        let location_display = if location.len() > 15 {
+            format!("{}...", &location[..12])
         } else {
             location
         };
-        // Truncate message if too long
-        let msg = if issue.message.len() > 30 {
-            format!("{}...", &issue.message[..27])
+        // Truncate message to fit
+        let max_msg_len = 38 - 4 - location_display.len(); // "  X " prefix + location + " "
+        let msg = if issue.message.len() > max_msg_len {
+            format!("{}...", &issue.message[..max_msg_len.saturating_sub(3)])
         } else {
             issue.message.clone()
         };
-        output.push_str(&format!(
-            "│  {} {:<20} {}│\n",
-            severity_icon,
-            location_display,
-            msg
-        ));
-        // Show code if available (optional)
-        if let Some(code) = &issue.code {
-            output.push_str(&format!("│     [{}]│\n", code.dimmed()));
-        }
+        let line_content = format!(" {} {} {}", severity_char, location_display, msg);
+        output.push_str(&format!("{}\n", pad_line(&line_content, 0)));
     }
 
     if total_issues > max_issues {
-        output.push_str(&format!(
-            "│  ... and {} more issue{}                  │\n",
+        let more_line = format!(" ... and {} more issue{}",
             total_issues - max_issues,
             if total_issues - max_issues == 1 { "" } else { "s" }
-        ));
+        );
+        output.push_str(&format!("{}\n", pad_line(&more_line, 0)));
     }
 
     output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
 
     // Fix instructions
-    output.push_str("│ To fix automatically:                  │\n");
-    output.push_str(&format!("│   {}                          │\n", "linthis -c -f".cyan()));
-    output.push_str("│                                        │\n");
-    output.push_str("│ To skip this check:                    │\n");
-    // Pad the skip command to fit in the box
-    let skip_padding = 22_usize.saturating_sub(skip_command.len());
-    output.push_str(&format!("│   {}{}│\n", skip_command.cyan(), " ".repeat(skip_padding)));
+    output.push_str(&format!("{}\n", pad_line("To fix automatically:", 0)));
+    output.push_str(&format!("{}\n", pad_line(&format!("  {}", "linthis -c -f"), 0)));
+    output.push_str(&format!("{}\n", pad_line("", 0)));
+    output.push_str(&format!("{}\n", pad_line("To skip this check:", 0)));
+    output.push_str(&format!("{}\n", pad_line(&format!("  {}", skip_command), 0)));
     output.push_str(&format!("{}", "╰────────────────────────────────────────╯".red()));
 
     output
