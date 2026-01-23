@@ -145,7 +145,7 @@ impl LanguageSecurityScanner for GoSecurityScanner {
         self.parse_govulncheck(&stdout)
     }
 
-    fn fix(&self, path: &Path, vulnerabilities: &[Vulnerability]) -> Result<FixResult, String> {
+    fn fix(&self, _path: &Path, vulnerabilities: &[Vulnerability]) -> Result<FixResult, String> {
         let mut result = FixResult::default();
 
         result.commands.push("go get -u ./...".to_string());
@@ -187,7 +187,9 @@ struct Finding {
 struct TraceEntry {
     module: Option<String>,
     version: Option<String>,
+    #[allow(dead_code)]
     package: Option<String>,
+    #[allow(dead_code)]
     function: Option<String>,
 }
 
@@ -237,6 +239,7 @@ struct OsvRange {
 
 #[derive(Debug, Deserialize)]
 struct OsvEvent {
+    #[allow(dead_code)]
     introduced: Option<String>,
     fixed: Option<String>,
 }

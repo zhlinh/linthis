@@ -130,6 +130,7 @@ impl AdvisoryDatabase {
 }
 
 /// Suppression list for ignoring specific vulnerabilities
+#[allow(dead_code)]
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SuppressionList {
     /// Suppressed vulnerability IDs with reasons
@@ -137,6 +138,7 @@ pub struct SuppressionList {
 }
 
 /// A suppression entry
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Suppression {
     /// Vulnerability ID
@@ -151,6 +153,7 @@ pub struct Suppression {
     pub added_at: Option<String>,
 }
 
+#[allow(dead_code)]
 impl SuppressionList {
     /// Create a new empty suppression list
     pub fn new() -> Self {

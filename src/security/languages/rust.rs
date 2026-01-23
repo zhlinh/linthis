@@ -20,6 +20,7 @@ use crate::security::vulnerability::{Advisory, AffectedPackage, Severity, Vulner
 
 /// Rust security scanner using cargo-audit
 pub struct RustSecurityScanner {
+    #[allow(dead_code)]
     tool_available: Option<bool>,
 }
 
@@ -167,6 +168,7 @@ struct CargoAuditOutput {
 #[derive(Debug, Deserialize)]
 struct VulnerabilitiesSection {
     list: Vec<CargoVulnerability>,
+    #[allow(dead_code)]
     count: usize,
 }
 

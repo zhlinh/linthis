@@ -27,6 +27,7 @@ use super::thresholds::Thresholds;
 /// Language-specific complexity analyzer trait
 pub trait LanguageComplexityAnalyzer: Send + Sync {
     /// Get the analyzer name
+    #[allow(dead_code)]
     fn name(&self) -> &str;
 
     /// Get supported file extensions

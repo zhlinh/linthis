@@ -238,7 +238,7 @@ impl AiProvider {
             .build()
             .map_err(|e| e.to_string())?;
 
-        let mut messages = vec![
+        let messages = vec![
             serde_json::json!({
                 "role": "user",
                 "content": prompt

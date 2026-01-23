@@ -133,7 +133,7 @@ impl LanguageSecurityScanner for PythonSecurityScanner {
         self.parse_pip_audit(&stdout)
     }
 
-    fn fix(&self, path: &Path, vulnerabilities: &[Vulnerability]) -> Result<FixResult, String> {
+    fn fix(&self, _path: &Path, vulnerabilities: &[Vulnerability]) -> Result<FixResult, String> {
         let mut result = FixResult::default();
 
         result.commands.push("pip-audit --fix".to_string());
