@@ -83,6 +83,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.1.0</h3>
+    <ul>
+        <li>Feature: Security scanning for dependencies</li>
+        <li>Feature: License compliance checking</li>
+        <li>Feature: Code complexity visualization</li>
+        <li>Feature: AI-assisted fix suggestions</li>
+    </ul>
     <h3>0.0.1</h3>
     <ul>
         <li>Initial release</li>
