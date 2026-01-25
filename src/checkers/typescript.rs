@@ -99,6 +99,13 @@ impl TypeScriptChecker {
         let rule_id = msg.get("ruleId").and_then(|r| r.as_str()).unwrap_or("");
         let severity_num = msg.get("severity").and_then(|s| s.as_u64()).unwrap_or(1);
 
+        // Filter out ESLint's own limitation/config messages - these are not actionable code issues
+        if message.contains("File ignored because no matching configuration was supplied")
+            || message.contains("File ignored because of a matching ignore pattern")
+        {
+            return None;
+        }
+
         let severity = match severity_num {
             2 => Severity::Error,
             1 => Severity::Warning,
@@ -164,5 +171,64 @@ impl Checker for TypeScriptChecker {
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_eslint_file_ignored_filtered() {
+        let checker = TypeScriptChecker::new();
+
+        // ESLint returns this when no config matches the file
+        let msg = serde_json::json!({
+            "line": 0,
+            "column": 0,
+            "message": "File ignored because no matching configuration was supplied.",
+            "severity": 1,
+            "ruleId": null
+        });
+
+        let result = checker.parse_eslint_message(&msg, Path::new("test.js"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_eslint_file_ignored_pattern_filtered() {
+        let checker = TypeScriptChecker::new();
+
+        // ESLint returns this when file matches ignore pattern
+        let msg = serde_json::json!({
+            "line": 0,
+            "column": 0,
+            "message": "File ignored because of a matching ignore pattern. Use \"--no-ignore\" to override.",
+            "severity": 1,
+            "ruleId": null
+        });
+
+        let result = checker.parse_eslint_message(&msg, Path::new("test.js"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_eslint_real_issue_not_filtered() {
+        let checker = TypeScriptChecker::new();
+
+        // Real ESLint issue should not be filtered
+        let msg = serde_json::json!({
+            "line": 10,
+            "column": 5,
+            "message": "Unexpected console statement.",
+            "severity": 1,
+            "ruleId": "no-console"
+        });
+
+        let result = checker.parse_eslint_message(&msg, Path::new("test.js"));
+        assert!(result.is_some());
+        let issue = result.unwrap();
+        assert_eq!(issue.line, 10);
+        assert_eq!(issue.code, Some("no-console".to_string()));
     }
 }

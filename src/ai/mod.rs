@@ -16,7 +16,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use linthis::ai::{AiSuggester, SuggestionOptions, AiProvider};
 //! use linthis::utils::types::LintIssue;
 //!

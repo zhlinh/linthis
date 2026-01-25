@@ -21,6 +21,7 @@ use std::collections::HashSet;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
+use super::ai_fix::{run_ai_fix_all, run_ai_fix_single, AiFixConfig};
 use super::editor::{open_in_editor, LineChange};
 use super::nolint::{add_nolint_comment, describe_nolint_action, LineDiff, NolintResult};
 use super::quickfix::{default_quickfix_path, write_quickfix_file};
@@ -38,6 +39,8 @@ pub enum InteractiveAction {
     Previous,
     /// Go to specific issue number
     GoTo(usize),
+    /// Get AI-powered fix suggestion
+    AiFix,
     /// Quit interactive mode
     Quit,
 }
@@ -85,6 +88,17 @@ pub fn run_interactive(result: &RunResult) -> InteractiveResult {
                     println!("{} Quickfix file created", "✓".green());
                 }
             }
+            MainMenuChoice::AiFixAll => {
+                let ai_config = AiFixConfig::default();
+                let ai_result = run_ai_fix_all(result, &ai_config);
+                return InteractiveResult {
+                    edited: ai_result.applied,
+                    ignored: 0,
+                    skipped: ai_result.skipped,
+                    quit_early: ai_result.quit_early,
+                    modified_files: ai_result.modified_files,
+                };
+            }
             MainMenuChoice::Exit => {
                 return InteractiveResult::default();
             }
@@ -97,6 +111,7 @@ pub fn run_interactive(result: &RunResult) -> InteractiveResult {
 enum MainMenuChoice {
     ReviewOneByOne,
     OpenInQuickfix,
+    AiFixAll,
     Exit,
 }
 
@@ -125,7 +140,8 @@ fn show_main_menu(result: &RunResult) -> MainMenuChoice {
     println!();
     println!("  [{}] Review issues one by one (interactive)", "1".cyan());
     println!("  [{}] Open all in editor (vim quickfix)", "2".cyan());
-    println!("  [{}] Exit", "3".cyan());
+    println!("  [{}] AI Fix - get AI-powered suggestions", "3".cyan());
+    println!("  [{}] Exit", "4".cyan());
     println!();
     println!("  {}", "Vim quickfix shortcuts:".dimmed());
     println!("    {} - next issue  {} - previous  {} - list all", ":cn".cyan(), ":cp".cyan(), ":copen".cyan());
@@ -138,7 +154,8 @@ fn show_main_menu(result: &RunResult) -> MainMenuChoice {
     match choice.as_str() {
         "1" => MainMenuChoice::ReviewOneByOne,
         "2" => MainMenuChoice::OpenInQuickfix,
-        "3" | "q" | "quit" | "exit" => MainMenuChoice::Exit,
+        "3" | "ai" => MainMenuChoice::AiFixAll,
+        "4" | "q" | "quit" | "exit" => MainMenuChoice::Exit,
         _ => {
             println!("{}", "Invalid choice, please try again.".yellow());
             show_main_menu(result)
@@ -197,6 +214,25 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
                     }
                     NolintResult::Error(e) => {
                         eprintln!("{}: {}", "Failed to add NOLINT".red(), e);
+                        result.skipped += 1;
+                    }
+                }
+                idx += 1;
+            }
+            InteractiveAction::AiFix => {
+                processed[idx] = true;
+                let ai_config = AiFixConfig::default();
+                match run_ai_fix_single(issue, &ai_config) {
+                    Ok((applied, modified_files)) => {
+                        if applied {
+                            result.edited += 1;
+                            result.modified_files.extend(modified_files);
+                        } else {
+                            result.skipped += 1;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}: {}", "AI fix error".red(), e);
                         result.skipped += 1;
                     }
                 }
@@ -331,6 +367,7 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
     let nolint_desc = describe_nolint_action(issue);
     println!("    [{}] Edit - open $EDITOR at this line", "e".cyan());
     println!("    [{}] Ignore - {}", "i".cyan(), nolint_desc.dimmed());
+    println!("    [{}] AI fix - get AI suggestion for this issue", "a".cyan());
     println!("    [{}] Skip", "s".cyan());
     if current > 1 {
         println!("    [{}] Previous - go back to issue #{}", "p".cyan(), current - 1);
@@ -346,6 +383,7 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
     match choice.as_str() {
         "e" | "edit" => InteractiveAction::Edit,
         "i" | "ignore" => InteractiveAction::Ignore,
+        "a" | "ai" | "aifix" | "ai-fix" => InteractiveAction::AiFix,
         "s" | "skip" | "" => InteractiveAction::Skip, // Enter defaults to skip
         "p" | "prev" | "previous" => InteractiveAction::Previous,
         "q" | "quit" => InteractiveAction::Quit,
@@ -380,7 +418,7 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
 }
 
 /// Print code context for an issue
-fn print_code_context(issue: &LintIssue) {
+pub(crate) fn print_code_context(issue: &LintIssue) {
     // Context before
     for (line_num, content) in &issue.context_before {
         println!(
@@ -563,7 +601,7 @@ fn launch_quickfix_editor(editor: &str, path: &std::path::Path) -> super::Intera
 }
 
 /// Print diff information in git-style format (for NOLINT comments)
-fn print_diff(diffs: &[LineDiff], _file_path: &PathBuf) {
+pub(crate) fn print_diff(diffs: &[LineDiff], _file_path: &PathBuf) {
     println!("  {}", "Changes:".bold());
 
     for diff in diffs {
@@ -710,6 +748,7 @@ mod tests {
         assert_ne!(InteractiveAction::Edit, InteractiveAction::Skip);
         assert_ne!(InteractiveAction::Ignore, InteractiveAction::Quit);
         assert_ne!(InteractiveAction::Previous, InteractiveAction::Skip);
+        assert_ne!(InteractiveAction::AiFix, InteractiveAction::Edit);
     }
 
     #[test]

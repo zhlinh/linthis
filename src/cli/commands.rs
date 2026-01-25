@@ -118,16 +118,6 @@ pub struct Cli {
     #[arg(long)]
     pub benchmark: bool,
 
-    /// Interactive fix mode: review and fix issues one by one
-    ///
-    /// Usage:
-    ///   --fix           Load last result and enter interactive mode
-    ///   --fix last      Same as above (explicit)
-    ///   --fix <FILE>    Load specific result file
-    ///   -c --fix        Run check then enter interactive mode
-    #[arg(short = 'F', long, value_name = "SOURCE", num_args = 0..=1, default_missing_value = "last")]
-    pub fix: Option<String>,
-
     /// Skip loading plugins, use default configuration
     #[arg(long)]
     pub no_plugin: bool,
@@ -473,68 +463,92 @@ pub enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// AI-assisted fix suggestions
+    /// Interactive fix mode for reviewing and fixing lint issues
     ///
-    /// Get intelligent fix suggestions for lint issues using AI.
-    /// Supports Claude, OpenAI, and local LLM providers.
+    /// Review and fix issues one by one, with optional AI-powered suggestions.
+    /// Supports loading from previous results or running check first.
     ///
     /// Example usage:
-    ///   linthis suggest                      # Suggest fixes for last run results
-    ///   linthis suggest --file src/main.rs   # Suggest for specific file
-    ///   linthis suggest --provider openai    # Use OpenAI instead of Claude
-    ///   linthis suggest --interactive        # Interactive mode
-    Suggest {
+    ///   linthis fix                          # Load last result, interactive mode
+    ///   linthis fix result.json              # Load specific result file
+    ///   linthis fix -c                       # Run check first, then fix
+    ///   linthis fix --ai                     # AI-assisted batch fix mode
+    ///   linthis fix --ai -i src/main.rs --line 10  # AI fix for specific location
+    Fix {
         /// Source of lint results: "last" (default) or a result file path
         #[arg(default_value = "last")]
         source: String,
 
-        /// Specific file to get suggestions for
+        /// Run lint check first, then enter fix mode
+        #[arg(short = 'c', long)]
+        check: bool,
+
+        /// Run format only first, then enter fix mode
         #[arg(short = 'f', long)]
-        file: Option<PathBuf>,
+        format_only: bool,
 
-        /// Specific line number (requires --file)
-        #[arg(short = 'l', long)]
-        line: Option<u32>,
+        /// Enable AI-powered fix suggestions
+        #[arg(long)]
+        ai: bool,
 
-        /// Issue message (optional, for context)
-        #[arg(short = 'm', long)]
-        message: Option<String>,
-
-        /// Rule ID (optional, for context)
-        #[arg(short = 'r', long)]
-        rule: Option<String>,
-
-        /// AI provider: claude (default), openai, local, mock
-        #[arg(long, default_value = "claude")]
-        provider: String,
+        /// AI provider: claude (default), claude-cli, openai, local, mock
+        ///
+        /// Priority: command line > LINTHIS_AI_PROVIDER env var > default (claude)
+        #[arg(long, requires = "ai")]
+        provider: Option<String>,
 
         /// Model name (defaults to provider's default)
-        #[arg(long)]
+        #[arg(long, requires = "ai")]
         model: Option<String>,
 
-        /// Maximum suggestions per issue
-        #[arg(long, default_value = "3")]
+        /// Maximum suggestions per issue (default: 3)
+        #[arg(long, default_value = "3", requires = "ai")]
         max_suggestions: usize,
 
-        /// Interactive mode: review suggestions one by one
-        #[arg(short = 'I', long)]
-        interactive: bool,
-
-        /// Apply suggestions automatically (dangerous!)
-        #[arg(long)]
+        /// Automatically apply AI suggestions without confirmation
+        ///
+        /// Warning: This will modify files automatically. Use with caution.
+        #[arg(long, requires = "ai")]
         auto_apply: bool,
 
-        /// Output format: human, json, diff
-        #[arg(short = 'o', long, default_value = "human")]
-        format: String,
+        /// Number of parallel jobs for AI analysis (default: 8)
+        ///
+        /// Use -j 4 or --jobs 4 for parallel processing with 4 threads.
+        /// Use -j 1 for sequential processing.
+        #[arg(short = 'j', long, default_value = "8", requires = "ai")]
+        jobs: usize,
 
-        /// Include code context in output
+        /// Target specific file for AI fix (use with --ai)
+        #[arg(short = 'i', long = "include", requires = "ai")]
+        file: Option<PathBuf>,
+
+        /// Target specific line number (requires -i/--include)
+        #[arg(long, requires = "file")]
+        line: Option<u32>,
+
+        /// Issue message for context (optional, use with --line)
+        #[arg(long, requires = "line")]
+        message: Option<String>,
+
+        /// Rule ID for context (optional, use with --line)
+        #[arg(long, requires = "line")]
+        rule: Option<String>,
+
+        /// Output format for AI mode: human, json, diff
+        #[arg(short = 'o', long, default_value = "human")]
+        output: String,
+
+        /// Include code context in AI output
         #[arg(long)]
         with_context: bool,
 
         /// Verbose output
         #[arg(short, long)]
         verbose: bool,
+
+        /// Suppress non-error output
+        #[arg(short, long)]
+        quiet: bool,
     },
 }
 
