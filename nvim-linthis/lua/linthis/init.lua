@@ -5,7 +5,29 @@ local M = {}
 local config = require("linthis.config")
 
 -- Compatibility layer for Neovim 0.9.x and 0.10+
-local get_clients = vim.lsp.get_clients or vim.lsp.get_active_clients
+-- vim.lsp.get_clients() was added in 0.10, use get_active_clients() for 0.9.x
+local get_clients
+if vim.lsp.get_clients then
+  get_clients = vim.lsp.get_clients
+elseif vim.lsp.get_active_clients then
+  get_clients = function(opts)
+    -- get_active_clients in 0.9.x supports {bufnr=bufnr} but we need to filter by name manually
+    local clients = vim.lsp.get_active_clients(opts)
+    if opts and opts.name then
+      local filtered = {}
+      for _, client in ipairs(clients) do
+        if client.name == opts.name then
+          table.insert(filtered, client)
+        end
+      end
+      return filtered
+    end
+    return clients
+  end
+else
+  -- Fallback for very old versions
+  get_clients = function() return {} end
+end
 
 -- vim.fs.root was added in 0.10, provide fallback for 0.9
 local function find_root_dir(fname, markers)
