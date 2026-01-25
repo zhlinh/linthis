@@ -4,6 +4,28 @@
 local M = {}
 local config = require("linthis.config")
 
+-- Compatibility layer for Neovim 0.9.x and 0.10+
+local get_clients = vim.lsp.get_clients or vim.lsp.get_active_clients
+
+-- vim.fs.root was added in 0.10, provide fallback for 0.9
+local function find_root_dir(fname, markers)
+  if vim.fs.root then
+    return vim.fs.root(fname, markers)
+  end
+  -- Fallback for Neovim 0.9.x
+  local path = vim.fn.fnamemodify(fname, ":p:h")
+  while path and path ~= "/" do
+    for _, marker in ipairs(markers) do
+      local marker_path = path .. "/" .. marker
+      if vim.fn.filereadable(marker_path) == 1 or vim.fn.isdirectory(marker_path) == 1 then
+        return path
+      end
+    end
+    path = vim.fn.fnamemodify(path, ":h")
+  end
+  return nil
+end
+
 -- Check if linthis executable exists
 local function check_executable()
   local cmd = config.get().cmd[1]
@@ -26,7 +48,7 @@ local function find_root(fname)
     return vim.fn.getcwd()
   end
 
-  local root = vim.fs.root(fname, markers)
+  local root = find_root_dir(fname, markers)
   return root or vim.fn.getcwd()
 end
 
@@ -36,7 +58,7 @@ local function start_lsp(bufnr)
   local fname = vim.api.nvim_buf_get_name(bufnr)
 
   -- Check if already attached
-  local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "linthis" })
+  local clients = get_clients({ bufnr = bufnr, name = "linthis" })
   if #clients > 0 then
     return clients[1]
   end
@@ -140,12 +162,15 @@ function M.lint(opts)
   vim.diagnostic.set(ns, bufnr, {})
 
   -- Run linthis -c (check only, no format)
+  -- Use --no-cache to ensure fresh results on each lint
   local cmd = config.get().cmd[1]
-  local result = vim.fn.system({ cmd, "-c", "-i", filepath })
+  local result = vim.fn.system({ cmd, "-c", "--no-cache", "-i", filepath })
 
-  -- Strip ANSI escape codes from output
-  result = result:gsub("\27%[[%d;]*[mKHJ]", "")
-  result = result:gsub("\27%[%?%d+[hl]", "")
+  -- Strip ANSI escape codes from output (comprehensive)
+  result = result:gsub("\27%[[%d;]*[mKHJGsu]", "")  -- Common SGR and cursor codes
+  result = result:gsub("\27%[%?%d+[hl]", "")        -- DEC private modes
+  result = result:gsub("\27%[[%d;]*[ABCDEFG]", "")  -- Cursor movement
+  result = result:gsub("\r", "")                     -- Carriage returns
 
   -- Parse output and set diagnostics
   local diagnostics = {}
@@ -225,7 +250,7 @@ end
 -- Restart LSP server
 function M.restart()
   local bufnr = vim.api.nvim_get_current_buf()
-  local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "linthis" })
+  local clients = get_clients({ bufnr = bufnr, name = "linthis" })
 
   for _, client in ipairs(clients) do
     vim.lsp.stop_client(client.id)
@@ -240,6 +265,45 @@ function M.restart()
   end, 500)
 end
 
+-- Debug format output
+function M.debug_format()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+
+  if filepath == "" then
+    print("linthis debug: no file")
+    return
+  end
+
+  -- Save buffer first if modified
+  if vim.bo[bufnr].modified then
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("silent write")
+    end)
+  end
+
+  local cmd = config.get().cmd[1]
+  print("=== Debug Format ===")
+  print("Command: " .. cmd)
+  print("File: " .. filepath)
+  print("Full command: " .. cmd .. " -f -i " .. filepath)
+  print("=== Running format ===")
+
+  local result = vim.fn.system({ cmd, "-f", "-i", filepath })
+  local exit_code = vim.v.shell_error
+
+  print("Exit code: " .. exit_code)
+  print("Output: " .. result)
+  print("=== Done ===")
+
+  -- Show file content after format
+  print("=== File content after format (first 10 lines) ===")
+  local lines = vim.fn.readfile(filepath, "", 10)
+  for i, line in ipairs(lines) do
+    print(i .. ": " .. line)
+  end
+end
+
 -- Debug lint output
 function M.debug_lint()
   local bufnr = vim.api.nvim_get_current_buf()
@@ -251,7 +315,7 @@ function M.debug_lint()
   end
 
   local cmd = config.get().cmd[1]
-  local result = vim.fn.system({ cmd, "-c", "-i", filepath })
+  local result = vim.fn.system({ cmd, "-c", "--no-cache", "-i", filepath })
 
   print("=== Raw output ===")
   print(result)
@@ -296,10 +360,86 @@ function M.debug_lint()
   print("=== Done ===")
 end
 
+-- Quick test function to verify lint parsing works
+function M.test()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+
+  print("=== linthis test ===")
+  print("File: " .. (filepath ~= "" and filepath or "(unsaved)"))
+  print("Filetype: " .. vim.bo[bufnr].filetype)
+
+  if filepath == "" then
+    print("ERROR: Cannot test unsaved buffer")
+    return
+  end
+
+  -- Run linthis
+  local cmd = config.get().cmd[1]
+  print("Command: " .. cmd .. " -c --no-cache -i " .. filepath)
+
+  local result = vim.fn.system({ cmd, "-c", "--no-cache", "-i", filepath })
+  local exit_code = vim.v.shell_error
+
+  print("Exit code: " .. exit_code)
+  print("Output length: " .. #result .. " bytes")
+
+  -- Strip ANSI
+  result = result:gsub("\27%[[%d;]*[mKHJGsu]", "")
+  result = result:gsub("\27%[%?%d+[hl]", "")
+  result = result:gsub("\27%[[%d;]*[ABCDEFG]", "")
+  result = result:gsub("\r", "")
+
+  -- Count diagnostics
+  local count = 0
+  for line in result:gmatch("[^\n]+") do
+    if line:match("^%[E?%d+%]%[%w+%]%[%w+%]") then
+      count = count + 1
+      print("Found: " .. line:sub(1, 100))
+    end
+  end
+
+  print("Diagnostics found: " .. count)
+
+  -- Run actual lint
+  M.lint({ silent = false })
+
+  -- Check diagnostics
+  local ns = vim.api.nvim_create_namespace("linthis")
+  local diags = vim.diagnostic.get(bufnr, { namespace = ns })
+  print("Diagnostics set: " .. #diags)
+
+  for i, d in ipairs(diags) do
+    print(string.format("  [%d] line %d: %s", i, d.lnum + 1, d.message:sub(1, 60)))
+  end
+  print("=== end test ===")
+end
+
+-- Show all diagnostics for current line (useful when multiple sources)
+function M.show_line_diagnostics()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local line = vim.api.nvim_win_get_cursor(0)[1] - 1
+
+  -- Get all diagnostics for this line
+  local all_diags = vim.diagnostic.get(bufnr, { lnum = line })
+
+  if #all_diags == 0 then
+    print("No diagnostics on this line")
+    return
+  end
+
+  print(string.format("=== %d diagnostics on line %d ===", #all_diags, line + 1))
+  for i, d in ipairs(all_diags) do
+    local source = d.source or "unknown"
+    local code = d.code and string.format(" (%s)", d.code) or ""
+    print(string.format("[%d] [%s]%s: %s", i, source, code, d.message))
+  end
+end
+
 -- Get LSP info
 function M.info()
   local bufnr = vim.api.nvim_get_current_buf()
-  local clients = vim.lsp.get_clients({ bufnr = bufnr, name = "linthis" })
+  local clients = get_clients({ bufnr = bufnr, name = "linthis" })
   local cmd = config.get().cmd[1]
 
   print("linthis info:")
@@ -350,7 +490,9 @@ local function setup_autocmds()
       callback = function(args)
         local ft = vim.bo[args.buf].filetype
         if vim.tbl_contains(opts.filetypes, ft) then
-          M.lint({ bufnr = args.buf, silent = true })
+          if vim.api.nvim_buf_is_valid(args.buf) then
+            M.lint({ bufnr = args.buf, silent = true })
+          end
         end
       end,
     })
@@ -399,6 +541,18 @@ local function setup_commands()
   vim.api.nvim_create_user_command("LinthisDebug", function()
     M.debug_lint()
   end, { desc = "Debug linthis lint output" })
+
+  vim.api.nvim_create_user_command("LinthisDebugFormat", function()
+    M.debug_format()
+  end, { desc = "Debug linthis format output" })
+
+  vim.api.nvim_create_user_command("LinthisTest", function()
+    M.test()
+  end, { desc = "Quick test to verify linthis lint works" })
+
+  vim.api.nvim_create_user_command("LinthisShowDiagnostics", function()
+    M.show_line_diagnostics()
+  end, { desc = "Show all diagnostics on current line from all sources" })
 end
 
 -- Main setup function

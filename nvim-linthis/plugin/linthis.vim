@@ -7,10 +7,10 @@ if exists('g:loaded_linthis')
 endif
 let g:loaded_linthis = 1
 
-" Require Neovim 0.10+ for vim.lsp.config
-if !has('nvim-0.10')
+" Require Neovim 0.9+
+if !has('nvim-0.9')
   echohl WarningMsg
-  echomsg 'linthis.nvim requires Neovim 0.10 or later'
+  echomsg 'linthis.nvim requires Neovim 0.9 or later'
   echohl None
   finish
 endif
