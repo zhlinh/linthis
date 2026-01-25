@@ -37,11 +37,8 @@ return {
   "zhlinh/linthis",
   event = { "BufReadPre", "BufNewFile" },
   config = function(plugin)
-    -- Add nvim-linthis subdirectory to runtimepath and package.path
-    local plugin_dir = plugin.dir .. "/nvim-linthis"
-    vim.opt.rtp:append(plugin_dir)
-    local lua_path = plugin_dir .. "/lua"
-    package.path = lua_path .. "/?.lua;" .. lua_path .. "/?/init.lua;" .. package.path
+    -- Add nvim-linthis subdirectory to runtimepath
+    vim.opt.rtp:append(plugin.dir .. "/nvim-linthis")
     require("linthis").setup({
       format_on_save = false,
       lint_on_save = true,
