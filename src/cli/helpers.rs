@@ -72,11 +72,13 @@ pub fn strip_ansi_codes(s: &str) -> String {
     ansi_regex.replace_all(s, "").to_string()
 }
 
-/// Find the most recent result file in .linthis/result/
+/// Find the most recent result file in <project_root>/.linthis/result/
 pub fn find_latest_result_file() -> Option<PathBuf> {
     use std::fs;
 
-    let result_dir = PathBuf::from(".linthis").join("result");
+    // Use project root to find .linthis directory
+    let project_root = linthis::utils::get_project_root();
+    let result_dir = project_root.join(".linthis").join("result");
     if !result_dir.exists() {
         return None;
     }
@@ -105,6 +107,27 @@ pub fn find_latest_result_file() -> Option<PathBuf> {
     Some(result_files[0].path())
 }
 
+/// Resolve AI provider with priority: command line > env var > default
+///
+/// The environment variable is `LINTHIS_AI_PROVIDER`.
+/// Default value is "claude".
+pub fn resolve_ai_provider(cli_value: Option<&str>) -> String {
+    // Priority 1: command line argument
+    if let Some(value) = cli_value {
+        return value.to_string();
+    }
+
+    // Priority 2: environment variable
+    if let Ok(value) = std::env::var("LINTHIS_AI_PROVIDER") {
+        if !value.is_empty() {
+            return value;
+        }
+    }
+
+    // Priority 3: default
+    "claude".to_string()
+}
+
 /// Print hint about how to enter interactive fix mode
 pub fn print_fix_hint() {
     eprintln!();
@@ -112,5 +135,6 @@ pub fn print_fix_hint() {
         "  {} To review and fix issues interactively:",
         "Tip:".cyan().bold()
     );
-    eprintln!("       {}     - load last result and fix", "linthis --fix".cyan());
+    eprintln!("       {}      - load last result and fix", "linthis fix".cyan());
+    eprintln!("       {} - AI-powered fix suggestions", "linthis fix --ai".cyan());
 }

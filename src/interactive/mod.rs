@@ -15,7 +15,9 @@
 //! - Opening files in editor at the issue location
 //! - Adding NOLINT comments to suppress specific issues
 //! - Generating vim quickfix format output
+//! - AI-powered fix suggestions
 
+pub mod ai_fix;
 mod editor;
 mod menu;
 mod nolint;
@@ -48,6 +50,7 @@ pub enum InteractiveError {
 /// Result type for interactive operations
 pub type InteractiveResult<T> = std::result::Result<T, InteractiveError>;
 
+pub use ai_fix::{run_ai_fix_all, run_ai_fix_single, AiFixConfig, AiFixResult};
 pub use editor::open_in_editor;
 pub use menu::{run_interactive, InteractiveAction};
 pub use nolint::add_nolint_comment;

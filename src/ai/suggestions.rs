@@ -468,17 +468,37 @@ fn extract_context_from_source(
     let lines: Vec<&str> = source.lines().collect();
     let total_lines = lines.len();
 
-    if line_number == 0 || line_number > total_lines {
+    if total_lines == 0 {
+        return Err("File is empty".to_string());
+    }
+
+    // Handle line 0 as file-level issue (use beginning of file)
+    let effective_line = if line_number == 0 { 1 } else { line_number };
+
+    if effective_line > total_lines {
         return Err(format!(
             "Line number {} out of range (file has {} lines)",
             line_number, total_lines
         ));
     }
 
-    let idx = line_number - 1;
+    let idx = effective_line - 1;
     let language = detect_language_from_path(file_path);
 
-    let mut context = CodeContext::new(file_path, &language, line_number as u32);
+    let mut context = CodeContext::new(file_path, &language, effective_line as u32);
+
+    // For file-level issues (line 0), show first N lines as context
+    if line_number == 0 {
+        let context_lines = (options.lines_before + options.lines_after + 1).min(total_lines);
+        context.issue_lines = "(file-level issue)".to_string();
+        context.before = String::new();
+        context.after = lines[..context_lines].join("\n");
+        context.full_snippet = format!(
+            ">>> File-level issue <<<\n{}",
+            context.after
+        );
+        return Ok(context);
+    }
 
     // Extract issue line
     context.issue_lines = lines[idx].to_string();

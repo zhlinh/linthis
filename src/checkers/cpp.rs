@@ -647,6 +647,12 @@ impl CppChecker {
             return None;
         }
 
+        // Filter out cpplint's own limitation warnings - these are not actionable code issues
+        // "Multi-line string found. This lint script doesn't do well with such strings..."
+        if line.contains("Multi-line string") && line.contains("bogus warnings") {
+            return None;
+        }
+
         let parts: Vec<&str> = line.splitn(3, ':').collect();
         if parts.len() < 3 {
             return None;
@@ -679,6 +685,37 @@ impl CppChecker {
             default_path.to_path_buf()
         };
 
+        // Read the source code line with context
+        let ctx = crate::utils::read_file_line_with_context(&file_path, line_num, 1);
+
+        // Filter out whitespace issues that appear to be inside multi-line string literals
+        // Multi-line strings in C/C++/ObjC use line continuation with backslash
+        if let (Some(ref cat), Some(ref context)) = (&code, &ctx) {
+            if cat.starts_with("whitespace/") {
+                // Check if previous line ends with \ (line continuation in string)
+                let in_multiline_string = context.before.iter().any(|(_, line)| {
+                    let trimmed = line.trim_end();
+                    trimmed.ends_with('\\') || trimmed.ends_with("\\\"")
+                });
+
+                // Also check if this line looks like string content
+                // Common patterns for multi-line string endings in ObjC/C++:
+                // - ends with \  (line continuation)
+                // - contains );" (JS code ending inside string literal)
+                // - contains "; (semicolon inside string, common in embedded JS/SQL)
+                let line_trimmed = context.line.trim_end();
+                let looks_like_string_content = line_trimmed.ends_with('\\')
+                    || line_trimmed.contains(");\"")   // e.g., })();"
+                    || line_trimmed.contains("();\"")  // e.g., foo();"
+                    || line_trimmed.contains("; \\")   // e.g., return x; \
+                    ;
+
+                if in_multiline_string || looks_like_string_content {
+                    return None;
+                }
+            }
+        }
+
         let mut issue =
             LintIssue::new(file_path.clone(), line_num, message, severity)
                 .with_source("cpplint".to_string());
@@ -687,12 +724,11 @@ impl CppChecker {
             issue = issue.with_code(c);
         }
 
-        // Read the source code line with context
-        if let Some(ctx) = crate::utils::read_file_line_with_context(&file_path, line_num, 1) {
+        if let Some(context) = ctx {
             issue = issue
-                .with_code_line(ctx.line)
-                .with_context_before(ctx.before)
-                .with_context_after(ctx.after);
+                .with_code_line(context.line)
+                .with_context_before(context.before)
+                .with_context_after(context.after);
         }
 
         Some(issue)
@@ -993,6 +1029,15 @@ mod tests {
         assert_eq!(issue.line, 15);
         assert!(issue.message.contains("space between //"));
         assert_eq!(issue.code, Some("whitespace/comments".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cpplint_multiline_string_filtered() {
+        // cpplint's own limitation warning should be filtered out - it's not an actionable code issue
+        let line = r#"test.m:710: Multi-line string ("...") found.  This lint script doesn't do well with such strings, and may give bogus warnings.  Use C++11 raw strings or concatenation instead.  [readability/multiline_string] [5]"#;
+        let default_path = Path::new("test.m");
+        let result = CppChecker::parse_cpplint_line(line, default_path);
+        assert!(result.is_none());
     }
 
     // ==================== CpplintConfig tests ====================

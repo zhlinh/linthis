@@ -19,14 +19,12 @@ use std::process::ExitCode;
 
 use cli::{
     collect_paths, handle_cache_command, handle_complexity_command, handle_config_command,
-    handle_doctor_command, handle_fix_from_file, handle_hook_command, handle_init_command,
+    handle_doctor_command, handle_fix_command, handle_hook_command, handle_init_command,
     handle_license_command, handle_plugin_command, handle_report_command, handle_security_command,
-    handle_suggest_command, init_linter_configs, perform_auto_sync, perform_self_update,
-    print_fix_hint, print_recheck_footer, print_recheck_header, print_recheck_summary,
-    recheck_modified_files, run_benchmark, run_watch, strip_ansi_codes, Cli, Commands,
-    ComplexityCommandOptions, PathCollectionOptions, PathCollectionResult, SuggestCommandOptions,
+    init_linter_configs, perform_auto_sync, perform_self_update, print_fix_hint, run_benchmark,
+    run_watch, strip_ansi_codes, Cli, Commands, ComplexityCommandOptions, FixCommandOptions,
+    PathCollectionOptions, PathCollectionResult,
 };
-use linthis::interactive::run_interactive;
 use linthis::lsp::{run_lsp_server, LspMode};
 use linthis::utils::output::{format_result_with_hook_type, OutputFormat};
 use linthis::{run, Language, RunMode, RunOptions};
@@ -135,37 +133,45 @@ fn main() -> ExitCode {
         });
     }
 
-    // Handle suggest subcommand
-    if let Some(Commands::Suggest {
+    // Handle fix subcommand
+    if let Some(Commands::Fix {
         source,
+        check,
+        format_only,
+        ai,
+        provider,
+        model,
+        max_suggestions,
+        auto_apply,
+        jobs,
         file,
         line,
         message,
         rule,
-        provider,
-        model,
-        max_suggestions,
-        interactive,
-        auto_apply,
-        format,
+        output,
         with_context,
         verbose,
+        quiet,
     }) = cli.command
     {
-        return handle_suggest_command(SuggestCommandOptions {
+        return handle_fix_command(FixCommandOptions {
             source,
+            check,
+            format_only,
+            ai,
+            provider,
+            model,
+            max_suggestions,
+            auto_apply,
+            jobs,
             file,
             line,
             message,
             rule,
-            provider,
-            model,
-            max_suggestions,
-            interactive,
-            auto_apply,
-            format,
+            output,
             with_context,
             verbose,
+            quiet,
         });
     }
 
@@ -258,15 +264,6 @@ fn main() -> ExitCode {
         // If only --clear-cache is specified, exit
         if cli.paths.is_empty() && !cli.check_only && !cli.format_only {
             return ExitCode::SUCCESS;
-        }
-    }
-
-    // Handle --fix without -c: load result file and enter interactive mode
-    // If --fix is used with -c, we'll run check first then enter interactive mode later
-    if let Some(ref source) = cli.fix {
-        // --fix without -c: load from file
-        if !cli.check_only && !cli.format_only {
-            return handle_fix_from_file(source, cli.quiet, cli.verbose);
         }
     }
 
@@ -516,33 +513,15 @@ fn main() -> ExitCode {
                 println!("{}", output);
             }
 
-            // Run interactive fix mode if --fix was used with -c
-            if cli.fix.is_some() && !result.issues.is_empty() {
-                let interactive_result = run_interactive(&result);
-
-                // Recheck modified files if any changes were made
-                if !interactive_result.modified_files.is_empty() {
-                    print_recheck_header();
-
-                    let recheck_result = recheck_modified_files(
-                        &interactive_result.modified_files,
-                        &result.issues,
-                        cli.quiet,
-                        cli.verbose,
-                    );
-
-                    let fixed_count = interactive_result.edited + interactive_result.ignored;
-                    print_recheck_summary(&recheck_result, fixed_count);
-                    print_recheck_footer();
-                }
-            }
-
             // Save to file by default (unless --no-save-result is specified)
             // Default format is JSON for programmatic access (--last, --from-result)
             if !cli.no_save_result || cli.output_file.is_some() {
                 use chrono::Local;
                 use std::fs::{self, File};
                 use std::io::Write;
+
+                // Get project root for .linthis directory
+                let project_root = linthis::utils::get_project_root();
 
                 // Determine actual output path
                 let output_file = if let Some(ref custom_path) = cli.output_file {
@@ -554,8 +533,8 @@ fn main() -> ExitCode {
                     }
                     custom_path.clone()
                 } else {
-                    // Use default path: .linthis/result/result-{timestamp}.json
-                    let result_dir = PathBuf::from(".linthis").join("result");
+                    // Use default path: <project_root>/.linthis/result/result-{timestamp}.json
+                    let result_dir = project_root.join(".linthis").join("result");
                     if let Err(e) = fs::create_dir_all(&result_dir) {
                         eprintln!(
                             "{}: Failed to create {}: {}",
@@ -671,8 +650,8 @@ fn main() -> ExitCode {
                 }
             }
 
-            // Show hint for --fix mode if there are issues and not already using --fix
-            if !cli.quiet && cli.fix.is_none() && !result.issues.is_empty() {
+            // Show hint for fix mode if there are issues
+            if !cli.quiet && !result.issues.is_empty() {
                 print_fix_hint();
             }
 

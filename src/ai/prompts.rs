@@ -316,15 +316,24 @@ const SYSTEM_PROMPT_GENERAL: &str = r#"You are an expert code reviewer and fix a
 
 Guidelines:
 1. Provide only the fixed code, not explanations unless asked
-2. Make minimal changes - fix only what's necessary
-3. Preserve the original code style and formatting
+2. Make minimal changes - fix ONLY what the error message describes
+3. Preserve the original code style, formatting, and indentation
 4. Consider the surrounding context when making changes
 5. If the fix requires imports, include them
 6. Output the fix in a code block with the appropriate language tag
+7. Pay close attention to the EXACT error message - it tells you precisely what to fix
+
+Common lint rules and their fixes:
+- "Missing space after X" → Add a space AFTER the character X
+- "Missing space before X" → Add a space BEFORE the character X
+- "Extra space" → Remove the extra space
+- "Line too long" → Break the line appropriately
+- "Unused variable" → Remove or use the variable
+- "Missing return type" → Add the return type annotation
 
 Response format:
 ```{{language}}
-// Fixed code here
+// Fixed code here - preserve original indentation
 ```
 
 If multiple approaches are possible, provide the most idiomatic solution for the language."#;
@@ -333,14 +342,23 @@ const SYSTEM_PROMPT_STYLE: &str = r#"You are an expert code formatter and style 
 
 Guidelines:
 1. Follow language-specific style conventions
-2. Make minimal changes to fix the style issue
+2. Make minimal changes to fix the style issue - focus ONLY on what the error message describes
 3. Preserve existing formatting patterns where not explicitly wrong
 4. Consider readability and consistency
 5. Do not change logic or behavior
+6. Do NOT change indentation unless the error specifically mentions indentation
+7. Pay close attention to the EXACT error message - it tells you precisely what to fix
+
+Common style rules and their fixes:
+- "Missing space after X" → Add a space AFTER the character X (e.g., "Missing space after ;" means add space after semicolon)
+- "Missing space before X" → Add a space BEFORE the character X
+- "Extra space after X" → Remove the extra space after X
+- "Line too long" → Break the line appropriately
+- "Trailing whitespace" → Remove spaces/tabs at the end of line
 
 Response format:
 ```{{language}}
-// Fixed code here
+// Fixed code here - with ONLY the specific style issue fixed
 ```"#;
 
 const SYSTEM_PROMPT_SECURITY: &str = r#"You are a security expert. Your task is to fix security vulnerabilities in code while maintaining functionality.
@@ -418,12 +436,17 @@ Code context:
 {{code_context}}
 ```
 
-The issue is on this line:
+The issue is on this line (line {{line_number}}):
 ```{{language}}
 {{issue_line}}
 ```
 
-Provide only the fixed code."#;
+IMPORTANT: The error message "{{issue_message}}" tells you EXACTLY what to fix.
+- Read the error message carefully and fix ONLY what it describes
+- Do NOT change indentation or other formatting unless the error specifically mentions it
+- Preserve the original code structure
+
+Provide only the fixed line."#;
 
 const USER_PROMPT_STYLE: &str = r#"Fix the following code style issue in {{language}}:
 
@@ -432,17 +455,23 @@ Line: {{line_number}}
 Style Issue: {{issue_message}}
 Rule: {{rule_id}}
 
-Code:
+Code context:
 ```{{language}}
 {{code_context}}
 ```
 
-Problem line:
+Problem line (line {{line_number}}):
 ```{{language}}
 {{issue_line}}
 ```
 
-Provide the properly formatted code."#;
+IMPORTANT: The error message "{{issue_message}}" tells you EXACTLY what to fix.
+- If it says "Missing space after X", add a space AFTER the character X
+- If it says "Missing space before X", add a space BEFORE the character X
+- Do NOT change indentation or other formatting unless the error specifically mentions it
+- Make the MINIMAL change to fix ONLY this specific issue
+
+Provide ONLY the fixed line with the style issue corrected."#;
 
 const USER_PROMPT_SECURITY: &str = r#"Fix the following security vulnerability in {{language}}:
 
