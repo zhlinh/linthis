@@ -197,7 +197,7 @@ impl Checker for PythonChecker {
 
         // Try to find ruff config
         if let Some(config_path) = Self::find_ruff_config(path) {
-            cmd.arg("--config").arg(config_path);
+            cmd.arg("--config").arg(&config_path);
         }
 
         let output = cmd
@@ -206,6 +206,22 @@ impl Checker for PythonChecker {
             .map_err(|e| crate::LintisError::checker("ruff", path, format!("Failed to run: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // If ruff failed to parse config (exit code 2 with empty stdout), retry without config
+        if output.status.code() == Some(2) && stdout.is_empty() && stderr.contains("Failed to parse") {
+            let mut retry_cmd = Command::new("ruff");
+            retry_cmd.args(["check", "--output-format", "json"]);
+            // Don't use config - let ruff use defaults
+            let retry_output = retry_cmd
+                .arg(path)
+                .output()
+                .map_err(|e| crate::LintisError::checker("ruff", path, format!("Failed to run: {}", e)))?;
+
+            let retry_stdout = String::from_utf8_lossy(&retry_output.stdout);
+            return Ok(self.parse_ruff_json_output(&retry_stdout, path));
+        }
+
         let issues = self.parse_ruff_json_output(&stdout, path);
 
         Ok(issues)

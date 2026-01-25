@@ -12,7 +12,7 @@ Neovim plugin for [linthis](https://github.com/zhlinh/linthis) - a multi-languag
 
 ## Requirements
 
-- Neovim >= 0.10.0
+- Neovim >= 0.9.0
 - [linthis](https://github.com/zhlinh/linthis) installed
 
 ```bash
@@ -27,9 +27,20 @@ cargo install linthis
 
 ### [lazy.nvim](https://github.com/folke/lazy.nvim)
 
+Create a new file `~/.config/nvim/lua/plugins/linthis.lua`:
+
+**Option 1: Install from GitHub**
+
 ```lua
-{
-  "linthis/nvim-linthis",
+-- ~/.config/nvim/lua/plugins/linthis.lua
+return {
+  "zhlinh/linthis",
+  config = function(_, opts)
+    -- Add nvim-linthis subdirectory to package.path
+    local lazy_path = vim.fn.stdpath("data") .. "/lazy/linthis/nvim-linthis/lua"
+    package.path = lazy_path .. "/?.lua;" .. lazy_path .. "/?/init.lua;" .. package.path
+    require("linthis").setup(opts)
+  end,
   opts = {
     format_on_save = false,
     lint_on_save = true,
@@ -37,11 +48,12 @@ cargo install linthis
 }
 ```
 
-### [packer.nvim](https://github.com/wbthomason/packer.nvim)
+**Option 2: Local development (use local path)**
 
 ```lua
-use {
-  "linthis/nvim-linthis",
+-- ~/.config/nvim/lua/plugins/linthis.lua
+return {
+  dir = "~/path/to/linthis/nvim-linthis",
   config = function()
     require("linthis").setup({
       format_on_save = false,
@@ -51,13 +63,56 @@ use {
 }
 ```
 
+> **Note**: The plugin is in the `nvim-linthis` subdirectory of the main linthis repo.
+
+### [packer.nvim](https://github.com/wbthomason/packer.nvim)
+
+```lua
+use {
+  "zhlinh/linthis",
+  rtp = "nvim-linthis",
+  config = function()
+    require("linthis").setup({
+      format_on_save = false,
+      lint_on_save = true,
+    })
+  end,
+}
+```
+
+### [vim-plug](https://github.com/junegunn/vim-plug)
+
+Add to your `~/.config/nvim/init.vim` or `~/.vimrc`:
+
+```vim
+Plug 'zhlinh/linthis', { 'rtp': 'nvim-linthis' }
+```
+
+Then in your Lua config:
+
+```lua
+require("linthis").setup({
+  format_on_save = false,
+  lint_on_save = true,
+})
+```
+
 ### Manual
 
 Clone to your Neovim packages directory:
 
 ```bash
-git clone https://github.com/linthis/nvim-linthis \
-  ~/.local/share/nvim/site/pack/plugins/start/nvim-linthis
+git clone https://github.com/zhlinh/linthis \
+  ~/.local/share/nvim/site/pack/plugins/start/linthis
+```
+
+Then add to your Neovim config:
+
+```lua
+-- Add the subdirectory to runtimepath
+vim.opt.rtp:append(vim.fn.stdpath("data") .. "/site/pack/plugins/start/linthis/nvim-linthis")
+
+require("linthis").setup()
 ```
 
 ## Configuration
