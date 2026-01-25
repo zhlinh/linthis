@@ -35,16 +35,18 @@ Create a new file `~/.config/nvim/lua/plugins/linthis.lua`:
 -- ~/.config/nvim/lua/plugins/linthis.lua
 return {
   "zhlinh/linthis",
-  config = function(_, opts)
-    -- Add nvim-linthis subdirectory to package.path
-    local lazy_path = vim.fn.stdpath("data") .. "/lazy/linthis/nvim-linthis/lua"
-    package.path = lazy_path .. "/?.lua;" .. lazy_path .. "/?/init.lua;" .. package.path
-    require("linthis").setup(opts)
+  event = { "BufReadPre", "BufNewFile" },
+  config = function(plugin)
+    -- Add nvim-linthis subdirectory to runtimepath and package.path
+    local plugin_dir = plugin.dir .. "/nvim-linthis"
+    vim.opt.rtp:append(plugin_dir)
+    local lua_path = plugin_dir .. "/lua"
+    package.path = lua_path .. "/?.lua;" .. lua_path .. "/?/init.lua;" .. package.path
+    require("linthis").setup({
+      format_on_save = false,
+      lint_on_save = true,
+    })
   end,
-  opts = {
-    format_on_save = false,
-    lint_on_save = true,
-  },
 }
 ```
 
