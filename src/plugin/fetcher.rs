@@ -55,18 +55,16 @@ impl PluginFetcher {
         }
     }
 
-    /// Fetch a plugin from Git repository
+    /// Fetch a plugin from Git repository or use local path
     ///
     /// If already cached, returns the cached version unless force_update is true.
+    /// For local paths, directly uses the path without cloning.
     pub fn fetch(
         &self,
         source: &PluginSource,
         cache: &PluginCache,
         force_update: bool,
     ) -> Result<CachedPlugin> {
-        // Check Git availability first
-        Self::check_git_available()?;
-
         let url = source
             .url
             .as_ref()
@@ -74,6 +72,14 @@ impl PluginFetcher {
                 url: source.name.clone(),
                 message: "No URL provided for plugin".to_string(),
             })?;
+
+        // Check if this is a local path
+        if source.is_local_path() {
+            return self.fetch_local(source, url);
+        }
+
+        // Check Git availability first (only needed for remote URLs)
+        Self::check_git_available()?;
 
         let cache_path = cache.url_to_cache_path(url);
 
@@ -112,6 +118,56 @@ impl PluginFetcher {
         cache.save_cache_metadata(&plugin)?;
 
         Ok(plugin)
+    }
+
+    /// Fetch a plugin from a local path (no cloning needed)
+    fn fetch_local(&self, source: &PluginSource, path: &str) -> Result<CachedPlugin> {
+        // Resolve the path (handle relative paths)
+        let local_path = std::path::PathBuf::from(path);
+        let resolved_path = if local_path.is_relative() {
+            std::env::current_dir()
+                .map_err(|e| PluginError::CacheError {
+                    message: format!("Failed to get current directory: {}", e),
+                })?
+                .join(&local_path)
+        } else {
+            local_path
+        };
+
+        // Canonicalize to get absolute path
+        let canonical_path =
+            std::fs::canonicalize(&resolved_path).map_err(|e| PluginError::CacheError {
+                message: format!("Local plugin path '{}' not found: {}", path, e),
+            })?;
+
+        // Check if manifest exists
+        let manifest_path = canonical_path.join("linthis-plugin.toml");
+        if !manifest_path.exists() {
+            return Err(PluginError::InvalidManifest {
+                path: manifest_path,
+                message: "linthis-plugin.toml not found in local plugin directory".to_string(),
+            });
+        }
+
+        log_plugin_operation(
+            "local",
+            &format!("Using local plugin at {}", canonical_path.display()),
+            self.verbose,
+        );
+
+        // Get commit hash if it's a git repo
+        let commit_hash = self.get_local_commit_hash(&canonical_path);
+
+        let now = Utc::now();
+        Ok(CachedPlugin {
+            name: source.name.clone(),
+            url: path.to_string(),
+            git_ref: source.git_ref.clone(),
+            commit_hash,
+            cached_at: now,
+            last_updated: now,
+            cache_path: canonical_path,
+        })
     }
 
     /// Clone a plugin repository with shallow clone

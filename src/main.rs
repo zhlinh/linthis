@@ -285,37 +285,75 @@ fn main() -> ExitCode {
     // Track loaded plugins for display
     let mut loaded_plugins: Vec<String> = Vec::new();
 
-    // Load plugins from config files (project first, then global)
+    // Load plugins: --use-plugin takes priority, then config files
     if !cli.no_plugin {
         use linthis::plugin::{PluginConfigManager, PluginLoader, PluginSource};
 
         let mut plugins_to_load: Vec<(String, PluginSource)> = Vec::new();
 
-        // Check project config first
-        if let Ok(project_manager) = PluginConfigManager::project() {
-            if let Ok(project_plugins) = project_manager.list_plugins() {
-                for (name, url, git_ref) in project_plugins {
-                    let source = if let Some(ref r) = git_ref {
-                        PluginSource::new(&url).with_ref(r)
+        // Check --use-plugin first (takes priority over config files)
+        if let Some(ref plugin_specs) = cli.use_plugin {
+            for spec in plugin_specs {
+                // Parse plugin spec: URL[@ref] or local path
+                let (url_or_path, git_ref) = if spec.contains('@') && !spec.starts_with('/') {
+                    // URL with ref: https://github.com/org/plugin.git@v1.0
+                    let parts: Vec<&str> = spec.rsplitn(2, '@').collect();
+                    if parts.len() == 2 {
+                        (parts[1].to_string(), Some(parts[0].to_string()))
                     } else {
-                        PluginSource::new(&url)
-                    };
-                    plugins_to_load.push((name, source));
-                }
-            }
-        }
+                        (spec.clone(), None)
+                    }
+                } else {
+                    (spec.clone(), None)
+                };
 
-        // If no project plugins, check global config
-        if plugins_to_load.is_empty() {
-            if let Ok(global_manager) = PluginConfigManager::global() {
-                if let Ok(global_plugins) = global_manager.list_plugins() {
-                    for (name, url, git_ref) in global_plugins {
+                // Generate plugin name from URL/path
+                let name = url_or_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&url_or_path)
+                    .trim_end_matches(".git")
+                    .to_string();
+
+                let source = if let Some(ref r) = git_ref {
+                    PluginSource::new(&url_or_path).with_ref(r)
+                } else {
+                    PluginSource::new(&url_or_path)
+                };
+
+                if cli.verbose {
+                    eprintln!("Using plugin from CLI: {} ({})", name, url_or_path);
+                }
+                plugins_to_load.push((name, source));
+            }
+        } else {
+            // No --use-plugin, load from config files (project first, then global)
+            // Check project config first
+            if let Ok(project_manager) = PluginConfigManager::project() {
+                if let Ok(project_plugins) = project_manager.list_plugins() {
+                    for (name, url, git_ref) in project_plugins {
                         let source = if let Some(ref r) = git_ref {
                             PluginSource::new(&url).with_ref(r)
                         } else {
                             PluginSource::new(&url)
                         };
                         plugins_to_load.push((name, source));
+                    }
+                }
+            }
+
+            // If no project plugins, check global config
+            if plugins_to_load.is_empty() {
+                if let Ok(global_manager) = PluginConfigManager::global() {
+                    if let Ok(global_plugins) = global_manager.list_plugins() {
+                        for (name, url, git_ref) in global_plugins {
+                            let source = if let Some(ref r) = git_ref {
+                                PluginSource::new(&url).with_ref(r)
+                            } else {
+                                PluginSource::new(&url)
+                            };
+                            plugins_to_load.push((name, source));
+                        }
                     }
                 }
             }

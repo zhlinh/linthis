@@ -122,6 +122,17 @@ pub struct Cli {
     #[arg(long)]
     pub no_plugin: bool,
 
+    /// Use specific plugin(s) directly, bypassing config files
+    /// Useful for debugging plugins or CI integration
+    ///
+    /// Formats:
+    ///   --use-plugin https://github.com/org/plugin.git
+    ///   --use-plugin https://github.com/org/plugin.git@v1.0
+    ///   --use-plugin /path/to/local/plugin
+    ///   --use-plugin plugin1,plugin2  (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    pub use_plugin: Option<Vec<String>>,
+
     /// Hook mode: enable compact output format for git hooks
     /// Shows summary at top, lists errors with file:line, and provides fix commands
     /// Optional value specifies hook type: pre-commit (default), pre-push, commit-msg
