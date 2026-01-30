@@ -100,6 +100,11 @@
           "default": "",
           "description": "Additional arguments to pass to linthis (space-separated)"
         },
+        "linthis.usePlugin": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Specify plugin(s) to use directly, bypassing config files. Useful for team-shared lint configurations.\n\n**Supported formats:**\n- Git URL: `https://github.com/org/plugin.git`\n- Git URL with version: `https://github.com/org/plugin.git@v1.0`\n- Local path: `./my-plugin` or `/absolute/path`\n- Multiple plugins: `plugin1,plugin2` (comma-separated)\n\n**Example:** `https://github.com/zhlinh/linthis-plugin-template`"
+        },
         "linthis.trace.server": {
           "type": "string",
           "enum": [
