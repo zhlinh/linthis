@@ -198,6 +198,9 @@ impl Checker for PythonChecker {
         // Try to find ruff config
         if let Some(config_path) = Self::find_ruff_config(path) {
             cmd.arg("--config").arg(&config_path);
+        } else {
+            // No config found - use sensible defaults (E=pycodestyle errors, W=warnings, F=pyflakes)
+            cmd.args(["--select", "E,W,F"]);
         }
 
         let output = cmd
@@ -212,7 +215,8 @@ impl Checker for PythonChecker {
         if output.status.code() == Some(2) && stdout.is_empty() && stderr.contains("Failed to parse") {
             let mut retry_cmd = Command::new("ruff");
             retry_cmd.args(["check", "--output-format", "json"]);
-            // Don't use config - let ruff use defaults
+            // Use default rules instead of broken config
+            retry_cmd.args(["--select", "E,W,F"]);
             let retry_output = retry_cmd
                 .arg(path)
                 .output()

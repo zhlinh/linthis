@@ -3,7 +3,6 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
-  TransportKind,
 } from 'vscode-languageclient/node';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
@@ -11,6 +10,8 @@ import * as path from 'path';
 import * as os from 'os';
 
 let client: LanguageClient | undefined;
+// Track files being formatted to prevent save loops
+const formattingFiles = new Set<string>();
 
 /**
  * Find linthis executable in common locations
@@ -137,6 +138,19 @@ async function formatDocument(
 
     if (showMessages) {
       outputChannel.appendLine(`[info] Format result: ${result}`);
+    }
+
+    // Reload the file content in VSCode after in-place formatting
+    // Use revert to reload from disk, avoiding conflicts
+    const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === filePath);
+    if (editor) {
+      // Focus on the editor and revert to reload from disk
+      await vscode.window.showTextDocument(editor.document);
+      await vscode.commands.executeCommand('workbench.action.files.revert');
+      outputChannel.appendLine(`[info] Document reverted to reload formatted content`);
+    }
+
+    if (showMessages) {
       vscode.window.showInformationMessage('Linthis: Document formatted successfully');
     }
     return true;
@@ -172,16 +186,24 @@ async function formatDocument(
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const config = vscode.workspace.getConfiguration('linthis');
+  // Create output channel immediately for logging
   const outputChannel = vscode.window.createOutputChannel('Linthis');
+  outputChannel.appendLine('[info] Linthis extension activating...');
+  outputChannel.show(true); // Show output channel to help with debugging
 
-  if (!config.get<boolean>('enable', true)) {
-    outputChannel.appendLine('[info] Extension is disabled via linthis.enable setting');
-    return;
-  }
+  try {
+    const config = vscode.workspace.getConfiguration('linthis');
+    outputChannel.appendLine('[info] Configuration loaded');
 
-  // Register commands first (so they're available even if LSP fails)
-  context.subscriptions.push(
+    if (!config.get<boolean>('enable', true)) {
+      outputChannel.appendLine('[info] Extension is disabled via linthis.enable setting');
+      return;
+    }
+
+    outputChannel.appendLine('[info] Registering commands...');
+
+    // Register commands first (so they're available even if LSP fails)
+    context.subscriptions.push(
     vscode.commands.registerCommand('linthis.lint', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
@@ -258,6 +280,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register format on save (always register, but check config each time)
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (document) => {
+      const filePath = document.uri.fsPath;
+
+      // Skip if we're already formatting this file (prevent loops)
+      if (formattingFiles.has(filePath)) {
+        return;
+      }
+
       // Check if format on save is enabled
       const currentConfig = vscode.workspace.getConfiguration('linthis');
       if (!currentConfig.get<boolean>('formatOnSave', false)) {
@@ -275,34 +304,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      const filePath = document.uri.fsPath;
       outputChannel.appendLine(`[info] Format on save: ${filePath}`);
 
-      // Format the file using linthis -f -i (in-place)
-      const executablePath = getLinthisPath(currentConfig);
-      const additionalArgs = parseAdditionalArguments(currentConfig);
-      const usePluginArgs = getUsePluginArgs(currentConfig);
-      const args = ['-f', '-i', filePath, ...usePluginArgs, ...additionalArgs];
-      const command = `"${executablePath}" ${args.map(a => `"${a}"`).join(' ')}`;
-
+      // Mark file as being formatted
+      formattingFiles.add(filePath);
       try {
-        const result = execSync(command, {
-          encoding: 'utf-8',
-          cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-          timeout: 10000,
-        });
-
-        outputChannel.appendLine(`[info] Format completed`);
-      } catch (error: any) {
-        // Log error details
-        const exitCode = error.status || 0;
-        outputChannel.appendLine(`[error] Format on save failed with exit code: ${exitCode}`);
-        if (error.stdout) {
-          outputChannel.appendLine(`[error] stdout: ${error.stdout}`);
-        }
-        if (error.stderr) {
-          outputChannel.appendLine(`[error] stderr: ${error.stderr}`);
-        }
+        // Use formatDocument to format and refresh the editor
+        await formatDocument(filePath, currentConfig, outputChannel, false);
+      } finally {
+        // Clear the flag after a short delay to allow save to complete
+        setTimeout(() => formattingFiles.delete(filePath), 500);
       }
     })
   );
@@ -411,18 +422,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // Start the language client
-  try {
-    client = createLanguageClient(config, outputChannel);
-    await startClientSafely(client, outputChannel);
-    context.subscriptions.push(client);
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    outputChannel.appendLine(`[error] Failed to start language server: ${errorMsg}`);
-    vscode.window.showErrorMessage(
-      `Linthis: Failed to start language server. Check Output panel for details.`
-    );
-    // Don't throw - allow extension to continue with commands available
+    outputChannel.appendLine('[info] Starting language client...');
+
+    // Start the language client
+    try {
+      client = createLanguageClient(config, outputChannel);
+      await startClientSafely(client, outputChannel);
+      context.subscriptions.push(client);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      outputChannel.appendLine(`[error] Failed to start language server: ${errorMsg}`);
+      vscode.window.showErrorMessage(
+        `Linthis: Failed to start language server. Check Output panel for details.`
+      );
+      // Don't throw - allow extension to continue with commands available
+    }
+
+    outputChannel.appendLine('[info] Linthis extension activated successfully');
+  } catch (activationError) {
+    const errorMsg = activationError instanceof Error ? activationError.message : String(activationError);
+    outputChannel.appendLine(`[error] Extension activation failed: ${errorMsg}`);
+    if (activationError instanceof Error && activationError.stack) {
+      outputChannel.appendLine(`[error] Stack trace: ${activationError.stack}`);
+    }
+    vscode.window.showErrorMessage(`Linthis: Extension activation failed - ${errorMsg}`);
+    throw activationError; // Re-throw to let VS Code know activation failed
   }
 }
 
@@ -432,20 +456,32 @@ async function startClientSafely(
 ): Promise<void> {
   outputChannel.appendLine('[info] Starting language server...');
 
-  // Use a timeout to prevent indefinite hanging
-  const startPromise = client.start();
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('Language server start timeout (10s)')), 10000);
-  });
+  // Use a longer timeout (60s) to allow plugin cloning on first use
+  // Show progress notification for better UX
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'Linthis: Starting language server...',
+      cancellable: false,
+    },
+    async (progress) => {
+      progress.report({ message: 'Loading plugins (this may take a while on first run)...' });
 
-  try {
-    await Promise.race([startPromise, timeoutPromise]);
-    outputChannel.appendLine('[info] Language server started successfully');
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    outputChannel.appendLine(`[error] Failed to start: ${errorMsg}`);
-    throw error;
-  }
+      const startPromise = client.start();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Language server start timeout (60s). If using --use-plugin with a git URL, try running "linthis lsp --use-plugin <url>" manually first.')), 60000);
+      });
+
+      try {
+        await Promise.race([startPromise, timeoutPromise]);
+        outputChannel.appendLine('[info] Language server started successfully');
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        outputChannel.appendLine(`[error] Failed to start: ${errorMsg}`);
+        throw error;
+      }
+    }
+  );
 }
 
 function createLanguageClient(
