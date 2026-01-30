@@ -73,6 +73,17 @@ function parseAdditionalArguments(config: vscode.WorkspaceConfiguration): string
   return argsString.trim().split(/\s+/).filter(arg => arg.length > 0);
 }
 
+/**
+ * Get --use-plugin arguments from config
+ */
+function getUsePluginArgs(config: vscode.WorkspaceConfiguration): string[] {
+  const usePlugin = config.get<string>('usePlugin', '');
+  if (!usePlugin || usePlugin.trim() === '') {
+    return [];
+  }
+  return ['--use-plugin', usePlugin.trim()];
+}
+
 // Supported languages matching the LSP server
 const SUPPORTED_LANGUAGES = [
   'rust',
@@ -106,6 +117,7 @@ async function formatDocument(
 ): Promise<boolean> {
   const executablePath = getLinthisPath(config);
   const additionalArgs = parseAdditionalArguments(config);
+  const usePluginArgs = getUsePluginArgs(config);
 
   try {
     if (showMessages) {
@@ -113,7 +125,7 @@ async function formatDocument(
     }
 
     // Run linthis format-only
-    const args = ['-f', '-i', filePath, ...additionalArgs];
+    const args = ['-f', '-i', filePath, ...usePluginArgs, ...additionalArgs];
     const command = `"${executablePath}" ${args.map(a => `"${a}"`).join(' ')}`;
     outputChannel.appendLine(`[info] Running: ${command}`);
 
@@ -269,7 +281,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // Format the file using linthis -f -i (in-place)
       const executablePath = getLinthisPath(currentConfig);
       const additionalArgs = parseAdditionalArguments(currentConfig);
-      const args = ['-f', '-i', filePath, ...additionalArgs];
+      const usePluginArgs = getUsePluginArgs(currentConfig);
+      const args = ['-f', '-i', filePath, ...usePluginArgs, ...additionalArgs];
       const command = `"${executablePath}" ${args.map(a => `"${a}"`).join(' ')}`;
 
       try {
@@ -441,13 +454,17 @@ function createLanguageClient(
 ): LanguageClient {
   const executablePath = getLinthisPath(config);
   const additionalArgs = parseAdditionalArguments(config);
+  const usePluginArgs = getUsePluginArgs(config);
 
   outputChannel.appendLine(`[info] Using linthis executable: ${executablePath}`);
-  outputChannel.appendLine(`[info] LSP arguments: lsp ${additionalArgs.join(' ')}`);
+  if (usePluginArgs.length > 0) {
+    outputChannel.appendLine(`[info] Using plugin: ${usePluginArgs[1]}`);
+  }
+  outputChannel.appendLine(`[info] LSP arguments: lsp ${[...usePluginArgs, ...additionalArgs].join(' ')}`);
 
   const serverOptions: ServerOptions = {
     command: executablePath,
-    args: ['lsp', ...additionalArgs],
+    args: ['lsp', ...usePluginArgs, ...additionalArgs],
   };
 
   const documentSelector = SUPPORTED_LANGUAGES.map((language) => ({
