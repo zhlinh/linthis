@@ -176,7 +176,60 @@ fn main() -> ExitCode {
     }
 
     // Handle lsp subcommand
-    if let Some(Commands::Lsp { mode, port }) = cli.command {
+    if let Some(Commands::Lsp { mode, port, use_plugin }) = cli.command {
+        // Load plugins before starting LSP (same logic as main command)
+        if let Some(ref plugin_specs) = use_plugin {
+            use linthis::plugin::{PluginLoader, PluginSource};
+
+            for spec in plugin_specs {
+                // Parse plugin spec: URL[@ref] or local path
+                let (url_or_path, git_ref) = if spec.contains('@') && !spec.starts_with('/') {
+                    let parts: Vec<&str> = spec.rsplitn(2, '@').collect();
+                    if parts.len() == 2 {
+                        (parts[1].to_string(), Some(parts[0].to_string()))
+                    } else {
+                        (spec.clone(), None)
+                    }
+                } else {
+                    (spec.clone(), None)
+                };
+
+                let name = url_or_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&url_or_path)
+                    .trim_end_matches(".git")
+                    .to_string();
+
+                let source = if let Some(ref r) = git_ref {
+                    PluginSource::new(&url_or_path).with_ref(r)
+                } else {
+                    PluginSource::new(&url_or_path)
+                };
+
+                if let Ok(loader) = PluginLoader::new() {
+                    if let Ok(configs) = loader.load_configs(&[source], false) {
+                        // Copy plugin configs to .linthis/configs/
+                        let linthis_dir = std::env::current_dir()
+                            .unwrap_or_default()
+                            .join(".linthis");
+                        let config_dir = linthis_dir.join("configs");
+
+                        for config in &configs {
+                            if let Some(filename) = config.config_path.file_name() {
+                                let lang_dir = config_dir.join(&config.language);
+                                if std::fs::create_dir_all(&lang_dir).is_ok() {
+                                    let target = lang_dir.join(filename);
+                                    let _ = std::fs::copy(&config.config_path, &target);
+                                }
+                            }
+                        }
+                        eprintln!("[lsp] Loaded {} config(s) from plugin '{}'", configs.len(), name);
+                    }
+                }
+            }
+        }
+
         let lsp_mode = match mode.parse::<LspMode>() {
             Ok(m) => m,
             Err(e) => {

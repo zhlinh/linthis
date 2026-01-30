@@ -13,6 +13,8 @@ webpack.config.js
 *.vsix
 .DS_Store
 .linthis.toml
+.linthis/**
+.ruff_cache/**
 PUBLISHING.md
 PUBLISHING.zh.md
 !dist/**

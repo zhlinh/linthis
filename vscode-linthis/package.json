@@ -33,23 +33,7 @@
     "multi-language"
   ],
   "activationEvents": [
-    "onLanguage:rust",
-    "onLanguage:python",
-    "onLanguage:typescript",
-    "onLanguage:javascript",
-    "onLanguage:typescriptreact",
-    "onLanguage:javascriptreact",
-    "onLanguage:go",
-    "onLanguage:java",
-    "onLanguage:c",
-    "onLanguage:cpp",
-    "onLanguage:swift",
-    "onLanguage:kotlin",
-    "onLanguage:json",
-    "onLanguage:yaml",
-    "onLanguage:toml",
-    "onLanguage:markdown",
-    "workspaceContains:.linthis.toml"
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {

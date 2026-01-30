@@ -398,6 +398,7 @@ pub enum Commands {
     /// Example usage:
     ///   linthis lsp              # Start in stdio mode (default)
     ///   linthis lsp --mode tcp   # Start in TCP mode on port 9257
+    ///   linthis lsp --use-plugin https://github.com/org/plugin.git
     Lsp {
         /// Communication mode: stdio (default) or tcp
         #[arg(long, default_value = "stdio")]
@@ -406,6 +407,12 @@ pub enum Commands {
         /// TCP port (only used when mode is tcp)
         #[arg(long, default_value = "9257")]
         port: u16,
+
+        /// Use specific plugin(s) directly, bypassing config files
+        ///
+        /// Example: --use-plugin https://github.com/zhlinh/linthis-plugin-template
+        #[arg(long, value_delimiter = ',')]
+        use_plugin: Option<Vec<String>>,
     },
     /// Generate reports and analyze lint results
     ///
