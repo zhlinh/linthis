@@ -168,10 +168,21 @@ pub struct PluginSource {
 }
 
 impl PluginSource {
-    /// Create a new plugin source from a name (registry lookup) or URL
+    /// Create a new plugin source from a name (registry lookup), URL, or local path
     pub fn new(name_or_url: &str) -> Self {
         if name_or_url.contains("://") || name_or_url.starts_with("git@") {
             // It's a URL
+            Self {
+                name: Self::name_from_url(name_or_url),
+                url: Some(name_or_url.to_string()),
+                git_ref: None,
+                enabled: true,
+            }
+        } else if name_or_url.starts_with('/')
+            || name_or_url.starts_with("./")
+            || name_or_url.starts_with("../")
+        {
+            // It's a local path
             Self {
                 name: Self::name_from_url(name_or_url),
                 url: Some(name_or_url.to_string()),
@@ -186,6 +197,15 @@ impl PluginSource {
                 git_ref: None,
                 enabled: true,
             }
+        }
+    }
+
+    /// Check if this is a local path source
+    pub fn is_local_path(&self) -> bool {
+        if let Some(ref url) = self.url {
+            url.starts_with('/') || url.starts_with("./") || url.starts_with("../")
+        } else {
+            false
         }
     }
 
@@ -266,6 +286,39 @@ mod tests {
             source.url,
             Some("git@github.com:zhlinh/linthis-plugin.git".to_string())
         );
+    }
+
+    #[test]
+    fn test_plugin_source_new_from_local_path_absolute() {
+        let source = PluginSource::new("/path/to/local/plugin");
+        assert_eq!(source.name, "plugin");
+        assert_eq!(source.url, Some("/path/to/local/plugin".to_string()));
+        assert!(source.is_local_path());
+    }
+
+    #[test]
+    fn test_plugin_source_new_from_local_path_relative() {
+        let source = PluginSource::new("./my-plugin");
+        assert_eq!(source.name, "my-plugin");
+        assert_eq!(source.url, Some("./my-plugin".to_string()));
+        assert!(source.is_local_path());
+    }
+
+    #[test]
+    fn test_plugin_source_new_from_local_path_parent() {
+        let source = PluginSource::new("../parent-plugin");
+        assert_eq!(source.name, "parent-plugin");
+        assert_eq!(source.url, Some("../parent-plugin".to_string()));
+        assert!(source.is_local_path());
+    }
+
+    #[test]
+    fn test_plugin_source_is_not_local_path() {
+        let source = PluginSource::new("https://github.com/org/plugin.git");
+        assert!(!source.is_local_path());
+
+        let source2 = PluginSource::new("official");
+        assert!(!source2.is_local_path());
     }
 
     // ==================== PluginSource::with_ref tests ====================
