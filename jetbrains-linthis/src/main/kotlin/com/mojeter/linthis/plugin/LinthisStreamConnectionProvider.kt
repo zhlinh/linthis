@@ -7,6 +7,7 @@
 package com.mojeter.linthis.plugin
 
 import com.intellij.openapi.project.Project
+import com.mojeter.linthis.plugin.settings.LinthisSettings
 import com.redhat.devtools.lsp4ij.server.ProcessStreamConnectionProvider
 import java.io.File
 
@@ -31,8 +32,22 @@ class LinthisStreamConnectionProvider(private val project: Project) : ProcessStr
     }
 
     private fun buildCommand(): List<String> {
-        val linthisPath = findLinthisExecutable()
-        return listOf(linthisPath, "lsp")
+        val settings = LinthisSettings.getInstance(project)
+        val linthisPath = if (settings.linthisPath.isNotBlank()) {
+            settings.linthisPath
+        } else {
+            findLinthisExecutable()
+        }
+
+        val commands = mutableListOf(linthisPath, "lsp")
+
+        // Add --use-plugin if configured
+        if (settings.usePlugin.isNotBlank()) {
+            commands.add("--use-plugin")
+            commands.add(settings.usePlugin)
+        }
+
+        return commands
     }
 
     /**

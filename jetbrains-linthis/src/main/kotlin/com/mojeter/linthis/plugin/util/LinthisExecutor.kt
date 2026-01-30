@@ -36,19 +36,25 @@ object LinthisExecutor {
      * @param filePath Path to the file to format
      * @param workingDir Working directory for the command
      * @param customLinthisPath Custom path to linthis executable (empty for auto-detect)
+     * @param usePlugin Plugin URL to use (empty for none)
      * @return ExecutionResult with success status and any error messages
      */
-    fun format(filePath: String, workingDir: String?, customLinthisPath: String?): ExecutionResult {
+    fun format(filePath: String, workingDir: String?, customLinthisPath: String?, usePlugin: String? = null): ExecutionResult {
         val linthisPath = if (customLinthisPath.isNullOrBlank()) {
             findLinthisExecutable()
         } else {
             customLinthisPath
         }
 
-        LOG.warn("Format file: $filePath, linthisPath: $linthisPath, workingDir: $workingDir")
+        LOG.warn("Format file: $filePath, linthisPath: $linthisPath, workingDir: $workingDir, usePlugin: $usePlugin")
 
         return try {
-            val processBuilder = ProcessBuilder(linthisPath, "-f", "-i", filePath)
+            val commands = mutableListOf(linthisPath, "-f", "-i", filePath)
+            if (!usePlugin.isNullOrBlank()) {
+                commands.add("--use-plugin")
+                commands.add(usePlugin)
+            }
+            val processBuilder = ProcessBuilder(commands)
 
             if (workingDir != null) {
                 processBuilder.directory(File(workingDir))
@@ -101,13 +107,15 @@ object LinthisExecutor {
      * @param originalFilePath Original file path (used to determine file extension)
      * @param workingDir Working directory for the command
      * @param customLinthisPath Custom path to linthis executable
+     * @param usePlugin Plugin URL to use (empty for none)
      * @return FormatResult with formatted content or error message
      */
     fun formatContent(
         content: String,
         originalFilePath: String,
         workingDir: String?,
-        customLinthisPath: String?
+        customLinthisPath: String?,
+        usePlugin: String? = null
     ): FormatResult {
         val linthisPath = if (customLinthisPath.isNullOrBlank()) {
             findLinthisExecutable()
@@ -119,14 +127,19 @@ object LinthisExecutor {
         val extension = originalFilePath.substringAfterLast('.', "")
         val tempFile = File.createTempFile("linthis_format_", if (extension.isNotEmpty()) ".$extension" else "")
 
-        LOG.info("FormatContent: originalPath=$originalFilePath, linthisPath=$linthisPath, tempFile=${tempFile.absolutePath}")
+        LOG.info("FormatContent: originalPath=$originalFilePath, linthisPath=$linthisPath, tempFile=${tempFile.absolutePath}, usePlugin=$usePlugin")
 
         return try {
             // Write content to temp file
             tempFile.writeText(content)
             LOG.info("FormatContent: wrote ${content.length} chars to temp file")
 
-            val processBuilder = ProcessBuilder(linthisPath, "-f", "-i", tempFile.absolutePath)
+            val commands = mutableListOf(linthisPath, "-f", "-i", tempFile.absolutePath)
+            if (!usePlugin.isNullOrBlank()) {
+                commands.add("--use-plugin")
+                commands.add(usePlugin)
+            }
+            val processBuilder = ProcessBuilder(commands)
 
             if (workingDir != null) {
                 processBuilder.directory(File(workingDir))

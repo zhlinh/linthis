@@ -81,7 +81,7 @@ class LinthisDocumentListener : FileDocumentManagerListener {
                     LOG.warn("Running format on save for: ${file.path}")
 
                     // Format the file in-place (file is already saved to disk)
-                    val result = LinthisExecutor.format(file.path, project.basePath, settings.linthisPath)
+                    val result = LinthisExecutor.format(file.path, project.basePath, settings.linthisPath, settings.usePlugin)
 
                     if (result.success) {
                         LOG.warn("Format on save successful, reloading document")
