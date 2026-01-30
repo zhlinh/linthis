@@ -28,6 +28,7 @@ class LinthisSettings : PersistentStateComponent<LinthisSettings.State> {
         var lintOnSave: Boolean = true
         var formatOnSave: Boolean = false
         var linthisPath: String = ""
+        var usePlugin: String = ""
         var additionalArgs: String = ""
     }
 
@@ -52,6 +53,10 @@ class LinthisSettings : PersistentStateComponent<LinthisSettings.State> {
     var linthisPath: String
         get() = myState.linthisPath
         set(value) { myState.linthisPath = value }
+
+    var usePlugin: String
+        get() = myState.usePlugin
+        set(value) { myState.usePlugin = value }
 
     var additionalArgs: String
         get() = myState.additionalArgs

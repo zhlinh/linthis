@@ -28,6 +28,7 @@ class LinthisSettingsConfigurable(private val project: Project) : Configurable {
     private var lintOnSaveCheckbox: JBCheckBox? = null
     private var formatOnSaveCheckbox: JBCheckBox? = null
     private var linthisPathField: TextFieldWithBrowseButton? = null
+    private var usePluginField: JBTextField? = null
     private var additionalArgsField: JBTextField? = null
 
     override fun getDisplayName(): String = "Linthis"
@@ -47,6 +48,7 @@ class LinthisSettingsConfigurable(private val project: Project) : Configurable {
         }
 
         additionalArgsField = JBTextField()
+        usePluginField = JBTextField()
 
         settingsPanel = FormBuilder.createFormBuilder()
             .addComponent(JBLabel("<html><b>Behavior</b></html>"))
@@ -59,6 +61,14 @@ class LinthisSettingsConfigurable(private val project: Project) : Configurable {
                 JBLabel("Linthis path (leave empty for auto-detect):"),
                 linthisPathField!!
             )
+            .addSeparator()
+            .addComponent(JBLabel("<html><b>Plugin</b></html>"))
+            .addLabeledComponent(
+                JBLabel("<html>Use plugin (e.g., https://github.com/zhlinh/linthis-plugin-template):</html>"),
+                usePluginField!!
+            )
+            .addSeparator()
+            .addComponent(JBLabel("<html><b>Advanced</b></html>"))
             .addLabeledComponent(
                 JBLabel("Additional arguments:"),
                 additionalArgsField!!
@@ -75,6 +85,7 @@ class LinthisSettingsConfigurable(private val project: Project) : Configurable {
                lintOnSaveCheckbox?.isSelected != settings.lintOnSave ||
                formatOnSaveCheckbox?.isSelected != settings.formatOnSave ||
                linthisPathField?.text != settings.linthisPath ||
+               usePluginField?.text != settings.usePlugin ||
                additionalArgsField?.text != settings.additionalArgs
     }
 
@@ -84,6 +95,7 @@ class LinthisSettingsConfigurable(private val project: Project) : Configurable {
         settings.lintOnSave = lintOnSaveCheckbox?.isSelected ?: true
         settings.formatOnSave = formatOnSaveCheckbox?.isSelected ?: false
         settings.linthisPath = linthisPathField?.text ?: ""
+        settings.usePlugin = usePluginField?.text ?: ""
         settings.additionalArgs = additionalArgsField?.text ?: ""
     }
 
@@ -93,6 +105,7 @@ class LinthisSettingsConfigurable(private val project: Project) : Configurable {
         lintOnSaveCheckbox?.isSelected = settings.lintOnSave
         formatOnSaveCheckbox?.isSelected = settings.formatOnSave
         linthisPathField?.text = settings.linthisPath
+        usePluginField?.text = settings.usePlugin
         additionalArgsField?.text = settings.additionalArgs
     }
 
@@ -102,6 +115,7 @@ class LinthisSettingsConfigurable(private val project: Project) : Configurable {
         lintOnSaveCheckbox = null
         formatOnSaveCheckbox = null
         linthisPathField = null
+        usePluginField = null
         additionalArgsField = null
     }
 }

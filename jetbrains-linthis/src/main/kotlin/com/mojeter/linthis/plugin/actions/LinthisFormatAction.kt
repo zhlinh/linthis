@@ -49,7 +49,7 @@ class LinthisFormatAction : AnAction(), DumbAware {
         // Run linthis format
         ApplicationManager.getApplication().executeOnPooledThread {
             LOG.warn("Running format on file: ${file.path}")
-            val result = LinthisExecutor.format(file.path, project.basePath, settings.linthisPath)
+            val result = LinthisExecutor.format(file.path, project.basePath, settings.linthisPath, settings.usePlugin)
 
             ApplicationManager.getApplication().invokeLater {
                 if (result.success) {
