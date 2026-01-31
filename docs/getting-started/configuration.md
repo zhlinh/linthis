@@ -6,7 +6,13 @@ linthis can be configured through configuration files, CLI parameters, or both.
 
 ### Project Configuration
 
-Create `.linthis.toml` in your project root:
+Use `linthis init` to create the configuration file:
+
+```bash
+linthis init
+```
+
+This creates `.linthis/config.toml` in your project root:
 
 ```toml
 # Specify languages to check (omit for auto-detection)
@@ -50,10 +56,17 @@ Global configuration is located at `~/.linthis/config.toml`, with the same forma
 Configuration merge priority (from high to low):
 
 1. **CLI Parameters**: `--option value`
-2. **Project Config**: `.linthis.toml`
+2. **Project Config**: `.linthis/config.toml`
 3. **Global Config**: `~/.linthis/config.toml`
-4. **Plugin Config**: Plugins in sources array (later ones override earlier ones)
-5. **Built-in Defaults**
+4. **Built-in Defaults**
+
+For tool-specific configs (ruff.toml, .eslintrc.js, etc.), the priority is:
+
+1. **Local manual configs** (highest) - ruff.toml, pyproject.toml, .eslintrc.js in project
+2. **CLI plugin configs** - from `--use-plugin` option
+3. **Project plugin configs** - from `.linthis/config.toml` plugins section
+4. **Global plugin configs** - from `~/.linthis/config.toml` plugins
+5. **Tool defaults** (lowest)
 
 ## Configuration Management Commands
 

@@ -1,6 +1,6 @@
 # 支持的语言
 
-linthis 支持 17 种编程语言，具有自动语言检测功能。
+linthis 支持 18 种编程语言，具有自动语言检测功能。
 
 ## 语言支持矩阵
 
@@ -12,10 +12,11 @@ linthis 支持 17 种编程语言，具有自动语言检测功能。
 | [JavaScript](javascript.md) | eslint | prettier | `.js`, `.jsx`, `.mjs`, `.cjs` |
 | [Go](go.md) | golangci-lint | gofmt | `.go` |
 | [Java](java.md) | checkstyle | google-java-format | `.java` |
-| [C++](cpp.md) | cpplint, cppcheck | clang-format | `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp` |
+| [C](c.md) | clang-tidy, cppcheck | clang-format | `.c`, `.h` |
+| [C++](cpp.md) | clang-tidy, cpplint, cppcheck | clang-format | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` |
+| [Objective-C](objc.md) | clang-tidy | clang-format | `.m`, `.mm` |
 | [Swift](swift.md) | swiftlint | swift-format | `.swift` |
 | [Kotlin](kotlin.md) | detekt | ktlint | `.kt`, `.kts` |
-| [Objective-C](objc.md) | clang-tidy | clang-format | `.m`, `.mm` |
 | [Lua](lua.md) | luacheck | stylua | `.lua` |
 | [Dart](dart.md) | dart analyze | dart format | `.dart` |
 | [Shell](shell.md) | shellcheck | shfmt | `.sh`, `.bash`, `.zsh`, `.ksh` |

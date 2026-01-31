@@ -6,7 +6,13 @@ linthis 可以通过配置文件、CLI 参数或两者结合进行配置。
 
 ### 项目配置
 
-在项目根目录创建 `.linthis.toml`：
+使用 `linthis init` 创建配置文件：
+
+```bash
+linthis init
+```
+
+这会在项目根目录创建 `.linthis/config.toml`：
 
 ```toml
 # 指定要检查的语言（省略则自动检测）
@@ -50,10 +56,17 @@ sources = [
 配置合并优先级（从高到低）：
 
 1. **CLI 参数**：`--option value`
-2. **项目配置**：`.linthis.toml`
+2. **项目配置**：`.linthis/config.toml`
 3. **全局配置**：`~/.linthis/config.toml`
-4. **插件配置**：sources 数组中的插件（后面的覆盖前面的）
-5. **内置默认值**
+4. **内置默认值**
+
+对于工具特定的配置文件（ruff.toml、.eslintrc.js 等），优先级如下：
+
+1. **本地手动配置**（最高）- 项目中的 ruff.toml、pyproject.toml、.eslintrc.js
+2. **CLI 插件配置** - 来自 `--use-plugin` 选项
+3. **项目插件配置** - 来自 `.linthis/config.toml` 的 plugins 部分
+4. **全局插件配置** - 来自 `~/.linthis/config.toml` 的 plugins
+5. **工具默认值**（最低）
 
 ## 配置管理命令
 

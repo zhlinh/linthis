@@ -120,7 +120,7 @@ linthis supports Git-based configuration plugins for easy sharing of code standa
 ### Add Plugin
 
 ```bash
-# Add plugin to project config (.linthis.toml)
+# Add plugin to project config (.linthis/config.toml)
 linthis plugin add <alias> <git-url>
 
 # Example: Add a custom plugin
@@ -193,7 +193,13 @@ linthis plugin clean --all    # Clean all caches
 
 ### Project Configuration
 
-Create `.linthis.toml` in your project root:
+Use `linthis init` to create the configuration file:
+
+```bash
+linthis init
+```
+
+This creates `.linthis/config.toml` in your project root:
 
 ```toml
 # Specify languages to check (omit for auto-detection)
@@ -237,10 +243,17 @@ Global configuration file is located at `~/.linthis/config.toml`, with the same 
 Configuration merge priority (from high to low):
 
 1. **CLI Parameters**: `--option value`
-2. **Project Config**: `.linthis.toml`
+2. **Project Config**: `.linthis/config.toml`
 3. **Global Config**: `~/.linthis/config.toml`
-4. **Plugin Config**: Plugins in sources array (later ones override earlier ones)
-5. **Built-in Defaults**
+4. **Built-in Defaults**
+
+For tool-specific configs (ruff.toml, .eslintrc.js, etc.), the priority is:
+
+1. **Local manual configs** (highest) - ruff.toml, pyproject.toml, .eslintrc.js in project
+2. **CLI plugin configs** - from `--use-plugin` option
+3. **Project plugin configs** - from `.linthis/config.toml` plugins section
+4. **Global plugin configs** - from `~/.linthis/config.toml` plugins
+5. **Tool defaults** (lowest)
 
 ## Configuration Management
 
@@ -429,7 +442,7 @@ Migrated configurations are placed in `.linthis/configs/{language}/`:
 Use the `init` subcommand to explicitly create configuration files:
 
 ```bash
-# Create project config (.linthis.toml)
+# Create project config (.linthis/config.toml)
 linthis init
 
 # Create global config (~/.linthis/config.toml)
@@ -444,7 +457,7 @@ linthis --init
 
 When using the `config` command, configuration files are automatically created if they don't exist:
 
-- **Project Config**: Creates `.linthis.toml` in current directory
+- **Project Config**: Creates `.linthis/config.toml` in current directory
 - **Global Config**: Creates `config.toml` in `~/.linthis/` directory
 
 All modifications preserve TOML file format and comments.
@@ -465,7 +478,7 @@ All modifications preserve TOML file format and comments.
 | `-v`  | `--verbose`             | Verbose output                                | `-v`                    |
 | `-q`  | `--quiet`               | Quiet mode (errors only)                      | `-q`                    |
 |       | `--config`              | Specify config file path                      | `--config custom.toml`  |
-|       | `--init`                | Initialize .linthis.toml config file          | `--init`                |
+|       | `--init`                | Initialize .linthis/config.toml config file   | `--init`                |
 |       | `--preset`              | Format preset                                 | `--preset google`       |
 |       | `--no-default-excludes` | Disable default exclude rules                 | `--no-default-excludes` |
 |       | `--no-gitignore`        | Disable .gitignore rules                      | `--no-gitignore`        |
@@ -514,7 +527,7 @@ All modifications preserve TOML file format and comments.
 
 **Created configuration files**:
 
-- Without `-g`: Creates `.linthis.toml` (current directory)
+- Without `-g`: Creates `.linthis/config.toml` (current directory)
 - With `-g`: Creates `~/.linthis/config.toml` (global config)
 
 ### Hook Subcommand
@@ -546,19 +559,26 @@ All modifications preserve TOML file format and comments.
 
 ## Supported Languages
 
-| Language   | Linter               | Formatter          |
-| ---------- | -------------------- | ------------------ |
-| Rust       | clippy               | rustfmt            |
-| Python     | pylint, flake8, ruff | black, ruff        |
-| TypeScript | eslint               | prettier           |
-| JavaScript | eslint               | prettier           |
-| Go         | golangci-lint        | gofmt              |
-| Java       | checkstyle           | google-java-format |
-| C++        | cpplint, cppcheck    | clang-format       |
-| Swift      | swiftlint            | swift-format       |
-| Kotlin     | detekt               | ktlint             |
-| Lua        | luacheck             | stylua             |
-| Dart       | dart analyze         | dart format        |
+| Language    | Linter                        | Formatter          |
+| ----------- | ----------------------------- | ------------------ |
+| Rust        | clippy                        | rustfmt            |
+| Python      | ruff, pylint, flake8          | ruff, black        |
+| TypeScript  | eslint                        | prettier           |
+| JavaScript  | eslint                        | prettier           |
+| Go          | golangci-lint                 | gofmt              |
+| Java        | checkstyle                    | google-java-format |
+| C           | clang-tidy, cppcheck          | clang-format       |
+| C++         | clang-tidy, cpplint, cppcheck | clang-format       |
+| Objective-C | clang-tidy                    | clang-format       |
+| Swift       | swiftlint                     | swift-format       |
+| Kotlin      | detekt                        | ktlint             |
+| Lua         | luacheck                      | stylua             |
+| Dart        | dart analyze                  | dart format        |
+| Shell/Bash  | shellcheck                    | shfmt              |
+| Ruby        | rubocop                       | rubocop            |
+| PHP         | phpcs                         | php-cs-fixer       |
+| Scala       | scalafix                      | scalafmt           |
+| C#          | dotnet format                 | dotnet format      |
 
 ## Editor Plugins
 
