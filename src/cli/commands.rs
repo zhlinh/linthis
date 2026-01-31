@@ -627,10 +627,25 @@ pub enum HookCommands {
 /// Plugin subcommands
 #[derive(clap::Subcommand, Debug)]
 pub enum PluginCommands {
-    /// Initialize a new plugin
-    Init {
-        /// Plugin name
+    /// Create a new plugin from template
+    ///
+    /// Creates a plugin directory with example configs for supported languages.
+    /// The generated plugin includes linting and formatting configs that can be
+    /// customized for your team's coding standards.
+    ///
+    /// Example:
+    ///   linthis plugin new my-company-standards
+    ///   linthis plugin new my-plugin --languages rust,python,go
+    New {
+        /// Plugin name (will be used as directory name)
         name: String,
+        /// Only include specific languages (comma-separated)
+        /// Example: --languages rust,python,go
+        #[arg(short, long, value_delimiter = ',')]
+        languages: Option<Vec<String>>,
+        /// Overwrite existing directory
+        #[arg(long)]
+        force: bool,
     },
     /// List configured or cached plugins
     List {

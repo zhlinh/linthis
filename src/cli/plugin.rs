@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use super::commands::PluginCommands;
-use linthis::templates::{generate_plugin_manifest, generate_plugin_readme, get_plugin_template_configs};
+use linthis::templates::{generate_plugin_manifest_filtered, generate_plugin_readme, get_plugin_template_configs};
 
 /// Check if any plugins have available updates
 pub fn check_plugins_for_updates(plugins: &[(String, String, Option<String>)]) -> bool {
@@ -97,69 +97,92 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
     };
 
     match action {
-        PluginCommands::Init { name } => {
-            // Create a new plugin scaffold
+        PluginCommands::New { name, languages, force } => {
+            // Create a new plugin from template
             let plugin_dir = PathBuf::from(&name);
             if plugin_dir.exists() {
-                eprintln!("{}: Directory '{}' already exists", "Error".red(), name);
+                if force {
+                    if let Err(e) = std::fs::remove_dir_all(&plugin_dir) {
+                        eprintln!("{}: Failed to remove existing directory: {}", "Error".red(), e);
+                        return ExitCode::from(1);
+                    }
+                } else {
+                    eprintln!("{}: Directory '{}' already exists (use --force to overwrite)", "Error".red(), name);
+                    return ExitCode::from(1);
+                }
+            }
+
+            // All supported languages
+            let all_langs = [
+                ("rust", "Rust configs (clippy, rustfmt)"),
+                ("python", "Python configs (ruff)"),
+                ("typescript", "TypeScript configs (eslint, prettier)"),
+                ("go", "Go configs (golangci-lint)"),
+                ("java", "Java configs (checkstyle)"),
+                ("cpp", "C/C++ configs (clang-format, cpplint)"),
+                ("swift", "Swift configs (swiftlint)"),
+                ("oc", "Objective-C configs (clang-format)"),
+                ("sql", "SQL configs (sqlfluff)"),
+                ("csharp", "C# configs (dotnet-format)"),
+                ("lua", "Lua configs (luacheck, stylua)"),
+                ("css", "CSS configs (stylelint, prettier)"),
+                ("kotlin", "Kotlin configs (detekt)"),
+                ("dockerfile", "Dockerfile configs (hadolint)"),
+                ("scala", "Scala configs (scalafmt)"),
+                ("dart", "Dart configs (dart analyzer)"),
+            ];
+
+            // Filter languages if specified
+            let selected_langs: Vec<_> = if let Some(ref filter) = languages {
+                let filter_lower: Vec<_> = filter.iter().map(|s| s.to_lowercase()).collect();
+                all_langs.iter()
+                    .filter(|(lang, _)| filter_lower.contains(&lang.to_string()))
+                    .collect()
+            } else {
+                all_langs.iter().collect()
+            };
+
+            if selected_langs.is_empty() {
+                eprintln!("{}: No valid languages specified", "Error".red());
+                eprintln!("Available languages: {}", all_langs.iter().map(|(l, _)| *l).collect::<Vec<_>>().join(", "));
                 return ExitCode::from(1);
             }
 
-            // Create directory structure
-            let dirs = [
-                "rust",
-                "python",
-                "typescript",
-                "go",
-                "java",
-                "cpp",
-                "swift",
-                "objectivec",
-                "sql",
-                "csharp",
-                "lua",
-                "css",
-                "kotlin",
-                "dockerfile",
-                "scala",
-                "dart",
-            ];
+            // Create plugin directory
             if let Err(e) = std::fs::create_dir_all(&plugin_dir) {
                 eprintln!("{}: Failed to create directory: {}", "Error".red(), e);
                 return ExitCode::from(1);
             }
 
-            for dir in dirs {
-                if let Err(e) = std::fs::create_dir_all(plugin_dir.join(dir)) {
-                    eprintln!(
-                        "{}: Failed to create {} directory: {}",
-                        "Error".red(),
-                        dir,
-                        e
-                    );
+            // Create language directories
+            for (lang, _) in &selected_langs {
+                if let Err(e) = std::fs::create_dir_all(plugin_dir.join(lang)) {
+                    eprintln!("{}: Failed to create {} directory: {}", "Error".red(), lang, e);
                     return ExitCode::from(1);
                 }
             }
 
-            // Create example config files for each language
+            // Get selected language names for template generation
+            let lang_names: Vec<&str> = selected_langs.iter().map(|(l, _)| *l).collect();
+
+            // Create example config files for selected languages
             let config_files = get_plugin_template_configs(&name);
             for (path, content) in config_files {
-                let file_path = plugin_dir.join(path);
-                if let Err(e) = std::fs::write(&file_path, content) {
-                    eprintln!(
-                        "{}: Failed to write {}: {}",
-                        "Error".red(),
-                        file_path.display(),
-                        e
-                    );
-                    return ExitCode::from(1);
+                // Only write config if it's for a selected language
+                let should_include = lang_names.iter().any(|lang| path.starts_with(lang));
+                if should_include {
+                    let file_path = plugin_dir.join(path);
+                    if let Err(e) = std::fs::write(&file_path, content) {
+                        eprintln!("{}: Failed to write {}: {}", "Error".red(), file_path.display(), e);
+                        return ExitCode::from(1);
+                    }
                 }
             }
 
-            // Create manifest with config mappings
-            let manifest_content = generate_plugin_manifest(&name);
+            // Create manifest with config mappings (filtered by selected languages)
+            let manifest_content = generate_plugin_manifest_filtered(&name, &lang_names);
             let manifest_path = plugin_dir.join("linthis-plugin.toml");
-            if let Err(e) = std::fs::write(manifest_path, manifest_content) {
+            if let Err(e) = std::fs::write(&manifest_path, &manifest_content) {
                 eprintln!("{}: Failed to write manifest: {}", "Error".red(), e);
                 return ExitCode::from(1);
             }
@@ -172,88 +195,27 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             let gitignore_content = "# Editor files\n*.swp\n*.swo\n*~\n.idea/\n.vscode/\n\n# OS files\n.DS_Store\nThumbs.db\n";
             let _ = std::fs::write(plugin_dir.join(".gitignore"), gitignore_content);
 
-            println!("{} Created plugin scaffold at {}/", "✓".green(), name);
+            println!("{} Created plugin '{}' with {} language(s)", "✓".green(), name, selected_langs.len());
             println!();
             println!("Created files:");
             println!("  {} linthis-plugin.toml  - Plugin manifest", "•".cyan());
             println!("  {} README.md            - Documentation", "•".cyan());
-            println!(
-                "  {} rust/                - Rust configs (clippy, rustfmt)",
-                "•".cyan()
-            );
-            println!(
-                "  {} python/              - Python configs (ruff)",
-                "•".cyan()
-            );
-            println!(
-                "  {} typescript/          - TypeScript configs (eslint, prettier)",
-                "•".cyan()
-            );
-            println!(
-                "  {} go/                  - Go configs (golangci-lint)",
-                "•".cyan()
-            );
-            println!(
-                "  {} java/                - Java configs (checkstyle)",
-                "•".cyan()
-            );
-            println!(
-                "  {} cpp/                 - C/C++ configs (clang-format, cpplint)",
-                "•".cyan()
-            );
-            println!(
-                "  {} swift/               - Swift configs (swiftlint, swift-format)",
-                "•".cyan()
-            );
-            println!(
-                "  {} objectivec/          - Objective-C configs (clang-format)",
-                "•".cyan()
-            );
-            println!(
-                "  {} sql/                 - SQL configs (sqlfluff)",
-                "•".cyan()
-            );
-            println!(
-                "  {} csharp/              - C# configs (dotnet-format)",
-                "•".cyan()
-            );
-            println!(
-                "  {} lua/                 - Lua configs (luacheck, stylua)",
-                "•".cyan()
-            );
-            println!(
-                "  {} css/                 - CSS configs (stylelint, prettier)",
-                "•".cyan()
-            );
-            println!(
-                "  {} kotlin/              - Kotlin configs (detekt)",
-                "•".cyan()
-            );
-            println!(
-                "  {} dockerfile/          - Dockerfile configs (hadolint)",
-                "•".cyan()
-            );
-            println!(
-                "  {} scala/               - Scala configs (scalafmt, scalafix)",
-                "•".cyan()
-            );
-            println!(
-                "  {} dart/                - Dart configs (dart analyzer)",
-                "•".cyan()
-            );
+            for (lang, desc) in &selected_langs {
+                println!("  {} {:<17} - {}", "•".cyan(), format!("{}/", lang), desc);
+            }
             println!();
             println!("Next steps:");
-            println!("  1. Review and customize the config files for your needs");
-            println!("  2. Edit {}/linthis-plugin.toml with your details", name);
-            println!("  3. Remove any languages you don't need");
+            println!("  1. cd {}", name);
+            println!("  2. Review and customize the config files");
+            println!("  3. Edit linthis-plugin.toml with your details");
             println!("  4. Push to a Git repository:");
             println!();
-            println!("     git init && git add . && git commit -m \"Initial commit\"");
-            println!(
-                "     git remote add origin git@github.com:your-org/{}.git",
-                name
-            );
+            println!("     cd {} && git init && git add . && git commit -m \"Initial commit\"", name);
+            println!("     git remote add origin git@github.com:your-org/{}.git", name);
             println!("     git push -u origin main");
+            println!();
+            println!("  5. Use the plugin:");
+            println!("     linthis --use-plugin ./{}", name);
 
             ExitCode::SUCCESS
         }

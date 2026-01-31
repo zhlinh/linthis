@@ -19,4 +19,4 @@ mod readme;
 
 pub use linter_configs::get_default_configs;
 pub use plugin_templates::get_plugin_template_configs;
-pub use readme::{generate_plugin_manifest, generate_plugin_readme};
+pub use readme::{generate_plugin_manifest, generate_plugin_manifest_filtered, generate_plugin_readme};
