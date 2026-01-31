@@ -26,6 +26,7 @@ use crate::cli::recheck::{
     print_recheck_footer, print_recheck_header, print_recheck_summary, recheck_modified_files,
 };
 use linthis::ai::{AiProvider, AiProviderConfig, AiProviderKind, AiSuggester, SuggestionOptions};
+use linthis::config::Config;
 use linthis::interactive::{run_ai_fix_all, run_interactive, AiFixConfig};
 use linthis::utils::types::LintIssue;
 
@@ -69,22 +70,26 @@ pub struct FixCommandOptions {
 
 /// Handle the fix subcommand
 pub fn handle_fix_command(options: FixCommandOptions) -> ExitCode {
+    // Load config for AI settings
+    let project_root = linthis::utils::get_project_root();
+    let config = Config::load_merged(&project_root);
+
     // If --check or --format-only is specified, run lint first
     if options.check || options.format_only {
-        return handle_fix_with_lint(&options);
+        return handle_fix_with_lint(&options, &config);
     }
 
     // If single file mode (--ai with -i/--include and --line)
     if options.ai && options.file.is_some() && options.line.is_some() {
-        return handle_single_file_ai_fix(&options);
+        return handle_single_file_ai_fix(&options, &config);
     }
 
     // Load from result file and fix
-    handle_fix_from_result(&options)
+    handle_fix_from_result(&options, &config)
 }
 
 /// Handle fix with running lint first
-fn handle_fix_with_lint(options: &FixCommandOptions) -> ExitCode {
+fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCode {
     use linthis::{run, RunMode, RunOptions};
 
     let mode = if options.format_only {
@@ -133,7 +138,10 @@ fn handle_fix_with_lint(options: &FixCommandOptions) -> ExitCode {
 
             // Enter fix mode
             let (modified_files, fixed_count) = if options.ai {
-                let provider = resolve_ai_provider(options.provider.as_deref());
+                let provider = resolve_ai_provider(
+                    options.provider.as_deref(),
+                    config.ai.provider.as_deref(),
+                );
                 let ai_config = AiFixConfig::with_provider(&provider)
                     .with_model(options.model.clone())
                     .with_auto_apply(options.auto_apply)
@@ -167,7 +175,7 @@ fn handle_fix_with_lint(options: &FixCommandOptions) -> ExitCode {
 }
 
 /// Handle fix by loading from result file
-fn handle_fix_from_result(options: &FixCommandOptions) -> ExitCode {
+fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitCode {
     let path = if options.source == "last" {
         match find_latest_result_file() {
             Some(p) => p,
@@ -223,7 +231,10 @@ fn handle_fix_from_result(options: &FixCommandOptions) -> ExitCode {
 
                 // Check if AI mode is enabled
                 let (modified_files, fixed_count) = if options.ai {
-                    let provider = resolve_ai_provider(options.provider.as_deref());
+                    let provider = resolve_ai_provider(
+                        options.provider.as_deref(),
+                        config.ai.provider.as_deref(),
+                    );
                     let ai_config = AiFixConfig::with_provider(&provider)
                         .with_model(options.model.clone())
                         .with_auto_apply(options.auto_apply)
@@ -272,12 +283,15 @@ fn handle_fix_from_result(options: &FixCommandOptions) -> ExitCode {
 }
 
 /// Handle single file AI fix mode
-fn handle_single_file_ai_fix(options: &FixCommandOptions) -> ExitCode {
+fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> ExitCode {
     let file_path = options.file.as_ref().unwrap();
     let line_number = options.line.unwrap();
 
     // Create AI provider
-    let provider_str = resolve_ai_provider(options.provider.as_deref());
+    let provider_str = resolve_ai_provider(
+        options.provider.as_deref(),
+        config.ai.provider.as_deref(),
+    );
     let provider_kind: AiProviderKind = provider_str.parse().unwrap_or_default();
 
     let mut config = match provider_kind {

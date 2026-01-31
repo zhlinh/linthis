@@ -107,11 +107,14 @@ pub fn find_latest_result_file() -> Option<PathBuf> {
     Some(result_files[0].path())
 }
 
-/// Resolve AI provider with priority: command line > env var > default
+/// Resolve AI provider with priority: command line > env var > config > default
 ///
-/// The environment variable is `LINTHIS_AI_PROVIDER`.
-/// Default value is "claude".
-pub fn resolve_ai_provider(cli_value: Option<&str>) -> String {
+/// Priority order:
+/// 1. CLI argument (--provider)
+/// 2. Environment variable (LINTHIS_AI_PROVIDER)
+/// 3. Config file (project or global)
+/// 4. Default ("claude")
+pub fn resolve_ai_provider(cli_value: Option<&str>, config_value: Option<&str>) -> String {
     // Priority 1: command line argument
     if let Some(value) = cli_value {
         return value.to_string();
@@ -124,7 +127,14 @@ pub fn resolve_ai_provider(cli_value: Option<&str>) -> String {
         }
     }
 
-    // Priority 3: default
+    // Priority 3: config file value
+    if let Some(value) = config_value {
+        if !value.is_empty() {
+            return value.to_string();
+        }
+    }
+
+    // Priority 4: default
     "claude".to_string()
 }
 

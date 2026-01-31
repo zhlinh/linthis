@@ -511,7 +511,7 @@ pub enum Commands {
 
         /// AI provider: claude (default), claude-cli, codebuddy, codebuddy-cli, openai, local, mock
         ///
-        /// Priority: command line > LINTHIS_AI_PROVIDER env var > default (claude)
+        /// Priority: CLI > env var (LINTHIS_AI_PROVIDER) > config file ([ai] section) > default
         #[arg(long, requires = "ai")]
         provider: Option<String>,
 
