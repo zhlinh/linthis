@@ -42,6 +42,9 @@ Multi-language linter and formatter extension for Visual Studio Code.
    ```bash
    # using pip
    pip install linthis
+   # Or use uv (Recommand)
+   # pip install uv
+   uv pip install linthis
 
    # Or Using cargo
    cargo install linthis
@@ -56,9 +59,11 @@ Multi-language linter and formatter extension for Visual Studio Code.
 |---------|---------|-------------|
 | `linthis.enable` | `true` | Enable/disable the extension |
 | `linthis.lintOnSave` | `true` | Run lint on file save |
+| `linthis.lintOnOpen` | `true` | Run lint when opening a file |
 | `linthis.formatOnSave` | `false` | Format document on save |
-| `linthis.executablePath` | `"linthis"` | Path to linthis executable |
-| `linthis.extraArgs` | `[]` | Extra arguments for LSP server |
+| `linthis.executable.path` | `""` | Path to linthis executable (auto-detect if empty) |
+| `linthis.executable.additionalArguments` | `""` | Additional arguments for linthis CLI |
+| `linthis.usePlugin` | `""` | Plugin(s) to use directly (see [Plugin Configuration](#plugin-configuration)) |
 | `linthis.trace.server` | `"off"` | Trace LSP communication |
 
 ## Commands
@@ -83,21 +88,43 @@ linter = "eslint"
 formatter = "prettier"
 ```
 
-## Development
+## Plugin Configuration
 
-```bash
-# Install dependencies
-npm install
+Plugins provide pre-configured lint rules for teams or organizations. You can specify plugins in two ways:
 
-# Build
-npm run build
+### 1. Via Settings (Recommended for team-wide configuration)
 
-# Watch mode
-npm run watch
+Add the `linthis.usePlugin` setting in your VS Code settings:
 
-# Package extension
-npx vsce package
+```json
+{
+  "linthis.usePlugin": "https://github.com/org/linthis-plugin.git"
+}
 ```
+
+**Supported formats:**
+
+| Format | Example |
+|--------|---------|
+| Git URL | `https://github.com/org/plugin.git` |
+| Git URL with version | `https://github.com/org/plugin.git@v1.0` |
+| Local path | `./my-plugin` or `/absolute/path/to/plugin` |
+| Multiple plugins | `plugin1,plugin2` (comma-separated) |
+
+### 2. Via Config File
+
+Add the plugin to your `.linthis.toml`:
+
+```toml
+[plugin]
+use = "https://github.com/org/linthis-plugin.git@v1.0"
+```
+
+### Plugin Priority
+
+When both settings and config file specify plugins:
+- The `linthis.usePlugin` setting takes precedence
+- This allows workspace-level overrides without modifying the config file
 
 ## License
 
