@@ -32,7 +32,7 @@ languages = ["rust", "python", "typescript"]
 
 **Type:** Array of strings
 **Default:** `[]` (auto-detect)
-**Valid values:** `rust`, `python`, `typescript`, `javascript`, `go`, `java`, `cpp`, `oc` (Objective-C), `swift`, `kotlin`, `lua`, `dart`
+**Valid values:** `rust`, `python`, `typescript`, `javascript`, `go`, `java`, `c`, `cpp`, `oc` (Objective-C), `swift`, `kotlin`, `lua`, `dart`, `shell`, `ruby`, `php`, `scala`, `csharp`
 
 ---
 
@@ -388,6 +388,145 @@ Java-specific options.
 [java]
 enabled = true
 excludes = ["*Test.java"]
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[c]`
+
+C-specific options.
+
+```toml
+[c]
+enabled = true
+linelength = 120
+```
+
+Same fields as `[cpp]`.
+
+---
+
+### `[swift]`
+
+Swift-specific options.
+
+```toml
+[swift]
+enabled = true
+excludes = ["Pods/**"]
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[kotlin]`
+
+Kotlin-specific options.
+
+```toml
+[kotlin]
+enabled = true
+excludes = ["*Test.kt"]
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[lua]`
+
+Lua-specific options.
+
+```toml
+[lua]
+enabled = true
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[dart]`
+
+Dart-specific options.
+
+```toml
+[dart]
+enabled = true
+excludes = [".dart_tool/**"]
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[shell]`
+
+Shell/Bash-specific options.
+
+```toml
+[shell]
+enabled = true
+excludes = ["*.bak.sh"]
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[ruby]`
+
+Ruby-specific options.
+
+```toml
+[ruby]
+enabled = true
+excludes = ["vendor/**"]
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[php]`
+
+PHP-specific options.
+
+```toml
+[php]
+enabled = true
+excludes = ["vendor/**"]
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[scala]`
+
+Scala-specific options.
+
+```toml
+[scala]
+enabled = true
+excludes = ["target/**"]
+```
+
+Same fields as `[rust]`.
+
+---
+
+### `[csharp]`
+
+C#-specific options.
+
+```toml
+[csharp]
+enabled = true
+excludes = ["bin/**", "obj/**"]
 ```
 
 Same fields as `[rust]`.
