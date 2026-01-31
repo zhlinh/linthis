@@ -15,9 +15,13 @@
 #   - PRIVATE_KEY_PASSWORD: Private key password
 #
 # Usage:
-#   ./scripts/publish.sh           # Build, sign, and publish
-#   ./scripts/publish.sh --build   # Build only (no publish)
-#   ./scripts/publish.sh --dry-run # Build and sign, but don't publish
+#   ./scripts/publish.sh                    # Build, sign, and publish
+#   ./scripts/publish.sh --patch            # Bump patch version, commit, push, then publish
+#   ./scripts/publish.sh --minor            # Bump minor version, commit, push, then publish
+#   ./scripts/publish.sh --major            # Bump major version, commit, push, then publish
+#   ./scripts/publish.sh --patch --build    # Bump version and build only (no publish)
+#   ./scripts/publish.sh --build            # Build only (no version bump, no publish)
+#   ./scripts/publish.sh --dry-run          # Build and sign, but don't publish
 
 set -e
 
@@ -44,12 +48,57 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Get current version from build.gradle.kts
+get_current_version() {
+    grep 'version = ' build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/'
+}
+
+# Bump version based on type
+bump_version() {
+    local current="$1"
+    local bump_type="$2"
+
+    IFS='.' read -r major minor patch <<< "$current"
+
+    case "$bump_type" in
+        --major)
+            echo "$((major + 1)).0.0"
+            ;;
+        --minor)
+            echo "${major}.$((minor + 1)).0"
+            ;;
+        --patch)
+            echo "${major}.${minor}.$((patch + 1))"
+            ;;
+        *)
+            echo "$current"
+            ;;
+    esac
+}
+
+# Update version in build.gradle.kts
+update_version() {
+    local old_version="$1"
+    local new_version="$2"
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "s/version = \"$old_version\"/version = \"$new_version\"/" build.gradle.kts
+    else
+        sed -i "s/version = \"$old_version\"/version = \"$new_version\"/" build.gradle.kts
+    fi
+    log_info "Updated build.gradle.kts: $old_version -> $new_version"
+}
+
 # Parse arguments
 BUILD_ONLY=false
 DRY_RUN=false
+BUMP_TYPE=""
 
 for arg in "$@"; do
     case $arg in
+        --patch|--minor|--major)
+            BUMP_TYPE="$arg"
+            ;;
         --build)
             BUILD_ONLY=true
             ;;
@@ -59,16 +108,29 @@ for arg in "$@"; do
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
-            echo "Options:"
+            echo "Version bump options:"
+            echo "  --patch     Bump patch version (0.1.0 -> 0.1.1)"
+            echo "  --minor     Bump minor version (0.1.0 -> 0.2.0)"
+            echo "  --major     Bump major version (0.1.0 -> 1.0.0)"
+            echo ""
+            echo "Build options:"
             echo "  --build     Build only (no publish)"
             echo "  --dry-run   Build and sign, but don't publish"
             echo "  --help, -h  Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0                    # Build and publish current version"
+            echo "  $0 --patch            # Bump patch, commit, push, then publish"
+            echo "  $0 --minor --build    # Bump minor, commit, push, build only"
+            echo "  $0 --build            # Build current version only"
             echo ""
             echo "Environment variables:"
             echo "  JETBRAINS_MARKETPLACE_TOKEN  Required for publishing"
             echo "  CERTIFICATE_CHAIN            Optional: for signed releases"
             echo "  PRIVATE_KEY                  Optional: for signed releases"
             echo "  PRIVATE_KEY_PASSWORD         Optional: for signed releases"
+            echo ""
+            echo "Current version: $(get_current_version)"
             exit 0
             ;;
         *)
@@ -94,8 +156,32 @@ fi
 
 log_info "Java version: $(java -version 2>&1 | head -n 1)"
 
-# Get version from build.gradle.kts
-VERSION=$(grep 'version = ' build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
+# Handle version bump if requested
+CURRENT_VERSION=$(get_current_version)
+
+if [ -n "$BUMP_TYPE" ]; then
+    NEW_VERSION=$(bump_version "$CURRENT_VERSION" "$BUMP_TYPE")
+
+    if [ "$CURRENT_VERSION" == "$NEW_VERSION" ]; then
+        log_warn "Version is already $CURRENT_VERSION"
+    else
+        log_info "Bumping version: $CURRENT_VERSION -> $NEW_VERSION"
+        update_version "$CURRENT_VERSION" "$NEW_VERSION"
+
+        # Commit and push the version bump
+        log_info "Committing version bump..."
+        git add build.gradle.kts
+        git commit -m "chore(jetbrains-linthis): bump version to $NEW_VERSION"
+
+        log_info "Pushing to remote..."
+        git push
+
+        log_info "Version bump committed and pushed!"
+        CURRENT_VERSION="$NEW_VERSION"
+    fi
+fi
+
+VERSION="$CURRENT_VERSION"
 log_info "Plugin version: $VERSION"
 
 # Clean previous builds
