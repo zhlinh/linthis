@@ -150,6 +150,10 @@ pub struct Config {
     /// Custom rules, rule disable, and severity overrides
     #[serde(default)]
     pub rules: RulesConfig,
+
+    /// AI configuration for fix suggestions
+    #[serde(default)]
+    pub ai: AiConfig,
 }
 
 /// Plugin configuration section
@@ -254,6 +258,26 @@ fn default_hook_parallel() -> bool {
 
 fn default_commit_msg_pattern() -> String {
     r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}".to_string()
+}
+
+/// AI configuration section
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiConfig {
+    /// AI provider to use: claude, claude-cli, codebuddy, codebuddy-cli, openai, local, mock
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Model name to use (overrides provider default)
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Maximum tokens for AI response
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    /// Temperature for AI generation (0.0 - 1.0)
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    /// Request timeout in seconds
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
 }
 
 /// Source path configuration (CodeCC compatibility)
