@@ -233,6 +233,7 @@ fn run_lint(config: &WatchConfig) -> Result<RunResult, String> {
         quiet: true, // Suppress normal output in watch mode
         plugins: Vec::new(),
         no_cache: false,
+        config_resolver: None,
     };
 
     run(&options).map_err(|e| e.to_string())

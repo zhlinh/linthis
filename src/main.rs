@@ -25,9 +25,11 @@ use cli::{
     run_watch, strip_ansi_codes, Cli, Commands, ComplexityCommandOptions, FixCommandOptions,
     PathCollectionOptions, PathCollectionResult,
 };
-use linthis::lsp::{run_lsp_server, LspMode};
+use linthis::config::resolver::{ConfigResolver, ConfigSource, ResolvedConfig};
+use linthis::lsp::{run_lsp_server_with_config, LspMode};
 use linthis::utils::output::{format_result_with_hook_type, OutputFormat};
 use linthis::{run, Language, RunMode, RunOptions};
+use std::sync::Arc;
 
 fn main() -> ExitCode {
     env_logger::init();
@@ -177,7 +179,10 @@ fn main() -> ExitCode {
 
     // Handle lsp subcommand
     if let Some(Commands::Lsp { mode, port, use_plugin }) = cli.command {
-        // Load plugins before starting LSP (same logic as main command)
+        // Build ConfigResolver for LSP (instead of copying configs)
+        let mut lsp_config_resolver = ConfigResolver::new();
+
+        // Load plugins before starting LSP
         if let Some(ref plugin_specs) = use_plugin {
             use linthis::plugin::{PluginLoader, PluginSource};
 
@@ -209,20 +214,15 @@ fn main() -> ExitCode {
 
                 if let Ok(loader) = PluginLoader::new() {
                     if let Ok(configs) = loader.load_configs(&[source], false) {
-                        // Copy plugin configs to .linthis/configs/
-                        let linthis_dir = std::env::current_dir()
-                            .unwrap_or_default()
-                            .join(".linthis");
-                        let config_dir = linthis_dir.join("configs");
-
+                        // Add configs to resolver (no more copying to .linthis/configs/)
                         for config in &configs {
-                            if let Some(filename) = config.config_path.file_name() {
-                                let lang_dir = config_dir.join(&config.language);
-                                if std::fs::create_dir_all(&lang_dir).is_ok() {
-                                    let target = lang_dir.join(filename);
-                                    let _ = std::fs::copy(&config.config_path, &target);
-                                }
-                            }
+                            lsp_config_resolver.add_config(ResolvedConfig::new(
+                                config.language.clone(),
+                                config.tool.clone(),
+                                config.config_path.clone(),
+                                ConfigSource::CliPlugin,
+                                name.clone(),
+                            ));
                         }
                         eprintln!("[lsp] Loaded {} config(s) from plugin '{}'", configs.len(), name);
                     }
@@ -238,7 +238,7 @@ fn main() -> ExitCode {
             }
         };
 
-        // Run LSP server using tokio runtime
+        // Run LSP server using tokio runtime with ConfigResolver
         let runtime = match tokio::runtime::Runtime::new() {
             Ok(rt) => rt,
             Err(e) => {
@@ -247,7 +247,13 @@ fn main() -> ExitCode {
             }
         };
 
-        match runtime.block_on(run_lsp_server(lsp_mode, port)) {
+        let resolver = if lsp_config_resolver.is_empty() {
+            None
+        } else {
+            Some(Arc::new(lsp_config_resolver))
+        };
+
+        match runtime.block_on(run_lsp_server_with_config(lsp_mode, port, resolver)) {
             Ok(_) => return ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("{}: LSP server error: {}", "Error".red(), e);
@@ -338,11 +344,19 @@ fn main() -> ExitCode {
     // Track loaded plugins for display
     let mut loaded_plugins: Vec<String> = Vec::new();
 
+    // Build ConfigResolver for plugin configs (instead of copying to .linthis/configs/)
+    // Priority order: CLI plugins (2) > Project plugins (3) > Global plugins (4)
+    // Local manual configs (1) are checked first by the resolver at runtime
+    let mut config_resolver = ConfigResolver::new();
+
     // Load plugins: --use-plugin takes priority, then config files
     if !cli.no_plugin {
         use linthis::plugin::{PluginConfigManager, PluginLoader, PluginSource};
 
-        let mut plugins_to_load: Vec<(String, PluginSource)> = Vec::new();
+        // Track plugins with their source type for ConfigResolver
+        let mut cli_plugins: Vec<(String, PluginSource)> = Vec::new();
+        let mut project_plugins: Vec<(String, PluginSource)> = Vec::new();
+        let mut global_plugins: Vec<(String, PluginSource)> = Vec::new();
 
         // Check --use-plugin first (takes priority over config files)
         if let Some(ref plugin_specs) = cli.use_plugin {
@@ -377,42 +391,53 @@ fn main() -> ExitCode {
                 if cli.verbose {
                     eprintln!("Using plugin from CLI: {} ({})", name, url_or_path);
                 }
-                plugins_to_load.push((name, source));
+                cli_plugins.push((name, source));
             }
         } else {
             // No --use-plugin, load from config files (project first, then global)
             // Check project config first
             if let Ok(project_manager) = PluginConfigManager::project() {
-                if let Ok(project_plugins) = project_manager.list_plugins() {
-                    for (name, url, git_ref) in project_plugins {
+                if let Ok(plugins) = project_manager.list_plugins() {
+                    for (name, url, git_ref) in plugins {
                         let source = if let Some(ref r) = git_ref {
                             PluginSource::new(&url).with_ref(r)
                         } else {
                             PluginSource::new(&url)
                         };
-                        plugins_to_load.push((name, source));
+                        project_plugins.push((name, source));
                     }
                 }
             }
 
             // If no project plugins, check global config
-            if plugins_to_load.is_empty() {
+            if project_plugins.is_empty() {
                 if let Ok(global_manager) = PluginConfigManager::global() {
-                    if let Ok(global_plugins) = global_manager.list_plugins() {
-                        for (name, url, git_ref) in global_plugins {
+                    if let Ok(plugins) = global_manager.list_plugins() {
+                        for (name, url, git_ref) in plugins {
                             let source = if let Some(ref r) = git_ref {
                                 PluginSource::new(&url).with_ref(r)
                             } else {
                                 PluginSource::new(&url)
                             };
-                            plugins_to_load.push((name, source));
+                            global_plugins.push((name, source));
                         }
                     }
                 }
             }
         }
 
-        if !plugins_to_load.is_empty() {
+        // Load all plugins and build ConfigResolver
+        let all_plugins = [
+            (cli_plugins, ConfigSource::CliPlugin),
+            (project_plugins, ConfigSource::ProjectPlugin),
+            (global_plugins, ConfigSource::GlobalPlugin),
+        ];
+
+        for (plugins, source_type) in all_plugins {
+            if plugins.is_empty() {
+                continue;
+            }
+
             let loader = match PluginLoader::with_verbose(cli.verbose) {
                 Ok(l) => l,
                 Err(e) => {
@@ -425,51 +450,38 @@ fn main() -> ExitCode {
                 }
             };
 
-            for (plugin_name, source) in plugins_to_load {
+            for (plugin_name, source) in plugins {
                 match loader.load_configs(&[source], false) {
                     Ok(configs) => {
                         loaded_plugins.push(plugin_name.clone());
                         if cli.verbose {
                             eprintln!(
-                                "Loaded {} config(s) from plugin '{}'",
+                                "Loaded {} config(s) from plugin '{}' (priority: {:?})",
                                 configs.len(),
-                                plugin_name
+                                plugin_name,
+                                source_type
                             );
                         }
-                        // Auto-apply plugin configs to .linthis/configs/{language}/
-                        // Each language gets its own subdirectory to avoid conflicts
-                        // (e.g., cpp/.clang-format vs oc/.clang-format)
-                        let linthis_dir = std::env::current_dir()
-                            .unwrap_or_default()
-                            .join(".linthis");
-                        let config_dir = linthis_dir.join("configs");
 
+                        // Add configs to resolver (no more copying to .linthis/configs/)
                         for config in &configs {
-                            if let Some(filename) = config.config_path.file_name() {
-                                // Create language-specific subdirectory
-                                let lang_dir = config_dir.join(&config.language);
-                                if std::fs::create_dir_all(&lang_dir).is_ok() {
-                                    let target = lang_dir.join(filename);
-                                    // Always update to latest plugin config
-                                    if std::fs::copy(&config.config_path, &target).is_ok()
-                                        && cli.verbose {
-                                            eprintln!(
-                                                "  - {}/{}: {} -> .linthis/configs/{}/{}",
-                                                config.language,
-                                                config.tool,
-                                                filename.to_string_lossy(),
-                                                config.language,
-                                                filename.to_string_lossy()
-                                            );
-                                        }
-                                }
+                            config_resolver.add_config(ResolvedConfig::new(
+                                config.language.clone(),
+                                config.tool.clone(),
+                                config.config_path.clone(),
+                                source_type,
+                                plugin_name.clone(),
+                            ));
+
+                            if cli.verbose {
+                                eprintln!(
+                                    "  - {}/{}: {} (from plugin cache)",
+                                    config.language,
+                                    config.tool,
+                                    config.config_path.display()
+                                );
                             }
                         }
-
-                        // NOTE: We no longer create symlinks for CPPLINT.cfg in project root.
-                        // linthis now passes cpplint config via command line args (--linelength, --filter)
-                        // which allows per-language (cpp vs oc) configuration.
-                        // Root symlinks would override this with a single cpp config for all files.
                     }
                     Err(e) => {
                         eprintln!(
@@ -565,7 +577,7 @@ fn main() -> ExitCode {
         }
     };
 
-    // Build options
+    // Build options with ConfigResolver for plugin configs
     let options = RunOptions {
         paths,
         mode,
@@ -575,6 +587,11 @@ fn main() -> ExitCode {
         quiet: cli.quiet,
         plugins: loaded_plugins,
         no_cache: cli.no_cache,
+        config_resolver: if config_resolver.is_empty() {
+            None
+        } else {
+            Some(Arc::new(config_resolver))
+        },
     };
 
     // Parse output format (hook_mode overrides output format)
