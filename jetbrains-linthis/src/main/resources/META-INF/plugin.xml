@@ -11,6 +11,15 @@
         powered by the linthis Language Server Protocol (LSP) server.
     </p>
 
+    <h3>Features</h3>
+    <ul>
+        <li>Real-time diagnostics via LSP</li>
+        <li>Format on save</li>
+        <li>Quick fixes and suggestions</li>
+        <li>Lint on file open/save</li>
+        <li>Configurable via .linthis.toml</li>
+    </ul>
+
     <h3>Supported Languages</h3>
     <ul>
         <li>Rust (clippy, rustfmt)</li>
@@ -32,13 +41,13 @@
         <li>And more...</li>
     </ul>
 
-    <h3>Features</h3>
-    <ul>
-        <li>Real-time diagnostics via LSP</li>
-        <li>Format on save</li>
-        <li>Quick fixes and suggestions</li>
-        <li>Configurable via .linthis.toml</li>
-    </ul>
+    <h3>Quick Start</h3>
+    <ol>
+        <li>Install <b>LSP4IJ plugin</b> and <b>linthis CLI</b> (see Requirements below)</li>
+        <li>Install this Linthis plugin</li>
+        <li>Open a supported file - The LSP server starts automatically</li>
+        <li>View diagnostics in editor gutter and Problems view</li>
+    </ol>
 
     <h3>Usage</h3>
     <p>
@@ -51,21 +60,57 @@
     <p>
         <img src="https://plugins.jetbrains.com/files/29860/screenshot_efe42203-d43e-4ae7-95c8-b394f2539229" alt="Linthis Tools Menu" width="400"/>
     </p>
+    <p>
+        Additional menu actions:
+    </p>
+    <ul>
+        <li><b>Code → Reformat Code</b> - Also triggers LSP-based formatting</li>
+        <li><b>View → Tool Windows → Problems</b> - Show all diagnostics</li>
+    </ul>
+
+    <h3>Viewing Diagnostics</h3>
+    <p>Linting issues are displayed in multiple places:</p>
+    <ul>
+        <li><b>Editor Gutter</b> - Icons indicate warnings/errors on specific lines</li>
+        <li><b>Problems Tool Window</b> - View → Tool Windows → Problems</li>
+        <li><b>Inline Highlights</b> - Underlines in the code editor</li>
+        <li><b>Hover Tooltips</b> - Hover over highlighted code to see details</li>
+    </ul>
 
     <h3>Configuration</h3>
     <p>
         Configure linthis in <b>Settings → Tools → Linthis</b>:
     </p>
     <ul>
-        <li><b>Lint on file open</b> - Run linter when opening files</li>
-        <li><b>Lint on save</b> - Run linter when saving files</li>
-        <li><b>Format on save</b> - Auto-format files when saving</li>
+        <li><b>Lint on file open</b> - Run linter when opening files (default: on)</li>
+        <li><b>Lint on save</b> - Run linter when saving files (default: on)</li>
+        <li><b>Format on save</b> - Auto-format files when saving (default: off)</li>
         <li><b>Linthis path</b> - Custom path to linthis executable (leave empty for auto-detect)</li>
         <li><b>Additional arguments</b> - Extra CLI arguments for linthis</li>
     </ul>
     <p>
         <img src="https://plugins.jetbrains.com/files/29860/screenshot_45c0e613-a97f-44c9-8700-23bd410aa2db" alt="Linthis Settings" width="600"/>
     </p>
+
+    <h3>Keyboard Shortcuts</h3>
+    <p>
+        To configure shortcuts, go to <b>Settings → Keymap</b>, search for "Linthis", and add your preferred shortcuts.
+    </p>
+    <p>Suggested shortcuts (not set by default to avoid conflicts):</p>
+    <ul>
+        <li>Lint Current File: <code>Ctrl+Shift+;</code> / <code>Cmd+Shift+;</code></li>
+        <li>Format Current File: <code>Ctrl+Shift+'</code> / <code>Cmd+Shift+'</code></li>
+    </ul>
+
+    <h3>LSP Server Status</h3>
+    <p>
+        Check the Language Server status at <b>View → Tool Windows → Language Servers</b>. You can:
+    </p>
+    <ul>
+        <li>See if Linthis server is running</li>
+        <li>View server logs</li>
+        <li>Restart the server if needed</li>
+    </ul>
 
     <h3>Requirements</h3>
     <ol>
@@ -76,10 +121,19 @@
         <li>
             <b>linthis CLI tool</b>:
             <pre>pip install linthis</pre>
+            or with uv (recommended)
+            <pre>uv pip install linthis</pre>
             or
             <pre>cargo install linthis</pre>
         </li>
     </ol>
+
+    <h3>Troubleshooting</h3>
+    <ul>
+        <li><b>Linthis not found</b> - Verify installation with <code>linthis --version</code>, ensure it's in PATH, then restart IDE</li>
+        <li><b>No diagnostics showing</b> - Check file type support, verify .linthis.toml config, check Language Servers status</li>
+        <li><b>LSP server not starting</b> - Enable debug logging in Help → Diagnostic Tools → Debug Log Settings (add #com.linthis)</li>
+    </ul>
     ]]></description>
 
     <change-notes><![CDATA[
