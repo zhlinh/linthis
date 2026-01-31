@@ -22,6 +22,10 @@ pub enum AiProviderKind {
     Claude,
     /// Claude CLI (claude -p command)
     ClaudeCli,
+    /// CodeBuddy API
+    CodeBuddy,
+    /// CodeBuddy CLI (codebuddy -p command)
+    CodeBuddyCli,
     /// OpenAI GPT
     OpenAi,
     /// Local LLM (Ollama, llama.cpp, etc.)
@@ -36,7 +40,9 @@ impl std::str::FromStr for AiProviderKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "claude" | "anthropic" => Ok(Self::Claude),
-            "claude-cli" | "claudecli" | "cli" => Ok(Self::ClaudeCli),
+            "claude-cli" | "claudecli" => Ok(Self::ClaudeCli),
+            "codebuddy" | "buddy" => Ok(Self::CodeBuddy),
+            "codebuddy-cli" | "codebuddycli" | "cli" => Ok(Self::CodeBuddyCli),
             "openai" | "gpt" => Ok(Self::OpenAi),
             "local" | "ollama" | "llama" => Ok(Self::Local),
             "mock" | "test" => Ok(Self::Mock),
@@ -97,6 +103,28 @@ impl AiProviderConfig {
         Self {
             kind: AiProviderKind::ClaudeCli,
             model: "claude-cli".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Create CodeBuddy API configuration
+    ///
+    /// Uses environment variables:
+    /// - CODEBUDDY_API_KEY for authentication
+    /// - CODEBUDDY_BASE_URL for custom endpoint (optional)
+    pub fn codebuddy() -> Self {
+        Self {
+            kind: AiProviderKind::CodeBuddy,
+            model: "deepseek-v3.1".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Create CodeBuddy CLI configuration (uses `codebuddy -p` command)
+    pub fn codebuddy_cli() -> Self {
+        Self {
+            kind: AiProviderKind::CodeBuddyCli,
+            model: "codebuddy-cli".to_string(),
             ..Default::default()
         }
     }
@@ -168,11 +196,12 @@ impl AiProvider {
             .and_then(|s| s.parse().ok())
             .unwrap_or(AiProviderKind::Claude);
 
-        // For Claude, try ANTHROPIC_AUTH_TOKEN first, then fall back to ANTHROPIC_API_KEY
+        // Get API key based on provider type
         let api_key = match kind {
             AiProviderKind::Claude => env::var("ANTHROPIC_AUTH_TOKEN")
                 .or_else(|_| env::var("ANTHROPIC_API_KEY"))
                 .ok(),
+            AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").ok(),
             AiProviderKind::OpenAi => env::var("OPENAI_API_KEY").ok(),
             _ => None,
         };
@@ -181,15 +210,18 @@ impl AiProvider {
             match kind {
                 AiProviderKind::Claude => "claude-sonnet-4-20250514".to_string(),
                 AiProviderKind::ClaudeCli => "claude-cli".to_string(),
+                AiProviderKind::CodeBuddy => "deepseek-v3.1".to_string(),
+                AiProviderKind::CodeBuddyCli => "codebuddy-cli".to_string(),
                 AiProviderKind::OpenAi => "gpt-4o".to_string(),
                 AiProviderKind::Local => "codellama:7b".to_string(),
                 AiProviderKind::Mock => "mock".to_string(),
             }
         });
 
-        // For Claude, check ANTHROPIC_BASE_URL, otherwise use LINTHIS_AI_ENDPOINT
+        // Get endpoint based on provider type
         let endpoint = match kind {
             AiProviderKind::Claude => env::var("ANTHROPIC_BASE_URL").ok(),
+            AiProviderKind::CodeBuddy => env::var("CODEBUDDY_BASE_URL").ok(),
             _ => env::var("LINTHIS_AI_ENDPOINT").ok(),
         };
 
@@ -226,6 +258,8 @@ impl AiProviderTrait for AiProvider {
         match self.config.kind {
             AiProviderKind::Claude => "Claude API",
             AiProviderKind::ClaudeCli => "Claude CLI",
+            AiProviderKind::CodeBuddy => "CodeBuddy API",
+            AiProviderKind::CodeBuddyCli => "CodeBuddy CLI",
             AiProviderKind::OpenAi => "OpenAI",
             AiProviderKind::Local => "Local LLM",
             AiProviderKind::Mock => "Mock",
@@ -234,10 +268,22 @@ impl AiProviderTrait for AiProvider {
 
     fn is_available(&self) -> bool {
         match self.config.kind {
-            AiProviderKind::Claude | AiProviderKind::OpenAi => self.config.api_key.is_some(),
+            AiProviderKind::Claude | AiProviderKind::CodeBuddy | AiProviderKind::OpenAi => {
+                self.config.api_key.is_some()
+            }
             AiProviderKind::ClaudeCli => {
                 // Check if claude CLI is available
                 std::process::Command::new("claude")
+                    .arg("--version")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            }
+            AiProviderKind::CodeBuddyCli => {
+                // Check if codebuddy CLI is available
+                std::process::Command::new("codebuddy")
                     .arg("--version")
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
@@ -262,6 +308,8 @@ impl AiProviderTrait for AiProvider {
         match self.config.kind {
             AiProviderKind::Claude => self.complete_claude(prompt, system_prompt),
             AiProviderKind::ClaudeCli => self.complete_claude_cli(prompt, system_prompt),
+            AiProviderKind::CodeBuddy => self.complete_codebuddy(prompt, system_prompt),
+            AiProviderKind::CodeBuddyCli => self.complete_codebuddy_cli(prompt, system_prompt),
             AiProviderKind::OpenAi => self.complete_openai(prompt, system_prompt),
             AiProviderKind::Local => self.complete_local(prompt, system_prompt),
             AiProviderKind::Mock => self.complete_mock(prompt, system_prompt),
@@ -382,6 +430,124 @@ impl AiProvider {
 
         if response.trim().is_empty() {
             return Err("Empty response from Claude CLI".to_string());
+        }
+
+        Ok(response)
+    }
+
+    fn complete_codebuddy(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+        // Try CODEBUDDY_API_KEY from env, then config
+        let api_key = env::var("CODEBUDDY_API_KEY")
+            .ok()
+            .or_else(|| self.config.api_key.clone())
+            .ok_or_else(|| "CodeBuddy API key not set. Set CODEBUDDY_API_KEY environment variable.".to_string())?;
+
+        // Try CODEBUDDY_BASE_URL first, then config endpoint
+        let base_url = env::var("CODEBUDDY_BASE_URL")
+            .ok()
+            .or_else(|| self.config.endpoint.clone());
+
+        let endpoint = if let Some(base) = base_url {
+            // Ensure the URL ends with /v1/chat/completions
+            let base = base.trim_end_matches('/');
+            if base.ends_with("/v1/chat/completions") {
+                base.to_string()
+            } else if base.ends_with("/v1") {
+                format!("{}/chat/completions", base)
+            } else {
+                format!("{}/v1/chat/completions", base)
+            }
+        } else {
+            // Default CodeBuddy API endpoint (OpenAI-compatible)
+            "https://api.codebuddy.cn/v1/chat/completions".to_string()
+        };
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let mut messages = Vec::new();
+        if let Some(sys) = system_prompt {
+            messages.push(serde_json::json!({
+                "role": "system",
+                "content": sys
+            }));
+        }
+        messages.push(serde_json::json!({
+            "role": "user",
+            "content": prompt
+        }));
+
+        let body = serde_json::json!({
+            "model": self.config.model,
+            "max_tokens": self.config.max_tokens,
+            "temperature": self.config.temperature,
+            "messages": messages
+        });
+
+        let response = client
+            .post(&endpoint)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().unwrap_or_default();
+            return Err(format!("API error ({}): {}", status, text));
+        }
+
+        let result: serde_json::Value = response.json()
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        result["choices"][0]["message"]["content"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No content in response".to_string())
+    }
+
+    fn complete_codebuddy_cli(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+        use std::process::{Command, Stdio};
+
+        // Build the command with optional system prompt
+        let mut cmd = Command::new("codebuddy");
+        cmd.arg("-p")
+            .arg("--output-format")
+            .arg("text");
+
+        // Add system prompt if provided
+        if let Some(sys) = system_prompt {
+            cmd.arg("--append-system-prompt").arg(sys);
+        }
+
+        // Add the main prompt
+        cmd.arg(prompt);
+
+        // Configure I/O
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn codebuddy command: {}", e))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to wait for codebuddy command: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("CodeBuddy CLI error: {}", stderr));
+        }
+
+        let response = String::from_utf8_lossy(&output.stdout).to_string();
+
+        if response.trim().is_empty() {
+            return Err("Empty response from CodeBuddy CLI".to_string());
         }
 
         Ok(response)
@@ -508,7 +674,9 @@ mod tests {
     fn test_provider_kind_parsing() {
         assert_eq!("claude".parse::<AiProviderKind>().unwrap(), AiProviderKind::Claude);
         assert_eq!("claude-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::ClaudeCli);
-        assert_eq!("cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::ClaudeCli);
+        assert_eq!("codebuddy".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodeBuddy);
+        assert_eq!("codebuddy-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodeBuddyCli);
+        assert_eq!("cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodeBuddyCli);
         assert_eq!("openai".parse::<AiProviderKind>().unwrap(), AiProviderKind::OpenAi);
         assert_eq!("local".parse::<AiProviderKind>().unwrap(), AiProviderKind::Local);
         assert_eq!("mock".parse::<AiProviderKind>().unwrap(), AiProviderKind::Mock);
@@ -537,6 +705,12 @@ mod tests {
 
         let claude_cli = AiProvider::new(AiProviderConfig::claude_cli());
         assert_eq!(claude_cli.name(), "Claude CLI");
+
+        let codebuddy = AiProvider::new(AiProviderConfig::codebuddy());
+        assert_eq!(codebuddy.name(), "CodeBuddy API");
+
+        let codebuddy_cli = AiProvider::new(AiProviderConfig::codebuddy_cli());
+        assert_eq!(codebuddy_cli.name(), "CodeBuddy CLI");
 
         let openai = AiProvider::new(AiProviderConfig::openai());
         assert_eq!(openai.name(), "OpenAI");

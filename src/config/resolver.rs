@@ -14,8 +14,8 @@
 //!
 //! 1. **Local manual configs** (highest) - ruff.toml, pyproject.toml, .eslintrc.js in project
 //! 2. **CLI plugin configs** - from `--use-plugin` (referenced, not copied)
-//! 3. **Project plugin configs** - from `.linthis.toml` plugins section
-//! 4. **Global plugin configs** - from `~/.config/linthis/config.toml` plugins
+//! 3. **Project plugin configs** - from `.linthis/config.toml` plugins section
+//! 4. **Global plugin configs** - from `~/.linthis/config.toml` plugins
 //! 5. **Tool defaults** (lowest)
 
 use std::path::{Path, PathBuf};
@@ -26,9 +26,9 @@ use std::sync::Arc;
 pub enum ConfigSource {
     /// From `--use-plugin` CLI option (priority 2)
     CliPlugin,
-    /// From project `.linthis.toml` plugins section (priority 3)
+    /// From project `.linthis/config.toml` plugins section (priority 3)
     ProjectPlugin,
-    /// From global `~/.config/linthis/config.toml` plugins (priority 4)
+    /// From global `~/.linthis/config.toml` plugins (priority 4)
     GlobalPlugin,
 }
 
@@ -354,7 +354,7 @@ impl ConfigResolverBuilder {
         self
     }
 
-    /// Add configs from project plugins (.linthis.toml)
+    /// Add configs from project plugins (.linthis/config.toml)
     pub fn with_project_plugins(mut self, plugin_configs: Vec<(String, String, PathBuf, String)>) -> Self {
         for (lang, tool, path, plugin_name) in plugin_configs {
             self.configs.push(ResolvedConfig::new(
@@ -368,7 +368,7 @@ impl ConfigResolverBuilder {
         self
     }
 
-    /// Add configs from global plugins (~/.config/linthis/)
+    /// Add configs from global plugins (~/.linthis/)
     pub fn with_global_plugins(mut self, plugin_configs: Vec<(String, String, PathBuf, String)>) -> Self {
         for (lang, tool, path, plugin_name) in plugin_configs {
             self.configs.push(ResolvedConfig::new(

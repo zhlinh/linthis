@@ -283,6 +283,8 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions) -> ExitCode {
     let mut config = match provider_kind {
         AiProviderKind::Claude => AiProviderConfig::claude(),
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
+        AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
+        AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
         AiProviderKind::OpenAi => AiProviderConfig::openai(),
         AiProviderKind::Local => AiProviderConfig::local(),
         AiProviderKind::Mock => AiProviderConfig::mock(),
@@ -298,15 +300,24 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions) -> ExitCode {
         AiProviderKind::Claude => std::env::var("ANTHROPIC_AUTH_TOKEN")
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
+        AiProviderKind::CodeBuddy => std::env::var("CODEBUDDY_API_KEY").ok(),
         AiProviderKind::OpenAi => std::env::var("OPENAI_API_KEY").ok(),
         _ => None,
     };
 
-    // Set endpoint from environment for Claude
-    if provider_kind == AiProviderKind::Claude {
-        if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
-            config.endpoint = Some(base_url);
+    // Set endpoint from environment for Claude or CodeBuddy
+    match provider_kind {
+        AiProviderKind::Claude => {
+            if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
+                config.endpoint = Some(base_url);
+            }
         }
+        AiProviderKind::CodeBuddy => {
+            if let Ok(base_url) = std::env::var("CODEBUDDY_BASE_URL") {
+                config.endpoint = Some(base_url);
+            }
+        }
+        _ => {}
     }
 
     let provider = AiProvider::new(config);

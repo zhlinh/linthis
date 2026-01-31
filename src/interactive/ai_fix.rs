@@ -119,6 +119,8 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
     let mut provider_config = match config.provider {
         AiProviderKind::Claude => AiProviderConfig::claude(),
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
+        AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
+        AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
         AiProviderKind::OpenAi => AiProviderConfig::openai(),
         AiProviderKind::Local => AiProviderConfig::local(),
         AiProviderKind::Mock => AiProviderConfig::mock(),
@@ -134,15 +136,24 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
         AiProviderKind::Claude => std::env::var("ANTHROPIC_AUTH_TOKEN")
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
+        AiProviderKind::CodeBuddy => std::env::var("CODEBUDDY_API_KEY").ok(),
         AiProviderKind::OpenAi => std::env::var("OPENAI_API_KEY").ok(),
         _ => None,
     };
 
-    // Set endpoint from environment for Claude
-    if config.provider == AiProviderKind::Claude {
-        if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
-            provider_config.endpoint = Some(base_url);
+    // Set endpoint from environment for Claude or CodeBuddy
+    match config.provider {
+        AiProviderKind::Claude => {
+            if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
+                provider_config.endpoint = Some(base_url);
+            }
         }
+        AiProviderKind::CodeBuddy => {
+            if let Ok(base_url) = std::env::var("CODEBUDDY_BASE_URL") {
+                provider_config.endpoint = Some(base_url);
+            }
+        }
+        _ => {}
     }
 
     let provider = AiProvider::new(provider_config);
@@ -152,6 +163,8 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
         let hint = match config.provider {
             AiProviderKind::Claude => "Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable",
             AiProviderKind::ClaudeCli => "Install Claude CLI (claude command must be available)",
+            AiProviderKind::CodeBuddy => "Set CODEBUDDY_API_KEY environment variable",
+            AiProviderKind::CodeBuddyCli => "Install CodeBuddy CLI (codebuddy command must be available)",
             AiProviderKind::OpenAi => "Set OPENAI_API_KEY environment variable",
             AiProviderKind::Local => "Set LINTHIS_AI_ENDPOINT environment variable",
             AiProviderKind::Mock => "Mock provider should always be available",
