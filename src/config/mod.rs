@@ -67,6 +67,7 @@
 
 pub mod cli;
 pub mod migrate;
+pub mod resolver;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

@@ -22,6 +22,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use super::diagnostics::to_diagnostics;
 use super::document::DocumentManager;
+use crate::config::resolver::SharedConfigResolver;
 use crate::{run, Language, RunMode, RunOptions};
 
 /// LSP communication mode.
@@ -52,14 +53,17 @@ pub struct LinthisLanguageServer {
     client: Client,
     /// Document manager for tracking open files.
     documents: Arc<DocumentManager>,
+    /// Config resolver for plugin configs (priority-based lookup)
+    config_resolver: Option<SharedConfigResolver>,
 }
 
 impl LinthisLanguageServer {
-    /// Create a new language server instance.
-    pub fn new(client: Client) -> Self {
+    /// Create a new language server instance with a config resolver.
+    pub fn with_config_resolver(client: Client, config_resolver: Option<SharedConfigResolver>) -> Self {
         Self {
             client,
             documents: Arc::new(DocumentManager::new()),
+            config_resolver,
         }
     }
 
@@ -99,6 +103,7 @@ impl LinthisLanguageServer {
             mode: RunMode::CheckOnly,
             quiet: true,
             no_cache: true, // Don't use cache for LSP (we want fresh results)
+            config_resolver: self.config_resolver.clone(),
             ..Default::default()
         };
 
@@ -222,25 +227,41 @@ impl LanguageServer for LinthisLanguageServer {
 /// * `mode` - Communication mode (stdio or tcp)
 /// * `port` - TCP port (only used when mode is tcp)
 pub async fn run_lsp_server(mode: LspMode, port: u16) -> anyhow::Result<()> {
+    run_lsp_server_with_config(mode, port, None).await
+}
+
+/// Run the LSP server with an optional config resolver.
+///
+/// # Arguments
+/// * `mode` - Communication mode (stdio or tcp)
+/// * `port` - TCP port (only used when mode is tcp)
+/// * `config_resolver` - Optional config resolver for plugin configs
+pub async fn run_lsp_server_with_config(
+    mode: LspMode,
+    port: u16,
+    config_resolver: Option<SharedConfigResolver>,
+) -> anyhow::Result<()> {
     match mode {
-        LspMode::Stdio => run_stdio_server().await,
-        LspMode::Tcp => run_tcp_server(port).await,
+        LspMode::Stdio => run_stdio_server(config_resolver).await,
+        LspMode::Tcp => run_tcp_server(port, config_resolver).await,
     }
 }
 
 /// Run the LSP server over stdio.
-async fn run_stdio_server() -> anyhow::Result<()> {
+async fn run_stdio_server(config_resolver: Option<SharedConfigResolver>) -> anyhow::Result<()> {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(LinthisLanguageServer::new);
+    let (service, socket) = LspService::new(move |client| {
+        LinthisLanguageServer::with_config_resolver(client, config_resolver.clone())
+    });
     Server::new(stdin, stdout, socket).serve(service).await;
 
     Ok(())
 }
 
 /// Run the LSP server over TCP.
-async fn run_tcp_server(port: u16) -> anyhow::Result<()> {
+async fn run_tcp_server(port: u16, config_resolver: Option<SharedConfigResolver>) -> anyhow::Result<()> {
     use tokio::net::TcpListener;
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
@@ -252,7 +273,10 @@ async fn run_tcp_server(port: u16) -> anyhow::Result<()> {
 
         let (read, write) = tokio::io::split(stream);
 
-        let (service, socket) = LspService::new(LinthisLanguageServer::new);
+        let resolver = config_resolver.clone();
+        let (service, socket) = LspService::new(move |client| {
+            LinthisLanguageServer::with_config_resolver(client, resolver.clone())
+        });
         Server::new(read, write, socket).serve(service).await;
     }
 }

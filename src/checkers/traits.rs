@@ -34,6 +34,24 @@ pub trait Checker: Send + Sync {
     /// A vector of lint issues, or an error if the check failed.
     fn check(&self, path: &Path) -> Result<Vec<LintIssue>>;
 
+    /// Check a single file with an optional external config path.
+    ///
+    /// This method allows the ConfigResolver to pass a plugin config when
+    /// no local config exists. The default implementation ignores the config
+    /// and calls `check()`.
+    ///
+    /// # Arguments
+    /// * `path` - Path to the file to check
+    /// * `config` - Optional path to a config file to use
+    ///
+    /// # Returns
+    /// A vector of lint issues, or an error if the check failed.
+    fn check_with_config(&self, path: &Path, config: Option<&Path>) -> Result<Vec<LintIssue>> {
+        // Default implementation: ignore config and use check()
+        let _ = config;
+        self.check(path)
+    }
+
     /// Check if this checker supports the given language.
     fn supports(&self, lang: Language) -> bool {
         self.supported_languages().contains(&lang)

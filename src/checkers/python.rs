@@ -66,7 +66,7 @@ impl PythonChecker {
         Self
     }
 
-    /// Find Ruff configuration file
+    /// Find Ruff configuration file (searches all locations including plugin configs)
     fn find_ruff_config(path: &Path) -> Option<std::path::PathBuf> {
         let mut current = if path.is_file() {
             path.parent()?.to_path_buf()
@@ -74,9 +74,43 @@ impl PythonChecker {
             path.to_path_buf()
         };
 
+        // Search order: local configs first, then plugin configs
         let config_names = [
-            ".linthis/configs/python/ruff.toml",  // Plugin config (highest priority)
+            "ruff.toml",
+            ".ruff.toml",
+            "pyproject.toml",
+            ".linthis/configs/python/ruff.toml",  // Plugin config (lower priority)
             ".linthis/configs/python/.ruff.toml",
+        ];
+
+        loop {
+            for config_name in &config_names {
+                let config_path = current.join(config_name);
+                if config_path.exists() {
+                    return Some(config_path);
+                }
+            }
+
+            if !current.pop() {
+                break;
+            }
+        }
+
+        None
+    }
+
+    /// Find local Ruff configuration file (excludes plugin configs in .linthis/configs/)
+    /// This is used when ConfigResolver provides an external config - we still want
+    /// to check for local overrides first.
+    fn find_local_ruff_config(path: &Path) -> Option<std::path::PathBuf> {
+        let mut current = if path.is_file() {
+            path.parent()?.to_path_buf()
+        } else {
+            path.to_path_buf()
+        };
+
+        // Only search for local configs (not in .linthis/configs/)
+        let config_names = [
             "ruff.toml",
             ".ruff.toml",
             "pyproject.toml",
@@ -86,7 +120,11 @@ impl PythonChecker {
             for config_name in &config_names {
                 let config_path = current.join(config_name);
                 if config_path.exists() {
-                    return Some(config_path);
+                    // Skip configs in .linthis/configs/ directory (those are plugin configs)
+                    let path_str = config_path.to_string_lossy();
+                    if !path_str.contains(".linthis/configs/") && !path_str.contains(".linthis\\configs\\") {
+                        return Some(config_path);
+                    }
                 }
             }
 
@@ -192,11 +230,31 @@ impl Checker for PythonChecker {
     }
 
     fn check(&self, path: &Path) -> Result<Vec<LintIssue>> {
+        // Default check: find local config, then use defaults
+        self.check_with_config(path, None)
+    }
+
+    fn check_with_config(&self, path: &Path, config: Option<&Path>) -> Result<Vec<LintIssue>> {
         let mut cmd = Command::new("ruff");
         cmd.args(["check", "--output-format", "json"]);
 
-        // Try to find ruff config
-        if let Some(config_path) = Self::find_ruff_config(path) {
+        // Config resolution priority:
+        // 1. If external config provided (from ConfigResolver), check for local config first
+        // 2. If no external config, search for local config
+        // 3. If no config found at all, use defaults
+        let effective_config = if config.is_some() {
+            // External config provided - first check for local override
+            if let Some(local_config) = Self::find_local_ruff_config(path) {
+                Some(local_config)
+            } else {
+                config.map(|p| p.to_path_buf())
+            }
+        } else {
+            // No external config - search for any config
+            Self::find_ruff_config(path)
+        };
+
+        if let Some(config_path) = effective_config {
             cmd.arg("--config").arg(&config_path);
         } else {
             // No config found - use sensible defaults (E=pycodestyle errors, W=warnings, F=pyflakes)

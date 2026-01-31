@@ -19,4 +19,4 @@ mod diagnostics;
 mod document;
 mod server;
 
-pub use server::{run_lsp_server, LspMode};
+pub use server::{run_lsp_server, run_lsp_server_with_config, LspMode};

@@ -111,6 +111,7 @@ fn handle_fix_with_lint(options: &FixCommandOptions) -> ExitCode {
         quiet: options.quiet,
         plugins: vec![],
         no_cache: false,
+        config_resolver: None,
     };
 
     match run(&run_options) {

@@ -145,6 +145,8 @@ use thiserror::Error;
 
 use rayon::prelude::*;
 
+use config::resolver::{ConfigResolver, SharedConfigResolver};
+
 /// Global progress counter for parallel checking
 static PROGRESS_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -576,6 +578,8 @@ pub struct RunOptions {
     pub plugins: Vec<String>,
     /// Disable cache (force re-check all files)
     pub no_cache: bool,
+    /// Config resolver for plugin configs (priority-based lookup)
+    pub config_resolver: Option<SharedConfigResolver>,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -589,6 +593,7 @@ impl std::fmt::Debug for RunOptions {
             .field("quiet", &self.quiet)
             .field("plugins", &self.plugins)
             .field("no_cache", &self.no_cache)
+            .field("config_resolver", &self.config_resolver.as_ref().map(|r| format!("{} configs", r.len())))
             .finish()
     }
 }
@@ -604,6 +609,7 @@ impl Default for RunOptions {
             quiet: false,
             plugins: Vec::new(),
             no_cache: false,
+            config_resolver: None,
         }
     }
 }
@@ -893,11 +899,27 @@ fn should_warn_tool(tool_name: &str) -> bool {
 }
 
 /// Run checker on a file and return issues.
-fn run_checker_on_file(file: &Path, lang: Language, verbose: bool) -> Vec<utils::types::LintIssue> {
+fn run_checker_on_file(
+    file: &Path,
+    lang: Language,
+    verbose: bool,
+    config_resolver: Option<&ConfigResolver>,
+) -> Vec<utils::types::LintIssue> {
     let mut issues = Vec::new();
     if let Some(checker) = get_checker(lang) {
         if checker.is_available() {
-            match checker.check(file) {
+            // Get config from resolver if available
+            let config_path = config_resolver.and_then(|r| {
+                r.get_plugin_config(lang.name(), checker.name())
+            });
+
+            let result = if let Some(ref cfg) = config_path {
+                checker.check_with_config(file, Some(cfg.as_path()))
+            } else {
+                checker.check(file)
+            };
+
+            match result {
                 Ok(file_issues) => {
                     // Set language for each issue
                     for mut issue in file_issues {
@@ -1072,7 +1094,12 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 }
 
                 // Cache miss - run actual check
-                let file_issues = run_checker_on_file(file, *lang, options.verbose);
+                let file_issues = run_checker_on_file(
+                    file,
+                    *lang,
+                    options.verbose,
+                    options.config_resolver.as_deref(),
+                );
 
                 // Update cache with results
                 if let Some(ref cache_mutex) = cache {
@@ -1208,7 +1235,12 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                             false,
                         );
                     }
-                    run_checker_on_file(file, *lang, options.verbose)
+                    run_checker_on_file(
+                        file,
+                        *lang,
+                        options.verbose,
+                        options.config_resolver.as_deref(),
+                    )
                 } else {
                     vec![]
                 }
@@ -1281,7 +1313,12 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     }
 
                     // Cache miss - run actual check
-                    let issues = run_checker_on_file(file, *lang, options.verbose);
+                    let issues = run_checker_on_file(
+                        file,
+                        *lang,
+                        options.verbose,
+                        options.config_resolver.as_deref(),
+                    );
 
                     // Update cache with results
                     if let Some(ref cache_mutex) = cache {
