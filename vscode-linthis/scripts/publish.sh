@@ -13,10 +13,14 @@
 #      (needs Marketplace > Manage scope)
 #
 # Usage:
-#   ./scripts/publish.sh              # Build and publish
-#   ./scripts/publish.sh --build      # Build only (no publish)
-#   ./scripts/publish.sh --package    # Build and package VSIX (no publish)
-#   ./scripts/publish.sh --dry-run    # Build and show what would be published
+#   ./scripts/publish.sh                    # Build and publish
+#   ./scripts/publish.sh --patch            # Bump patch version, commit, push, then publish
+#   ./scripts/publish.sh --minor            # Bump minor version, commit, push, then publish
+#   ./scripts/publish.sh --major            # Bump major version, commit, push, then publish
+#   ./scripts/publish.sh --patch --build    # Bump version and build only (no publish)
+#   ./scripts/publish.sh --build            # Build only (no version bump, no publish)
+#   ./scripts/publish.sh --package          # Build and package VSIX (no publish)
+#   ./scripts/publish.sh --dry-run          # Build and show what would be published
 
 set -e
 
@@ -43,13 +47,54 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Get current version from package.json
+get_current_version() {
+    node -p "require('./package.json').version"
+}
+
+# Bump version based on type
+bump_version() {
+    local current="$1"
+    local bump_type="$2"
+
+    IFS='.' read -r major minor patch <<< "$current"
+
+    case "$bump_type" in
+        --major)
+            echo "$((major + 1)).0.0"
+            ;;
+        --minor)
+            echo "${major}.$((minor + 1)).0"
+            ;;
+        --patch)
+            echo "${major}.${minor}.$((patch + 1))"
+            ;;
+        *)
+            echo "$current"
+            ;;
+    esac
+}
+
+# Update version in package.json
+update_version() {
+    local new_version="$1"
+
+    # Use npm version to update package.json (without git tag)
+    npm version "$new_version" --no-git-tag-version
+    log_info "Updated package.json to version $new_version"
+}
+
 # Parse arguments
 BUILD_ONLY=false
 PACKAGE_ONLY=false
 DRY_RUN=false
+BUMP_TYPE=""
 
 for arg in "$@"; do
     case $arg in
+        --patch|--minor|--major)
+            BUMP_TYPE="$arg"
+            ;;
         --build)
             BUILD_ONLY=true
             ;;
@@ -62,14 +107,27 @@ for arg in "$@"; do
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
-            echo "Options:"
+            echo "Version bump options:"
+            echo "  --patch     Bump patch version (0.2.0 -> 0.2.1)"
+            echo "  --minor     Bump minor version (0.2.0 -> 0.3.0)"
+            echo "  --major     Bump major version (0.2.0 -> 1.0.0)"
+            echo ""
+            echo "Build options:"
             echo "  --build     Build only (no package or publish)"
             echo "  --package   Build and package VSIX (no publish)"
             echo "  --dry-run   Build and show what would be published"
             echo "  --help, -h  Show this help message"
             echo ""
+            echo "Examples:"
+            echo "  $0                    # Build and publish current version"
+            echo "  $0 --patch            # Bump patch, commit, push, then publish"
+            echo "  $0 --minor --package  # Bump minor, commit, push, package only"
+            echo "  $0 --build            # Build current version only"
+            echo ""
             echo "Environment variables:"
             echo "  VSCE_PAT    Personal Access Token for VS Code Marketplace"
+            echo ""
+            echo "Current version: $(get_current_version)"
             exit 0
             ;;
         *)
@@ -110,8 +168,32 @@ fi
 
 log_info "vsce version: $(vsce --version)"
 
-# Get version from package.json
-VERSION=$(node -p "require('./package.json').version")
+# Handle version bump if requested
+CURRENT_VERSION=$(get_current_version)
+
+if [ -n "$BUMP_TYPE" ]; then
+    NEW_VERSION=$(bump_version "$CURRENT_VERSION" "$BUMP_TYPE")
+
+    if [ "$CURRENT_VERSION" == "$NEW_VERSION" ]; then
+        log_warn "Version is already $CURRENT_VERSION"
+    else
+        log_info "Bumping version: $CURRENT_VERSION -> $NEW_VERSION"
+        update_version "$NEW_VERSION"
+
+        # Commit and push the version bump
+        log_info "Committing version bump..."
+        git add package.json package-lock.json 2>/dev/null || git add package.json
+        git commit -m "chore(vscode-linthis): bump version to $NEW_VERSION"
+
+        log_info "Pushing to remote..."
+        git push
+
+        log_info "Version bump committed and pushed!"
+        CURRENT_VERSION="$NEW_VERSION"
+    fi
+fi
+
+VERSION="$CURRENT_VERSION"
 NAME=$(node -p "require('./package.json').name")
 log_info "Extension: $NAME v$VERSION"
 
