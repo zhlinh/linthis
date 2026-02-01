@@ -263,6 +263,71 @@ linthis config migrate [OPTIONS]
 
 ---
 
+## fix
+
+交互式修复模式，支持可选的 AI 辅助。
+
+```bash
+linthis --fix [OPTIONS]
+linthis fix [OPTIONS]
+```
+
+### 修复选项
+
+| 选项 | 描述 | 示例 |
+|-----|------|------|
+| `--fix` | 检查/格式化后进入修复模式 | `--fix` |
+| `--ai` | 使用 AI 进行修复建议（需要 `--fix`） | `--fix --ai` |
+| `--provider` | AI 提供商（需要 `--ai`） | `--provider claude` |
+| `--accept-all` | 自动接受所有修复（需要 `--fix`） | `--fix --accept-all` |
+
+### AI 提供商
+
+| 提供商 | 描述 |
+|-------|------|
+| `claude` | Anthropic Claude API（默认） |
+| `claude-cli` | Claude CLI（`claude -p` 命令） |
+| `codebuddy` | CodeBuddy API |
+| `codebuddy-cli` | CodeBuddy CLI |
+| `openai` | OpenAI API |
+| `local` | 本地 LLM（Ollama 等） |
+| `mock` | 模拟提供商（用于测试） |
+
+### 提供商优先级
+
+1. 命令行参数 (`--provider`)
+2. 环境变量 (`LINTHIS_AI_PROVIDER`)
+3. 配置文件 (`[ai]` 部分)
+4. 默认值：`claude`
+
+**示例：**
+
+```bash
+# 交互式修复模式（手动审查）
+linthis -i src/ --fix
+
+# AI 辅助修复，交互式审查
+linthis -i src/ --fix --ai
+
+# 使用特定提供商的 AI 修复
+linthis --fix --ai --provider claude
+linthis --fix --ai --provider claude-cli
+
+# 自动接受所有 AI 修复（用于 CI/自动化）
+linthis --fix --ai --accept-all
+linthis --fix --ai --provider claude-cli --accept-all
+
+# 仅修复暂存文件并使用 AI
+linthis -s --fix --ai --provider claude-cli --accept-all
+
+# 修复特定语言
+linthis -l python --fix --ai --provider claude
+```
+
+详见 [AI 智能修复](../features/ai-fix.zh.md)。
+
+---
+
 ## watch
 
 监视模式，持续检查。
