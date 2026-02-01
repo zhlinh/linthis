@@ -133,6 +133,29 @@ pub struct Cli {
     #[arg(long, value_delimiter = ',')]
     pub use_plugin: Option<Vec<String>>,
 
+    /// Enter fix mode after check/format to fix issues
+    ///
+    /// Can be combined with --ai for AI-powered fixes.
+    /// Useful in git hooks: linthis -c --fix --ai --accept-all
+    #[arg(long)]
+    pub fix: bool,
+
+    /// Use AI for fix suggestions (requires --fix)
+    #[arg(long, requires = "fix")]
+    pub ai: bool,
+
+    /// AI provider for fix (requires --ai)
+    ///
+    /// Options: claude, claude-cli, codebuddy, codebuddy-cli, openai, local, mock
+    #[arg(long, requires = "ai")]
+    pub provider: Option<String>,
+
+    /// Automatically accept all fix suggestions (requires --fix)
+    ///
+    /// Warning: This will modify files automatically. Use with caution.
+    #[arg(long, requires = "fix")]
+    pub accept_all: bool,
+
     /// Hook mode: enable compact output format for git hooks
     /// Shows summary at top, lists errors with file:line, and provides fix commands
     /// Optional value specifies hook type: pre-commit (default), pre-push, commit-msg
