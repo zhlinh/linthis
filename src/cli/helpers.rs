@@ -152,4 +152,9 @@ pub fn print_fix_hint() {
         "linthis fix --ai --provider claude-cli --accept-all".cyan(),
         "(dangerously)".red().bold()
     );
+    eprintln!();
+    eprintln!(
+        "  {} claude (default), claude-cli, codebuddy-cli",
+        "Available providers:".cyan().bold()
+    );
 }
