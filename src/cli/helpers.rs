@@ -154,7 +154,7 @@ pub fn print_fix_hint() {
     );
     eprintln!();
     eprintln!(
-        "  {} claude (default), claude-cli, codebuddy-cli",
+        "  {} claude (default), claude-cli, codebuddy, codebuddy-cli",
         "Available providers:".cyan().bold()
     );
 }
