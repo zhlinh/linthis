@@ -196,8 +196,6 @@ fn group_issues_by_file(issues: &[LintIssue]) -> std::collections::HashMap<PathB
 /// Run CLI-based file fix (direct file editing mode)
 /// This lets the CLI agent directly edit files, then shows the diff
 pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResult {
-    use std::collections::HashMap;
-
     let mut fix_result = AiFixResult::default();
 
     // Group issues by file

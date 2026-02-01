@@ -745,7 +745,7 @@ fn parse_diff_hunk(diff: &str, language: &str) -> Option<FixSuggestion> {
 
     let cap = re.captures(diff)?;
     let old_start: usize = cap.get(1)?.as_str().parse().ok()?;
-    let old_count: usize = cap.get(2).map_or(1, |m| m.as_str().parse().unwrap_or(1));
+    let _old_count: usize = cap.get(2).map_or(1, |m| m.as_str().parse().unwrap_or(1));
     let _new_start: usize = cap.get(3)?.as_str().parse().ok()?;
     let _new_count: usize = cap.get(4).map_or(1, |m| m.as_str().parse().unwrap_or(1));
 
