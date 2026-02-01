@@ -352,6 +352,45 @@ pub fn show_ai_suggestions(
     }
 }
 
+/// Validate that a suggestion is reasonable before applying
+fn validate_suggestion(issue: &LintIssue, suggestion: &FixSuggestion, original_lines: &[&str]) -> bool {
+    let suggestion_lines: Vec<&str> = suggestion.code.lines().collect();
+    let lines_to_replace = suggestion.end_line.saturating_sub(issue.line) + 1;
+
+    // Check 1: If we're replacing few lines but suggestion has way more, reject
+    if lines_to_replace <= 3 && suggestion_lines.len() > lines_to_replace * 4 {
+        eprintln!(
+            "  {} Suggestion rejected: replacing {} lines with {} lines is too different",
+            "⚠".yellow(),
+            lines_to_replace,
+            suggestion_lines.len()
+        );
+        return false;
+    }
+
+    // Check 2: If suggestion contains function/class definitions but original doesn't, reject
+    let line_idx = issue.line.saturating_sub(1);
+    if line_idx < original_lines.len() {
+        let original_line = original_lines[line_idx].trim();
+        let first_suggestion_line = suggestion_lines.first().map(|s| s.trim()).unwrap_or("");
+
+        // Check for new function/class definitions that weren't in original
+        let def_patterns = ["def ", "class ", "fn ", "func ", "function "];
+        let orig_has_def = def_patterns.iter().any(|p| original_line.starts_with(p));
+        let sugg_has_def = def_patterns.iter().any(|p| first_suggestion_line.starts_with(p));
+
+        if sugg_has_def && !orig_has_def {
+            eprintln!(
+                "  {} Suggestion rejected: introduces function/class definition where original had none",
+                "⚠".yellow()
+            );
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Apply a suggestion to the file
 pub fn apply_suggestion(issue: &LintIssue, suggestion: &FixSuggestion) -> bool {
     let content = match fs::read_to_string(&issue.file_path) {
@@ -363,6 +402,11 @@ pub fn apply_suggestion(issue: &LintIssue, suggestion: &FixSuggestion) -> bool {
     let line_idx = issue.line.saturating_sub(1);
 
     if line_idx >= lines.len() {
+        return false;
+    }
+
+    // Validate the suggestion before applying
+    if !validate_suggestion(issue, suggestion, &lines) {
         return false;
     }
 
