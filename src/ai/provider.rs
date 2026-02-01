@@ -658,10 +658,29 @@ impl AiProvider {
     }
 
     fn complete_mock(&self, prompt: &str, _system_prompt: Option<&str>) -> Result<String, String> {
-        // Return a mock response for testing
+        // Extract line number from prompt if available
+        let line_num = if let Some(pos) = prompt.find("Line: ") {
+            let rest = &prompt[pos + 6..];
+            rest.lines()
+                .next()
+                .and_then(|s| s.trim().parse::<usize>().ok())
+                .unwrap_or(1)
+        } else {
+            1
+        };
+
+        // Return a mock diff response for testing
         Ok(format!(
-            "// Mock AI suggestion for issue\n// Original prompt length: {} characters\n// Suggested fix:\nlet fixed_code = original_code.clone();",
-            prompt.len()
+            r#"Here's the fix:
+
+```diff
+@@ -{line},1 +{line},1 @@
+-    original_line
++    fixed_line  // mock fix
+```
+
+Note: This is a mock AI response for testing."#,
+            line = line_num
         ))
     }
 }
