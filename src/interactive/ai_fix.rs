@@ -42,7 +42,7 @@ pub struct AiFixConfig {
     /// Maximum suggestions per issue
     pub max_suggestions: usize,
     /// Auto-apply first suggestion without confirmation
-    pub auto_apply: bool,
+    pub accept_all: bool,
     /// Show verbose output
     pub verbose: bool,
     /// Number of parallel jobs (0 = sequential, >0 = parallel)
@@ -55,7 +55,7 @@ impl Default for AiFixConfig {
             provider: AiProviderKind::Claude,
             model: None,
             max_suggestions: 3,
-            auto_apply: false,
+            accept_all: false,
             verbose: false,
             parallel_jobs: 8,
         }
@@ -79,8 +79,8 @@ impl AiFixConfig {
     }
 
     /// Set auto-apply mode
-    pub fn with_auto_apply(mut self, auto_apply: bool) -> Self {
-        self.auto_apply = auto_apply;
+    pub fn with_accept_all(mut self, accept_all: bool) -> Self {
+        self.accept_all = accept_all;
         self
     }
 
@@ -269,7 +269,7 @@ pub fn show_ai_suggestions(
     }
 
     // Auto-apply mode
-    if config.auto_apply {
+    if config.accept_all {
         if let Some(suggestion) = result.suggestions.first() {
             println!("  {} Applying first suggestion...", "→".cyan());
             // Capture original content before applying
@@ -666,7 +666,7 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
         suggester.model_name()
     );
     println!("  Issues: {}", issues.len());
-    if config.auto_apply {
+    if config.accept_all {
         println!("  Mode: {} (will apply automatically)", "Auto-apply".yellow());
     } else {
         println!("  Mode: Batch collect, then review");
@@ -675,7 +675,7 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     println!();
 
     // Confirm before starting
-    if !config.auto_apply {
+    if !config.accept_all {
         print!("  Start AI analysis? [Y/n]: ");
         io::stdout().flush().ok();
         let input = read_line().trim().to_lowercase();
@@ -728,7 +728,7 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     println!();
 
     // If auto-apply mode, apply all and return
-    if config.auto_apply {
+    if config.accept_all {
         return apply_all_suggestions(issues, &cached_suggestions, config);
     }
 
@@ -1330,7 +1330,7 @@ mod tests {
         let config = AiFixConfig::default();
         assert_eq!(config.provider, AiProviderKind::Claude);
         assert_eq!(config.max_suggestions, 3);
-        assert!(!config.auto_apply);
+        assert!(!config.accept_all);
     }
 
     #[test]
