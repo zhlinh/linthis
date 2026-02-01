@@ -621,6 +621,25 @@ pub enum HookCommands {
         /// Non-interactive mode (use defaults, no prompts)
         #[arg(short = 'y', long)]
         yes: bool,
+
+        /// Enable AI-powered auto-fix during hook execution
+        ///
+        /// When enabled, hook will automatically attempt to fix lint issues using AI.
+        /// Combine with --provider and --accept-all for fully automated fixing.
+        #[arg(long)]
+        ai: bool,
+
+        /// AI provider for fix (requires --ai)
+        ///
+        /// Options: claude, claude-cli, codebuddy, codebuddy-cli, openai, local
+        #[arg(long, requires = "ai")]
+        provider: Option<String>,
+
+        /// Automatically accept all AI fix suggestions (requires --ai)
+        ///
+        /// Warning: This will modify files automatically during hook execution.
+        #[arg(long, requires = "ai")]
+        accept_all: bool,
     },
     /// Uninstall git hook
     Uninstall {
