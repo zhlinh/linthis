@@ -47,7 +47,7 @@ pub struct FixCommandOptions {
     /// Max suggestions per issue
     pub max_suggestions: usize,
     /// Auto-apply suggestions
-    pub auto_apply: bool,
+    pub accept_all: bool,
     /// Number of parallel jobs (0 = sequential)
     pub jobs: usize,
     /// Target specific file (for single-file AI mode)
@@ -144,7 +144,7 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
                 );
                 let ai_config = AiFixConfig::with_provider(&provider)
                     .with_model(options.model.clone())
-                    .with_auto_apply(options.auto_apply)
+                    .with_accept_all(options.accept_all)
                     .with_verbose(options.verbose)
                     .with_parallel(options.jobs);
 
@@ -237,7 +237,7 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
                     );
                     let ai_config = AiFixConfig::with_provider(&provider)
                         .with_model(options.model.clone())
-                        .with_auto_apply(options.auto_apply)
+                        .with_accept_all(options.accept_all)
                         .with_verbose(options.verbose)
                         .with_parallel(options.jobs);
 
@@ -402,7 +402,7 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
 
     if result.is_success() {
         // Handle auto-apply
-        if options.auto_apply && !result.suggestions.is_empty() {
+        if options.accept_all && !result.suggestions.is_empty() {
             if let Some(suggestion) = result.suggestions.first() {
                 // Create a temporary issue for apply_suggestion
                 let issue = LintIssue {

@@ -523,11 +523,11 @@ pub enum Commands {
         #[arg(long, default_value = "3", requires = "ai")]
         max_suggestions: usize,
 
-        /// Automatically apply AI suggestions without confirmation
+        /// Automatically accept all AI suggestions without confirmation
         ///
         /// Warning: This will modify files automatically. Use with caution.
         #[arg(long, requires = "ai")]
-        auto_apply: bool,
+        accept_all: bool,
 
         /// Number of parallel jobs for AI analysis (default: 8)
         ///
