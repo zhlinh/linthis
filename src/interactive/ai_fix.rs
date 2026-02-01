@@ -179,6 +179,161 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
     Ok(suggester)
 }
 
+/// Check if provider is a CLI provider that supports direct file editing
+fn is_cli_provider(kind: AiProviderKind) -> bool {
+    matches!(kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli)
+}
+
+/// Group issues by file path
+fn group_issues_by_file(issues: &[LintIssue]) -> std::collections::HashMap<PathBuf, Vec<&LintIssue>> {
+    let mut groups: std::collections::HashMap<PathBuf, Vec<&LintIssue>> = std::collections::HashMap::new();
+    for issue in issues {
+        groups.entry(issue.file_path.clone()).or_default().push(issue);
+    }
+    groups
+}
+
+/// Run CLI-based file fix (direct file editing mode)
+/// This lets the CLI agent directly edit files, then shows the diff
+pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResult {
+    use std::collections::HashMap;
+
+    let mut fix_result = AiFixResult::default();
+
+    // Group issues by file
+    let file_groups = group_issues_by_file(issues);
+    let total_files = file_groups.len();
+
+    println!();
+    println!("{}", "─".repeat(60).dimmed());
+    println!(
+        "  {} Direct file editing mode ({} files)",
+        "CLI Fix:".cyan().bold(),
+        total_files
+    );
+    println!("{}", "─".repeat(60).dimmed());
+    println!();
+
+    // Create provider for CLI operations
+    let provider_config = match config.provider {
+        AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
+        AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
+        _ => return fix_result,
+    };
+    let provider = AiProvider::new(provider_config);
+
+    // Process files (can be parallelized at file level)
+    let file_list: Vec<_> = file_groups.into_iter().collect();
+
+    for (file_idx, (file_path, file_issues)) in file_list.iter().enumerate() {
+        println!(
+            "  [{}/{}] Processing: {}",
+            file_idx + 1,
+            total_files,
+            file_path.display()
+        );
+
+        // Backup original content
+        let original_content = match fs::read_to_string(file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("    {} Failed to read file: {}", "✗".red(), e);
+                fix_result.errors += file_issues.len();
+                continue;
+            }
+        };
+
+        // Prepare issues for CLI
+        let issues_data: Vec<(usize, String, String)> = file_issues
+            .iter()
+            .map(|i| (i.line, i.message.clone(), i.code.clone().unwrap_or_default()))
+            .collect();
+
+        println!("    {} issues to fix", issues_data.len());
+
+        // Let CLI fix the file
+        let diff_result = provider.fix_file_with_cli(file_path, &issues_data);
+
+        match diff_result {
+            Ok(diff) => {
+                if diff.is_empty() {
+                    println!("    {} No changes made", "⚠".yellow());
+                    fix_result.skipped += file_issues.len();
+                    continue;
+                }
+
+                // Show diff
+                println!();
+                println!("    {}", "Changes:".bold());
+                for line in diff.lines() {
+                    if line.starts_with('+') && !line.starts_with("+++") {
+                        println!("    {}", line.green());
+                    } else if line.starts_with('-') && !line.starts_with("---") {
+                        println!("    {}", line.red());
+                    } else if line.starts_with("@@") {
+                        println!("    {}", line.cyan());
+                    } else {
+                        println!("    {}", line.dimmed());
+                    }
+                }
+                println!();
+
+                if config.accept_all {
+                    // Auto-accept
+                    println!("    {} Changes applied", "✓".green());
+                    fix_result.applied += file_issues.len();
+                    fix_result.modified_files.insert(file_path.clone());
+                } else {
+                    // Ask for confirmation
+                    print!("    Apply changes? [Y/n/r(estore)]: ");
+                    io::stdout().flush().ok();
+                    let input = read_line().trim().to_lowercase();
+
+                    match input.as_str() {
+                        "n" | "no" => {
+                            // Restore original
+                            let _ = fs::write(file_path, &original_content);
+                            println!("    {} Changes discarded", "⚠".yellow());
+                            fix_result.skipped += file_issues.len();
+                        }
+                        "r" | "restore" => {
+                            let _ = fs::write(file_path, &original_content);
+                            println!("    {} File restored", "↺".cyan());
+                            fix_result.skipped += file_issues.len();
+                        }
+                        _ => {
+                            println!("    {} Changes applied", "✓".green());
+                            fix_result.applied += file_issues.len();
+                            fix_result.modified_files.insert(file_path.clone());
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("    {} CLI error: {}", "✗".red(), e);
+                // Restore original on error
+                let _ = fs::write(file_path, &original_content);
+                fix_result.errors += file_issues.len();
+            }
+        }
+
+        println!();
+    }
+
+    // Print summary
+    println!("{}", "═".repeat(60).dimmed());
+    println!("  {}", "CLI Fix Summary".bold());
+    println!("{}", "─".repeat(60).dimmed());
+    println!("  Files processed: {}", total_files.to_string().cyan());
+    println!("  Issues applied:  {}", fix_result.applied.to_string().green());
+    println!("  Issues skipped:  {}", fix_result.skipped.to_string().yellow());
+    println!("  Errors:          {}", fix_result.errors.to_string().red());
+    println!("{}", "═".repeat(60).dimmed());
+    println!();
+
+    fix_result
+}
+
 /// Get AI suggestion for a single issue
 pub fn get_suggestion_for_issue(
     suggester: &AiSuggester,
@@ -678,15 +833,23 @@ fn collect_suggestions_parallel(
 
 /// Run AI fix for all issues in a result
 ///
-/// This uses a two-phase approach:
-/// 1. Phase 1: Batch collect all AI suggestions (user waits once)
-/// 2. Phase 2: Interactive review of all suggestions (no waiting)
+/// For CLI providers (claude-cli, codebuddy-cli):
+/// - Uses direct file editing mode where CLI edits files directly
+/// - Groups issues by file to avoid conflicts
+///
+/// For API providers:
+/// - Uses two-phase approach: collect suggestions, then review
 pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     let issues = &result.issues;
 
     if issues.is_empty() {
         println!("{}", "No issues to fix.".green());
         return AiFixResult::default();
+    }
+
+    // For CLI providers, use direct file editing mode
+    if is_cli_provider(config.provider) {
+        return run_cli_file_fix(issues, config);
     }
 
     // Create suggester

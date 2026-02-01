@@ -435,6 +435,99 @@ impl AiProvider {
         Ok(response)
     }
 
+    /// Fix a file directly using Claude CLI with Edit tool
+    /// Returns the diff of changes made
+    pub fn fix_file_with_cli(
+        &self,
+        file_path: &std::path::Path,
+        issues: &[(usize, String, String)], // (line, message, code)
+    ) -> Result<String, String> {
+        use std::process::{Command, Stdio};
+
+        // Only works with CLI providers
+        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli) {
+            return Err("fix_file_with_cli only works with CLI providers".to_string());
+        }
+
+        // Read original content for backup
+        let original_content = std::fs::read_to_string(file_path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+
+        // Build issue descriptions
+        let issues_desc: Vec<String> = issues
+            .iter()
+            .map(|(line, msg, code)| format!("- Line {}: {} ({})", line, msg, code))
+            .collect();
+
+        // Build prompt for direct file editing
+        let prompt = format!(
+            r#"Fix the following lint issues in file "{}":
+
+{}
+
+IMPORTANT:
+- Use the Edit tool to fix each issue directly in the file
+- Make MINIMAL changes - only fix what each error describes
+- Do NOT add, remove, or modify any other code
+- Preserve all formatting and indentation
+- After fixing, respond with "Done" or describe what you fixed"#,
+            file_path.display(),
+            issues_desc.join("\n")
+        );
+
+        // Run CLI with Edit tool allowed
+        let cli_cmd = match self.config.kind {
+            AiProviderKind::ClaudeCli => "claude",
+            AiProviderKind::CodeBuddyCli => "codebuddy",
+            _ => unreachable!(),
+        };
+
+        let mut cmd = Command::new(cli_cmd);
+        cmd.arg("-p")
+            .arg("--output-format")
+            .arg("text")
+            .arg("--allowedTools")
+            .arg("Edit,Read")
+            .arg("--")  // Separate options from prompt
+            .arg(&prompt);
+
+        // Set working directory to file's parent
+        if let Some(parent) = file_path.parent() {
+            cmd.current_dir(parent);
+        }
+
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn {} command: {}", cli_cmd, e))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to wait for {} command: {}", cli_cmd, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Restore original file on error
+            let _ = std::fs::write(file_path, &original_content);
+            return Err(format!("{} CLI error: {}", cli_cmd, stderr));
+        }
+
+        // Read modified content
+        let modified_content = std::fs::read_to_string(file_path)
+            .map_err(|e| format!("Failed to read modified file: {}", e))?;
+
+        // Generate diff
+        let diff = generate_unified_diff(&original_content, &modified_content, file_path);
+
+        // Store original for potential restore
+        // (caller can restore if needed)
+
+        Ok(diff)
+    }
+
     fn complete_codebuddy(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
         // Try CODEBUDDY_API_KEY from env, then config
         let api_key = env::var("CODEBUDDY_API_KEY")
@@ -683,6 +776,80 @@ Note: This is a mock AI response for testing."#,
             line = line_num
         ))
     }
+}
+
+/// Generate unified diff between two strings
+fn generate_unified_diff(original: &str, modified: &str, file_path: &std::path::Path) -> String {
+    use std::fmt::Write;
+
+    let original_lines: Vec<&str> = original.lines().collect();
+    let modified_lines: Vec<&str> = modified.lines().collect();
+
+    if original_lines == modified_lines {
+        return String::new();
+    }
+
+    let mut diff = String::new();
+    let file_name = file_path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+
+    writeln!(diff, "--- a/{}", file_name).ok();
+    writeln!(diff, "+++ b/{}", file_name).ok();
+
+    // Simple line-by-line diff
+    let mut i = 0;
+    let mut j = 0;
+
+    while i < original_lines.len() || j < modified_lines.len() {
+        if i < original_lines.len() && j < modified_lines.len() {
+            if original_lines[i] == modified_lines[j] {
+                i += 1;
+                j += 1;
+                continue;
+            }
+        }
+
+        // Find the extent of the change
+        let start_i = i;
+        let start_j = j;
+
+        // Skip different lines
+        while i < original_lines.len() && j < modified_lines.len() && original_lines[i] != modified_lines[j] {
+            i += 1;
+            j += 1;
+        }
+
+        // Handle remaining lines
+        if i >= original_lines.len() && j < modified_lines.len() {
+            while j < modified_lines.len() {
+                j += 1;
+            }
+        } else if j >= modified_lines.len() && i < original_lines.len() {
+            while i < original_lines.len() {
+                i += 1;
+            }
+        }
+
+        // Output hunk
+        let old_count = i - start_i;
+        let new_count = j - start_j;
+
+        writeln!(diff, "@@ -{},{} +{},{} @@", start_i + 1, old_count.max(1), start_j + 1, new_count.max(1)).ok();
+
+        for k in start_i..i {
+            if k < original_lines.len() {
+                writeln!(diff, "-{}", original_lines[k]).ok();
+            }
+        }
+        for k in start_j..j {
+            if k < modified_lines.len() {
+                writeln!(diff, "+{}", modified_lines[k]).ok();
+            }
+        }
+    }
+
+    diff
 }
 
 #[cfg(test)]
