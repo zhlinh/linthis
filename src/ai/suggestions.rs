@@ -261,7 +261,8 @@ impl AiSuggester {
         let file_path_str = issue.file_path.to_string_lossy().to_string();
         let issue_code = issue.code.as_deref().unwrap_or("UNKNOWN");
 
-        // Skip if issue already has a suggestion and option is set
+        // Note: skip_with_suggestion is now disabled by default for AI fix
+        // because the linter suggestion is human-readable text, not actual code
         if options.skip_with_suggestion && issue.suggestion.is_some() {
             return SuggestionResult::success(
                 issue_code,

@@ -202,6 +202,7 @@ pub fn get_suggestion_for_issue(
         max_suggestions: config.max_suggestions,
         include_explanation: true,
         include_confidence: true,
+        skip_with_suggestion: false, // Always call AI, linter suggestions are text not code
         ..Default::default()
     };
 
