@@ -263,6 +263,71 @@ linthis config migrate [OPTIONS]
 
 ---
 
+## fix
+
+Interactive fix mode with optional AI assistance.
+
+```bash
+linthis --fix [OPTIONS]
+linthis fix [OPTIONS]
+```
+
+### Fix Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--fix` | Enter fix mode after check/format | `--fix` |
+| `--ai` | Use AI for fix suggestions (requires `--fix`) | `--fix --ai` |
+| `--provider` | AI provider (requires `--ai`) | `--provider claude` |
+| `--accept-all` | Auto-accept all fixes (requires `--fix`) | `--fix --accept-all` |
+
+### AI Providers
+
+| Provider | Description |
+|----------|-------------|
+| `claude` | Anthropic Claude API (default) |
+| `claude-cli` | Claude CLI (`claude -p` command) |
+| `codebuddy` | CodeBuddy API |
+| `codebuddy-cli` | CodeBuddy CLI |
+| `openai` | OpenAI API |
+| `local` | Local LLM (Ollama, etc.) |
+| `mock` | Mock provider for testing |
+
+### Provider Priority
+
+1. Command line (`--provider`)
+2. Environment variable (`LINTHIS_AI_PROVIDER`)
+3. Config file (`[ai]` section)
+4. Default: `claude`
+
+**Examples:**
+
+```bash
+# Interactive fix mode (manual review)
+linthis -i src/ --fix
+
+# AI-powered fix with interactive review
+linthis -i src/ --fix --ai
+
+# AI fix with specific provider
+linthis --fix --ai --provider claude
+linthis --fix --ai --provider claude-cli
+
+# Auto-accept all AI fixes (for CI/automation)
+linthis --fix --ai --accept-all
+linthis --fix --ai --provider claude-cli --accept-all
+
+# Fix only staged files with AI
+linthis -s --fix --ai --provider claude-cli --accept-all
+
+# Fix specific language
+linthis -l python --fix --ai --provider claude
+```
+
+See [AI-Powered Fix](../features/ai-fix.md) for detailed documentation.
+
+---
+
 ## watch
 
 Watch mode for continuous checking.
