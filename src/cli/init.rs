@@ -267,6 +267,9 @@ pub fn handle_init_command(
                 format_only: false,        // Not format-only
                 force,                     // Use force flag from init
                 yes: true,                 // Non-interactive mode
+                ai: false,                 // No AI fix by default
+                provider: None,            // No provider specified
+                accept_all: false,         // Don't auto-accept fixes
             });
             if exit_code != ExitCode::SUCCESS {
                 return exit_code;

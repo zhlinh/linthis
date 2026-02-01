@@ -22,8 +22,8 @@ use super::commands::{HookCommands, HookEvent, HookTool};
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
-        HookCommands::Install { hook_type, hook_event, check_only, format_only, force, yes } => {
-            handle_hook_install(hook_type, hook_event, check_only, format_only, force, yes)
+        HookCommands::Install { hook_type, hook_event, check_only, format_only, force, yes, ai, provider, accept_all } => {
+            handle_hook_install(hook_type, hook_event, check_only, format_only, force, yes, ai, provider, accept_all)
         }
         HookCommands::Uninstall { hook_event, all, yes } => {
             handle_hook_uninstall(hook_event, all, yes)
@@ -48,6 +48,9 @@ fn handle_hook_install(
     format_only: bool,
     force: bool,
     yes: bool,
+    ai: bool,
+    provider: Option<String>,
+    accept_all: bool,
 ) -> ExitCode {
     use std::io::{self, Write};
 
@@ -105,11 +108,11 @@ fn handle_hook_install(
                 match choice.trim() {
                     "1" => {
                         // Replace: use force flag internally
-                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, true, false);
+                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, true, false, ai, provider.clone(), accept_all);
                     }
                     "2" => {
                         // Append
-                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, false, true);
+                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, false, true, ai, provider.clone(), accept_all);
                     }
                     "3" => {
                         // Backup and replace
@@ -119,7 +122,7 @@ fn handle_hook_install(
                             return ExitCode::from(2);
                         }
                         println!("{} Created backup at {}", "✓".green(), backup_path.display());
-                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, true, false);
+                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, true, false, ai, provider.clone(), accept_all);
                     }
                     _ => {
                         println!("Installation cancelled");
@@ -128,7 +131,7 @@ fn handle_hook_install(
                 }
             } else {
                 // Non-interactive mode: append by default
-                return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, false, true);
+                return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, false, true, ai, provider.clone(), accept_all);
             }
         }
 
@@ -137,7 +140,7 @@ fn handle_hook_install(
     }
 
     // No existing hook or force mode - create new hook
-    handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, force, false)
+    handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, force, false, ai, provider, accept_all)
 }
 
 /// Internal implementation of hook installation
@@ -148,16 +151,19 @@ fn handle_hook_install_impl(
     format_only: bool,
     force: bool,
     append: bool,
+    ai: bool,
+    provider: Option<String>,
+    accept_all: bool,
 ) -> ExitCode {
     let tool = hook_type.unwrap_or(HookTool::Git);
 
     // For append mode, we need to modify create_hook_config to support appending
     if append {
         // For now, use create_hook_config which already handles appending for git hooks
-        if let Err(exit_code) = create_hook_config(&tool, hook_event, check_only, format_only, false) {
+        if let Err(exit_code) = create_hook_config(&tool, hook_event, check_only, format_only, false, ai, &provider, accept_all) {
             return exit_code;
         }
-    } else if let Err(exit_code) = create_hook_config(&tool, hook_event, check_only, format_only, force) {
+    } else if let Err(exit_code) = create_hook_config(&tool, hook_event, check_only, format_only, force, ai, &provider, accept_all) {
         return exit_code;
     }
 
@@ -557,7 +563,7 @@ pub fn find_git_root() -> Option<PathBuf> {
 }
 
 /// Create hook configuration file based on the selected tool and event
-fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: bool, hook_format_only: bool, force: bool) -> Result<(), ExitCode> {
+fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: bool, hook_format_only: bool, force: bool, ai: bool, provider: &Option<String>, accept_all: bool) -> Result<(), ExitCode> {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -578,7 +584,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: 
             }
 
             // Build hook command based on options and event type
-            let hook_cmd = build_hook_command(hook_event, hook_check_only, hook_format_only);
+            let hook_cmd = build_hook_command(hook_event, hook_check_only, hook_format_only, ai, provider, accept_all);
 
             // For prek/pre-commit, we need to specify the stage for different hook types
             let stage = match hook_event {
@@ -687,7 +693,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: 
             }
 
             // Build hook command based on options and event type
-            let linthis_hook_line = build_hook_command(hook_event, hook_check_only, hook_format_only);
+            let linthis_hook_line = build_hook_command(hook_event, hook_check_only, hook_format_only, ai, provider, accept_all);
 
             // Check if hook file already exists
             if hook_path.exists() {
@@ -789,8 +795,15 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: 
 }
 
 /// Build the linthis command for a hook based on event type and options
-fn build_hook_command(hook_event: &HookEvent, hook_check_only: bool, hook_format_only: bool) -> String {
-    match hook_event {
+fn build_hook_command(
+    hook_event: &HookEvent,
+    hook_check_only: bool,
+    hook_format_only: bool,
+    ai: bool,
+    provider: &Option<String>,
+    accept_all: bool,
+) -> String {
+    let mut cmd = match hook_event {
         HookEvent::PreCommit => {
             // For pre-commit: check staged files with hook mode output
             if hook_check_only {
@@ -815,7 +828,21 @@ fn build_hook_command(hook_event: &HookEvent, hook_check_only: bool, hook_format
             // For commit-msg: validate commit message using the msg file passed as $1
             "linthis hook commit-msg-check \"$1\"".to_string()
         }
+    };
+
+    // Add AI-related flags for auto-fix during hook execution
+    // Note: commit-msg hook doesn't support AI fix (it validates message format, not code)
+    if ai && !matches!(hook_event, HookEvent::CommitMsg) {
+        cmd.push_str(" --fix --ai");
+        if let Some(ref p) = provider {
+            cmd.push_str(&format!(" --provider {}", p));
+        }
+        if accept_all {
+            cmd.push_str(" --accept-all");
+        }
     }
+
+    cmd
 }
 
 /// Get the git action for a hook event
