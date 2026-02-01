@@ -642,10 +642,13 @@ fn parse_ai_response(response: &str, language: &str, line_number: usize) -> Vec<
                     let code_str = code.as_str().trim();
                     // Skip if it's a diff block we already tried to parse
                     if !code_str.starts_with("@@") && !code_str.starts_with("---") {
+                        // Limit code block size - if AI returned too much, extract only relevant lines
+                        let limited_code = limit_code_block_size(code_str, 5);
+                        let line_count = limited_code.lines().count();
                         let suggestion = FixSuggestion::new(
-                            code_str.to_string(),
+                            limited_code,
                             line_number,
-                            line_number,
+                            line_number + line_count.saturating_sub(1),
                             language,
                         );
                         suggestions.push(suggestion);
@@ -665,10 +668,12 @@ fn parse_ai_response(response: &str, language: &str, line_number: usize) -> Vec<
                             && !code_str.starts_with("@@")
                             && !code_str.starts_with("---")
                         {
+                            let limited_code = limit_code_block_size(code_str, 5);
+                            let line_count = limited_code.lines().count();
                             let suggestion = FixSuggestion::new(
-                                code_str.to_string(),
+                                limited_code,
                                 line_number,
-                                line_number,
+                                line_number + line_count.saturating_sub(1),
                                 language,
                             );
                             suggestions.push(suggestion);
@@ -747,70 +752,85 @@ fn parse_diff_hunk(diff: &str, language: &str) -> Option<FixSuggestion> {
     let hunk_end = cap.get(0)?.end();
     let diff_body = &diff[hunk_end..];
 
-    // Parse diff lines
+    // Parse diff lines - only extract actual changes (+ and - lines)
+    // Skip context lines (lines starting with space) as they confuse the replacement
     let mut added_lines: Vec<String> = Vec::new();
-    let mut removed_count = 0;
+    let mut removed_lines: Vec<String> = Vec::new();
+    let mut first_change_offset: Option<usize> = None;
+    let mut context_before = 0;
 
     for line in diff_body.lines() {
         if line.starts_with('+') && !line.starts_with("+++") {
             // Added line - remove the '+' prefix
+            if first_change_offset.is_none() {
+                first_change_offset = Some(context_before);
+            }
             added_lines.push(line[1..].to_string());
         } else if line.starts_with('-') && !line.starts_with("---") {
-            // Removed line - count it
-            removed_count += 1;
-        } else if line.starts_with(' ') {
-            // Context line - include in added lines (unchanged)
-            added_lines.push(line[1..].to_string());
-        } else if !line.is_empty() && !line.starts_with("@@") && !line.starts_with("\\") {
-            // Line without prefix (some AIs omit the space for context)
-            // Only include if we're in the middle of parsing
-            if !added_lines.is_empty() || removed_count > 0 {
-                added_lines.push(line.to_string());
+            // Removed line
+            if first_change_offset.is_none() {
+                first_change_offset = Some(context_before);
             }
+            removed_lines.push(line[1..].to_string());
+        } else if line.starts_with(' ') {
+            // Context line - count them before first change
+            if first_change_offset.is_none() {
+                context_before += 1;
+            }
+            // Don't add context lines to added_lines
         }
+        // Ignore other lines (@@, \, empty, etc.)
     }
 
     if added_lines.is_empty() {
         return None;
     }
 
-    // Filter out context lines to get only the actual fix
-    // We want to return only the lines that replace the removed lines
-    let fix_code = extract_fix_from_diff_lines(&added_lines, removed_count, old_count);
+    // Calculate actual start line (accounting for context before)
+    let actual_start = old_start + first_change_offset.unwrap_or(0);
+    let removed_count = removed_lines.len();
 
-    let end_line = old_start + old_count.saturating_sub(1);
+    // Only use the added lines that correspond to the removed lines
+    // If AI returned way more lines than removed, it likely returned extra context
+    let fix_code = if removed_count > 0 && added_lines.len() > removed_count * 3 {
+        // AI returned too much content - try to extract just the relevant portion
+        // Take only the first N lines where N is reasonable based on removed count
+        let take_count = (removed_count * 2).max(3).min(added_lines.len());
+        added_lines[..take_count].join("\n")
+    } else {
+        added_lines.join("\n")
+    };
+
+    // End line is based on how many lines were actually removed
+    let end_line = if removed_count > 0 {
+        actual_start + removed_count - 1
+    } else {
+        actual_start
+    };
 
     Some(FixSuggestion::new(
         fix_code,
-        old_start,
+        actual_start,
         end_line,
         language,
     ))
 }
 
-/// Extract the actual fix code from diff lines
-fn extract_fix_from_diff_lines(
-    added_lines: &[String],
-    removed_count: usize,
-    _old_count: usize,
-) -> String {
-    // If we have context lines (old_count > removed_count), we need to handle them
-    // The added_lines includes context + new lines
-    // We want to extract only the changed portion
+/// Limit code block size to avoid applying entire file as a fix
+/// If the code block has more than max_lines, try to extract only the relevant portion
+fn limit_code_block_size(code: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = code.lines().collect();
 
-    // For simple cases where we're replacing lines directly
-    if removed_count > 0 && added_lines.len() >= removed_count {
-        // Return all added lines as the replacement
-        return added_lines.join("\n");
+    if lines.len() <= max_lines {
+        return code.to_string();
     }
 
-    // If no lines were removed but lines were added, return added lines
-    if removed_count == 0 && !added_lines.is_empty() {
-        return added_lines.join("\n");
-    }
+    // If code is too long, it's likely the AI returned too much
+    // Try to find the actual changed portion by looking for common patterns
 
-    // For complex cases, just return all non-context lines
-    added_lines.join("\n")
+    // For simple cases, just take the first few lines
+    // This is a heuristic - the AI should really return minimal diffs
+    lines[..max_lines].join("\n")
 }
 
 /// Check if text looks like code
@@ -977,7 +997,7 @@ Note: Added underscore prefix.
     fn test_parse_unified_diff_multiline() {
         let response = r#"
 ```diff
-@@ -10,3 +10,2 @@
+@@ -10,4 +10,3 @@
  context before
 -    old line 1
 -    old line 2
@@ -989,7 +1009,9 @@ Note: Added underscore prefix.
         let suggestions = parse_ai_response(response, "python", 10);
 
         assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].start_line, 10);
+        // Start line is 11 (10 + 1 context line before the change)
+        assert_eq!(suggestions[0].start_line, 11);
+        // End line is 12 (start + 2 removed lines - 1)
         assert_eq!(suggestions[0].end_line, 12);
     }
 
