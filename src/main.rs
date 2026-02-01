@@ -758,6 +758,70 @@ fn main() -> ExitCode {
                 }
             }
 
+            // If --fix is specified and there are issues, enter fix mode
+            if cli.fix && !result.issues.is_empty() {
+                use cli::resolve_ai_provider;
+                use linthis::config::Config;
+                use linthis::interactive::{run_ai_fix_all, run_interactive, AiFixConfig};
+
+                let project_root = linthis::utils::get_project_root();
+                let config = Config::load_merged(&project_root);
+
+                if cli.ai {
+                    // AI-powered fix mode
+                    let provider = resolve_ai_provider(
+                        cli.provider.as_deref(),
+                        config.ai.provider.as_deref(),
+                    );
+                    let ai_config = AiFixConfig::with_provider(&provider)
+                        .with_accept_all(cli.accept_all)
+                        .with_verbose(cli.verbose);
+
+                    if !cli.quiet {
+                        eprintln!(
+                            "\n{} Entering AI fix mode with provider: {}",
+                            "→".cyan(),
+                            provider.cyan()
+                        );
+                    }
+
+                    let ai_result = run_ai_fix_all(&result, &ai_config);
+
+                    if !cli.quiet && ai_result.applied > 0 {
+                        eprintln!(
+                            "{} Applied {} fix(es)",
+                            "✓".green(),
+                            ai_result.applied
+                        );
+                    }
+
+                    // Return success if all issues were fixed
+                    if ai_result.applied > 0 && ai_result.errors == 0 {
+                        return ExitCode::SUCCESS;
+                    }
+                } else {
+                    // Interactive fix mode
+                    if !cli.quiet {
+                        eprintln!("\n{} Entering interactive fix mode", "→".cyan());
+                    }
+
+                    let interactive_result = run_interactive(&result);
+
+                    if !cli.quiet {
+                        let count = interactive_result.edited + interactive_result.ignored;
+                        if count > 0 {
+                            eprintln!(
+                                "{} Processed {} issue(s)",
+                                "✓".green(),
+                                count
+                            );
+                        }
+                    }
+                }
+
+                return ExitCode::from(result.exit_code as u8);
+            }
+
             // Show hint for fix mode if there are issues
             if !cli.quiet && !result.issues.is_empty() {
                 print_fix_hint();
