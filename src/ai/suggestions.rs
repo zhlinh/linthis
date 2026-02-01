@@ -624,32 +624,24 @@ fn categorize_from_rule_id(rule_id: &str) -> IssueCategory {
 fn parse_ai_response(response: &str, language: &str, line_number: usize) -> Vec<FixSuggestion> {
     let mut suggestions = Vec::new();
 
-    // Extract code blocks from the response
-    let code_block_pattern = format!("```{}\\s*\\n([\\s\\S]*?)\\n```", language);
-    let generic_block_pattern = r"```\s*\n([\s\S]*?)\n```";
-
-    // Try language-specific blocks first
-    if let Ok(re) = regex::Regex::new(&code_block_pattern) {
-        for cap in re.captures_iter(response) {
-            if let Some(code) = cap.get(1) {
-                let suggestion = FixSuggestion::new(
-                    code.as_str().trim().to_string(),
-                    line_number,
-                    line_number,
-                    language,
-                );
-                suggestions.push(suggestion);
-            }
-        }
+    // Try unified diff format first (preferred)
+    if let Some(diff_suggestions) = parse_unified_diff(response, language) {
+        suggestions.extend(diff_suggestions);
     }
 
-    // If no language-specific blocks found, try generic blocks
+    // Fall back to code blocks if no diff found
     if suggestions.is_empty() {
-        if let Ok(re) = regex::Regex::new(generic_block_pattern) {
+        // Extract code blocks from the response
+        let code_block_pattern = format!("```{}\\s*\\n([\\s\\S]*?)\\n```", language);
+        let generic_block_pattern = r"```\s*\n([\s\S]*?)\n```";
+
+        // Try language-specific blocks first
+        if let Ok(re) = regex::Regex::new(&code_block_pattern) {
             for cap in re.captures_iter(response) {
                 if let Some(code) = cap.get(1) {
                     let code_str = code.as_str().trim();
-                    if !code_str.is_empty() {
+                    // Skip if it's a diff block we already tried to parse
+                    if !code_str.starts_with("@@") && !code_str.starts_with("---") {
                         let suggestion = FixSuggestion::new(
                             code_str.to_string(),
                             line_number,
@@ -657,6 +649,30 @@ fn parse_ai_response(response: &str, language: &str, line_number: usize) -> Vec<
                             language,
                         );
                         suggestions.push(suggestion);
+                    }
+                }
+            }
+        }
+
+        // If no language-specific blocks found, try generic blocks
+        if suggestions.is_empty() {
+            if let Ok(re) = regex::Regex::new(generic_block_pattern) {
+                for cap in re.captures_iter(response) {
+                    if let Some(code) = cap.get(1) {
+                        let code_str = code.as_str().trim();
+                        // Skip diff blocks and empty blocks
+                        if !code_str.is_empty()
+                            && !code_str.starts_with("@@")
+                            && !code_str.starts_with("---")
+                        {
+                            let suggestion = FixSuggestion::new(
+                                code_str.to_string(),
+                                line_number,
+                                line_number,
+                                language,
+                            );
+                            suggestions.push(suggestion);
+                        }
                     }
                 }
             }
@@ -683,6 +699,118 @@ fn parse_ai_response(response: &str, language: &str, line_number: usize) -> Vec<
     }
 
     suggestions
+}
+
+/// Parse unified diff format from AI response
+fn parse_unified_diff(response: &str, language: &str) -> Option<Vec<FixSuggestion>> {
+    // Look for diff code blocks
+    let diff_pattern = r"```diff\s*\n([\s\S]*?)\n```";
+
+    let re = regex::Regex::new(diff_pattern).ok()?;
+    let mut suggestions = Vec::new();
+
+    for cap in re.captures_iter(response) {
+        if let Some(diff_content) = cap.get(1) {
+            if let Some(suggestion) = parse_diff_hunk(diff_content.as_str(), language) {
+                suggestions.push(suggestion);
+            }
+        }
+    }
+
+    // Also try to find inline diff (not in code block)
+    if suggestions.is_empty() {
+        if let Some(suggestion) = parse_diff_hunk(response, language) {
+            suggestions.push(suggestion);
+        }
+    }
+
+    if suggestions.is_empty() {
+        None
+    } else {
+        Some(suggestions)
+    }
+}
+
+/// Parse a single diff hunk and extract the fix
+fn parse_diff_hunk(diff: &str, language: &str) -> Option<FixSuggestion> {
+    // Parse the @@ -start,count +start,count @@ header
+    let hunk_pattern = r"@@\s*-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s*@@";
+    let re = regex::Regex::new(hunk_pattern).ok()?;
+
+    let cap = re.captures(diff)?;
+    let old_start: usize = cap.get(1)?.as_str().parse().ok()?;
+    let old_count: usize = cap.get(2).map_or(1, |m| m.as_str().parse().unwrap_or(1));
+    let _new_start: usize = cap.get(3)?.as_str().parse().ok()?;
+    let _new_count: usize = cap.get(4).map_or(1, |m| m.as_str().parse().unwrap_or(1));
+
+    // Find the position after the @@ line
+    let hunk_end = cap.get(0)?.end();
+    let diff_body = &diff[hunk_end..];
+
+    // Parse diff lines
+    let mut added_lines: Vec<String> = Vec::new();
+    let mut removed_count = 0;
+
+    for line in diff_body.lines() {
+        if line.starts_with('+') && !line.starts_with("+++") {
+            // Added line - remove the '+' prefix
+            added_lines.push(line[1..].to_string());
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            // Removed line - count it
+            removed_count += 1;
+        } else if line.starts_with(' ') {
+            // Context line - include in added lines (unchanged)
+            added_lines.push(line[1..].to_string());
+        } else if !line.is_empty() && !line.starts_with("@@") && !line.starts_with("\\") {
+            // Line without prefix (some AIs omit the space for context)
+            // Only include if we're in the middle of parsing
+            if !added_lines.is_empty() || removed_count > 0 {
+                added_lines.push(line.to_string());
+            }
+        }
+    }
+
+    if added_lines.is_empty() {
+        return None;
+    }
+
+    // Filter out context lines to get only the actual fix
+    // We want to return only the lines that replace the removed lines
+    let fix_code = extract_fix_from_diff_lines(&added_lines, removed_count, old_count);
+
+    let end_line = old_start + old_count.saturating_sub(1);
+
+    Some(FixSuggestion::new(
+        fix_code,
+        old_start,
+        end_line,
+        language,
+    ))
+}
+
+/// Extract the actual fix code from diff lines
+fn extract_fix_from_diff_lines(
+    added_lines: &[String],
+    removed_count: usize,
+    _old_count: usize,
+) -> String {
+    // If we have context lines (old_count > removed_count), we need to handle them
+    // The added_lines includes context + new lines
+    // We want to extract only the changed portion
+
+    // For simple cases where we're replacing lines directly
+    if removed_count > 0 && added_lines.len() >= removed_count {
+        // Return all added lines as the replacement
+        return added_lines.join("\n");
+    }
+
+    // If no lines were removed but lines were added, return added lines
+    if removed_count == 0 && !added_lines.is_empty() {
+        return added_lines.join("\n");
+    }
+
+    // For complex cases, just return all non-context lines
+    added_lines.join("\n")
 }
 
 /// Check if text looks like code
@@ -823,6 +951,65 @@ Note: Added underscore prefix to indicate intentionally unused variable.
         assert_eq!(suggestions.len(), 1);
         assert!(suggestions[0].code.contains("let _x"));
         assert!(suggestions[0].explanation.is_some());
+    }
+
+    #[test]
+    fn test_parse_unified_diff() {
+        let response = r#"
+Here's the fix:
+```diff
+@@ -5,1 +5,1 @@
+-    let x = 5;
++    let _x = 5;
+```
+Note: Added underscore prefix.
+"#;
+
+        let suggestions = parse_ai_response(response, "rust", 5);
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].start_line, 5);
+        assert_eq!(suggestions[0].end_line, 5);
+        assert!(suggestions[0].code.contains("let _x"));
+    }
+
+    #[test]
+    fn test_parse_unified_diff_multiline() {
+        let response = r#"
+```diff
+@@ -10,3 +10,2 @@
+ context before
+-    old line 1
+-    old line 2
++    new line
+ context after
+```
+"#;
+
+        let suggestions = parse_ai_response(response, "python", 10);
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].start_line, 10);
+        assert_eq!(suggestions[0].end_line, 12);
+    }
+
+    #[test]
+    fn test_parse_diff_with_context() {
+        let response = r#"
+```diff
+@@ -4,3 +4,3 @@
+     let y = 10;
+-    let x = 5;
++    let _x = 5;
+     println!("{}", y);
+```
+"#;
+
+        let suggestions = parse_ai_response(response, "rust", 5);
+
+        assert_eq!(suggestions.len(), 1);
+        // The fix should include the replaced line
+        assert!(suggestions[0].code.contains("let _x"));
     }
 
     #[test]

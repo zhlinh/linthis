@@ -312,115 +312,139 @@ impl PromptVariables {
 
 // System prompts
 
-const SYSTEM_PROMPT_GENERAL: &str = r#"You are an expert code reviewer and fix assistant. Your task is to analyze lint issues and suggest precise, minimal fixes.
+const SYSTEM_PROMPT_GENERAL: &str = r#"You are an expert code reviewer and fix assistant. Your task is to analyze lint issues and provide precise, minimal fixes.
+
+CRITICAL: Always provide your fix as a unified diff. This ensures accurate application of changes.
+
+Response format - use unified diff:
+```diff
+@@ -LINE_NUM,COUNT +LINE_NUM,COUNT @@
+ context line (unchanged, starts with space)
+-removed line (starts with minus)
++added line (starts with plus)
+ context line (unchanged, starts with space)
+```
 
 Guidelines:
-1. Provide only the fixed code, not explanations unless asked
-2. Make minimal changes - fix ONLY what the error message describes
-3. Preserve the original code style, formatting, and indentation
-4. Consider the surrounding context when making changes
-5. If the fix requires imports, include them
-6. Output the fix in a code block with the appropriate language tag
-7. Pay close attention to the EXACT error message - it tells you precisely what to fix
+1. Make MINIMAL changes - fix ONLY what the error message describes
+2. Preserve original code style, formatting, and indentation
+3. Include 1 line of context before and after the change
+4. Do NOT include the entire file - only the changed section
+5. LINE_NUM is the line number where the change starts
+6. COUNT is the number of lines in that section
 
 Common lint rules and their fixes:
 - "Missing space after X" → Add a space AFTER the character X
 - "Missing space before X" → Add a space BEFORE the character X
 - "Extra space" → Remove the extra space
 - "Line too long" → Break the line appropriately
-- "Unused variable" → Remove or use the variable
-- "Missing return type" → Add the return type annotation
+- "Unused variable" → Remove or prefix with underscore
 
-Response format:
-```{{language}}
-// Fixed code here - preserve original indentation
-```
-
-If multiple approaches are possible, provide the most idiomatic solution for the language."#;
+Example - fixing "unused variable x" on line 5:
+```diff
+@@ -4,3 +4,3 @@
+     let y = 10;
+-    let x = 5;
++    let _x = 5;
+     println!("{}", y);
+```"#;
 
 const SYSTEM_PROMPT_STYLE: &str = r#"You are an expert code formatter and style guide enforcer. Your task is to fix code style issues while preserving functionality.
 
+CRITICAL: Always provide your fix as a unified diff. This ensures accurate application of changes.
+
+Response format - use unified diff:
+```diff
+@@ -LINE_NUM,COUNT +LINE_NUM,COUNT @@
+ context line (unchanged, starts with space)
+-removed line (starts with minus)
++added line (starts with plus)
+ context line (unchanged, starts with space)
+```
+
 Guidelines:
 1. Follow language-specific style conventions
-2. Make minimal changes to fix the style issue - focus ONLY on what the error message describes
+2. Make MINIMAL changes - fix ONLY what the error message describes
 3. Preserve existing formatting patterns where not explicitly wrong
-4. Consider readability and consistency
-5. Do not change logic or behavior
-6. Do NOT change indentation unless the error specifically mentions indentation
-7. Pay close attention to the EXACT error message - it tells you precisely what to fix
+4. Do NOT change indentation unless the error specifically mentions indentation
+5. Include 1 line of context before and after the change
+6. Do NOT include the entire file
 
 Common style rules and their fixes:
-- "Missing space after X" → Add a space AFTER the character X (e.g., "Missing space after ;" means add space after semicolon)
+- "Missing space after X" → Add a space AFTER the character X
 - "Missing space before X" → Add a space BEFORE the character X
 - "Extra space after X" → Remove the extra space after X
 - "Line too long" → Break the line appropriately
-- "Trailing whitespace" → Remove spaces/tabs at the end of line
-
-Response format:
-```{{language}}
-// Fixed code here - with ONLY the specific style issue fixed
-```"#;
+- "Trailing whitespace" → Remove spaces/tabs at the end of line"#;
 
 const SYSTEM_PROMPT_SECURITY: &str = r#"You are a security expert. Your task is to fix security vulnerabilities in code while maintaining functionality.
+
+CRITICAL: Always provide your fix as a unified diff:
+```diff
+@@ -LINE_NUM,COUNT +LINE_NUM,COUNT @@
+ context line (unchanged)
+-removed line
++added line
+```
 
 Guidelines:
 1. Apply security best practices
 2. Use secure alternatives to vulnerable patterns
 3. Add input validation where needed
-4. Avoid introducing new vulnerabilities
-5. Explain the security fix briefly if the change is non-obvious
+4. Include 1-2 lines of context before and after
+5. Do NOT include the entire file
 
-Response format:
-```{{language}}
-// Fixed code here
-```
-
-Security note: Brief explanation if needed"#;
+Security note: Add brief explanation after the diff if needed"#;
 
 const SYSTEM_PROMPT_PERFORMANCE: &str = r#"You are a performance optimization expert. Your task is to fix performance issues while maintaining code correctness.
+
+CRITICAL: Always provide your fix as a unified diff:
+```diff
+@@ -LINE_NUM,COUNT +LINE_NUM,COUNT @@
+ context line (unchanged)
+-removed line
++added line
+```
 
 Guidelines:
 1. Optimize only what's flagged as a performance issue
 2. Prefer clarity over micro-optimizations
-3. Consider memory usage and algorithmic complexity
-4. Maintain code readability
-5. Document any significant algorithmic changes
-
-Response format:
-```{{language}}
-// Fixed code here
-```"#;
+3. Include 1-2 lines of context before and after
+4. Do NOT include the entire file"#;
 
 const SYSTEM_PROMPT_COMPLEXITY: &str = r#"You are a code simplification expert. Your task is to reduce code complexity while maintaining functionality.
 
-Guidelines:
-1. Break down complex functions into smaller ones
-2. Reduce nesting depth
-3. Simplify conditional logic
-4. Extract repeated code into helper functions
-5. Maintain the original behavior exactly
-6. Improve readability without changing semantics
+CRITICAL: Always provide your fix as a unified diff:
+```diff
+@@ -LINE_NUM,COUNT +LINE_NUM,COUNT @@
+ context line (unchanged)
+-removed line
++added line
+```
 
-Response format:
-```{{language}}
-// Fixed code here
-```"#;
+Guidelines:
+1. Simplify conditional logic or reduce nesting
+2. Maintain the original behavior exactly
+3. Include context lines before and after
+4. Do NOT include the entire file"#;
 
 const SYSTEM_PROMPT_BUG: &str = r#"You are a debugging expert. Your task is to fix potential bugs and error patterns in code.
+
+CRITICAL: Always provide your fix as a unified diff:
+```diff
+@@ -LINE_NUM,COUNT +LINE_NUM,COUNT @@
+ context line (unchanged)
+-removed line
++added line
+```
 
 Guidelines:
 1. Fix the specific bug pattern identified
 2. Consider edge cases
-3. Add null/error checks where appropriate
-4. Maintain the intended behavior
-5. Explain the fix briefly if the bug is subtle
+3. Include 1-2 lines of context before and after
+4. Do NOT include the entire file
 
-Response format:
-```{{language}}
-// Fixed code here
-```
-
-Bug fix note: Brief explanation if needed"#;
+Bug fix note: Add brief explanation after the diff if needed"#;
 
 // User prompts
 
@@ -441,12 +465,19 @@ The issue is on this line (line {{line_number}}):
 {{issue_line}}
 ```
 
-IMPORTANT: The error message "{{issue_message}}" tells you EXACTLY what to fix.
-- Read the error message carefully and fix ONLY what it describes
-- Do NOT change indentation or other formatting unless the error specifically mentions it
-- Preserve the original code structure
+IMPORTANT:
+- The error message "{{issue_message}}" tells you EXACTLY what to fix
+- Fix ONLY what the error describes, do NOT change other lines
+- Preserve original indentation and formatting
 
-Provide only the fixed line."#;
+Provide your fix as a unified diff starting at line {{line_number}}:
+```diff
+@@ -{{line_number}},N +{{line_number}},M @@
+ context line before
+-original problematic line
++fixed line
+ context line after
+```"#;
 
 const USER_PROMPT_STYLE: &str = r#"Fix the following code style issue in {{language}}:
 
@@ -465,13 +496,17 @@ Problem line (line {{line_number}}):
 {{issue_line}}
 ```
 
-IMPORTANT: The error message "{{issue_message}}" tells you EXACTLY what to fix.
-- If it says "Missing space after X", add a space AFTER the character X
-- If it says "Missing space before X", add a space BEFORE the character X
-- Do NOT change indentation or other formatting unless the error specifically mentions it
+IMPORTANT:
+- "{{issue_message}}" tells you EXACTLY what to fix
 - Make the MINIMAL change to fix ONLY this specific issue
+- Do NOT change other lines or formatting
 
-Provide ONLY the fixed line with the style issue corrected."#;
+Provide your fix as a unified diff:
+```diff
+@@ -{{line_number}},1 +{{line_number}},1 @@
+-{{issue_line}}
++fixed line here
+```"#;
 
 const USER_PROMPT_SECURITY: &str = r#"Fix the following security vulnerability in {{language}}:
 
@@ -485,12 +520,17 @@ Vulnerable code:
 {{code_context}}
 ```
 
-Problem line:
+Problem line (line {{line_number}}):
 ```{{language}}
 {{issue_line}}
 ```
 
-Provide secure code that fixes the vulnerability."#;
+Provide your fix as a unified diff:
+```diff
+@@ -{{line_number}},N +{{line_number}},M @@
+-vulnerable code
++secure code
+```"#;
 
 const USER_PROMPT_PERFORMANCE: &str = r#"Optimize the following performance issue in {{language}}:
 
@@ -504,12 +544,17 @@ Code to optimize:
 {{code_context}}
 ```
 
-Problem area:
+Problem area (line {{line_number}}):
 ```{{language}}
 {{issue_line}}
 ```
 
-Provide optimized code."#;
+Provide your fix as a unified diff:
+```diff
+@@ -{{line_number}},N +{{line_number}},M @@
+-slow code
++optimized code
+```"#;
 
 const USER_PROMPT_COMPLEXITY: &str = r#"Simplify the following complex code in {{language}}:
 
@@ -530,7 +575,12 @@ Full function/method:
 ```
 {{/if}}
 
-Provide simplified code that maintains the same behavior."#;
+Provide your fix as a unified diff:
+```diff
+@@ -{{line_number}},N +{{line_number}},M @@
+-complex code
++simplified code
+```"#;
 
 const USER_PROMPT_BUG: &str = r#"Fix the following potential bug in {{language}}:
 
@@ -544,12 +594,17 @@ Buggy code:
 {{code_context}}
 ```
 
-Problem line:
+Problem line (line {{line_number}}):
 ```{{language}}
 {{issue_line}}
 ```
 
-Provide corrected code that fixes the bug."#;
+Provide your fix as a unified diff:
+```diff
+@@ -{{line_number}},N +{{line_number}},M @@
+-buggy code
++fixed code
+```"#;
 
 #[cfg(test)]
 mod tests {
