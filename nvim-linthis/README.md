@@ -150,8 +150,56 @@ require("linthis").setup({
 
   -- Log level: "debug", "info", "warn", "error"
   log_level = "warn",
+
+  -- Use specific plugin(s) directly, bypassing config files
+  -- Formats:
+  --   "https://github.com/org/plugin.git"
+  --   "https://github.com/org/plugin.git@v1.0"
+  --   "/path/to/local/plugin"
+  --   "plugin1,plugin2" (comma-separated for multiple plugins)
+  use_plugin = "",
 })
 ```
+
+## Using Plugins
+
+The `use_plugin` option allows you to specify linthis plugin(s) directly, bypassing the default config file discovery. This is useful when you want to use a specific set of lint rules across projects.
+
+### Plugin URL
+
+```lua
+require("linthis").setup({
+  use_plugin = "https://github.com/zhlinh/linthis-plugin-template",
+})
+```
+
+### Plugin with Version Tag
+
+```lua
+require("linthis").setup({
+  use_plugin = "https://github.com/org/plugin.git@v1.0",
+})
+```
+
+### Local Plugin Path
+
+```lua
+require("linthis").setup({
+  use_plugin = "/path/to/local/plugin",
+})
+```
+
+### Multiple Plugins
+
+Use comma-separated values for multiple plugins:
+
+```lua
+require("linthis").setup({
+  use_plugin = "plugin1,plugin2",
+})
+```
+
+Run `:LinthisInfo` to verify your current `use_plugin` configuration.
 
 ## Commands
 

@@ -63,6 +63,15 @@ local function check_executable()
   return true
 end
 
+-- Get --use-plugin arguments from config
+local function get_use_plugin_args()
+  local use_plugin = config.get().use_plugin
+  if not use_plugin or use_plugin == "" then
+    return {}
+  end
+  return { "--use-plugin", vim.trim(use_plugin) }
+end
+
 -- Find root directory
 local function find_root(fname)
   local markers = config.get().root_markers
@@ -85,10 +94,17 @@ local function start_lsp(bufnr)
     return clients[1]
   end
 
+  -- Build command with --use-plugin if configured
+  local cmd = vim.deepcopy(opts.cmd)
+  local use_plugin_args = get_use_plugin_args()
+  for _, arg in ipairs(use_plugin_args) do
+    table.insert(cmd, arg)
+  end
+
   -- Start new client
   local client_id = vim.lsp.start({
     name = "linthis",
-    cmd = opts.cmd,
+    cmd = cmd,
     root_dir = find_root(fname),
     capabilities = vim.lsp.protocol.make_client_capabilities(),
   }, {
@@ -136,7 +152,12 @@ function M.format(opts)
 
   -- Run linthis -f -i (format in-place)
   local cmd = config.get().cmd[1]
-  local result = vim.fn.system({ cmd, "-f", "-i", filepath })
+  local args = { cmd, "-f", "-i", filepath }
+  local use_plugin_args = get_use_plugin_args()
+  for _, arg in ipairs(use_plugin_args) do
+    table.insert(args, arg)
+  end
+  local result = vim.fn.system(args)
   local exit_code = vim.v.shell_error
 
   if exit_code == 0 then
@@ -186,7 +207,12 @@ function M.lint(opts)
   -- Run linthis -c (check only, no format)
   -- Use --no-cache to ensure fresh results on each lint
   local cmd = config.get().cmd[1]
-  local result = vim.fn.system({ cmd, "-c", "--no-cache", "-i", filepath })
+  local args = { cmd, "-c", "--no-cache", "-i", filepath }
+  local use_plugin_args = get_use_plugin_args()
+  for _, arg in ipairs(use_plugin_args) do
+    table.insert(args, arg)
+  end
+  local result = vim.fn.system(args)
 
   -- Strip ANSI escape codes from output (comprehensive)
   result = result:gsub("\27%[[%d;]*[mKHJGsu]", "")  -- Common SGR and cursor codes
@@ -305,13 +331,19 @@ function M.debug_format()
   end
 
   local cmd = config.get().cmd[1]
+  local use_plugin_args = get_use_plugin_args()
+  local args = { cmd, "-f", "-i", filepath }
+  for _, arg in ipairs(use_plugin_args) do
+    table.insert(args, arg)
+  end
+
   print("=== Debug Format ===")
   print("Command: " .. cmd)
   print("File: " .. filepath)
-  print("Full command: " .. cmd .. " -f -i " .. filepath)
+  print("Full command: " .. table.concat(args, " "))
   print("=== Running format ===")
 
-  local result = vim.fn.system({ cmd, "-f", "-i", filepath })
+  local result = vim.fn.system(args)
   local exit_code = vim.v.shell_error
 
   print("Exit code: " .. exit_code)
@@ -337,8 +369,15 @@ function M.debug_lint()
   end
 
   local cmd = config.get().cmd[1]
-  local result = vim.fn.system({ cmd, "-c", "--no-cache", "-i", filepath })
+  local use_plugin_args = get_use_plugin_args()
+  local args = { cmd, "-c", "--no-cache", "-i", filepath }
+  for _, arg in ipairs(use_plugin_args) do
+    table.insert(args, arg)
+  end
+  local result = vim.fn.system(args)
 
+  print("=== Debug Lint ===")
+  print("Full command: " .. table.concat(args, " "))
   print("=== Raw output ===")
   print(result)
   print("=== End raw output ===")
@@ -398,9 +437,14 @@ function M.test()
 
   -- Run linthis
   local cmd = config.get().cmd[1]
-  print("Command: " .. cmd .. " -c --no-cache -i " .. filepath)
+  local use_plugin_args = get_use_plugin_args()
+  local args = { cmd, "-c", "--no-cache", "-i", filepath }
+  for _, arg in ipairs(use_plugin_args) do
+    table.insert(args, arg)
+  end
+  print("Command: " .. table.concat(args, " "))
 
-  local result = vim.fn.system({ cmd, "-c", "--no-cache", "-i", filepath })
+  local result = vim.fn.system(args)
   local exit_code = vim.v.shell_error
 
   print("Exit code: " .. exit_code)
@@ -462,11 +506,13 @@ end
 function M.info()
   local bufnr = vim.api.nvim_get_current_buf()
   local clients = get_clients({ bufnr = bufnr, name = "linthis" })
-  local cmd = config.get().cmd[1]
+  local opts = config.get()
+  local cmd = opts.cmd[1]
 
   print("linthis info:")
   print(string.format("  Executable: %s", cmd))
   print(string.format("  Executable found: %s", vim.fn.executable(cmd) == 1 and "yes" or "no"))
+  print(string.format("  use_plugin: %s", opts.use_plugin ~= "" and opts.use_plugin or "(not set)"))
 
   if #clients == 0 then
     print("  LSP: not attached")
@@ -493,7 +539,12 @@ local function setup_autocmds()
         if vim.tbl_contains(opts.filetypes, ft) then
           local filepath = vim.api.nvim_buf_get_name(args.buf)
           local cmd = config.get().cmd[1]
-          vim.fn.system({ cmd, "-f", "-i", filepath })
+          local format_args = { cmd, "-f", "-i", filepath }
+          local use_plugin_args = get_use_plugin_args()
+          for _, arg in ipairs(use_plugin_args) do
+            table.insert(format_args, arg)
+          end
+          vim.fn.system(format_args)
           if vim.v.shell_error == 0 then
             vim.api.nvim_buf_call(args.buf, function()
               vim.cmd("silent edit!")
