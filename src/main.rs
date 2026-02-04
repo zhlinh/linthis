@@ -154,6 +154,8 @@ fn main() -> ExitCode {
         with_context,
         verbose,
         quiet,
+        undo,
+        list_backups,
     }) = cli.command
     {
         return handle_fix_command(FixCommandOptions {
@@ -174,6 +176,8 @@ fn main() -> ExitCode {
             with_context,
             verbose,
             quiet,
+            undo,
+            list_backups,
         });
     }
 
