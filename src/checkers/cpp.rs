@@ -743,10 +743,11 @@ impl Default for CppChecker {
 
 impl Checker for CppChecker {
     fn name(&self) -> &str {
-        if Self::has_clang_tidy() {
-            "clang-tidy"
-        } else {
-            "cpplint"
+        match (Self::has_clang_tidy(), Self::has_cpplint()) {
+            (true, true) => "clang-tidy+cpplint",
+            (true, false) => "clang-tidy",
+            (false, true) => "cpplint",
+            (false, false) => "cpp-checker",
         }
     }
 
@@ -755,15 +756,39 @@ impl Checker for CppChecker {
     }
 
     fn check(&self, path: &Path) -> Result<Vec<LintIssue>> {
-        // Prefer clang-tidy if available, fall back to cpplint
+        let mut all_issues = Vec::new();
+
+        // Run clang-tidy for code quality, static analysis, and modernization
         if Self::has_clang_tidy() {
-            self.run_clang_tidy(path)
-        } else if Self::has_cpplint() {
-            self.run_cpplint(path)
-        } else {
-            // Neither tool available
-            Ok(Vec::new())
+            match self.run_clang_tidy(path) {
+                Ok(issues) => all_issues.extend(issues),
+                Err(e) => {
+                    // Log error but continue with cpplint
+                    log::warn!("clang-tidy failed: {}", e);
+                }
+            }
         }
+
+        // Run cpplint for style guide compliance (whitespace, comments, naming, etc.)
+        if Self::has_cpplint() {
+            match self.run_cpplint(path) {
+                Ok(issues) => all_issues.extend(issues),
+                Err(e) => {
+                    // Log error but return what we have
+                    log::warn!("cpplint failed: {}", e);
+                }
+            }
+        }
+
+        // Deduplicate issues by (file_path, line, message) to avoid duplicates
+        all_issues.sort_by(|a, b| {
+            (&a.file_path, a.line, &a.message).cmp(&(&b.file_path, b.line, &b.message))
+        });
+        all_issues.dedup_by(|a, b| {
+            a.file_path == b.file_path && a.line == b.line && a.message == b.message
+        });
+
+        Ok(all_issues)
     }
 
     fn is_available(&self) -> bool {

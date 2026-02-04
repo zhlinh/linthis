@@ -870,6 +870,43 @@ pub enum CacheCommands {
 /// Report subcommands
 #[derive(clap::Subcommand, Debug)]
 pub enum ReportCommands {
+    /// Show full lint results in human-readable format
+    ///
+    /// Display saved lint results (JSON) in the same human-readable format
+    /// as `linthis -c` output. Useful for viewing full error details from
+    /// hook output or reviewing previous runs.
+    ///
+    /// Example usage:
+    ///   linthis report show                 # Show last result
+    ///   linthis report show result.json     # Show specific file
+    ///   linthis report show -n 10           # Limit to 10 issues
+    ///   linthis report show --compact       # Compact format (no code context)
+    ///   linthis report show --errors-only   # Only show errors
+    Show {
+        /// Source of lint results: "last" (default) or a result file path
+        #[arg(default_value = "last")]
+        source: String,
+
+        /// Limit number of issues to display (0 = unlimited)
+        #[arg(short = 'n', long, default_value = "0")]
+        limit: usize,
+
+        /// Compact format: show only file:line message without code context
+        #[arg(long)]
+        compact: bool,
+
+        /// Only show errors (skip warnings and info)
+        #[arg(long)]
+        errors_only: bool,
+
+        /// Only show warnings (skip errors and info)
+        #[arg(long)]
+        warnings_only: bool,
+
+        /// Output format: human (default), json
+        #[arg(short, long, default_value = "human")]
+        format: String,
+    },
     /// Generate an HTML report from lint results
     ///
     /// Creates a self-contained HTML file with charts, statistics,

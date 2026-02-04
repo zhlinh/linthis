@@ -17,7 +17,8 @@ use linthis::reports::{
     HtmlReportOptions, ReportStatistics,
 };
 use linthis::utils::get_project_root;
-use linthis::utils::types::RunResult;
+use linthis::utils::output::{format_issue_human, format_summary_human};
+use linthis::utils::types::{RunResult, Severity};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -25,6 +26,14 @@ use std::process::ExitCode;
 /// Handle report subcommands
 pub fn handle_report_command(action: ReportCommands) -> ExitCode {
     match action {
+        ReportCommands::Show {
+            source,
+            limit,
+            compact,
+            errors_only,
+            warnings_only,
+            format,
+        } => handle_show_report(&source, limit, compact, errors_only, warnings_only, &format),
         ReportCommands::Html {
             source,
             output,
@@ -69,6 +78,183 @@ fn load_result_from_source(source: &str) -> Option<RunResult> {
             }
         }
     }
+}
+
+/// Show lint results in human-readable format
+fn handle_show_report(
+    source: &str,
+    limit: usize,
+    compact: bool,
+    errors_only: bool,
+    warnings_only: bool,
+    format: &str,
+) -> ExitCode {
+    let result = match load_result_from_source(source) {
+        Some(r) => r,
+        None => {
+            eprintln!(
+                "{}: No lint results found. Run 'linthis -c' first.",
+                "Error".red()
+            );
+            return ExitCode::from(1);
+        }
+    };
+
+    // Filter issues based on flags
+    let filtered_issues: Vec<_> = result
+        .issues
+        .iter()
+        .filter(|i| {
+            if errors_only {
+                i.severity == Severity::Error
+            } else if warnings_only {
+                i.severity == Severity::Warning
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    // Apply limit
+    let display_issues: Vec<_> = if limit > 0 {
+        filtered_issues.iter().take(limit).collect()
+    } else {
+        filtered_issues.iter().collect()
+    };
+
+    let total_filtered = filtered_issues.len();
+    let displayed_count = display_issues.len();
+
+    // Handle JSON format
+    if format == "json" {
+        // Create a modified result with filtered issues for JSON output
+        let mut filtered_result = result.clone();
+        filtered_result.issues = filtered_issues.into_iter().cloned().collect();
+        if limit > 0 {
+            filtered_result.issues.truncate(limit);
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&filtered_result).unwrap_or_default()
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    // Human-readable output
+    if display_issues.is_empty() {
+        let filter_desc = if errors_only {
+            "errors"
+        } else if warnings_only {
+            "warnings"
+        } else {
+            "issues"
+        };
+        println!("{} No {} found in result.", "✓".green(), filter_desc);
+        return ExitCode::SUCCESS;
+    }
+
+    // Separate errors and warnings for numbered output
+    let errors: Vec<_> = display_issues
+        .iter()
+        .filter(|i| i.severity == Severity::Error)
+        .collect();
+    let warnings: Vec<_> = display_issues
+        .iter()
+        .filter(|i| i.severity == Severity::Warning)
+        .collect();
+
+    // Output errors
+    for (idx, issue) in errors.iter().enumerate() {
+        let lang_tag = issue
+            .language
+            .map(|l| format!("[{}]", l.name()))
+            .unwrap_or_default();
+        let tool_tag = issue
+            .source
+            .as_ref()
+            .map(|s| format!("[{}]", s))
+            .unwrap_or_default();
+
+        if compact {
+            // Compact format: [E1] file:line:col message
+            let location = if let Some(col) = issue.column {
+                format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
+            } else {
+                format!("{}:{}", issue.file_path.display(), issue.line)
+            };
+            println!(
+                "{}{}{} {}: {}",
+                format!("[E{}]", idx + 1).red().bold(),
+                lang_tag.red(),
+                tool_tag.red(),
+                location.bold(),
+                issue.message
+            );
+        } else {
+            // Full format with code context
+            println!(
+                "{}{}{} {}",
+                format!("[E{}]", idx + 1).red().bold(),
+                lang_tag.red(),
+                tool_tag.red(),
+                format_issue_human(issue)
+            );
+        }
+    }
+
+    // Output warnings
+    for (idx, issue) in warnings.iter().enumerate() {
+        let lang_tag = issue
+            .language
+            .map(|l| format!("[{}]", l.name()))
+            .unwrap_or_default();
+        let tool_tag = issue
+            .source
+            .as_ref()
+            .map(|s| format!("[{}]", s))
+            .unwrap_or_default();
+
+        if compact {
+            // Compact format: [W1] file:line:col message
+            let location = if let Some(col) = issue.column {
+                format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
+            } else {
+                format!("{}:{}", issue.file_path.display(), issue.line)
+            };
+            println!(
+                "{}{}{} {}: {}",
+                format!("[W{}]", idx + 1).yellow().bold(),
+                lang_tag.yellow(),
+                tool_tag.yellow(),
+                location.bold(),
+                issue.message
+            );
+        } else {
+            // Full format with code context
+            println!(
+                "{}{}{} {}",
+                format!("[W{}]", idx + 1).yellow().bold(),
+                lang_tag.yellow(),
+                tool_tag.yellow(),
+                format_issue_human(issue)
+            );
+        }
+    }
+
+    // Show summary
+    println!();
+    if limit > 0 && total_filtered > displayed_count {
+        println!(
+            "{} Showing {} of {} issues (use -n 0 to show all)",
+            "→".cyan(),
+            displayed_count,
+            total_filtered
+        );
+        println!();
+    }
+    println!("{}", format_summary_human(&result));
+
+    ExitCode::SUCCESS
 }
 
 /// Generate HTML report

@@ -12,6 +12,12 @@
 
 use crate::utils::types::{LintIssue, RunResult, Severity};
 use colored::Colorize;
+use crossterm::terminal;
+
+/// Get the terminal width, with fallback to 80 columns.
+pub fn get_terminal_width() -> usize {
+    terminal::size().map(|(w, _)| w as usize).unwrap_or(80)
+}
 
 /// Output format enum
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -378,7 +384,26 @@ pub fn format_result_github_actions(result: &RunResult) -> String {
 
 /// Format the entire run result for git hook output.
 /// Compact format with summary at top, error list, and fix instructions.
+///
+/// # Arguments
+/// * `result` - The run result to format
+/// * `hook_type` - Optional hook type ("pre-push", "commit-msg", or default "pre-commit")
+/// * `config_width` - Optional configured width (0 or None = auto-detect terminal width)
 pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String {
+    format_result_hook_with_width(result, hook_type, None)
+}
+
+/// Format the entire run result for git hook output with configurable width.
+///
+/// # Arguments
+/// * `result` - The run result to format
+/// * `hook_type` - Optional hook type ("pre-push", "commit-msg", or default "pre-commit")
+/// * `config_width` - Optional configured width (0 or None = auto-detect terminal width)
+pub fn format_result_hook_with_width(
+    result: &RunResult,
+    hook_type: Option<&str>,
+    config_width: Option<u32>,
+) -> String {
     let hook_name = match hook_type {
         Some("pre-push") => "Pre-push",
         Some("commit-msg") => "Commit-msg",
@@ -400,37 +425,50 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
         .count();
     let total_issues = result.issues.len();
 
-    // Helper to pad content to fixed width (38 chars for content, accounting for emoji width)
-    // Box width: 42 total, 40 inside borders, we use "│ " prefix and " │" suffix = 38 for content
+    // Calculate box width: use config width if provided and > 0, otherwise auto-detect
+    // Clamp to min 50, max 120 for readability
+    let box_width = match config_width {
+        Some(w) if w > 0 => (w as usize).clamp(50, 120),
+        _ => get_terminal_width().clamp(50, 120),
+    };
+    // Content width = box width - 4 (for "│ " prefix and " │" suffix)
+    let content_width = box_width - 4;
+
+    // Create border strings dynamically
+    let top_border = format!("╭{}╮", "─".repeat(box_width - 2));
+    let mid_border = format!("├{}┤", "─".repeat(box_width - 2));
+    let bot_border = format!("╰{}╯", "─".repeat(box_width - 2));
+
+    // Helper to pad content to dynamic width
     let pad_line = |content: &str, emoji_count: usize| -> String {
         // Each emoji displays as ~2 chars but counts as 1 in len(), so we subtract emoji_count
         let visual_len = content.chars().count() + emoji_count;
-        let padding = 38_usize.saturating_sub(visual_len);
+        let padding = content_width.saturating_sub(visual_len);
         format!("│ {}{} │", content, " ".repeat(padding))
     };
 
     // If no issues, show success
     if total_issues == 0 {
         let mut output = String::new();
-        output.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".green()));
+        output.push_str(&format!("{}\n", top_border.green()));
         let header = format!("{} Linthis {} Hook Passed", "✓", hook_name);
         output.push_str(&format!("{}\n", pad_line(&header, 0).green()));
-        output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".green()));
+        output.push_str(&format!("{}\n", mid_border.green()));
         output.push_str(&format!("{}\n", pad_line("All checks passed!", 0).green()));
         output.push_str(&format!("{}\n", pad_line("", 0)));
         output.push_str(&format!("{}\n", pad_line(&format!("Files checked:   {:>3}", result.total_files), 0)));
         output.push_str(&format!("{}\n", pad_line(&format!("Files formatted: {:>3}", result.files_formatted), 0)));
-        output.push_str(&format!("{}", "╰────────────────────────────────────────╯".green()));
+        output.push_str(&format!("{}", bot_border.green()));
         return output;
     }
 
     let mut output = String::new();
 
     // Header
-    output.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".red()));
+    output.push_str(&format!("{}\n", top_border.red()));
     let header = format!("X Linthis {} Hook Failed", hook_name);
     output.push_str(&format!("{}\n", pad_line(&header, 0).red()));
-    output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
+    output.push_str(&format!("{}\n", mid_border.red()));
 
     // Summary line
     let summary = format!(
@@ -445,6 +483,12 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
     output.push_str(&format!("{}\n", pad_line(&summary, 0)));
     output.push_str(&format!("{}\n", pad_line("", 0)));
 
+    // Dynamic truncation lengths based on content width
+    // location: 1/3 of content width, clamped to 10-35 chars
+    let location_max = (content_width / 3).clamp(10, 35);
+    // message: remaining space after " X " (3 chars) + location + " " (1 char)
+    let msg_prefix_len = 4; // " X " + trailing space after location
+
     // List issues (compact format: file:line message)
     let max_issues = 8; // Limit to avoid too long output
     for issue in result.issues.iter().take(max_issues) {
@@ -458,13 +502,13 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
             Severity::Info => "I",
         };
         // Truncate location if too long
-        let location_display = if location.len() > 15 {
-            format!("{}...", &location[..12])
+        let location_display = if location.len() > location_max {
+            format!("{}...", &location[..location_max.saturating_sub(3)])
         } else {
             location
         };
         // Truncate message to fit
-        let max_msg_len = 38 - 4 - location_display.len(); // "  X " prefix + location + " "
+        let max_msg_len = content_width.saturating_sub(msg_prefix_len + location_display.len());
         let msg = if issue.message.len() > max_msg_len {
             format!("{}...", &issue.message[..max_msg_len.saturating_sub(3)])
         } else {
@@ -482,7 +526,7 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
         output.push_str(&format!("{}\n", pad_line(&more_line, 0)));
     }
 
-    output.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
+    output.push_str(&format!("{}\n", mid_border.red()));
 
     // Fix instructions
     output.push_str(&format!("{}\n", pad_line("To fix automatically:", 0)));
@@ -490,7 +534,7 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
     output.push_str(&format!("{}\n", pad_line("", 0)));
     output.push_str(&format!("{}\n", pad_line("To skip this check:", 0)));
     output.push_str(&format!("{}\n", pad_line(&format!("  {}", skip_command), 0)));
-    output.push_str(&format!("{}", "╰────────────────────────────────────────╯".red()));
+    output.push_str(&format!("{}", bot_border.red()));
 
     output
 }

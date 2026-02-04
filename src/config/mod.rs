@@ -234,6 +234,9 @@ pub struct HooksConfig {
     /// Ticket pattern regex (e.g., r"\[\w+-\d+\]")
     #[serde(default)]
     pub ticket_pattern: Option<String>,
+    /// Hook output box width (0 = auto-detect terminal width, min 50, max 120)
+    #[serde(default)]
+    pub output_width: Option<u32>,
 }
 
 impl Default for HooksConfig {
@@ -244,6 +247,7 @@ impl Default for HooksConfig {
             commit_msg_pattern: default_commit_msg_pattern(),
             require_ticket: false,
             ticket_pattern: None,
+            output_width: None,
         }
     }
 }
