@@ -175,7 +175,7 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
 }
 
 /// Maximum number of AI fix iterations to prevent infinite loops
-const MAX_AI_FIX_ITERATIONS: usize = 5;
+const MAX_AI_FIX_ITERATIONS: usize = 100;
 
 /// Handle fix by loading from result file
 fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitCode {
