@@ -127,16 +127,29 @@ section h2 {
 .issue-item.info { border-color: var(--color-info); }
 
 .issue-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.75rem;
+    align-items: center;
     margin-bottom: 0.5rem;
+}
+
+.issue-severity {
+    flex-shrink: 0;
 }
 
 .issue-location {
     font-family: 'SF Mono', Monaco, 'Courier New', monospace;
     font-size: 0.85rem;
     color: var(--color-text-muted);
+    word-break: break-all;
+}
+
+.issue-meta {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-shrink: 0;
 }
 
 .issue-message {
@@ -194,17 +207,18 @@ tr:hover {
 }
 
 .chart {
-    max-width: 100%;
+    max-width: 500px;
+    width: 100%;
     height: auto;
 }
 
 .bar { fill: #4a90d9; }
 .bar:hover { fill: #357abd; }
-.bar-label { font-size: 11px; fill: #333; }
-.bar-value { font-size: 10px; fill: #666; }
-.chart-title { font-size: 14px; font-weight: 600; fill: #333; }
+.bar-label { font-size: 12px; fill: #333; }
+.bar-value { font-size: 11px; fill: #666; font-weight: 500; }
+.chart-title { font-size: 16px; font-weight: 600; fill: #333; }
 .axis-line { stroke: #ccc; stroke-width: 1; }
-.axis-label { font-size: 10px; fill: #666; }
+.axis-label { font-size: 11px; fill: #666; }
 
 .trend-line { fill: none; stroke: #4a90d9; stroke-width: 2; }
 .trend-point { fill: #4a90d9; }
@@ -410,29 +424,39 @@ pub fn generate_bar_chart_svg(
     }
 
     let max_value = data.iter().map(|(_, v)| *v).max().unwrap_or(1).max(1);
-    let bar_width = (width - 60) / data.len().max(1);
-    let chart_height = height - 60;
+    // Limit bar width to max 80px for better appearance with few bars
+    let num_bars = data.len().max(1);
+    let available_width = width - 60;
+    let bar_width = (available_width / num_bars).min(80);
+    // Center bars if they don't fill the width
+    let total_bars_width = bar_width * num_bars;
+    let x_offset = 40 + (available_width - total_bars_width) / 2;
+
+    let chart_height = height - 70; // More space for title
     let scale = chart_height as f64 / max_value as f64;
 
     let mut bars = String::new();
     for (i, (label, value)) in data.iter().enumerate() {
         let bar_height = (*value as f64 * scale) as usize;
-        let x = 40 + i * bar_width;
-        let y = 30 + chart_height - bar_height;
-        let label_truncated = truncate_label(label, 8);
+        let x = x_offset + i * bar_width;
+        let y = 40 + chart_height - bar_height;
+        let label_truncated = truncate_label(label, 12);
+
+        // Position value text with minimum distance from title (y=25)
+        let value_y = y.saturating_sub(8).max(38);
 
         bars.push_str(&format!(
-            r#"<rect class="bar" x="{x}" y="{y}" width="{bw}" height="{bh}" rx="2">
+            r#"<rect class="bar" x="{x}" y="{y}" width="{bw}" height="{bh}" rx="3">
                 <title>{label}: {value}</title>
             </rect>
             <text class="bar-value" x="{lx}" y="{vy}" text-anchor="middle">{value}</text>
             <text class="bar-label" x="{lx}" y="{ly}" text-anchor="middle">{label_short}</text>"#,
-            x = x + 2,
+            x = x + 4,
             y = y,
-            bw = bar_width.saturating_sub(4),
+            bw = bar_width.saturating_sub(8),
             bh = bar_height,
             lx = x + bar_width / 2,
-            vy = y.saturating_sub(5),
+            vy = value_y,
             ly = height - 10,
             label = label,
             value = value,
@@ -443,8 +467,8 @@ pub fn generate_bar_chart_svg(
     format!(
         r#"<div class="chart-container">
         <svg viewBox="0 0 {w} {h}" class="chart" role="img" aria-label="{title}">
-            <text x="{tw}" y="20" text-anchor="middle" class="chart-title">{title}</text>
-            <line class="axis-line" x1="40" y1="30" x2="40" y2="{ah}"/>
+            <text x="{tw}" y="22" text-anchor="middle" class="chart-title">{title}</text>
+            <line class="axis-line" x1="40" y1="40" x2="40" y2="{ah}"/>
             <line class="axis-line" x1="40" y1="{ah}" x2="{aw}" y2="{ah}"/>
             {bars}
         </svg>
@@ -453,7 +477,7 @@ pub fn generate_bar_chart_svg(
         h = height,
         tw = width / 2,
         title = title,
-        ah = 30 + chart_height,
+        ah = 40 + chart_height,
         aw = width - 20,
         bars = bars,
     )
@@ -597,6 +621,6 @@ mod tests {
     #[test]
     fn test_truncate_label() {
         assert_eq!(truncate_label("short", 10), "short");
-        assert_eq!(truncate_label("verylongname", 8), "verylon…");
+        assert_eq!(truncate_label("verylongername", 12), "verylongern…");
     }
 }
