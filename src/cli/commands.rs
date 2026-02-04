@@ -590,6 +590,17 @@ pub enum Commands {
         /// Suppress non-error output
         #[arg(short, long)]
         quiet: bool,
+
+        /// Restore files from the last backup (undo previous fix)
+        ///
+        /// Backups are automatically created before each fix operation.
+        /// Use this to revert changes if the fix produced unwanted results.
+        #[arg(long)]
+        undo: bool,
+
+        /// List available backups
+        #[arg(long)]
+        list_backups: bool,
     },
 }
 
