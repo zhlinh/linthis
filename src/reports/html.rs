@@ -127,7 +127,7 @@ fn generate_statistics_html(stats: &ReportStatistics) -> String {
             &chart_data,
             500,
             200,
-            "Issues by Language",
+            "Issues group by Language",
         ));
     }
 
@@ -144,7 +144,7 @@ fn generate_statistics_html(stats: &ReportStatistics) -> String {
             &chart_data,
             500,
             200,
-            "Issues by Tool",
+            "Issues group by Tool",
         ));
     }
 
@@ -252,15 +252,16 @@ fn generate_issues_html(result: &RunResult) -> String {
         html.push_str(&format!(
             r#"<li class="issue-item {severity_class}">
             <div class="issue-header">
+                <span class="issue-severity">{severity_badge}</span>
                 <span class="issue-location">{location}</span>
-                {severity_badge}{rule_code}{source}
+                <span class="issue-meta">{rule_code}{source}</span>
             </div>
             <div class="issue-message">{message}</div>
             {suggestion}
         </li>"#,
             severity_class = severity_class,
-            location = html_escape(&location),
             severity_badge = severity_badge,
+            location = html_escape(&location),
             rule_code = rule_code,
             source = source,
             message = html_escape(&issue.message),
