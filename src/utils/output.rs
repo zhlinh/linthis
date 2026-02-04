@@ -13,10 +13,41 @@
 use crate::utils::types::{LintIssue, RunResult, Severity};
 use colored::Colorize;
 use crossterm::terminal;
+use std::process::{Command, Stdio};
 
 /// Get the terminal width, with fallback to 80 columns.
 pub fn get_terminal_width() -> usize {
     terminal::size().map(|(w, _)| w as usize).unwrap_or(80)
+}
+
+/// Detect the first available AI CLI provider (claude-cli or codebuddy-cli).
+/// Returns the provider name if found, or None if neither is available.
+pub fn detect_available_cli_provider() -> Option<&'static str> {
+    // Check for claude CLI first
+    if Command::new("claude")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        return Some("claude-cli");
+    }
+
+    // Check for codebuddy CLI
+    if Command::new("codebuddy")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        return Some("codebuddy-cli");
+    }
+
+    None
 }
 
 /// Output format enum
@@ -528,10 +559,29 @@ pub fn format_result_hook_with_width(
 
     output.push_str(&format!("{}\n", mid_border.red()));
 
-    // Fix instructions
-    output.push_str(&format!("{}\n", pad_line("To fix automatically:", 0)));
-    output.push_str(&format!("{}\n", pad_line(&format!("  {}", "linthis -c -f"), 0)));
+    // View full details hint
+    output.push_str(&format!("{}\n", pad_line("View full details:", 0)));
+    output.push_str(&format!("{}\n", pad_line("  linthis report show", 0)));
     output.push_str(&format!("{}\n", pad_line("", 0)));
+
+    // AI auto-fix suggestion based on available CLI
+    if let Some(cli_provider) = detect_available_cli_provider() {
+        output.push_str(&format!("{}\n", pad_line("Enable AI auto-fix in hooks (DANGEROUS):", 0)));
+        let ai_cmd = format!(
+            "  linthis hook install --ai --provider {} --accept-all",
+            cli_provider
+        );
+        // Truncate if too long
+        if ai_cmd.len() <= content_width {
+            output.push_str(&format!("{}\n", pad_line(&ai_cmd, 0)));
+        } else {
+            output.push_str(&format!("{}\n", pad_line("  linthis hook install --ai \\", 0)));
+            output.push_str(&format!("{}\n", pad_line(&format!("    --provider {} --accept-all", cli_provider), 0)));
+        }
+        output.push_str(&format!("{}\n", pad_line("", 0)));
+    }
+
+    // Skip check hint
     output.push_str(&format!("{}\n", pad_line("To skip this check:", 0)));
     output.push_str(&format!("{}\n", pad_line(&format!("  {}", skip_command), 0)));
     output.push_str(&format!("{}", bot_border.red()));
