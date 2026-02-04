@@ -559,27 +559,10 @@ pub fn format_result_hook_with_width(
 
     output.push_str(&format!("{}\n", mid_border.red()));
 
-    // Tip section for fix commands
-    output.push_str(&format!("{}\n", pad_line("Tip: To review and fix issues interactively:", 0)));
-    output.push_str(&format!("{}\n", pad_line("  linthis fix      - load last result and fix", 0)));
-    output.push_str(&format!("{}\n", pad_line("  linthis fix --ai - AI-powered fix suggestions", 0)));
-
-    // AI auto-fix suggestion based on available CLI
-    if let Some(cli_provider) = detect_available_cli_provider() {
-        let ai_cmd = format!(
-            "  linthis fix --ai --provider {} --accept-all",
-            cli_provider
-        );
-        let ai_desc = " - (dangerously) auto-fix";
-        // Check if we can fit on one line
-        if ai_cmd.len() + ai_desc.len() <= content_width {
-            output.push_str(&format!("{}\n", pad_line(&format!("{}{}", ai_cmd, ai_desc), 0)));
-        } else {
-            // Split across two lines
-            output.push_str(&format!("{}\n", pad_line(&ai_cmd, 0)));
-            output.push_str(&format!("{}\n", pad_line("                              - (dangerously) auto-fix", 0)));
-        }
-    }
+    // Tip section
+    output.push_str(&format!("{}\n", pad_line("Tip: To review and fix issues:", 0)));
+    output.push_str(&format!("{}\n", pad_line("  linthis report show  - view full details", 0)));
+    output.push_str(&format!("{}\n", pad_line("  linthis fix          - interactive fix", 0)));
     output.push_str(&format!("{}\n", pad_line("", 0)));
 
     // Skip check hint
