@@ -62,6 +62,14 @@ M.defaults = {
 
   -- Log level: "debug", "info", "warn", "error"
   log_level = "warn",
+
+  -- Use specific plugin(s) directly, bypassing config files
+  -- Formats:
+  --   "https://github.com/org/plugin.git"
+  --   "https://github.com/org/plugin.git@v1.0"
+  --   "/path/to/local/plugin"
+  --   "plugin1,plugin2" (comma-separated for multiple plugins)
+  use_plugin = "",
 }
 
 -- Current configuration (will be merged with user config)
