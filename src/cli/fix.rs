@@ -174,6 +174,9 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
     }
 }
 
+/// Maximum number of AI fix iterations to prevent infinite loops
+const MAX_AI_FIX_ITERATIONS: usize = 5;
+
 /// Handle fix by loading from result file
 fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitCode {
     let path = if options.source == "last" {
@@ -229,7 +232,12 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
                     );
                 }
 
-                // Check if AI mode is enabled
+                // For AI mode with accept_all, use iterative fix loop
+                if options.ai && options.accept_all {
+                    return run_ai_fix_loop(options, config, result);
+                }
+
+                // Check if AI mode is enabled (non-accept-all mode)
                 let (modified_files, fixed_count) = if options.ai {
                     let provider = resolve_ai_provider(
                         options.provider.as_deref(),
@@ -279,6 +287,164 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
             eprintln!("{}: Failed to read result file: {}", "Error".red(), e);
             ExitCode::from(2)
         }
+    }
+}
+
+/// Run AI fix in a loop until no issues remain or max iterations reached
+fn run_ai_fix_loop(
+    options: &FixCommandOptions,
+    config: &Config,
+    initial_result: linthis::utils::types::RunResult,
+) -> ExitCode {
+    use linthis::{run, RunMode, RunOptions};
+
+    let mut current_result = initial_result;
+    let mut iteration = 0;
+    let mut total_fixed = 0;
+
+    loop {
+        iteration += 1;
+
+        if !options.quiet {
+            println!(
+                "\n{} AI Fix Iteration {} / {}",
+                "→".cyan().bold(),
+                iteration,
+                MAX_AI_FIX_ITERATIONS
+            );
+            println!(
+                "  {} issue{} to fix",
+                current_result.issues.len(),
+                if current_result.issues.len() == 1 { "" } else { "s" }
+            );
+        }
+
+        // Run AI fix
+        let provider = resolve_ai_provider(
+            options.provider.as_deref(),
+            config.ai.provider.as_deref(),
+        );
+        let ai_config = AiFixConfig::with_provider(&provider)
+            .with_model(options.model.clone())
+            .with_accept_all(true)
+            .with_verbose(options.verbose)
+            .with_parallel(options.jobs);
+
+        let ai_result = run_ai_fix_all(&current_result, &ai_config);
+        total_fixed += ai_result.applied;
+
+        if ai_result.modified_files.is_empty() {
+            if !options.quiet {
+                println!(
+                    "  {} No files modified in this iteration",
+                    "⚠".yellow()
+                );
+            }
+            break;
+        }
+
+        if !options.quiet {
+            println!(
+                "  {} Applied {} fix{}",
+                "✓".green(),
+                ai_result.applied,
+                if ai_result.applied == 1 { "" } else { "es" }
+            );
+        }
+
+        // Check if we've reached max iterations
+        if iteration >= MAX_AI_FIX_ITERATIONS {
+            if !options.quiet {
+                println!(
+                    "\n{} Reached maximum iterations ({})",
+                    "⚠".yellow(),
+                    MAX_AI_FIX_ITERATIONS
+                );
+            }
+            break;
+        }
+
+        // Re-run lint check to see if there are remaining issues
+        if !options.quiet {
+            println!("\n{} Re-checking for remaining issues...", "→".cyan());
+        }
+
+        let run_options = RunOptions {
+            paths: vec![PathBuf::from(".")],
+            mode: RunMode::CheckOnly,
+            languages: vec![],
+            exclude_patterns: vec![],
+            verbose: options.verbose,
+            quiet: true, // Suppress normal output during recheck
+            plugins: vec![],
+            no_cache: true, // Don't use cache for recheck
+            config_resolver: None,
+        };
+
+        match run(&run_options) {
+            Ok(result) => {
+                if result.issues.is_empty() {
+                    if !options.quiet {
+                        println!(
+                            "\n{} All issues fixed after {} iteration{}!",
+                            "✓".green().bold(),
+                            iteration,
+                            if iteration == 1 { "" } else { "s" }
+                        );
+                        println!(
+                            "  Total fixes applied: {}",
+                            total_fixed.to_string().cyan()
+                        );
+                    }
+                    return ExitCode::SUCCESS;
+                }
+
+                if !options.quiet {
+                    println!(
+                        "  {} remaining issue{}",
+                        result.issues.len(),
+                        if result.issues.len() == 1 { "" } else { "s" }
+                    );
+                }
+
+                // Continue with remaining issues
+                current_result = result;
+            }
+            Err(e) => {
+                eprintln!("{}: Re-check failed: {}", "Error".red(), e);
+                break;
+            }
+        }
+    }
+
+    // Final summary
+    if !options.quiet {
+        println!("\n{}", "─".repeat(50));
+        println!(
+            "{} AI Fix completed after {} iteration{}",
+            "→".cyan(),
+            iteration,
+            if iteration == 1 { "" } else { "s" }
+        );
+        println!("  Total fixes applied: {}", total_fixed.to_string().cyan());
+
+        if !current_result.issues.is_empty() {
+            println!(
+                "  {} remaining issue{}",
+                current_result.issues.len().to_string().yellow(),
+                if current_result.issues.len() == 1 { "" } else { "s" }
+            );
+            println!(
+                "\n  Run {} to see remaining issues",
+                "linthis report show".cyan()
+            );
+        }
+    }
+
+    if current_result.issues.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     }
 }
 
