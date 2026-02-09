@@ -941,11 +941,41 @@ fn run_checker_on_file(
     issues
 }
 
-/// Print progress message (respects quiet mode)
+/// Spinner characters for progress indication
+const SPINNER_CHARS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/// Format elapsed time as human-readable string
+fn format_elapsed(start: Instant) -> String {
+    let secs = start.elapsed().as_secs();
+    if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}s", secs)
+    }
+}
+
+/// Get spinner character based on counter
+fn get_spinner(count: usize) -> char {
+    SPINNER_CHARS[count % SPINNER_CHARS.len()]
+}
+
+/// Print progress message with spinner and elapsed time (respects quiet mode)
+fn print_progress_with_time(msg: &str, quiet: bool, start: Instant, count: usize) {
+    if !quiet {
+        use std::io::Write;
+        let spinner = get_spinner(count);
+        let time_suffix = format!(" ({})", format_elapsed(start));
+        // Clear line and print with spinner
+        eprint!("\r\x1b[K\x1b[36m{}\x1b[0m {}{}", spinner, msg, time_suffix);
+        let _ = std::io::stderr().flush();
+    }
+}
+
+/// Simple print progress for clearing lines
 fn print_progress(msg: &str, quiet: bool) {
     if !quiet {
-        eprint!("\r\x1b[K{}", msg); // Clear line and print
         use std::io::Write;
+        eprint!("\r\x1b[K{}", msg);
         let _ = std::io::stderr().flush();
     }
 }
@@ -1068,6 +1098,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         }
         let total_files = file_langs.len();
         PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+        let step1_start = Instant::now();
 
         let check_results: Vec<(PathBuf, Vec<_>)> = file_langs
             .par_iter()
@@ -1075,9 +1106,11 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
                 if !options.quiet && !options.verbose {
                     let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
-                    print_progress(
-                        &format!("⏳ [1/3] Checking {}/{} ({}%)...", count + 1, total_files, percentage),
+                    print_progress_with_time(
+                        &format!("[1/3] Checking {}/{} ({}%)...", count + 1, total_files, percentage),
                         false,
+                        step1_start,
+                        count,
                     );
                 }
 
@@ -1140,6 +1173,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
             .collect();
         let format_total = files_to_format.len();
         PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+        let step2_start = Instant::now();
 
         let format_results: Vec<(PathBuf, Option<FormatResult>)> = files_to_format
             .par_iter()
@@ -1147,9 +1181,11 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
                 if !options.quiet && !options.verbose {
                     let percentage = ((count + 1) as f64 / format_total as f64 * 100.0) as usize;
-                    print_progress(
-                        &format!("⏳ [2/3] Formatting {}/{} ({}%)...", count + 1, format_total, percentage),
+                    print_progress_with_time(
+                        &format!("[2/3] Formatting {}/{} ({}%)...", count + 1, format_total, percentage),
                         false,
+                        step2_start,
+                        count,
                     );
                 }
 
@@ -1221,6 +1257,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
         let recheck_total = formatted_files.len();
         PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+        let step3_start = Instant::now();
 
         // Re-check formatted files in parallel
         let recheck_issues: Vec<_> = file_langs
@@ -1230,9 +1267,11 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
                     if !options.quiet && !options.verbose {
                         let percentage = ((count + 1) as f64 / recheck_total as f64 * 100.0) as usize;
-                        print_progress(
-                            &format!("⏳ [3/3] Rechecking {}/{} ({}%)...", count + 1, recheck_total, percentage),
+                        print_progress_with_time(
+                            &format!("[3/3] Rechecking {}/{} ({}%)...", count + 1, recheck_total, percentage),
                             false,
+                            step3_start,
+                            count,
                         );
                     }
                     run_checker_on_file(
@@ -1284,6 +1323,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         // CheckOnly mode: use parallel processing for better performance with cache support
         if options.mode == RunMode::CheckOnly {
             PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+            let check_start = Instant::now();
 
             let all_issues: Vec<_> = file_langs
                 .par_iter()
@@ -1291,9 +1331,11 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
                     if !options.quiet && !options.verbose {
                         let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
-                        print_progress(
-                            &format!("⏳ {} {}/{} ({}%)...", mode_name, count + 1, total_files, percentage),
+                        print_progress_with_time(
+                            &format!("{} {}/{} ({}%)...", mode_name, count + 1, total_files, percentage),
                             false,
+                            check_start,
+                            count,
                         );
                     }
                     if options.verbose {
@@ -1341,6 +1383,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         } else {
             // FormatOnly mode: parallel processing
             PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+            let format_start = Instant::now();
 
             let format_results: Vec<Option<FormatResult>> = file_langs
                 .par_iter()
@@ -1348,9 +1391,11 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
                     if !options.quiet && !options.verbose {
                         let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
-                        print_progress(
-                            &format!("⏳ {} {}/{} ({}%)...", mode_name, count + 1, total_files, percentage),
+                        print_progress_with_time(
+                            &format!("{} {}/{} ({}%)...", mode_name, count + 1, total_files, percentage),
                             false,
+                            format_start,
+                            count,
                         );
                     }
                     if options.verbose {
