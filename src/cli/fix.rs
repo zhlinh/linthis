@@ -400,13 +400,23 @@ fn run_ai_fix_loop(
             break;
         }
 
-        // Re-run lint check to see if there are remaining issues
+        // Re-run lint check ONLY on modified files to see if there are remaining issues
+        let modified_paths: Vec<PathBuf> = ai_result.modified_files.iter().cloned().collect();
+        if modified_paths.is_empty() {
+            break;
+        }
+
         if !options.quiet {
-            println!("\n{} Re-checking for remaining issues...", "→".cyan());
+            println!(
+                "\n{} Re-checking {} modified file{}...",
+                "→".cyan(),
+                modified_paths.len(),
+                if modified_paths.len() == 1 { "" } else { "s" }
+            );
         }
 
         let run_options = RunOptions {
-            paths: vec![PathBuf::from(".")],
+            paths: modified_paths,
             mode: RunMode::CheckOnly,
             languages: vec![],
             exclude_patterns: vec![],

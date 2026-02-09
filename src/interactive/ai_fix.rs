@@ -248,9 +248,14 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
             .collect();
 
         println!("    {} issues to fix", issues_data.len());
+        print!("    {} Running {} CLI...", "→".cyan(), if matches!(config.provider, AiProviderKind::ClaudeCli) { "Claude" } else { "CodeBuddy" });
+        io::stdout().flush().ok();
 
         // Let CLI fix the file
         let diff_result = provider.fix_file_with_cli(file_path, &issues_data);
+
+        // Clear the "Running..." line
+        print!("\r{}\r", " ".repeat(60));
 
         match diff_result {
             Ok(diff) => {
