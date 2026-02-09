@@ -70,7 +70,8 @@ fs2 = "0.4"
 
 # LSP Server
 tower-lsp = "0.20"
-tokio = { version = "1", features = ["full"] }
+# Only include tokio features actually used (not "full")
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-std", "io-util", "net", "macros"] }
 async-trait = "0.1"
 
 # Watch mode - file system watching
@@ -98,3 +99,9 @@ path = "src/main.rs"
 lto = true
 codegen-units = 1
 strip = true
+
+# Fast release build for development (use with: cargo build --profile dev-release)
+[profile.dev-release]
+inherits = "release"
+lto = false           # Skip LTO for faster builds
+codegen-units = 16    # Parallel codegen
