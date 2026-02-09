@@ -248,13 +248,45 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
             .collect();
 
         println!("    {} issues to fix", issues_data.len());
-        print!("    {} Running {} CLI...", "→".cyan(), if matches!(config.provider, AiProviderKind::ClaudeCli) { "Claude" } else { "CodeBuddy" });
-        io::stdout().flush().ok();
+
+        // Start spinner with elapsed time in a background thread
+        let cli_name = if matches!(config.provider, AiProviderKind::ClaudeCli) { "Claude" } else { "CodeBuddy" };
+        let spinner_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let spinner_running_clone = Arc::clone(&spinner_running);
+
+        let spinner_handle = std::thread::spawn(move || {
+            let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let start_time = std::time::Instant::now();
+            let mut idx = 0;
+
+            while spinner_running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                let elapsed = start_time.elapsed();
+                let secs = elapsed.as_secs();
+                let time_str = if secs >= 60 {
+                    format!("{}m {}s", secs / 60, secs % 60)
+                } else {
+                    format!("{}s", secs)
+                };
+
+                print!(
+                    "\r    {} Running {} CLI... ({})",
+                    spinner_chars[idx].to_string().cyan(),
+                    cli_name,
+                    time_str.dimmed()
+                );
+                io::stdout().flush().ok();
+
+                idx = (idx + 1) % spinner_chars.len();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
 
         // Let CLI fix the file
         let diff_result = provider.fix_file_with_cli(file_path, &issues_data);
 
-        // Clear the "Running..." line
+        // Stop spinner and clear the line
+        spinner_running.store(false, std::sync::atomic::Ordering::Relaxed);
+        let _ = spinner_handle.join();
         print!("\r{}\r", " ".repeat(60));
 
         match diff_result {
