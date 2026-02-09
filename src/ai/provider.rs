@@ -488,6 +488,7 @@ IMPORTANT:
             .arg("text")
             .arg("--allowedTools")
             .arg("Edit,Read")
+            .arg("--dangerously-skip-permissions")  // Auto-accept tool permissions
             .arg("--")  // Separate options from prompt
             .arg(&prompt);
 
