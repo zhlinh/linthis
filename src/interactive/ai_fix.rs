@@ -258,6 +258,7 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
             let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
             let start_time = std::time::Instant::now();
             let mut idx = 0;
+            let mut first_print = true;
 
             while spinner_running_clone.load(std::sync::atomic::Ordering::Relaxed) {
                 let elapsed = start_time.elapsed();
@@ -268,12 +269,25 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
                     format!("{}s", secs)
                 };
 
-                print!(
-                    "\r    {} Running {} CLI... ({})",
-                    spinner_chars[idx].to_string().cyan(),
-                    cli_name,
-                    time_str.dimmed()
-                );
+                if first_print {
+                    // First time: print spinner line and empty line below
+                    println!(
+                        "    {} Running {} CLI... ({})",
+                        spinner_chars[idx].to_string().cyan(),
+                        cli_name,
+                        time_str.dimmed()
+                    );
+                    println!(); // Empty line for cursor
+                    first_print = false;
+                } else {
+                    // Update: move up 2 lines, print, then move back down
+                    print!(
+                        "\x1B[2A\r    {} Running {} CLI... ({})\x1B[K\n\n",
+                        spinner_chars[idx].to_string().cyan(),
+                        cli_name,
+                        time_str.dimmed()
+                    );
+                }
                 io::stdout().flush().ok();
 
                 idx = (idx + 1) % spinner_chars.len();
@@ -284,10 +298,12 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
         // Let CLI fix the file
         let diff_result = provider.fix_file_with_cli(file_path, &issues_data);
 
-        // Stop spinner and clear the line
+        // Stop spinner and clear both lines (spinner line and empty line)
         spinner_running.store(false, std::sync::atomic::Ordering::Relaxed);
         let _ = spinner_handle.join();
-        print!("\r{}\r", " ".repeat(60));
+        // Move up 2 lines and clear them
+        print!("\x1B[2A\x1B[K\n\x1B[K\x1B[A");
+        io::stdout().flush().ok();
 
         match diff_result {
             Ok(diff) => {
