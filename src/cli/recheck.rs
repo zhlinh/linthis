@@ -58,9 +58,10 @@ pub fn recheck_modified_files(
     let modified_count = modified_files.len();
     let mut recheck_issues = Vec::new();
 
+    const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     for (i, file) in modified_files.iter().enumerate() {
         if !quiet {
-            eprint!("\r⏳ Rechecking {}/{}...", i + 1, modified_count);
+            eprint!("\r\x1b[K\x1b[36m{}\x1b[0m Rechecking {}/{}...", SPINNER[i % SPINNER.len()], i + 1, modified_count);
             std::io::stderr().flush().ok();
         }
 

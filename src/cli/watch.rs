@@ -44,7 +44,7 @@ pub fn run_watch(config: WatchConfig) -> Result<(), String> {
     println!();
 
     // Run initial lint
-    println!("⏳ Running initial lint...");
+    println!("\x1b[36m⠋\x1b[0m Running initial lint...");
     let result = run_lint(&config)?;
     print_result_summary(&result);
 

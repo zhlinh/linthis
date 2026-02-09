@@ -1001,7 +1001,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // Print starting message
     if !options.quiet {
-        eprint!("⏳ Scanning files...");
+        eprint!("\x1b[36m{}\x1b[0m Scanning files...", SPINNER_CHARS[0]);
         use std::io::Write;
         let _ = std::io::stderr().flush();
     }
@@ -1023,11 +1023,11 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         for warning in &path_warnings {
             eprintln!("\x1b[33mWarning\x1b[0m: {}", warning);
         }
-        eprint!("⏳ Found {} files, checking...", files.len());
+        eprint!("\x1b[36m{}\x1b[0m Found {} files, checking...", SPINNER_CHARS[1], files.len());
         use std::io::Write;
         let _ = std::io::stderr().flush();
     } else if !options.quiet {
-        eprint!("\r\x1b[K⏳ Found {} files, checking...", files.len());
+        eprint!("\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...", SPINNER_CHARS[1], files.len());
         use std::io::Write;
         let _ = std::io::stderr().flush();
     }
