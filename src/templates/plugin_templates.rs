@@ -1153,7 +1153,7 @@ excluded:
         ),
         // ==================== Objective-C ====================
         (
-            "objectivec/.clang-format",
+            "oc/.clang-format",
             format!(
                 r#"# Clang-Format Configuration for {} Plugin (Objective-C)
 # Documentation: https://clang.llvm.org/docs/ClangFormatStyleOptions.html

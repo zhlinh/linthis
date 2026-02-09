@@ -41,7 +41,7 @@ description = "{name} configuration plugin for linthis"
 linthis_version = ">=0.2.0"
 
 # Supported languages (informational)
-languages = ["rust", "python", "typescript", "go", "java", "cpp", "swift", "objectivec", "sql", "csharp", "lua", "css", "kotlin", "dockerfile", "scala", "dart"]
+languages = ["rust", "python", "typescript", "go", "java", "cpp", "swift", "oc", "sql", "csharp", "lua", "css", "kotlin", "dockerfile", "scala", "dart"]
 
 # License identifier (SPDX)
 license = "MIT"
@@ -97,9 +97,9 @@ swiftlint = "swift/.swiftlint.yml"
 # swift-format formatter configuration
 swift-format = "swift/.swift-format"
 
-[configs.objectivec]
+[configs.oc]
 # Clang-Format configuration
-clang-format = "objectivec/.clang-format"
+clang-format = "oc/.clang-format"
 
 [configs.sql]
 # SQLFluff linter and formatter configuration
@@ -311,7 +311,7 @@ A linthis configuration plugin providing consistent linting and formatting rules
 | Java       | checkstyle           | `java/checkstyle.xml`   |
 | C/C++      | clang-format, cpplint| `cpp/.clang-format`, `cpp/CPPLINT.cfg` |
 | Swift      | swiftlint, swift-format | `swift/.swiftlint.yml`, `swift/.swift-format` |
-| Objective-C| clang-format         | `objectivec/.clang-format` |
+| Objective-C| clang-format         | `oc/.clang-format` |
 | SQL        | sqlfluff             | `sql/.sqlfluff`         |
 | C#         | dotnet-format        | `csharp/.editorconfig`  |
 | Lua        | luacheck, stylua     | `lua/.luacheckrc`, `lua/stylua.toml` |
