@@ -831,7 +831,7 @@ fn main() -> ExitCode {
 
             // Show hint for fix mode if there are issues
             if !cli.quiet && !result.issues.is_empty() {
-                print_fix_hint();
+                print_fix_hint(&result.issues);
             }
 
             ExitCode::from(result.exit_code as u8)
