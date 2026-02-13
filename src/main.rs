@@ -616,7 +616,10 @@ fn main() -> ExitCode {
 
     // Run linthis
     match run(&options) {
-        Ok(result) => {
+        Ok(mut result) => {
+            // Record target paths for trend analysis scope tracking
+            result.target_paths = cli.paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+
             // Output results
             let output = format_result_with_hook_type(&result, output_format, hook_type.as_deref());
 

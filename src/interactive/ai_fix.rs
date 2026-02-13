@@ -438,14 +438,23 @@ fn run_cli_file_fix_parallel(
         .collect();
 
     let total_batches = batches.len();
+    let total_issues: usize = file_data.iter().map(|(_, _, count)| count).sum();
+    let actual_parallel = config.parallel_jobs.min(total_batches);
+    let actual_files_per_batch = if total_batches > 0 {
+        (total_files + total_batches - 1) / total_batches // ceiling division
+    } else {
+        total_files
+    };
 
     println!(
-        "  {} {} files in {} batches ({} files/batch, {} parallel)",
+        "  {} {} issues in {} files, {} batch{} (up to {} files/batch, {} parallel)",
         "→".cyan(),
+        total_issues,
         total_files,
         total_batches,
-        FILES_PER_BATCH,
-        config.parallel_jobs
+        if total_batches == 1 { "" } else { "es" },
+        actual_files_per_batch,
+        actual_parallel
     );
     println!();
 

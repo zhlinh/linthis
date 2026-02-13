@@ -36,6 +36,9 @@ pub struct TrendDataPoint {
     pub files_with_issues: usize,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
+    /// Target paths that were scanned (scope identifier).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_paths: Vec<String>,
 }
 
 impl TrendDataPoint {
@@ -61,6 +64,28 @@ impl TrendDataPoint {
             total_files: result.total_files,
             files_with_issues: result.files_with_issues,
             duration_ms: result.duration_ms,
+            target_paths: result.target_paths.clone(),
+        }
+    }
+
+    /// Get a normalized scope key for grouping results.
+    /// Empty target_paths means "project root" scan.
+    pub fn scope_key(&self) -> String {
+        if self.target_paths.is_empty() {
+            ".".to_string()
+        } else {
+            let mut sorted = self.target_paths.clone();
+            sorted.sort();
+            sorted.join(",")
+        }
+    }
+
+    /// Get a human-readable scope label.
+    pub fn scope_label(&self) -> String {
+        if self.target_paths.is_empty() {
+            "project root".to_string()
+        } else {
+            self.target_paths.join(", ")
         }
     }
 }
@@ -101,11 +126,26 @@ pub struct TrendAnalysis {
     pub best_run: Option<TrendDataPoint>,
     /// Worst run (highest issues).
     pub worst_run: Option<TrendDataPoint>,
+    /// Scope label for this trend analysis (what paths were scanned).
+    #[serde(default)]
+    pub scope: String,
+    /// Number of results excluded due to different scope.
+    #[serde(default)]
+    pub excluded_count: usize,
 }
 
 impl TrendAnalysis {
     /// Analyze trends from a list of data points.
-    pub fn from_data_points(mut data_points: Vec<TrendDataPoint>) -> Self {
+    pub fn from_data_points(data_points: Vec<TrendDataPoint>) -> Self {
+        Self::from_data_points_with_scope(data_points, String::new(), 0)
+    }
+
+    /// Analyze trends from data points with scope info.
+    pub fn from_data_points_with_scope(
+        mut data_points: Vec<TrendDataPoint>,
+        scope: String,
+        excluded_count: usize,
+    ) -> Self {
         // Sort by timestamp (oldest first)
         data_points.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
 
@@ -117,6 +157,8 @@ impl TrendAnalysis {
                 average_issues_per_run: 0.0,
                 best_run: None,
                 worst_run: None,
+                scope,
+                excluded_count,
             };
         }
 
@@ -174,6 +216,8 @@ impl TrendAnalysis {
             average_issues_per_run,
             best_run,
             worst_run,
+            scope,
+            excluded_count,
         }
     }
 
@@ -186,6 +230,17 @@ impl TrendAnalysis {
         let mut output = String::new();
 
         output.push_str("=== Code Quality Trends ===\n\n");
+
+        // Show scope info
+        if !self.scope.is_empty() {
+            output.push_str(&format!("Scope: {}\n", self.scope));
+        }
+        if self.excluded_count > 0 {
+            output.push_str(&format!(
+                "({} runs with different scope excluded)\n",
+                self.excluded_count
+            ));
+        }
 
         // Summary
         output.push_str(&format!("Runs analyzed: {}\n", self.data_points.len()));
@@ -217,13 +272,19 @@ impl TrendAnalysis {
 
         output.push_str("\nRecent runs:\n");
         for (i, dp) in self.data_points.iter().rev().take(5).enumerate() {
+            let scope_tag = if dp.target_paths.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", dp.target_paths.join(", "))
+            };
             output.push_str(&format!(
-                "  {}. {} - {} issues ({} errors, {} warnings)\n",
+                "  {}. {} - {} issues ({} errors, {} warnings){}\n",
                 i + 1,
                 dp.timestamp.format("%Y-%m-%d %H:%M"),
                 dp.total_issues,
                 dp.errors,
                 dp.warnings,
+                scope_tag,
             ));
         }
 
@@ -298,10 +359,13 @@ pub fn parse_result_timestamp(filename: &str) -> Option<DateTime<Utc>> {
 }
 
 /// Build trend analysis from historical results.
+/// Automatically groups by scope: uses the most recent run's scope as reference,
+/// and only compares results with the same scope.
 pub fn analyze_trends(project_root: &Path, limit: usize) -> TrendAnalysis {
-    let results = load_historical_results(project_root, limit);
+    // Load more results than requested so we can filter by scope and still have enough
+    let results = load_historical_results(project_root, limit * 3);
 
-    let data_points: Vec<_> = results
+    let all_data_points: Vec<_> = results
         .into_iter()
         .filter_map(|(path, result)| {
             let filename = path.file_name()?.to_string_lossy().to_string();
@@ -310,7 +374,29 @@ pub fn analyze_trends(project_root: &Path, limit: usize) -> TrendAnalysis {
         })
         .collect();
 
-    TrendAnalysis::from_data_points(data_points)
+    if all_data_points.is_empty() {
+        return TrendAnalysis::from_data_points(vec![]);
+    }
+
+    // Find the most recent run's scope as reference
+    let most_recent = all_data_points
+        .iter()
+        .max_by_key(|dp| dp.timestamp)
+        .unwrap();
+    let reference_scope = most_recent.scope_key();
+    let scope_label = most_recent.scope_label();
+
+    // Filter to only include results with matching scope
+    let (matching, excluded): (Vec<_>, Vec<_>) = all_data_points
+        .into_iter()
+        .partition(|dp| dp.scope_key() == reference_scope);
+
+    let excluded_count = excluded.len();
+
+    // Apply the original limit
+    let matching: Vec<_> = matching.into_iter().take(limit).collect();
+
+    TrendAnalysis::from_data_points_with_scope(matching, scope_label, excluded_count)
 }
 
 #[cfg(test)]
@@ -377,6 +463,7 @@ mod tests {
             total_files: 100,
             files_with_issues: issues / 10,
             duration_ms: 1000,
+            target_paths: vec![],
         }
     }
 }

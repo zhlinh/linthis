@@ -44,6 +44,22 @@ pub struct CppChecker {
 }
 
 impl CppChecker {
+    /// Get config search directories: current_dir first, then git project root as fallback.
+    /// This ensures configs are found when:
+    /// - Running from project root (normal case)
+    /// - Running from a subdirectory (cwd misses .linthis/, git root has it)
+    /// - Running with `-i /external/path` (cwd has user's config, git root may differ)
+    /// - Running from editor plugins (cwd is set by editor to project root)
+    fn config_search_dirs() -> Vec<PathBuf> {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let git_root = crate::utils::get_project_root();
+        if cwd == git_root {
+            vec![cwd]
+        } else {
+            vec![cwd, git_root]
+        }
+    }
+
     pub fn new() -> Self {
         // Try to load cpplint config from linthis config files
         let (cpp_config, oc_config) = Self::load_cpplint_configs();
@@ -64,20 +80,24 @@ impl CppChecker {
         }
     }
 
-    /// Find clang-tidy config from linthis plugin configs
+    /// Find clang-tidy config from linthis plugin configs.
     fn find_plugin_clang_tidy_config() -> Option<PathBuf> {
-        let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let search_dirs = Self::config_search_dirs();
 
-        // Check for cpp config first
-        let cpp_clang_tidy = project_dir.join(".linthis/configs/cpp/.clang-tidy");
-        if cpp_clang_tidy.exists() {
-            return Some(cpp_clang_tidy);
+        // Check for cpp config first (across all search dirs)
+        for dir in &search_dirs {
+            let cpp_clang_tidy = dir.join(".linthis/configs/cpp/.clang-tidy");
+            if cpp_clang_tidy.exists() {
+                return Some(cpp_clang_tidy);
+            }
         }
 
-        // Check for oc config as fallback
-        let oc_clang_tidy = project_dir.join(".linthis/configs/oc/.clang-tidy");
-        if oc_clang_tidy.exists() {
-            return Some(oc_clang_tidy);
+        // OC config as fallback
+        for dir in &search_dirs {
+            let oc_clang_tidy = dir.join(".linthis/configs/oc/.clang-tidy");
+            if oc_clang_tidy.exists() {
+                return Some(oc_clang_tidy);
+            }
         }
 
         None
@@ -101,32 +121,40 @@ impl CppChecker {
             filter: Some("-build/c++11,-build/c++14,-build/header_guard,-build/include,-legal/copyright,-readability/casting,-runtime/references,-runtime/int,-whitespace/parens,-whitespace/braces,-whitespace/blank_line,-readability/braces,-whitespace/empty_if_body,-whitespace/operators".to_string()),
         };
 
-        let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let search_dirs = Self::config_search_dirs();
 
         // Load from .linthis/configs/{lang}/CPPLINT.cfg (plugin configs)
         // Merge filters instead of replacing to preserve essential OC defaults
-        let cpp_cfg_path = project_dir.join(".linthis/configs/cpp/CPPLINT.cfg");
-        let oc_cfg_path = project_dir.join(".linthis/configs/oc/CPPLINT.cfg");
-
-        if let Some(cfg) = Self::parse_cpplint_cfg(&cpp_cfg_path) {
-            if cfg.linelength.is_some() {
-                cpp_config.linelength = cfg.linelength;
-            }
-            if let Some(ref f) = cfg.filter {
-                cpp_config.filter = Some(Self::merge_filters(cpp_config.filter.as_deref(), f));
+        // Search current_dir first, then git root as fallback
+        for dir in &search_dirs {
+            let cpp_cfg_path = dir.join(".linthis/configs/cpp/CPPLINT.cfg");
+            if let Some(cfg) = Self::parse_cpplint_cfg(&cpp_cfg_path) {
+                if cfg.linelength.is_some() {
+                    cpp_config.linelength = cfg.linelength;
+                }
+                if let Some(ref f) = cfg.filter {
+                    cpp_config.filter = Some(Self::merge_filters(cpp_config.filter.as_deref(), f));
+                }
+                break;
             }
         }
-        if let Some(cfg) = Self::parse_cpplint_cfg(&oc_cfg_path) {
-            if cfg.linelength.is_some() {
-                oc_config.linelength = cfg.linelength;
-            }
-            if let Some(ref f) = cfg.filter {
-                oc_config.filter = Some(Self::merge_filters(oc_config.filter.as_deref(), f));
+        for dir in &search_dirs {
+            let oc_cfg_path = dir.join(".linthis/configs/oc/CPPLINT.cfg");
+            if let Some(cfg) = Self::parse_cpplint_cfg(&oc_cfg_path) {
+                if cfg.linelength.is_some() {
+                    oc_config.linelength = cfg.linelength;
+                }
+                if let Some(ref f) = cfg.filter {
+                    oc_config.filter = Some(Self::merge_filters(oc_config.filter.as_deref(), f));
+                }
+                break;
             }
         }
 
         // Priority 2: Override with config.toml settings (if specified)
-        let merged = Config::load_merged(&project_dir);
+        // Use first dir that has config (cwd first, then git root)
+        let config_dir = search_dirs.first().cloned().unwrap_or_default();
+        let merged = Config::load_merged(&config_dir);
 
         if let Some(ref cpp) = merged.language_overrides.cpp {
             if cpp.linelength.is_some() {
@@ -153,8 +181,9 @@ impl CppChecker {
     fn load_ignored_checks() -> (Vec<String>, Vec<String>) {
         use crate::config::Config;
 
-        let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let merged = Config::load_merged(&project_dir);
+        let search_dirs = Self::config_search_dirs();
+        let config_dir = search_dirs.first().cloned().unwrap_or_default();
+        let merged = Config::load_merged(&config_dir);
 
         // Default ignored checks for Objective-C (ARC-related false positives)
         let default_oc_ignored = vec![
@@ -428,20 +457,33 @@ impl CppChecker {
             return Ok(vec![]);
         }
 
+        // Canonicalize file path to absolute so clang-tidy resolves it consistently.
+        // Run clang-tidy from the git project root to ensure consistent header resolution
+        // and include paths regardless of which directory linthis was invoked from.
+        let abs_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(path)
+        };
+        let project_root = crate::utils::get_project_root();
+
         let mut cmd = Command::new("clang-tidy");
-        cmd.arg(path);
+        cmd.current_dir(&project_root);
+        cmd.arg(&abs_path);
 
         // Add config file if specified or found
         if let Some(ref config) = self.config_path {
             cmd.arg(format!("--config-file={}", config.display()));
-        } else if let Some(config) = Self::find_clang_tidy_config(path) {
+        } else if let Some(config) = Self::find_clang_tidy_config(&abs_path) {
             cmd.arg(format!("--config-file={}", config.display()));
         }
 
         // Add compile_commands.json path: user-specified > auto-detected
         if let Some(ref build_path) = self.compile_commands_dir {
             cmd.arg(format!("-p={}", build_path.display()));
-        } else if let Some(build_path) = Self::find_compile_commands(path) {
+        } else if let Some(build_path) = Self::find_compile_commands(&abs_path) {
             cmd.arg(format!("-p={}", build_path.display()));
         } else {
             // Use -- to separate clang-tidy args from compiler args
