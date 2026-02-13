@@ -230,6 +230,9 @@ pub struct RunResult {
     /// Tools that were not available during the run
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unavailable_tools: Vec<UnavailableTool>,
+    /// Target paths that were scanned (CLI paths before expansion)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_paths: Vec<String>,
 }
 
 impl RunResult {
