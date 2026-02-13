@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use super::commands::Cli;
+use linthis::LintIssue;
 
 /// Run benchmark comparing ruff vs flake8+black for Python
 pub fn run_benchmark(cli: &Cli) -> ExitCode {
@@ -139,7 +140,26 @@ pub fn resolve_ai_provider(cli_value: Option<&str>, config_value: Option<&str>) 
 }
 
 /// Print hint about how to enter interactive fix mode
-pub fn print_fix_hint() {
+pub fn print_fix_hint(issues: &[LintIssue]) {
+    // Check if there are many clang-tidy issues
+    let clang_tidy_count = issues
+        .iter()
+        .filter(|i| i.source.as_deref() == Some("clang-tidy"))
+        .count();
+
+    if clang_tidy_count >= 10 {
+        eprintln!();
+        eprintln!(
+            "  {} Found {} clang-tidy issues. To skip clang-tidy checks:",
+            "Tip:".yellow().bold(),
+            clang_tidy_count,
+        );
+        eprintln!(
+            "       {}",
+            "LINTHIS_SKIP_CLANG_TIDY=1 linthis".yellow()
+        );
+    }
+
     eprintln!();
     eprintln!(
         "  {} To review and fix issues interactively:",

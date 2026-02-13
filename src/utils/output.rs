@@ -565,6 +565,18 @@ pub fn format_result_hook_with_width(
     output.push_str(&format!("{}\n", pad_line("  linthis fix          - interactive fix", 0)));
     output.push_str(&format!("{}\n", pad_line("", 0)));
 
+    // clang-tidy skip hint if too many clang-tidy issues
+    let clang_tidy_count = result.issues.iter()
+        .filter(|i| i.source.as_deref() == Some("clang-tidy"))
+        .count();
+    if clang_tidy_count >= 10 {
+        output.push_str(&format!("{}\n", pad_line(
+            &format!("Too many clang-tidy issues ({})? Skip with:", clang_tidy_count), 0)));
+        output.push_str(&format!("{}\n", pad_line(
+            "  LINTHIS_SKIP_CLANG_TIDY=1", 0)));
+        output.push_str(&format!("{}\n", pad_line("", 0)));
+    }
+
     // Skip check hint
     output.push_str(&format!("{}\n", pad_line("To skip this check:", 0)));
     output.push_str(&format!("{}\n", pad_line(&format!("  {}", skip_command), 0)));
