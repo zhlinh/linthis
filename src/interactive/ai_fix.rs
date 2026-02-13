@@ -57,7 +57,7 @@ impl Default for AiFixConfig {
             max_suggestions: 3,
             accept_all: false,
             verbose: false,
-            parallel_jobs: 8,
+            parallel_jobs: 4,
         }
     }
 }
@@ -205,9 +205,14 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
     println!();
     println!("{}", "─".repeat(60).dimmed());
     println!(
-        "  {} Direct file editing mode ({} files)",
+        "  {} Direct file editing mode ({} files{})",
         "CLI Fix:".cyan().bold(),
-        total_files
+        total_files,
+        if config.accept_all && config.parallel_jobs > 1 {
+            format!(", {} parallel", config.parallel_jobs)
+        } else {
+            String::new()
+        }
     );
     println!("{}", "─".repeat(60).dimmed());
     println!();
@@ -218,10 +223,16 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
         AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
         _ => return fix_result,
     };
-    let provider = AiProvider::new(provider_config);
 
-    // Process files (can be parallelized at file level)
     let file_list: Vec<_> = file_groups.into_iter().collect();
+
+    // Parallel mode: accept_all with parallel_jobs > 1
+    if config.accept_all && config.parallel_jobs > 1 {
+        return run_cli_file_fix_parallel(&file_list, &provider_config, config, total_files);
+    }
+
+    // Sequential mode: interactive or single-threaded
+    let provider = AiProvider::new(provider_config);
 
     for (file_idx, (file_path, file_issues)) in file_list.iter().enumerate() {
         println!(
@@ -372,6 +383,221 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
     }
 
     // Print summary
+    print_cli_fix_summary(&fix_result, total_files);
+
+    fix_result
+}
+
+/// Result of a batch fix (multiple files in one CLI call)
+#[derive(Debug)]
+struct BatchResult {
+    /// Per-file diffs (file_path -> diff)
+    diffs: std::collections::HashMap<PathBuf, String>,
+    /// Files in this batch with their issue counts
+    files: Vec<(PathBuf, usize)>,
+    /// Error if the entire batch failed
+    error: Option<String>,
+}
+
+/// Maximum number of files per batch CLI call
+const FILES_PER_BATCH: usize = 8;
+
+/// Run CLI file fix in parallel batches.
+/// Groups files into batches, each batch handled by one `claude -p` call.
+/// Multiple batches run in parallel via rayon.
+fn run_cli_file_fix_parallel(
+    file_list: &[(PathBuf, Vec<&LintIssue>)],
+    provider_config: &AiProviderConfig,
+    config: &AiFixConfig,
+    total_files: usize,
+) -> AiFixResult {
+    use std::sync::Mutex;
+
+    let mut fix_result = AiFixResult::default();
+    let cli_name = if matches!(config.provider, AiProviderKind::ClaudeCli) { "Claude" } else { "CodeBuddy" };
+
+    // Prepare file data
+    let file_data: Vec<(PathBuf, Vec<(usize, String, String)>, usize)> = file_list
+        .iter()
+        .map(|(path, issues)| {
+            let issues_data: Vec<(usize, String, String)> = issues
+                .iter()
+                .map(|i| (i.line, i.message.clone(), i.code.clone().unwrap_or_default()))
+                .collect();
+            let count = issues.len();
+            (path.clone(), issues_data, count)
+        })
+        .collect();
+
+    // Split into batches
+    let batches: Vec<Vec<&(PathBuf, Vec<(usize, String, String)>, usize)>> = file_data
+        .iter()
+        .collect::<Vec<_>>()
+        .chunks(FILES_PER_BATCH)
+        .map(|chunk| chunk.to_vec())
+        .collect();
+
+    let total_batches = batches.len();
+
+    println!(
+        "  {} {} files in {} batches ({} files/batch, {} parallel)",
+        "→".cyan(),
+        total_files,
+        total_batches,
+        FILES_PER_BATCH,
+        config.parallel_jobs
+    );
+    println!();
+
+    // Progress counter (tracks completed batches)
+    let progress = Arc::new(AtomicUsize::new(0));
+
+    // Start progress display thread
+    let progress_clone = Arc::clone(&progress);
+    let cli_name_owned = cli_name.to_string();
+    let progress_handle = std::thread::spawn(move || {
+        let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let start_time = std::time::Instant::now();
+        let mut idx = 0;
+
+        loop {
+            let current = progress_clone.load(Ordering::Relaxed);
+            let elapsed = start_time.elapsed();
+            let secs = elapsed.as_secs();
+            let time_str = if secs >= 60 {
+                format!("{}m {}s", secs / 60, secs % 60)
+            } else {
+                format!("{}s", secs)
+            };
+
+            print!(
+                "\r  {} [batch {}/{}] Running {} CLI... ({})\x1B[K",
+                spinner_chars[idx].to_string().cyan(),
+                current,
+                total_batches,
+                cli_name_owned,
+                time_str.dimmed()
+            );
+            io::stdout().flush().ok();
+
+            if current >= total_batches {
+                break;
+            }
+
+            idx = (idx + 1) % spinner_chars.len();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+
+    // Build thread pool
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(config.parallel_jobs)
+        .build()
+        .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
+
+    // Find common working directory (project root)
+    let working_dir = crate::utils::get_project_root();
+
+    // Process batches in parallel
+    let results_mutex = Arc::new(Mutex::new(Vec::new()));
+    let provider_config_clone = provider_config.clone();
+
+    pool.install(|| {
+        batches.par_iter().for_each(|batch| {
+            let provider = AiProvider::new(provider_config_clone.clone());
+
+            // Build batch file list for the provider
+            let batch_files: Vec<(&std::path::Path, &[(usize, String, String)])> = batch
+                .iter()
+                .map(|(path, issues, _count)| (path.as_path(), issues.as_slice()))
+                .collect();
+
+            let files_info: Vec<(PathBuf, usize)> = batch
+                .iter()
+                .map(|(path, _, count)| (path.clone(), *count))
+                .collect();
+
+            let result = match provider.fix_files_batch_with_cli(&batch_files, &working_dir) {
+                Ok(diffs) => BatchResult {
+                    diffs,
+                    files: files_info,
+                    error: None,
+                },
+                Err(e) => BatchResult {
+                    diffs: std::collections::HashMap::new(),
+                    files: files_info,
+                    error: Some(e),
+                },
+            };
+
+            progress.fetch_add(1, Ordering::Relaxed);
+            results_mutex.lock().unwrap().push(result);
+        });
+    });
+
+    // Wait for progress thread to finish
+    let _ = progress_handle.join();
+    println!(); // New line after progress
+    println!();
+
+    // Collect and display results
+    let results = Arc::try_unwrap(results_mutex)
+        .expect("All parallel tasks completed")
+        .into_inner()
+        .unwrap();
+
+    let mut file_idx = 0;
+    for batch_result in &results {
+        if let Some(ref error) = batch_result.error {
+            for (file_path, issue_count) in &batch_result.files {
+                file_idx += 1;
+                println!(
+                    "  [{}/{}] {}",
+                    file_idx, total_files, file_path.display()
+                );
+                eprintln!("    {} CLI error: {}", "✗".red(), error);
+                fix_result.errors += issue_count;
+            }
+        } else {
+            for (file_path, issue_count) in &batch_result.files {
+                file_idx += 1;
+                println!(
+                    "  [{}/{}] {}",
+                    file_idx, total_files, file_path.display()
+                );
+
+                if let Some(diff) = batch_result.diffs.get(file_path) {
+                    for line in diff.lines() {
+                        if line.starts_with('+') && !line.starts_with("+++") {
+                            println!("    {}", line.green());
+                        } else if line.starts_with('-') && !line.starts_with("---") {
+                            println!("    {}", line.red());
+                        } else if line.starts_with("@@") {
+                            println!("    {}", line.cyan());
+                        } else {
+                            println!("    {}", line.dimmed());
+                        }
+                    }
+                    println!("    {} Changes applied", "✓".green());
+                    fix_result.applied += issue_count;
+                    fix_result.modified_files.insert(file_path.clone());
+                } else {
+                    println!("    {} No changes made", "⚠".yellow());
+                    fix_result.skipped += issue_count;
+                }
+                println!();
+            }
+        }
+    }
+
+    // Print summary
+    print_cli_fix_summary(&fix_result, total_files);
+
+    fix_result
+}
+
+/// Print CLI fix summary
+fn print_cli_fix_summary(fix_result: &AiFixResult, total_files: usize) {
     println!("{}", "═".repeat(60).dimmed());
     println!("  {}", "CLI Fix Summary".bold());
     println!("{}", "─".repeat(60).dimmed());
@@ -381,8 +607,6 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
     println!("  Errors:          {}", fix_result.errors.to_string().red());
     println!("{}", "═".repeat(60).dimmed());
     println!();
-
-    fix_result
 }
 
 /// Get AI suggestion for a single issue

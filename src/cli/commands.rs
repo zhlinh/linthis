@@ -552,11 +552,11 @@ pub enum Commands {
         #[arg(long, requires = "ai")]
         accept_all: bool,
 
-        /// Number of parallel jobs for AI analysis (default: 8)
+        /// Number of parallel jobs for AI analysis (default: 4)
         ///
         /// Use -j 4 or --jobs 4 for parallel processing with 4 threads.
         /// Use -j 1 for sequential processing.
-        #[arg(short = 'j', long, default_value = "8", requires = "ai")]
+        #[arg(short = 'j', long, default_value = "4", requires = "ai")]
         jobs: usize,
 
         /// Target specific file for AI fix (use with --ai)

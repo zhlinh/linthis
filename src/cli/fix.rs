@@ -157,6 +157,11 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
                 println!();
             }
 
+            // For AI mode with accept_all, use iterative fix loop
+            if options.ai && options.accept_all {
+                return run_ai_fix_loop(options, config, result);
+            }
+
             // Enter fix mode
             let (modified_files, fixed_count) = if options.ai {
                 let provider = resolve_ai_provider(
@@ -337,6 +342,7 @@ fn run_ai_fix_loop(
     let mut current_result = initial_result;
     let mut iteration = 0;
     let mut total_fixed = 0;
+    let start_time = std::time::Instant::now();
 
     loop {
         iteration += 1;
@@ -431,6 +437,8 @@ fn run_ai_fix_loop(
             Ok(result) => {
                 if result.issues.is_empty() {
                     if !options.quiet {
+                        let elapsed = start_time.elapsed();
+                        let elapsed_str = format_duration(elapsed);
                         println!(
                             "\n{} All issues fixed after {} iteration{}!",
                             "✓".green().bold(),
@@ -440,6 +448,10 @@ fn run_ai_fix_loop(
                         println!(
                             "  Total fixes applied: {}",
                             total_fixed.to_string().cyan()
+                        );
+                        println!(
+                            "  Total time: {}",
+                            elapsed_str.cyan()
                         );
                     }
                     return ExitCode::SUCCESS;
@@ -465,6 +477,8 @@ fn run_ai_fix_loop(
 
     // Final summary
     if !options.quiet {
+        let elapsed = start_time.elapsed();
+        let elapsed_str = format_duration(elapsed);
         println!("\n{}", "─".repeat(50));
         println!(
             "{} AI Fix completed after {} iteration{}",
@@ -473,6 +487,7 @@ fn run_ai_fix_loop(
             if iteration == 1 { "" } else { "s" }
         );
         println!("  Total fixes applied: {}", total_fixed.to_string().cyan());
+        println!("  Total time: {}", elapsed_str.cyan());
 
         if !current_result.issues.is_empty() {
             println!(
@@ -496,6 +511,16 @@ fn run_ai_fix_loop(
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+/// Format a duration into a human-readable string (e.g. "3m 25s")
+fn format_duration(duration: std::time::Duration) -> String {
+    let total_secs = duration.as_secs();
+    if total_secs >= 60 {
+        format!("{}m {}s", total_secs / 60, total_secs % 60)
+    } else {
+        format!("{}s", total_secs)
     }
 }
 

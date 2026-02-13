@@ -489,6 +489,8 @@ IMPORTANT:
             .arg("--allowedTools")
             .arg("Edit,Read")
             .arg("--dangerously-skip-permissions")  // Auto-accept tool permissions
+            .arg("--settings")
+            .arg(r#"{"hooks":{}}"#)  // Disable hooks to avoid side effects
             .arg("--")  // Separate options from prompt
             .arg(&prompt);
 
@@ -527,6 +529,111 @@ IMPORTANT:
         // (caller can restore if needed)
 
         Ok(diff)
+    }
+
+    /// Fix multiple files in a single CLI invocation (batch mode).
+    /// Returns a map of file_path -> diff for each file that was modified.
+    pub fn fix_files_batch_with_cli(
+        &self,
+        files: &[(&std::path::Path, &[(usize, String, String)])],
+        working_dir: &std::path::Path,
+    ) -> Result<std::collections::HashMap<std::path::PathBuf, String>, String> {
+        use std::process::{Command, Stdio};
+
+        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli) {
+            return Err("fix_files_batch_with_cli only works with CLI providers".to_string());
+        }
+
+        // Read and backup original contents
+        let mut originals: Vec<(std::path::PathBuf, String)> = Vec::new();
+        for (file_path, _) in files {
+            let content = std::fs::read_to_string(file_path)
+                .map_err(|e| format!("Failed to read {}: {}", file_path.display(), e))?;
+            originals.push((file_path.to_path_buf(), content));
+        }
+
+        // Build prompt with all files and their issues
+        let mut file_sections = Vec::new();
+        for (file_path, issues) in files {
+            let issues_desc: Vec<String> = issues
+                .iter()
+                .map(|(line, msg, code)| format!("  - Line {}: {} ({})", line, msg, code))
+                .collect();
+            file_sections.push(format!(
+                "File \"{}\":\n{}",
+                file_path.display(),
+                issues_desc.join("\n")
+            ));
+        }
+
+        let prompt = format!(
+            r#"Fix the following lint issues in multiple files:
+
+{}
+
+IMPORTANT:
+- Use the Edit tool to fix each issue directly in each file
+- Make MINIMAL changes - only fix what each error describes
+- Do NOT add, remove, or modify any other code
+- Preserve all formatting and indentation
+- Process ALL files listed above
+- After fixing all files, respond with "Done""#,
+            file_sections.join("\n\n")
+        );
+
+        let cli_cmd = match self.config.kind {
+            AiProviderKind::ClaudeCli => "claude",
+            AiProviderKind::CodeBuddyCli => "codebuddy",
+            _ => unreachable!(),
+        };
+
+        let mut cmd = Command::new(cli_cmd);
+        cmd.arg("-p")
+            .arg("--output-format")
+            .arg("text")
+            .arg("--allowedTools")
+            .arg("Edit,Read")
+            .arg("--dangerously-skip-permissions")
+            .arg("--settings")
+            .arg(r#"{"hooks":{}}"#)
+            .arg("--")
+            .arg(&prompt);
+
+        cmd.current_dir(working_dir);
+
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn {} command: {}", cli_cmd, e))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to wait for {} command: {}", cli_cmd, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Restore all originals on error
+            for (path, content) in &originals {
+                let _ = std::fs::write(path, content);
+            }
+            return Err(format!("{} CLI error: {}", cli_cmd, stderr));
+        }
+
+        // Compare each file to generate diffs
+        let mut diffs = std::collections::HashMap::new();
+        for (path, original) in &originals {
+            if let Ok(modified) = std::fs::read_to_string(path) {
+                let diff = generate_unified_diff(original, &modified, path);
+                if !diff.is_empty() {
+                    diffs.insert(path.clone(), diff);
+                }
+            }
+        }
+
+        Ok(diffs)
     }
 
     fn complete_codebuddy(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
@@ -781,71 +888,39 @@ Note: This is a mock AI response for testing."#,
 
 /// Generate unified diff between two strings
 fn generate_unified_diff(original: &str, modified: &str, file_path: &std::path::Path) -> String {
+    use similar::{ChangeTag, TextDiff};
     use std::fmt::Write;
 
-    let original_lines: Vec<&str> = original.lines().collect();
-    let modified_lines: Vec<&str> = modified.lines().collect();
-
-    if original_lines == modified_lines {
+    if original == modified {
         return String::new();
     }
 
-    let mut diff = String::new();
-    let file_name = file_path.file_name()
+    let file_name = file_path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("file");
+
+    let text_diff = TextDiff::from_lines(original, modified);
+    let mut diff = String::new();
 
     writeln!(diff, "--- a/{}", file_name).ok();
     writeln!(diff, "+++ b/{}", file_name).ok();
 
-    // Simple line-by-line diff
-    let mut i = 0;
-    let mut j = 0;
-
-    while i < original_lines.len() || j < modified_lines.len() {
-        if i < original_lines.len() && j < modified_lines.len() {
-            if original_lines[i] == modified_lines[j] {
-                i += 1;
-                j += 1;
-                continue;
-            }
-        }
-
-        // Find the extent of the change
-        let start_i = i;
-        let start_j = j;
-
-        // Skip different lines
-        while i < original_lines.len() && j < modified_lines.len() && original_lines[i] != modified_lines[j] {
-            i += 1;
-            j += 1;
-        }
-
-        // Handle remaining lines
-        if i >= original_lines.len() && j < modified_lines.len() {
-            while j < modified_lines.len() {
-                j += 1;
-            }
-        } else if j >= modified_lines.len() && i < original_lines.len() {
-            while i < original_lines.len() {
-                i += 1;
-            }
-        }
-
-        // Output hunk
-        let old_count = i - start_i;
-        let new_count = j - start_j;
-
-        writeln!(diff, "@@ -{},{} +{},{} @@", start_i + 1, old_count.max(1), start_j + 1, new_count.max(1)).ok();
-
-        for k in start_i..i {
-            if k < original_lines.len() {
-                writeln!(diff, "-{}", original_lines[k]).ok();
-            }
-        }
-        for k in start_j..j {
-            if k < modified_lines.len() {
-                writeln!(diff, "+{}", modified_lines[k]).ok();
+    // Use unified diff hunks with 3 lines of context
+    for hunk in text_diff.unified_diff().context_radius(3).iter_hunks() {
+        writeln!(diff, "{}", hunk.header()).ok();
+        for change in hunk.iter_changes() {
+            let sign = match change.tag() {
+                ChangeTag::Delete => "-",
+                ChangeTag::Insert => "+",
+                ChangeTag::Equal => " ",
+            };
+            // Write the change line, ensuring it ends with newline
+            let value = change.value();
+            if value.ends_with('\n') {
+                write!(diff, "{}{}", sign, value).ok();
+            } else {
+                writeln!(diff, "{}{}", sign, value).ok();
             }
         }
     }
