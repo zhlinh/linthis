@@ -267,7 +267,6 @@ tr:hover {
 
 .collapse-content {
     overflow: hidden;
-    max-height: 2000px;
     transition: max-height 0.3s ease;
 }
 
@@ -315,12 +314,25 @@ footer {
 pub fn report_js() -> &'static str {
     r#"
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize: set max-height for all expanded collapse-content
+    document.querySelectorAll('.collapse-content:not(.collapsed)').forEach(function(content) {
+        content.style.maxHeight = content.scrollHeight + 'px';
+    });
+
     document.querySelectorAll('.collapsible').forEach(function(header) {
         header.addEventListener('click', function() {
             this.classList.toggle('collapsed');
             var content = this.nextElementSibling;
             if (content && content.classList.contains('collapse-content')) {
-                content.classList.toggle('collapsed');
+                if (content.classList.contains('collapsed')) {
+                    // Expanding
+                    content.classList.remove('collapsed');
+                    content.style.maxHeight = content.scrollHeight + 'px';
+                } else {
+                    // Collapsing
+                    content.style.maxHeight = '0';
+                    content.classList.add('collapsed');
+                }
             }
         });
     });
