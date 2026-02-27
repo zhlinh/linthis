@@ -468,9 +468,22 @@ impl AiProvider {
 IMPORTANT:
 - Use the Edit tool to fix each issue directly in the file
 - Make MINIMAL changes - only fix what each error describes
-- Do NOT add, remove, or modify any other code
 - Preserve all formatting and indentation
-- After fixing, respond with "Done" or describe what you fixed"#,
+
+CRITICAL FOR C/C++ INTERFACE CHANGES:
+- If you change a function/method signature (parameters, return type, qualifiers):
+  1. First use Read or Grep tools to find the function declaration (in .h/.hpp files)
+  2. Also find the function definition/implementation (in .cpp files)
+  3. Search for all callers of this function across the project
+  4. Update ALL of these locations to match the new signature
+  5. Verify parameter passing matches (e.g., if changing & to *, callers should pass & or change to pointer)
+- For reference-to-pointer changes (e.g., AClass &a → AClass *a):
+  * In header: update declaration
+  * In implementation: update definition AND all uses of the parameter
+  * In callers: change from passing object to passing &object (or adjust pointer usage)
+- Only after updating all related locations, respond with "Done"
+
+If you're unsure about related locations, use Grep to search for the function name first."#,
             file_path.display(),
             issues_desc.join("\n")
         );
@@ -487,7 +500,7 @@ IMPORTANT:
             .arg("--output-format")
             .arg("text")
             .arg("--allowedTools")
-            .arg("Edit,Read")
+            .arg("Edit,Read,Grep,Glob")  // Allow AI to search for related code
             .arg("--dangerously-skip-permissions")  // Auto-accept tool permissions
             .arg("--settings")
             .arg(r#"{"hooks":{}}"#)  // Disable hooks to avoid side effects
@@ -574,10 +587,29 @@ IMPORTANT:
 IMPORTANT:
 - Use the Edit tool to fix each issue directly in each file
 - Make MINIMAL changes - only fix what each error describes
-- Do NOT add, remove, or modify any other code
 - Preserve all formatting and indentation
 - Process ALL files listed above
-- After fixing all files, respond with "Done""#,
+
+CRITICAL FOR C/C++ INTERFACE CHANGES:
+- If you change a function/method signature (parameters, return type, qualifiers):
+  1. Use Read/Grep tools to find ALL related locations:
+     - Function declaration (in .h/.hpp header files)
+     - Function definition/implementation (in .cpp source files)
+     - All call sites across the entire project
+  2. Update ALL of these locations consistently
+  3. For reference-to-pointer changes (e.g., AClass &a → AClass *a):
+     * Update header declaration
+     * Update source file definition AND parameter usage inside the function
+     * Update ALL callers to pass compatible arguments (e.g., &obj instead of obj)
+  4. Verify the change won't break compilation by checking ALL usages
+
+Example workflow for signature change:
+1. Grep for function name to find all occurrences
+2. Read each file to understand context
+3. Edit declaration, definition, AND all call sites
+4. Only after all related edits are complete, respond with "Done"
+
+If unsure about impact, use Grep extensively to find all references first."#,
             file_sections.join("\n\n")
         );
 
@@ -592,7 +624,7 @@ IMPORTANT:
             .arg("--output-format")
             .arg("text")
             .arg("--allowedTools")
-            .arg("Edit,Read")
+            .arg("Edit,Read,Grep,Glob")  // Allow AI to search for related code
             .arg("--dangerously-skip-permissions")
             .arg("--settings")
             .arg(r#"{"hooks":{}}"#)

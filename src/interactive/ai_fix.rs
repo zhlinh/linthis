@@ -615,6 +615,19 @@ fn print_cli_fix_summary(fix_result: &AiFixResult, total_files: usize) {
     println!("  Issues skipped:  {}", fix_result.skipped.to_string().yellow());
     println!("  Errors:          {}", fix_result.errors.to_string().red());
     println!("{}", "═".repeat(60).dimmed());
+
+    // Add warning for C++ signature changes
+    if fix_result.applied > 0 {
+        println!();
+        println!("{}", "  ⚠ Important for C/C++ projects:".yellow().bold());
+        println!("  {}", "If function signatures were changed, verify that:".dimmed());
+        println!("  {}", "- All declarations and definitions are updated".dimmed());
+        println!("  {}", "- All call sites use correct argument types".dimmed());
+        println!("  {}", "- The code still compiles successfully".dimmed());
+        println!();
+        println!("  {}", "Recommended: Run your build command to verify:".cyan());
+        println!("  {}", "  make        # or cmake --build build, etc.".dimmed());
+    }
     println!();
 }
 
