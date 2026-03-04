@@ -13,7 +13,7 @@ linthis
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/QuickStart-en.mp4" type="video/mp4">
+  <source src="/assets/videos/QuickStart-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -28,7 +28,7 @@ linthis --lang python,rust,typescript
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/MultiLanguage-en.mp4" type="video/mp4">
+  <source src="/assets/videos/MultiLanguage-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -45,7 +45,7 @@ linthis
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/Plugin-en.mp4" type="video/mp4">
+  <source src="/assets/videos/Plugin-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -60,7 +60,7 @@ linthis --fix --ai --provider claude
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/AiFix-en.mp4" type="video/mp4">
+  <source src="/assets/videos/AiFix-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -77,7 +77,7 @@ git commit -m "feat: new feature"
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/GitHooks-en.mp4" type="video/mp4">
+  <source src="/assets/videos/GitHooks-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -88,7 +88,7 @@ git commit -m "feat: new feature"
 Works with VS Code, JetBrains, Neovim, and Claude Code — lint as you type.
 
 <video controls width="100%">
-  <source src="../assets/videos/EditorSkills-en.mp4" type="video/mp4">
+  <source src="/assets/videos/EditorSkills-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -103,7 +103,7 @@ linthis hook install --ai --provider claude --accept-all
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/AgentHook-en.mp4" type="video/mp4">
+  <source src="/assets/videos/AgentHook-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
