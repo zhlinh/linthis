@@ -104,6 +104,10 @@ linthis hook install --type pre-commit
 linthis --check-only --output github-actions
 ```
 
+## 观看演示
+
+观看[快速开始视频教程](videos.md#第-1-集快速开始)，20 秒了解基本用法。
+
 ## 下一步
 
 - [配置](configuration.md) - 了解配置选项

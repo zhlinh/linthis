@@ -40,6 +40,18 @@ linthis --format-only
 linthis --staged
 ```
 
+## Video Tutorials
+
+See linthis in action with short video demos:
+
+1. [Quick Start](getting-started/videos.md#episode-1-quick-start) — Install and run your first check (20s)
+2. [Multi-Language](getting-started/videos.md#episode-2-multi-language-support) — Auto-detect 18+ languages (15s)
+3. [Plugin System](getting-started/videos.md#episode-3-plugin-system) — Share configs across teams (20s)
+4. [AI Fix](getting-started/videos.md#episode-4-ai-powered-fix) — AI-powered code fixes (20s)
+5. [Git Hooks](getting-started/videos.md#episode-5-git-hooks) — Automatic pre-commit linting (15s)
+6. [Editor Integration](getting-started/videos.md#episode-6-editor-integration) — VS Code, JetBrains, Neovim, Claude Code (15s)
+7. [AI Agent Hook](getting-started/videos.md#episode-7-ai-agent-hook) — AI agent integration (20s)
+
 ## Why linthis?
 
 1. **Unified Interface**: One tool for all languages instead of managing multiple linters

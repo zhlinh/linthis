@@ -64,6 +64,10 @@ brew install shellcheck shfmt  # macOS
 apt install shellcheck         # Ubuntu/Debian
 ```
 
+## See It in Action
+
+Watch the [Multi-Language video tutorial](../getting-started/videos.md#episode-2-multi-language-support) for a 15-second demo.
+
 ## Checking Tool Availability
 
 Use the `doctor` command to check which tools are available:

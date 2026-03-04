@@ -64,6 +64,10 @@ brew install shellcheck shfmt  # macOS
 apt install shellcheck         # Ubuntu/Debian
 ```
 
+## 观看演示
+
+观看[多语言支持视频教程](../getting-started/videos.md#第-2-集多语言支持)，15 秒了解多语言检查。
+
 ## 检查工具可用性
 
 使用 `doctor` 命令检查哪些工具可用：

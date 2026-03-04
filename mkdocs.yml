@@ -45,6 +45,7 @@ plugins:
             Installation: 安装
             Quick Start: 快速开始
             Configuration: 配置
+            Video Tutorials: 视频教程
             Languages: 语言支持
             Overview: 概览
             Features: 功能特性
@@ -80,6 +81,7 @@ nav:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quickstart.md
     - Configuration: getting-started/configuration.md
+    - Video Tutorials: getting-started/videos.md
   - Languages:
     - Overview: languages/index.md
     - Rust: languages/rust.md

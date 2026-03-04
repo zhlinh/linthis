@@ -225,6 +225,10 @@ If hitting rate limits, consider:
 - Processing files in smaller batches
 - Adding delays between requests
 
+## See It in Action
+
+Watch the [AI Fix video tutorial](../getting-started/videos.md#episode-4-ai-powered-fix) for a 20-second demo showing before/after AI-powered fixes.
+
 ## See Also
 
 - [CLI Reference](../reference/cli.md) - Complete command reference

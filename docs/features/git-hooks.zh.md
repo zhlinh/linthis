@@ -417,6 +417,10 @@ mv .git/hooks/pre-commit .git/hooks/pre-commit.backup
 # 创建 pre-commit.local 调用其他工具
 ```
 
+## 观看演示
+
+观看 [Git Hooks 视频教程](../getting-started/videos.md#第-5-集git-hooks)，15 秒了解自动化 pre-commit 检查。
+
 ## 参考资料
 
 - [Git 文档 - init.templateDir](https://git-scm.com/docs/git-init#_template_directory)
