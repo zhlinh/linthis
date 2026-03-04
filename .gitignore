@@ -44,5 +44,6 @@ Thumbs.db
 
 # Project
 .linthis/
+.claude/
 
 site/

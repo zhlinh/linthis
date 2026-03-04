@@ -19,7 +19,7 @@ mod complexity;
 mod doctor;
 mod fix;
 mod helpers;
-mod hook;
+pub mod hook;
 mod init;
 mod license;
 mod paths;
@@ -35,7 +35,10 @@ pub use commands::{Cli, Commands};
 pub use complexity::{handle_complexity_command, ComplexityCommandOptions};
 pub use doctor::handle_doctor_command;
 pub use fix::{handle_fix_command, FixCommandOptions};
-pub use helpers::{print_fix_hint, resolve_ai_provider, run_benchmark, strip_ansi_codes};
+pub use helpers::{
+    print_fix_hint, resolve_ai_provider, run_benchmark, select_ai_provider_interactive,
+    strip_ansi_codes,
+};
 pub use hook::handle_hook_command;
 pub use init::{handle_config_command, handle_init_command, init_linter_configs};
 pub use license::handle_license_command;

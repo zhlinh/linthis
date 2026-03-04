@@ -129,19 +129,19 @@ linthis init -g --hook-type git --force
 
 ### AI-Powered Auto-Fix
 
-Enable AI to automatically fix lint issues during hook execution:
+Enable AI to automatically fix lint issues during hook execution using `--args`:
 
 ```bash
 # Install hook with AI auto-fix
-linthis hook install --ai --provider claude --accept-all
+linthis hook install --args "-c -f --fix --ai --provider claude --accept-all"
 
-# Or with check-only mode
-linthis hook install -c --ai --provider claude --accept-all
+# Check-only with AI fix (no formatting)
+linthis hook install --args "-c --fix --ai --provider codebuddy-cli --accept-all"
 ```
 
 Generated hook command:
 ```bash
-linthis -s -c -f --hook-mode=pre-commit --fix --ai --provider claude --accept-all
+linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude --accept-all
 ```
 
 **Available AI Providers:**
@@ -155,30 +155,25 @@ linthis -s -c -f --hook-mode=pre-commit --fix --ai --provider claude --accept-al
 | `openai` | OpenAI GPT API |
 | `local` | Local models (Ollama, llama.cpp, etc.) |
 
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--ai` | Enable AI-powered fixes |
-| `--provider <NAME>` | Specify AI provider (requires `--ai`) |
-| `--accept-all` | Auto-accept all AI suggestions (requires `--ai`) |
-
 **Warning:** Using `--accept-all` will automatically modify your files. Review the changes before committing if you're unsure.
 
 **Example: Different hook configurations**
 
 ```bash
+# Default hook (check + format)
+linthis hook install
+
+# Check-only hook (no formatting)
+linthis hook install --args "-c"
+
 # Basic AI fix (interactive - will prompt for each fix)
-linthis hook install --ai --provider claude
+linthis hook install --args "-c -f --fix --ai --provider claude"
 
 # Fully automated (no prompts, auto-accept all fixes)
-linthis hook install --ai --provider claude --accept-all
-
-# Check-only with AI fix (no formatting)
-linthis hook install -c --ai --provider codebuddy-cli --accept-all
+linthis hook install --args "-c -f --fix --ai --provider claude --accept-all"
 
 # Pre-push hook with AI
-linthis hook install --hook pre-push --ai --provider openai --accept-all
+linthis hook install --event pre-push --args "-c -f --fix --ai --provider openai --accept-all"
 ```
 
 ### Disable Hook Creation

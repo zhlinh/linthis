@@ -156,10 +156,10 @@ pub struct Cli {
     #[arg(long, requires = "fix")]
     pub accept_all: bool,
 
-    /// Hook mode: enable compact output format for git hooks
+    /// Hook event: enable compact output format for git hooks
     /// Shows summary at top, lists errors with file:line, and provides fix commands
     /// Optional value specifies hook type: pre-commit (default), pre-push, commit-msg
-    #[arg(long, hide = true, value_name = "HOOK_TYPE", num_args = 0..=1, default_missing_value = "pre-commit")]
+    #[arg(long = "hook-event", hide = true, value_name = "HOOK_TYPE", num_args = 0..=1, default_missing_value = "pre-commit")]
     pub hook_mode: Option<String>,
 
     /// Plugin subcommands (init, list, clean)
@@ -171,12 +171,45 @@ pub struct Cli {
 #[derive(Clone, Debug, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum HookTool {
+    /// Traditional git hook
+    Git,
+    /// AI coding agent integration (Claude Code, Cursor, etc.)
+    Agent,
     /// Prek (Rust-based, faster)
     Prek,
     /// Pre-commit (Python-based, standard)
     PreCommit,
-    /// Traditional git hook
-    Git,
+}
+
+/// AI coding agent providers
+#[derive(Clone, Debug, clap::ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum AgentProvider {
+    /// Claude Code (.claude/ directory)
+    Claude,
+    /// Cursor (.cursor/ directory)
+    Cursor,
+    /// Windsurf (.windsurf/ directory)
+    Windsurf,
+    /// GitHub Copilot (.github/ directory)
+    Copilot,
+    /// Cline (.clinerules/ directory)
+    Cline,
+    /// CodeBuddy (.codebuddy/ directory)
+    Codebuddy,
+}
+
+impl std::fmt::Display for AgentProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentProvider::Claude => write!(f, "Claude Code"),
+            AgentProvider::Cursor => write!(f, "Cursor"),
+            AgentProvider::Windsurf => write!(f, "Windsurf"),
+            AgentProvider::Copilot => write!(f, "GitHub Copilot"),
+            AgentProvider::Cline => write!(f, "Cline"),
+            AgentProvider::Codebuddy => write!(f, "CodeBuddy"),
+        }
+    }
 }
 
 /// Git hook event types
@@ -609,21 +642,13 @@ pub enum Commands {
 pub enum HookCommands {
     /// Install git hook (pre-commit, pre-push, or commit-msg)
     Install {
-        /// Hook tool to use (git, prek, or pre-commit)
+        /// Hook tool to use [default: git]
         #[arg(long = "type", value_name = "TYPE")]
         hook_type: Option<HookTool>,
 
         /// Git hook event type (pre-commit, pre-push, commit-msg)
-        #[arg(long = "hook", value_name = "HOOK", default_value = "pre-commit")]
+        #[arg(long = "event", value_name = "EVENT", default_value = "pre-commit")]
         hook_event: HookEvent,
-
-        /// Hook only runs check (no formatting)
-        #[arg(short = 'c', long = "check-only")]
-        check_only: bool,
-
-        /// Hook only runs format (no linting)
-        #[arg(short = 'f', long = "format-only")]
-        format_only: bool,
 
         /// Force overwrite existing hook
         #[arg(long)]
@@ -633,29 +658,26 @@ pub enum HookCommands {
         #[arg(short = 'y', long)]
         yes: bool,
 
-        /// Enable AI-powered auto-fix during hook execution
-        ///
-        /// When enabled, hook will automatically attempt to fix lint issues using AI.
-        /// Combine with --provider and --accept-all for fully automated fixing.
+        /// Agent provider (only with --type agent): claude, cursor, windsurf, copilot, cline, codebuddy
         #[arg(long)]
-        ai: bool,
-
-        /// AI provider for fix (requires --ai)
-        ///
-        /// Options: claude, claude-cli, codebuddy, codebuddy-cli, openai, local
-        #[arg(long, requires = "ai")]
         provider: Option<String>,
 
-        /// Automatically accept all AI fix suggestions (requires --ai)
+        /// Extra arguments for the linthis command in the hook script
         ///
-        /// Warning: This will modify files automatically during hook execution.
-        #[arg(long, requires = "ai")]
-        accept_all: bool,
+        /// Default: "-c -f" (check + format).
+        /// Examples: "-c" (check only), "-f" (format only),
+        /// "-c -f --fix --ai --provider claude --accept-all" (AI auto-fix)
+        #[arg(long, allow_hyphen_values = true)]
+        args: Option<String>,
     },
     /// Uninstall git hook
     Uninstall {
+        /// Hook tool to uninstall [default: git]
+        #[arg(long = "type", value_name = "TYPE")]
+        hook_type: Option<HookTool>,
+
         /// Git hook event type to uninstall (pre-commit, pre-push, commit-msg)
-        #[arg(long = "hook", value_name = "HOOK")]
+        #[arg(long = "event", value_name = "EVENT")]
         hook_event: Option<HookEvent>,
 
         /// Uninstall all hooks

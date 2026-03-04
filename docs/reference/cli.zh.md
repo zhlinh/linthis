@@ -71,19 +71,20 @@ linthis hook install [OPTIONS]
 
 | 选项 | 描述 |
 |-----|------|
-| `--type` | Hook 类型：`prek`、`pre-commit`、`git` |
-| `--event` | Hook 事件：`pre-commit`、`pre-push`、`commit-msg` |
-| `-c, --check-only` | Hook 仅运行检查 |
-| `-f, --format-only` | Hook 仅运行格式化 |
+| `--type` | Hook 类型：`git`（默认）、`agent`、`prek`、`pre-commit` |
+| `--event` | Hook 事件：`pre-commit`（默认）、`pre-push`、`commit-msg` |
+| `--args` | Hook 脚本中 linthis 命令的额外参数（默认：`-c -f`） |
+| `--provider` | Agent 提供者（仅 `--type agent`）：`claude`、`cursor`、`windsurf`、`copilot`、`cline`、`codebuddy` |
 | `--force` | 强制覆盖现有 hook |
 | `-y, --yes` | 非交互模式 |
 
 **示例：**
 
 ```bash
-linthis hook install --type git
-linthis hook install --type git --event pre-push
-linthis hook install --type prek --check-only
+linthis hook install                                  # 默认 git hook（检查 + 格式化）
+linthis hook install --event pre-push                 # Pre-push hook
+linthis hook install --args "-c"                      # 仅检查模式
+linthis hook install --type agent --provider claude   # Agent 集成
 ```
 
 ### hook uninstall

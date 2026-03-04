@@ -71,19 +71,20 @@ linthis hook install [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--type` | Hook type: `prek`, `pre-commit`, `git` |
-| `--event` | Hook event: `pre-commit`, `pre-push`, `commit-msg` |
-| `-c, --check-only` | Hook only runs check |
-| `-f, --format-only` | Hook only runs format |
+| `--type` | Hook type: `git` (default), `agent`, `prek`, `pre-commit` |
+| `--event` | Hook event: `pre-commit` (default), `pre-push`, `commit-msg` |
+| `--args` | Extra arguments for the linthis command in hook script (default: `-c -f`) |
+| `--provider` | Agent provider (only with `--type agent`): `claude`, `cursor`, `windsurf`, `copilot`, `cline`, `codebuddy` |
 | `--force` | Force overwrite existing |
 | `-y, --yes` | Non-interactive mode |
 
 **Examples:**
 
 ```bash
-linthis hook install --type git
-linthis hook install --type git --event pre-push
-linthis hook install --type prek --check-only
+linthis hook install                                  # Default git hook (check + format)
+linthis hook install --event pre-push                 # Pre-push hook
+linthis hook install --args "-c"                      # Check-only hook
+linthis hook install --type agent --provider claude   # Agent integration
 ```
 
 ### hook uninstall

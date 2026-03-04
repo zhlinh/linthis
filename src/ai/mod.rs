@@ -28,12 +28,15 @@
 //! let suggestion = suggester.suggest_fix(&issue, &source_code, &options);
 //! ```
 
-mod provider;
+pub mod provider;
 mod suggestions;
 mod context;
 mod prompts;
 
-pub use provider::{AiProvider, AiProviderConfig, AiProviderKind, AiProviderTrait};
+pub use provider::{
+    AiProvider, AiProviderConfig, AiProviderKind, AiProviderTrait, ALL_AI_PROVIDERS,
+    detect_available_providers,
+};
 pub use suggestions::{
     AiSuggester, FixSuggestion, SuggestionOptions, SuggestionResult, SuggestionsReport,
 };

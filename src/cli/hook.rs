@@ -17,15 +17,19 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use super::commands::{HookCommands, HookEvent, HookTool};
+use super::commands::{AgentProvider, HookCommands, HookEvent, HookTool};
 
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
-        HookCommands::Install { hook_type, hook_event, check_only, format_only, force, yes, ai, provider, accept_all } => {
-            handle_hook_install(hook_type, hook_event, check_only, format_only, force, yes, ai, provider, accept_all)
+        HookCommands::Install { hook_type, hook_event, force, yes, provider, args } => {
+            handle_hook_install(hook_type, hook_event, force, yes, provider, args)
         }
-        HookCommands::Uninstall { hook_event, all, yes } => {
+        HookCommands::Uninstall { hook_type, hook_event, all, yes } => {
+            // Agent type has its own uninstall flow
+            if matches!(hook_type, Some(HookTool::Agent)) {
+                return handle_agent_hook_uninstall(yes);
+            }
             handle_hook_uninstall(hook_event, all, yes)
         }
         HookCommands::Status => {
@@ -44,15 +48,36 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
 fn handle_hook_install(
     hook_type: Option<HookTool>,
     hook_event: HookEvent,
-    check_only: bool,
-    format_only: bool,
     force: bool,
     yes: bool,
-    ai: bool,
     provider: Option<String>,
-    accept_all: bool,
+    args: Option<String>,
 ) -> ExitCode {
     use std::io::{self, Write};
+
+    // Agent type has its own installation flow
+    if matches!(hook_type, Some(HookTool::Agent)) {
+        // Parse provider as AgentProvider if given
+        let agent_provider = provider.as_deref().and_then(|p| {
+            match p.to_lowercase().as_str() {
+                "claude" => Some(AgentProvider::Claude),
+                "cursor" => Some(AgentProvider::Cursor),
+                "windsurf" => Some(AgentProvider::Windsurf),
+                "copilot" => Some(AgentProvider::Copilot),
+                "cline" => Some(AgentProvider::Cline),
+                "codebuddy" => Some(AgentProvider::Codebuddy),
+                _ => {
+                    eprintln!("{}: Unknown agent provider '{}'. Valid options: claude, cursor, windsurf, copilot, cline, codebuddy", "Error".red(), p);
+                    None
+                }
+            }
+        });
+        // If provider was given but invalid, exit
+        if provider.is_some() && agent_provider.is_none() {
+            return ExitCode::from(1);
+        }
+        return handle_agent_hook_install(agent_provider, force, yes);
+    }
 
     // Find git root
     let git_root = match find_git_root() {
@@ -108,11 +133,11 @@ fn handle_hook_install(
                 match choice.trim() {
                     "1" => {
                         // Replace: use force flag internally
-                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, true, false, ai, provider.clone(), accept_all);
+                        return handle_hook_install_impl(hook_type, &hook_event, true, false, args.clone());
                     }
                     "2" => {
                         // Append
-                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, false, true, ai, provider.clone(), accept_all);
+                        return handle_hook_install_impl(hook_type, &hook_event, false, true, args.clone());
                     }
                     "3" => {
                         // Backup and replace
@@ -122,7 +147,7 @@ fn handle_hook_install(
                             return ExitCode::from(2);
                         }
                         println!("{} Created backup at {}", "✓".green(), backup_path.display());
-                        return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, true, false, ai, provider.clone(), accept_all);
+                        return handle_hook_install_impl(hook_type, &hook_event, true, false, args.clone());
                     }
                     _ => {
                         println!("Installation cancelled");
@@ -131,7 +156,7 @@ fn handle_hook_install(
                 }
             } else {
                 // Non-interactive mode: append by default
-                return handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, false, true, ai, provider.clone(), accept_all);
+                return handle_hook_install_impl(hook_type, &hook_event, false, true, args.clone());
             }
         }
 
@@ -140,30 +165,26 @@ fn handle_hook_install(
     }
 
     // No existing hook or force mode - create new hook
-    handle_hook_install_impl(hook_type, &hook_event, check_only, format_only, force, false, ai, provider, accept_all)
+    handle_hook_install_impl(hook_type, &hook_event, force, false, args)
 }
 
 /// Internal implementation of hook installation
 fn handle_hook_install_impl(
     hook_type: Option<HookTool>,
     hook_event: &HookEvent,
-    check_only: bool,
-    format_only: bool,
     force: bool,
     append: bool,
-    ai: bool,
-    provider: Option<String>,
-    accept_all: bool,
+    args: Option<String>,
 ) -> ExitCode {
     let tool = hook_type.unwrap_or(HookTool::Git);
 
     // For append mode, we need to modify create_hook_config to support appending
     if append {
         // For now, use create_hook_config which already handles appending for git hooks
-        if let Err(exit_code) = create_hook_config(&tool, hook_event, check_only, format_only, false, ai, &provider, accept_all) {
+        if let Err(exit_code) = create_hook_config(&tool, hook_event, false, &args) {
             return exit_code;
         }
-    } else if let Err(exit_code) = create_hook_config(&tool, hook_event, check_only, format_only, force, ai, &provider, accept_all) {
+    } else if let Err(exit_code) = create_hook_config(&tool, hook_event, force, &args) {
         return exit_code;
     }
 
@@ -244,14 +265,45 @@ fn handle_hook_status() -> ExitCode {
     println!("  {} - runs before push to remote", "pre-push".cyan());
     println!("  {} - validates commit message format", "commit-msg".cyan());
 
+    // Check agent integration status
+    println!("\n{}", "Agent Integration".bold());
+    let mut any_agent_installed = false;
+    for p in ALL_AGENT_PROVIDERS {
+        let installed = agent_is_installed(&git_root, p);
+        if installed {
+            any_agent_installed = true;
+            let path = agent_rules_path(&git_root, p);
+            println!("{} {} ({})", "✓".green(), p, path.display());
+            // Show extra info for Claude (Stop Hook)
+            if matches!(p, AgentProvider::Claude) {
+                let settings_path = git_root.join(".claude/settings.local.json");
+                let has_stop_hook = settings_path.exists()
+                    && std::fs::read_to_string(&settings_path)
+                        .map(|c| c.contains("linthis"))
+                        .unwrap_or(false);
+                if has_stop_hook {
+                    println!("  {} Stop Hook ({})", "✓".green(), settings_path.display());
+                }
+            }
+        } else {
+            println!("{} {} (not installed)", "✗".red(), p);
+        }
+    }
+
     println!("\n{}", "Commands:".bold());
     if !any_hook_installed {
         println!("  Install pre-commit:  {}", "linthis hook install".cyan());
-        println!("  Install pre-push:    {}", "linthis hook install --hook pre-push".cyan());
-        println!("  Install commit-msg:  {}", "linthis hook install --hook commit-msg".cyan());
+        println!("  Install pre-push:    {}", "linthis hook install --event pre-push".cyan());
+        println!("  Install commit-msg:  {}", "linthis hook install --event commit-msg".cyan());
     } else {
-        println!("  Install hook:   {}", "linthis hook install --hook <hook-type>".cyan());
-        println!("  Uninstall hook: {}", "linthis hook uninstall --hook <hook-type>".cyan());
+        println!("  Install hook:   {}", "linthis hook install --event <event>".cyan());
+        println!("  Uninstall hook: {}", "linthis hook uninstall --event <event>".cyan());
+        println!("  Uninstall all:  {}", "linthis hook uninstall --all".cyan());
+    }
+    if !any_agent_installed {
+        println!("  Install agent:  {}", "linthis hook install --type agent".cyan());
+    } else {
+        println!("  Install agent:  {}", "linthis hook install --type agent --provider <name>".cyan());
         println!("  Uninstall all:  {}", "linthis hook uninstall --all".cyan());
     }
 
@@ -270,7 +322,7 @@ fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool) ->
     };
 
     if all {
-        // Uninstall all hooks
+        // Uninstall all hooks (including agent hooks)
         let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
         let mut any_uninstalled = false;
 
@@ -279,6 +331,12 @@ fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool) ->
             if result == ExitCode::SUCCESS {
                 any_uninstalled = true;
             }
+        }
+
+        // Also uninstall agent hooks
+        let agent_result = handle_agent_hook_uninstall(yes);
+        if agent_result == ExitCode::SUCCESS {
+            any_uninstalled = true;
         }
 
         if !any_uninstalled {
@@ -522,7 +580,7 @@ fn install_hooks(tool: &HookTool, hook_event: &HookEvent) -> Result<(), String> 
     let (cmd, tool_name) = match tool {
         HookTool::Prek => ("prek", "prek"),
         HookTool::PreCommit => ("pre-commit", "pre-commit"),
-        HookTool::Git => return Ok(()), // Git hooks don't need install step
+        HookTool::Git | HookTool::Agent => return Ok(()), // Git/Agent hooks don't need install step
     };
 
     let hook_type_arg = hook_event.hook_filename();
@@ -563,7 +621,7 @@ pub fn find_git_root() -> Option<PathBuf> {
 }
 
 /// Create hook configuration file based on the selected tool and event
-fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: bool, hook_format_only: bool, force: bool, ai: bool, provider: &Option<String>, accept_all: bool) -> Result<(), ExitCode> {
+fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args: &Option<String>) -> Result<(), ExitCode> {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -571,6 +629,10 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: 
     let hook_filename = hook_event.hook_filename();
 
     match tool {
+        HookTool::Agent => {
+            // Agent hooks are handled separately in handle_agent_hook_install
+            return Ok(());
+        }
         HookTool::Prek | HookTool::PreCommit => {
             let config_path = std::path::PathBuf::from(".pre-commit-config.yaml");
 
@@ -584,7 +646,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: 
             }
 
             // Build hook command based on options and event type
-            let hook_cmd = build_hook_command(hook_event, hook_check_only, hook_format_only, ai, provider, accept_all);
+            let hook_cmd = build_hook_command(hook_event, args);
 
             // For prek/pre-commit, we need to specify the stage for different hook types
             let stage = match hook_event {
@@ -693,7 +755,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: 
             }
 
             // Build hook command based on options and event type
-            let linthis_hook_line = build_hook_command(hook_event, hook_check_only, hook_format_only, ai, provider, accept_all);
+            let linthis_hook_line = build_hook_command(hook_event, args);
 
             // Check if hook file already exists
             if hook_path.exists() {
@@ -794,55 +856,29 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, hook_check_only: 
     }
 }
 
-/// Build the linthis command for a hook based on event type and options
+/// Build the linthis command for a hook based on event type and extra args
 fn build_hook_command(
     hook_event: &HookEvent,
-    hook_check_only: bool,
-    hook_format_only: bool,
-    ai: bool,
-    provider: &Option<String>,
-    accept_all: bool,
+    args: &Option<String>,
 ) -> String {
-    let mut cmd = match hook_event {
+    match hook_event {
         HookEvent::PreCommit => {
-            // For pre-commit: check staged files with hook mode output
-            if hook_check_only {
-                "linthis -s -c --hook-mode=pre-commit".to_string()
-            } else if hook_format_only {
-                "linthis -s -f --hook-mode=pre-commit".to_string()
-            } else {
-                "linthis -s -c -f --hook-mode=pre-commit".to_string()
-            }
+            // For pre-commit: check staged files with hook event output
+            // Default args: "-c -f" (check + format)
+            let extra = args.as_deref().unwrap_or("-c -f");
+            format!("linthis -s {} --hook-event=pre-commit", extra)
         }
         HookEvent::PrePush => {
-            // For pre-push: check all files (more comprehensive) with hook mode output
-            if hook_check_only {
-                "linthis -c --hook-mode=pre-push".to_string()
-            } else if hook_format_only {
-                "linthis -f --hook-mode=pre-push".to_string()
-            } else {
-                "linthis -c -f --hook-mode=pre-push".to_string()
-            }
+            // For pre-push: check all files (more comprehensive) with hook event output
+            // Default args: "-c -f" (check + format)
+            let extra = args.as_deref().unwrap_or("-c -f");
+            format!("linthis {} --hook-event=pre-push", extra)
         }
         HookEvent::CommitMsg => {
             // For commit-msg: validate commit message using the msg file passed as $1
             "linthis hook commit-msg-check \"$1\"".to_string()
         }
-    };
-
-    // Add AI-related flags for auto-fix during hook execution
-    // Note: commit-msg hook doesn't support AI fix (it validates message format, not code)
-    if ai && !matches!(hook_event, HookEvent::CommitMsg) {
-        cmd.push_str(" --fix --ai");
-        if let Some(ref p) = provider {
-            cmd.push_str(&format!(" --provider {}", p));
-        }
-        if accept_all {
-            cmd.push_str(" --accept-all");
-        }
     }
-
-    cmd
 }
 
 /// Get the git action for a hook event
@@ -851,6 +887,812 @@ fn hook_action(hook_event: &HookEvent) -> &'static str {
         HookEvent::PreCommit => "commit",
         HookEvent::PrePush => "push",
         HookEvent::CommitMsg => "commit",
+    }
+}
+
+// =============================================================================
+// Agent (AI Coding Agent) Multi-Provider Integration
+// =============================================================================
+
+/// All supported agent providers (in display order)
+const ALL_AGENT_PROVIDERS: &[AgentProvider] = &[
+    AgentProvider::Claude,
+    AgentProvider::Cursor,
+    AgentProvider::Windsurf,
+    AgentProvider::Copilot,
+    AgentProvider::Cline,
+    AgentProvider::Codebuddy,
+];
+
+/// The section marker used in append-style files (CLAUDE.md, copilot-instructions.md)
+const AGENT_SECTION_MARKER: &str = "## Linthis Agent Rules";
+
+/// Shared lint rules body (provider-agnostic)
+fn agent_lint_rules_body() -> String {
+    r#"### After modifying code files
+
+After editing code files, run linthis to check for issues:
+
+```bash
+linthis -i <file1> -i <file2> -c
+```
+
+- Use separate `-i` flags for each modified file
+- Use `-c` (check-only) — do NOT use `--fix` or `linthis fix`
+- If lint issues are found, **fix them yourself by editing the code directly**, then re-run linthis to confirm
+
+### Before committing
+
+Always run linthis on staged files before any `git commit`:
+
+```bash
+linthis -s -c
+```
+
+If issues are found, fix them by editing the code, re-stage, and re-check until clean.
+
+### Key principle
+
+Never rely on `linthis --fix` or `linthis fix` for automated fixing. Always read the lint errors, understand them, and apply fixes manually through code edits. This ensures higher quality fixes with proper context awareness."#
+        .to_string()
+}
+
+/// Content for CLAUDE.md (append section)
+fn agent_content_claude_md() -> String {
+    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rules_body())
+}
+
+/// Content for Cursor .cursor/rules/linthis.mdc (dedicated file with YAML frontmatter)
+fn agent_content_cursor_mdc() -> String {
+    format!(
+        r#"---
+description: Linthis lint rules for code quality
+alwaysApply: true
+---
+
+# Linthis Agent Rules
+
+{}
+"#,
+        agent_lint_rules_body()
+    )
+}
+
+/// Content for Windsurf .windsurf/rules/linthis.md (dedicated file)
+fn agent_content_windsurf_md() -> String {
+    format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
+}
+
+/// Content for GitHub Copilot .github/copilot-instructions.md (append section)
+fn agent_content_copilot_md() -> String {
+    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rules_body())
+}
+
+/// Content for Cline .clinerules/linthis.md (dedicated file)
+fn agent_content_cline_md() -> String {
+    format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
+}
+
+/// Content for CodeBuddy .codebuddy/rules/linthis.md (dedicated file)
+fn agent_content_codebuddy_md() -> String {
+    format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
+}
+
+/// Generate the Stop hook JSON content for .claude/settings.local.json
+fn agent_stop_hook_json() -> String {
+    r#"{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Before finishing, check if any code files were modified during this session (Write/Edit/Bash tools). If code was modified:\n1. Run `linthis -i <file1> -i <file2> -c` on all modified files to check for lint issues\n2. If issues are found, fix them yourself by editing the code directly (do NOT use `linthis --fix` or `linthis fix`)\n3. Re-run `linthis -i <files> -c` to confirm all issues are resolved\n4. Only approve stopping once lint passes with no errors\n\nIf no code files were modified, approve stopping immediately."
+          }
+        ]
+      }
+    ]
+  }
+}"#
+    .to_string()
+}
+
+/// Get the rules file path for a given agent provider
+fn agent_rules_path(git_root: &std::path::Path, provider: &AgentProvider) -> PathBuf {
+    match provider {
+        AgentProvider::Claude => git_root.join("CLAUDE.md"),
+        AgentProvider::Cursor => git_root.join(".cursor/rules/linthis.mdc"),
+        AgentProvider::Windsurf => git_root.join(".windsurf/rules/linthis.md"),
+        AgentProvider::Copilot => git_root.join(".github/copilot-instructions.md"),
+        AgentProvider::Cline => git_root.join(".clinerules/linthis.md"),
+        AgentProvider::Codebuddy => git_root.join(".codebuddy/rules/linthis.md"),
+    }
+}
+
+/// Print info about an already-installed agent provider (file path + content)
+fn print_agent_installed_info(git_root: &std::path::Path, provider: &AgentProvider) {
+    let path = agent_rules_path(git_root, provider);
+    println!(
+        "       {} {}",
+        "File:".dimmed(),
+        path.display()
+    );
+
+    // For Claude, also show settings file
+    if matches!(provider, AgentProvider::Claude) {
+        let settings_path = git_root.join(".claude/settings.local.json");
+        if settings_path.exists() {
+            println!(
+                "       {} {}",
+                "File:".dimmed(),
+                settings_path.display()
+            );
+        }
+    }
+
+    // Show the installed linthis content section
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        match provider {
+            // Append-style: extract the linthis section
+            AgentProvider::Claude | AgentProvider::Copilot => {
+                if let Some(start) = content.find(AGENT_SECTION_MARKER) {
+                    let section = &content[start..];
+                    println!("       {}:", "Content".dimmed());
+                    for line in section.lines() {
+                        println!("       {}", line.dimmed());
+                    }
+                }
+            }
+            // Dedicated file: show full content
+            _ => {
+                println!("       {}:", "Content".dimmed());
+                for line in content.lines() {
+                    println!("       {}", line.dimmed());
+                }
+            }
+        }
+    }
+}
+
+/// Check if agent integration is installed for a given provider
+fn agent_is_installed(git_root: &std::path::Path, provider: &AgentProvider) -> bool {
+    let path = agent_rules_path(git_root, provider);
+    match provider {
+        // Append-style: check for section marker in file
+        AgentProvider::Claude | AgentProvider::Copilot => {
+            path.exists()
+                && std::fs::read_to_string(&path)
+                    .map(|c| c.contains(AGENT_SECTION_MARKER))
+                    .unwrap_or(false)
+        }
+        // Dedicated file: check if file exists and contains linthis
+        AgentProvider::Cursor
+        | AgentProvider::Windsurf
+        | AgentProvider::Cline
+        | AgentProvider::Codebuddy => {
+            path.exists()
+                && std::fs::read_to_string(&path)
+                    .map(|c| c.contains("linthis") || c.contains("Linthis"))
+                    .unwrap_or(false)
+        }
+    }
+}
+
+/// Detect which agent providers are likely in use (by checking for their directories)
+fn detect_agent_providers(git_root: &std::path::Path) -> Vec<AgentProvider> {
+    let mut detected = Vec::new();
+    if git_root.join(".claude").exists() {
+        detected.push(AgentProvider::Claude);
+    }
+    if git_root.join(".cursor").exists() {
+        detected.push(AgentProvider::Cursor);
+    }
+    if git_root.join(".windsurf").exists() {
+        detected.push(AgentProvider::Windsurf);
+    }
+    if git_root.join(".github").exists() {
+        detected.push(AgentProvider::Copilot);
+    }
+    if git_root.join(".clinerules").exists() {
+        detected.push(AgentProvider::Cline);
+    }
+    if git_root.join(".codebuddy").exists() {
+        detected.push(AgentProvider::Codebuddy);
+    }
+    detected
+}
+
+/// Lightweight agent provider detection for dynamic help text.
+///
+/// Returns a list of (display_name, detected) tuples using the project root.
+/// This avoids requiring a git root parameter.
+pub fn detect_agent_providers_lightweight() -> Vec<(&'static str, bool)> {
+    let root = linthis::utils::get_project_root();
+    ALL_AGENT_PROVIDERS
+        .iter()
+        .map(|p| {
+            let name = match p {
+                AgentProvider::Claude => "Claude Code",
+                AgentProvider::Cursor => "Cursor",
+                AgentProvider::Windsurf => "Windsurf",
+                AgentProvider::Copilot => "GitHub Copilot",
+                AgentProvider::Cline => "Cline",
+                AgentProvider::Codebuddy => "CodeBuddy",
+            };
+            let dir = match p {
+                AgentProvider::Claude => ".claude",
+                AgentProvider::Cursor => ".cursor",
+                AgentProvider::Windsurf => ".windsurf",
+                AgentProvider::Copilot => ".github",
+                AgentProvider::Cline => ".clinerules",
+                AgentProvider::Codebuddy => ".codebuddy",
+            };
+            (name, root.join(dir).exists())
+        })
+        .collect()
+}
+
+/// Install a dedicated rules file (Cursor, Windsurf, Cline, CodeBuddy)
+fn install_agent_dedicated_file(path: &std::path::Path, content: &str) -> Result<(), String> {
+    use std::fs;
+
+    // Create parent directories if needed
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+        }
+    }
+
+    fs::write(path, content)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+
+    Ok(())
+}
+
+/// Install rules by appending a section to an existing file (Claude CLAUDE.md, Copilot copilot-instructions.md)
+fn install_agent_append_rules(
+    path: &std::path::Path,
+    content: &str,
+    default_header: &str,
+) -> Result<(), String> {
+    use std::fs;
+
+    if path.exists() {
+        let existing = fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+
+        let new_content = if existing.contains(AGENT_SECTION_MARKER) {
+            // Replace existing section
+            if let Some(start) = existing.find(AGENT_SECTION_MARKER) {
+                let after_marker = &existing[start + AGENT_SECTION_MARKER.len()..];
+                let section_end = after_marker
+                    .find("\n## ")
+                    .map(|pos| start + AGENT_SECTION_MARKER.len() + pos)
+                    .unwrap_or(existing.len());
+
+                let mut result = existing[..start].trim_end().to_string();
+                result.push_str(content);
+                let remaining = existing[section_end..].trim_start();
+                if !remaining.is_empty() {
+                    result.push_str(remaining);
+                    if !result.ends_with('\n') {
+                        result.push('\n');
+                    }
+                }
+                result
+            } else {
+                let mut result = existing.trim_end().to_string();
+                result.push_str(content);
+                result
+            }
+        } else {
+            let mut result = existing.trim_end().to_string();
+            result.push_str(content);
+            result
+        };
+
+        fs::write(path, new_content)
+            .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    } else {
+        // Create new file with header
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+            }
+        }
+        let new_content = format!("{}{}", default_header, content);
+        fs::write(path, new_content)
+            .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    }
+
+    Ok(())
+}
+
+/// Install agent integration for a specific provider
+fn install_agent_provider(git_root: &std::path::Path, provider: &AgentProvider) -> Result<(), String> {
+    let rules_path = agent_rules_path(git_root, provider);
+
+    match provider {
+        AgentProvider::Claude => {
+            // Install CLAUDE.md rules (append)
+            install_agent_append_rules(&rules_path, &agent_content_claude_md(), "# Project Instructions\n")?;
+            // Also install Stop Hook
+            let settings_path = git_root.join(".claude/settings.local.json");
+            install_agent_stop_hook(git_root, &settings_path)?;
+        }
+        AgentProvider::Cursor => {
+            install_agent_dedicated_file(&rules_path, &agent_content_cursor_mdc())?;
+        }
+        AgentProvider::Windsurf => {
+            install_agent_dedicated_file(&rules_path, &agent_content_windsurf_md())?;
+        }
+        AgentProvider::Copilot => {
+            install_agent_append_rules(&rules_path, &agent_content_copilot_md(), "# Copilot Instructions\n")?;
+        }
+        AgentProvider::Cline => {
+            install_agent_dedicated_file(&rules_path, &agent_content_cline_md())?;
+        }
+        AgentProvider::Codebuddy => {
+            install_agent_dedicated_file(&rules_path, &agent_content_codebuddy_md())?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Uninstall agent integration for a specific provider
+fn uninstall_agent_provider(git_root: &std::path::Path, provider: &AgentProvider) -> Result<(), String> {
+    match provider {
+        AgentProvider::Claude => {
+            let claude_md = agent_rules_path(git_root, provider);
+            if claude_md.exists() {
+                remove_agent_section_from_file(&claude_md)?;
+            }
+            let settings_path = git_root.join(".claude/settings.local.json");
+            if settings_path.exists() {
+                remove_agent_stop_hook(&settings_path)?;
+            }
+        }
+        AgentProvider::Copilot => {
+            let copilot_md = agent_rules_path(git_root, provider);
+            if copilot_md.exists() {
+                remove_agent_section_from_file(&copilot_md)?;
+            }
+        }
+        AgentProvider::Cursor
+        | AgentProvider::Windsurf
+        | AgentProvider::Cline
+        | AgentProvider::Codebuddy => {
+            let path = agent_rules_path(git_root, provider);
+            remove_agent_dedicated_file(&path)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Remove a dedicated rules file and clean up empty parent directories
+fn remove_agent_dedicated_file(path: &std::path::Path) -> Result<(), String> {
+    use std::fs;
+
+    if path.exists() {
+        fs::remove_file(path)
+            .map_err(|e| format!("Failed to remove {}: {}", path.display(), e))?;
+
+        // Try to remove empty parent directories (e.g., .cursor/rules/)
+        if let Some(parent) = path.parent() {
+            let _ = fs::remove_dir(parent); // Ignore error if not empty
+            if let Some(grandparent) = parent.parent() {
+                // Only remove if it's a dotdir like .cursor, .windsurf etc.
+                if grandparent
+                    .file_name()
+                    .map(|n| n.to_string_lossy().starts_with('.'))
+                    .unwrap_or(false)
+                {
+                    let _ = fs::remove_dir(grandparent);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Remove the linthis section from a file (CLAUDE.md, copilot-instructions.md)
+fn remove_agent_section_from_file(path: &std::path::Path) -> Result<(), String> {
+    use std::fs;
+
+    let existing = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+
+    if let Some(start) = existing.find(AGENT_SECTION_MARKER) {
+        let after_marker = &existing[start + AGENT_SECTION_MARKER.len()..];
+        let section_end = after_marker
+            .find("\n## ")
+            .map(|pos| start + AGENT_SECTION_MARKER.len() + pos)
+            .unwrap_or(existing.len());
+
+        let mut result = existing[..start].trim_end().to_string();
+        let remaining = existing[section_end..].trim_start();
+        if !remaining.is_empty() {
+            result.push_str("\n\n");
+            result.push_str(remaining);
+        }
+        if !result.ends_with('\n') {
+            result.push('\n');
+        }
+
+        fs::write(path, result)
+            .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    }
+
+    Ok(())
+}
+
+/// Install the Stop Hook into .claude/settings.local.json
+fn install_agent_stop_hook(
+    git_root: &std::path::Path,
+    settings_path: &std::path::Path,
+) -> Result<(), String> {
+    use std::fs;
+
+    let claude_dir = git_root.join(".claude");
+    if !claude_dir.exists() {
+        fs::create_dir_all(&claude_dir)
+            .map_err(|e| format!("Failed to create .claude directory: {}", e))?;
+    }
+
+    if settings_path.exists() {
+        let existing = fs::read_to_string(settings_path)
+            .map_err(|e| format!("Failed to read {}: {}", settings_path.display(), e))?;
+
+        let mut json: serde_json::Value = serde_json::from_str(&existing)
+            .map_err(|e| format!("Failed to parse {}: {}", settings_path.display(), e))?;
+
+        let stop_hook_json: serde_json::Value = serde_json::from_str(&agent_stop_hook_json())
+            .map_err(|e| format!("Failed to parse stop hook template: {}", e))?;
+
+        let hooks = json
+            .as_object_mut()
+            .ok_or("settings.local.json root is not an object")?
+            .entry("hooks")
+            .or_insert_with(|| serde_json::json!({}));
+
+        let hooks_obj = hooks
+            .as_object_mut()
+            .ok_or("hooks field is not an object")?;
+
+        if let Some(stop_hooks) = stop_hook_json.get("hooks").and_then(|h| h.get("Stop")) {
+            hooks_obj.insert("Stop".to_string(), stop_hooks.clone());
+        }
+
+        let output = serde_json::to_string_pretty(&json)
+            .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+        fs::write(settings_path, output + "\n")
+            .map_err(|e| format!("Failed to write {}: {}", settings_path.display(), e))?;
+    } else {
+        fs::write(settings_path, agent_stop_hook_json() + "\n")
+            .map_err(|e| format!("Failed to write {}: {}", settings_path.display(), e))?;
+    }
+
+    Ok(())
+}
+
+/// Remove the Stop Hook from .claude/settings.local.json
+fn remove_agent_stop_hook(settings_path: &std::path::Path) -> Result<(), String> {
+    use std::fs;
+
+    let existing = fs::read_to_string(settings_path)
+        .map_err(|e| format!("Failed to read {}: {}", settings_path.display(), e))?;
+
+    let mut json: serde_json::Value = serde_json::from_str(&existing)
+        .map_err(|e| format!("Failed to parse {}: {}", settings_path.display(), e))?;
+
+    if let Some(hooks) = json.get_mut("hooks").and_then(|h| h.as_object_mut()) {
+        hooks.remove("Stop");
+        if hooks.is_empty() {
+            json.as_object_mut().unwrap().remove("hooks");
+        }
+    }
+
+    if json.as_object().map(|o| o.is_empty()).unwrap_or(false) {
+        fs::remove_file(settings_path)
+            .map_err(|e| format!("Failed to remove {}: {}", settings_path.display(), e))?;
+        if let Some(parent) = settings_path.parent() {
+            let _ = fs::remove_dir(parent);
+        }
+    } else {
+        let output = serde_json::to_string_pretty(&json)
+            .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+        fs::write(settings_path, output + "\n")
+            .map_err(|e| format!("Failed to write {}: {}", settings_path.display(), e))?;
+    }
+
+    Ok(())
+}
+
+/// Install agent hooks with multi-provider support
+fn handle_agent_hook_install(
+    provider: Option<AgentProvider>,
+    force: bool,
+    yes: bool,
+) -> ExitCode {
+    use std::io::{self, Write};
+
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => {
+            eprintln!("{}: Not in a git repository", "Error".red());
+            return ExitCode::from(1);
+        }
+    };
+
+    println!("{}", "🤖 AI Coding Agent Integration".bold());
+    println!();
+
+    // If a specific provider was given, install just that one
+    if let Some(ref p) = provider {
+        let installed = agent_is_installed(&git_root, p);
+        if installed && !force {
+            println!(
+                "{}: {} is already installed",
+                "Info".cyan(),
+                p
+            );
+            print_agent_installed_info(&git_root, p);
+            return ExitCode::SUCCESS;
+        }
+
+        match install_agent_provider(&git_root, p) {
+            Ok(_) => {
+                let path = agent_rules_path(&git_root, p);
+                println!("{} Installed {} → {}", "✓".green(), p, path.display());
+                if matches!(p, AgentProvider::Claude) {
+                    let settings_path = git_root.join(".claude/settings.local.json");
+                    println!(
+                        "{} Installed Stop Hook → {}",
+                        "✓".green(),
+                        settings_path.display()
+                    );
+                }
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("{}: Failed to install {}: {}", "Error".red(), p, e);
+                return ExitCode::from(2);
+            }
+        }
+    }
+
+    // Auto-detect and install all if -y
+    if yes {
+        let detected = detect_agent_providers(&git_root);
+        let targets: Vec<AgentProvider> = if detected.is_empty() {
+            ALL_AGENT_PROVIDERS.to_vec()
+        } else {
+            detected
+        };
+
+        let mut any_installed = false;
+        for p in &targets {
+            if agent_is_installed(&git_root, p) && !force {
+                println!("{}: {} already installed", "Info".cyan(), p);
+                print_agent_installed_info(&git_root, p);
+                continue;
+            }
+            match install_agent_provider(&git_root, p) {
+                Ok(_) => {
+                    let path = agent_rules_path(&git_root, p);
+                    println!("{} Installed {} → {}", "✓".green(), p, path.display());
+                    if matches!(p, AgentProvider::Claude) {
+                        let settings_path = git_root.join(".claude/settings.local.json");
+                        println!(
+                            "{} Installed Stop Hook → {}",
+                            "✓".green(),
+                            settings_path.display()
+                        );
+                    }
+                    any_installed = true;
+                }
+                Err(e) => {
+                    eprintln!("{}: Failed to install {}: {}", "Error".red(), p, e);
+                }
+            }
+        }
+
+        if any_installed {
+            println!();
+            println!("{}", "Agents will auto-check code quality after edits.".bold());
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    // Interactive menu
+    let detected = detect_agent_providers(&git_root);
+
+    // Build ordered list: detected/installed first, then others
+    let mut ordered: Vec<&AgentProvider> = Vec::new();
+    for p in ALL_AGENT_PROVIDERS {
+        if detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p))
+            || agent_is_installed(&git_root, p)
+        {
+            ordered.push(p);
+        }
+    }
+    for p in ALL_AGENT_PROVIDERS {
+        if !ordered.iter().any(|o| std::mem::discriminant(*o) == std::mem::discriminant(p)) {
+            ordered.push(p);
+        }
+    }
+    let provider_count = ordered.len();
+
+    println!("Select agent(s) to integrate with linthis:");
+    println!();
+
+    for (i, p) in ordered.iter().enumerate() {
+        let is_installed = agent_is_installed(&git_root, p);
+        let is_detected = detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p));
+        let mut status_parts = Vec::new();
+        if is_installed {
+            status_parts.push("installed".to_string());
+        }
+        if is_detected && !is_installed {
+            status_parts.push("detected".to_string());
+        }
+        let status = if status_parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", status_parts.join(", "))
+        };
+        println!("  {}. {}{}", i + 1, p, if is_installed {
+            format!(" {}", status.yellow())
+        } else if is_detected {
+            format!(" {}", status.cyan())
+        } else {
+            status
+        });
+    }
+
+    println!();
+    println!("  {}. All detected agents", provider_count + 1);
+    println!("  {}. All agents", provider_count + 2);
+    println!("  {}. Cancel", provider_count + 3);
+    println!();
+    print!("Choose (comma-separated for multiple, e.g. 1,2): ");
+    io::stdout().flush().unwrap();
+
+    let mut choice = String::new();
+    io::stdin().read_line(&mut choice).ok();
+    let choice = choice.trim();
+
+    let cancel_num = provider_count + 3;
+    if choice == cancel_num.to_string() || choice.is_empty() {
+        println!("Installation cancelled");
+        return ExitCode::SUCCESS;
+    }
+
+    let all_detected_num = provider_count + 1;
+    let all_agents_num = provider_count + 2;
+
+    let selected: Vec<&AgentProvider> = if choice == all_detected_num.to_string() {
+        if detected.is_empty() {
+            println!("{}: No agents detected, installing all", "Info".cyan());
+            ordered.clone()
+        } else {
+            detected.iter().collect()
+        }
+    } else if choice == all_agents_num.to_string() {
+        ordered.clone()
+    } else {
+        let mut selected = Vec::new();
+        for part in choice.split(',') {
+            if let Ok(num) = part.trim().parse::<usize>() {
+                if num >= 1 && num <= provider_count {
+                    selected.push(ordered[num - 1]);
+                }
+            }
+        }
+        if selected.is_empty() {
+            println!("Installation cancelled");
+            return ExitCode::SUCCESS;
+        }
+        selected
+    };
+
+    println!();
+    let mut any_installed = false;
+    for p in &selected {
+        if agent_is_installed(&git_root, p) && !force {
+            println!("{}: {} already installed", "Info".cyan(), p);
+            print_agent_installed_info(&git_root, p);
+            continue;
+        }
+        match install_agent_provider(&git_root, p) {
+            Ok(_) => {
+                let path = agent_rules_path(&git_root, p);
+                println!("{} Installed {} → {}", "✓".green(), p, path.display());
+                if matches!(p, AgentProvider::Claude) {
+                    let settings_path = git_root.join(".claude/settings.local.json");
+                    println!(
+                        "{} Installed Stop Hook → {}",
+                        "✓".green(),
+                        settings_path.display()
+                    );
+                }
+                any_installed = true;
+            }
+            Err(e) => {
+                eprintln!("{}: Failed to install {}: {}", "Error".red(), p, e);
+            }
+        }
+    }
+
+    if any_installed {
+        println!();
+        println!("{}", "Agents will auto-check code quality after edits.".bold());
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Uninstall agent hooks for all installed providers
+fn handle_agent_hook_uninstall(yes: bool) -> ExitCode {
+    use std::io::{self, Write};
+
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => {
+            return ExitCode::from(1);
+        }
+    };
+
+    // Find all installed providers
+    let installed: Vec<&AgentProvider> = ALL_AGENT_PROVIDERS
+        .iter()
+        .filter(|p| agent_is_installed(&git_root, p))
+        .collect();
+
+    if installed.is_empty() {
+        return ExitCode::from(1); // Nothing to uninstall
+    }
+
+    if !yes {
+        println!("{}", "Agent Integration:".bold());
+        for p in &installed {
+            let path = agent_rules_path(&git_root, p);
+            println!("  {} {} ({})", "✓".green(), p, path.display());
+        }
+        println!();
+        print!("Remove agent integration? [y/N]: ");
+        io::stdout().flush().unwrap();
+
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer).ok();
+        if !answer.trim().eq_ignore_ascii_case("y") {
+            println!("Uninstall cancelled");
+            return ExitCode::SUCCESS;
+        }
+    }
+
+    let mut any_removed = false;
+    for p in &installed {
+        match uninstall_agent_provider(&git_root, p) {
+            Ok(_) => {
+                println!("{} Removed {} integration", "✓".green(), p);
+                any_removed = true;
+            }
+            Err(e) => {
+                eprintln!("{}: Failed to remove {}: {}", "Error".red(), p, e);
+            }
+        }
+    }
+
+    if any_removed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     }
 }
 

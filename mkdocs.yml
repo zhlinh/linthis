@@ -53,6 +53,7 @@ plugins:
             Auto Sync: 自动同步
             Self Update: 自更新
             Git Hooks: Git Hooks
+            Agent Hooks: AI 编程助手集成
             Watch Mode: 监视模式
             AI Fix: AI 修复
             Report: 报告与分析
@@ -107,6 +108,7 @@ nav:
     - Auto Sync: features/auto-sync.md
     - Self Update: features/self-update.md
     - Git Hooks: features/git-hooks.md
+    - Agent Hooks: features/agent-hooks.md
     - Watch Mode: features/watch-mode.md
     - Report: features/report.md
   - Reference:
