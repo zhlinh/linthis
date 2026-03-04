@@ -73,7 +73,7 @@ pub struct FixCommandOptions {
 }
 
 /// Handle the fix subcommand
-pub fn handle_fix_command(options: FixCommandOptions) -> ExitCode {
+pub fn handle_fix_command(mut options: FixCommandOptions) -> ExitCode {
     // Handle --list-backups
     if options.list_backups {
         return handle_list_backups();
@@ -87,6 +87,21 @@ pub fn handle_fix_command(options: FixCommandOptions) -> ExitCode {
     // Load config for AI settings
     let project_root = linthis::utils::get_project_root();
     let config = Config::load_merged(&project_root);
+
+    // Interactive provider selection when --ai without --provider
+    if options.ai
+        && options.provider.is_none()
+        && std::env::var("LINTHIS_AI_PROVIDER").is_err()
+        && config.ai.provider.is_none()
+        && std::io::IsTerminal::is_terminal(&std::io::stdin())
+    {
+        if let Some(provider) = super::helpers::select_ai_provider_interactive() {
+            options.provider = Some(provider);
+        } else {
+            println!("Fix cancelled");
+            return ExitCode::SUCCESS;
+        }
+    }
 
     // If --check or --format-only is specified, run lint first
     if options.check || options.format_only {

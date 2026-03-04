@@ -7,9 +7,13 @@ Short video demos showing linthis features in action. Each episode is 15-20 seco
 Get up and running with linthis in seconds — install, run your first check, and see results.
 
 ```bash
-cargo install linthis
-cd my-project
-linthis
+pip install linthis
+linthis plugin add -g sample https://github.com/zhlinh/linthis-plugin-template
+linthis hook install
+linthis hook install --type agent
+linthis -i src/
+git add src/main.py
+linthis -s
 ```
 
 <video controls width="100%">
@@ -39,13 +43,12 @@ linthis --lang python,rust,typescript
 Share and reuse lint configurations across teams with the plugin system.
 
 ```bash
-linthis plugin add my-org-standards
-linthis plugin init
+linthis plugin add -g sample https://github.com/zhlinh/linthis-plugin-template
 linthis
 ```
 
 <video controls width="100%">
-  <source src="/assets/videos/Plugin-en.mp4" type="video/mp4">
+  <source src="/assets/videos/PluginSystem-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
@@ -56,7 +59,7 @@ linthis
 Let AI automatically fix lint issues — before and after, side by side.
 
 ```bash
-linthis --fix --ai --provider claude
+linthis fix --ai --provider claude-cli
 ```
 
 <video controls width="100%">
@@ -71,9 +74,9 @@ linthis --fix --ai --provider claude
 Configure once, lint on every commit — automatic pre-commit integration.
 
 ```bash
-linthis init -g
-git commit -m "feat: new feature"
-# linthis runs automatically
+linthis hook install
+linthis hook status
+git commit -m "feat: add new feature"
 ```
 
 <video controls width="100%">
@@ -83,27 +86,27 @@ git commit -m "feat: new feature"
 
 ---
 
-## Episode 6: Editor Integration
+## Episode 6: AI Agent Hook
 
-Works with VS Code, JetBrains, Neovim, and Claude Code — lint as you type.
+Integrate linthis into AI coding agents for automated code quality.
+
+```bash
+linthis hook install --type agent --provider claude
+```
 
 <video controls width="100%">
-  <source src="/assets/videos/EditorSkills-en.mp4" type="video/mp4">
+  <source src="/assets/videos/AgentHook-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
 ---
 
-## Episode 7: AI Agent Hook
+## Episode 7: Editor Integration
 
-Integrate linthis into AI coding agents for automated code quality.
-
-```bash
-linthis hook install --ai --provider claude --accept-all
-```
+Works with VS Code, JetBrains, Neovim, and Claude Code — lint as you type.
 
 <video controls width="100%">
-  <source src="/assets/videos/AgentHook-en.mp4" type="video/mp4">
+  <source src="/assets/videos/EditorSkills-en.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 

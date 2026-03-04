@@ -13,10 +13,12 @@
 //! This module contains utility functions used by the CLI.
 
 use colored::Colorize;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use super::commands::Cli;
+use linthis::ai::provider::{detect_available_providers, ALL_AI_PROVIDERS};
 use linthis::LintIssue;
 
 /// Run benchmark comparing ruff vs flake8+black for Python
@@ -177,4 +179,71 @@ pub fn print_fix_hint(issues: &[LintIssue]) {
         "  {} claude (default), claude-cli, codebuddy, codebuddy-cli",
         "Available providers:".cyan().bold()
     );
+}
+
+/// Interactive AI provider selection menu.
+///
+/// Shows available providers (detected first), prompts user to choose one.
+/// Returns the selected provider name string, or None if cancelled.
+pub fn select_ai_provider_interactive() -> Option<String> {
+    let providers = detect_available_providers();
+
+    // Reorder: available first, then unavailable
+    let mut ordered: Vec<_> = providers.iter().filter(|(_, avail)| *avail).collect();
+    let unavailable: Vec<_> = providers.iter().filter(|(_, avail)| !*avail).collect();
+    ordered.extend(unavailable);
+
+    eprintln!("{}", "Select AI provider:".cyan().bold());
+    eprintln!();
+    for (i, (kind, available)) in ordered.iter().enumerate() {
+        let (_, name, desc) = ALL_AI_PROVIDERS
+            .iter()
+            .find(|(k, _, _)| k == kind)
+            .unwrap();
+        if *available {
+            eprintln!(
+                "  {} {}. {} - {}{}",
+                "\u{2713}".green(),
+                i + 1,
+                name,
+                desc,
+                " (available)".cyan()
+            );
+        } else {
+            eprintln!("    {}. {} - {}", i + 1, name, desc);
+        }
+    }
+    let cancel_num = ordered.len() + 1;
+    eprintln!("    {}. Cancel", cancel_num);
+    eprintln!();
+    eprint!("Choose [1]: ");
+    io::stderr().flush().ok();
+
+    let mut choice = String::new();
+    io::stdin().read_line(&mut choice).ok();
+    let choice = choice.trim();
+
+    // Default to 1 (first provider) if empty
+    let num: usize = if choice.is_empty() {
+        1
+    } else if let Ok(n) = choice.parse() {
+        n
+    } else {
+        return None;
+    };
+
+    if num == cancel_num || num == 0 {
+        return None;
+    }
+
+    if num >= 1 && num <= ordered.len() {
+        let (kind, _) = ordered[num - 1];
+        let (_, name, _) = ALL_AI_PROVIDERS
+            .iter()
+            .find(|(k, _, _)| k == kind)
+            .unwrap();
+        Some(name.to_string())
+    } else {
+        None
+    }
 }

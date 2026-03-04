@@ -12,6 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::process::{Command, Stdio};
 
 /// Supported AI provider types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -49,6 +50,57 @@ impl std::str::FromStr for AiProviderKind {
             _ => Err(format!("Unknown AI provider: {}", s)),
         }
     }
+}
+
+/// All user-facing AI providers with their CLI name and description (excludes Mock)
+pub const ALL_AI_PROVIDERS: &[(AiProviderKind, &str, &str)] = &[
+    (AiProviderKind::Claude, "claude", "Anthropic Claude API"),
+    (AiProviderKind::ClaudeCli, "claude-cli", "Claude CLI"),
+    (AiProviderKind::CodeBuddy, "codebuddy", "CodeBuddy API"),
+    (
+        AiProviderKind::CodeBuddyCli,
+        "codebuddy-cli",
+        "CodeBuddy CLI",
+    ),
+    (AiProviderKind::OpenAi, "openai", "OpenAI GPT API"),
+    (AiProviderKind::Local, "local", "Local LLM (Ollama)"),
+];
+
+/// Detect which AI providers are available in the current environment.
+///
+/// Returns a list of (provider kind, is_available) tuples for all user-facing providers.
+/// This is a lightweight check that doesn't require a full AiProvider instance.
+pub fn detect_available_providers() -> Vec<(AiProviderKind, bool)> {
+    ALL_AI_PROVIDERS
+        .iter()
+        .map(|(kind, _, _)| {
+            let available = match kind {
+                AiProviderKind::Claude => {
+                    env::var("ANTHROPIC_AUTH_TOKEN").is_ok()
+                        || env::var("ANTHROPIC_API_KEY").is_ok()
+                }
+                AiProviderKind::ClaudeCli => Command::new("claude")
+                    .arg("--version")
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false),
+                AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").is_ok(),
+                AiProviderKind::CodeBuddyCli => Command::new("codebuddy")
+                    .arg("--version")
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false),
+                AiProviderKind::OpenAi => env::var("OPENAI_API_KEY").is_ok(),
+                AiProviderKind::Local => env::var("LINTHIS_AI_ENDPOINT").is_ok(),
+                AiProviderKind::Mock => true,
+            };
+            (*kind, available)
+        })
+        .collect()
 }
 
 /// Configuration for AI provider

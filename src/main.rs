@@ -12,7 +12,7 @@
 
 mod cli;
 
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -31,10 +31,72 @@ use linthis::utils::output::{format_result_with_hook_type, OutputFormat};
 use linthis::{run, Language, RunMode, RunOptions};
 use std::sync::Arc;
 
+/// Inject dynamic help text showing detected AI/agent providers into clap commands.
+fn inject_dynamic_help(cmd: &mut clap::Command) {
+    use linthis::ai::provider::{detect_available_providers, ALL_AI_PROVIDERS};
+
+    // Build dynamic help text for AI fix providers
+    let providers = detect_available_providers();
+    let mut ai_help = String::from("\nAI providers (current environment):\n");
+    // Show available first, then unavailable
+    let mut available: Vec<_> = providers.iter().filter(|(_, a)| *a).collect();
+    let unavailable: Vec<_> = providers.iter().filter(|(_, a)| !*a).collect();
+    available.extend(unavailable);
+    for (kind, avail) in &available {
+        let (_, name, desc) = ALL_AI_PROVIDERS
+            .iter()
+            .find(|(k, _, _)| k == kind)
+            .unwrap();
+        if *avail {
+            ai_help.push_str(&format!("  \u{2713} {:<14} {} (available)\n", name, desc));
+        } else {
+            ai_help.push_str(&format!("    {:<14} {}\n", name, desc));
+        }
+    }
+
+    // Inject into "fix" subcommand
+    if let Some(fix_cmd) = cmd.find_subcommand_mut("fix") {
+        let existing = fix_cmd
+            .get_after_long_help()
+            .map(|h| h.to_string())
+            .unwrap_or_default();
+        *fix_cmd = fix_cmd
+            .clone()
+            .after_long_help(format!("{}{}", existing, ai_help));
+    }
+
+    // Build dynamic help text for agent providers
+    let mut agent_help = String::from("\nAgent providers (current environment):\n");
+    let agent_detected = cli::hook::detect_agent_providers_lightweight();
+    for (name, detected) in &agent_detected {
+        if *detected {
+            agent_help.push_str(&format!("  \u{2713} {} (detected)\n", name));
+        } else {
+            agent_help.push_str(&format!("    {}\n", name));
+        }
+    }
+
+    // Inject into "hook install" subcommand
+    if let Some(hook_cmd) = cmd.find_subcommand_mut("hook") {
+        if let Some(install_cmd) = hook_cmd.find_subcommand_mut("install") {
+            let existing = install_cmd
+                .get_after_long_help()
+                .map(|h| h.to_string())
+                .unwrap_or_default();
+            *install_cmd = install_cmd
+                .clone()
+                .after_long_help(format!("{}{}", existing, agent_help));
+        }
+    }
+}
+
 fn main() -> ExitCode {
     env_logger::init();
 
-    let cli = Cli::parse();
+    let mut cmd = Cli::command();
+    inject_dynamic_help(&mut cmd);
+    let matches = cmd.get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 
     // Handle plugin subcommands first
     if let Some(Commands::Plugin { action }) = cli.command {
@@ -775,9 +837,22 @@ fn main() -> ExitCode {
                 let config = Config::load_merged(&project_root);
 
                 if cli.ai {
+                    // Interactive provider selection when --ai without --provider
+                    let interactive_provider = if cli.provider.is_none()
+                        && std::env::var("LINTHIS_AI_PROVIDER").is_err()
+                        && config.ai.provider.is_none()
+                        && std::io::IsTerminal::is_terminal(&std::io::stdin())
+                    {
+                        cli::select_ai_provider_interactive()
+                    } else {
+                        None
+                    };
+
+                    let provider_ref = interactive_provider.as_deref().or(cli.provider.as_deref());
+
                     // AI-powered fix mode
                     let provider = resolve_ai_provider(
-                        cli.provider.as_deref(),
+                        provider_ref,
                         config.ai.provider.as_deref(),
                     );
                     let ai_config = AiFixConfig::with_provider(&provider)

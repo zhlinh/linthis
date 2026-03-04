@@ -263,13 +263,10 @@ pub fn handle_init_command(
             let exit_code = handle_hook_command(HookCommands::Install {
                 hook_type: None,           // Use default hook type (Git)
                 hook_event: HookEvent::PreCommit, // Default to pre-commit hook
-                check_only: false,         // Not check-only
-                format_only: false,        // Not format-only
                 force,                     // Use force flag from init
                 yes: true,                 // Non-interactive mode
-                ai: false,                 // No AI fix by default
                 provider: None,            // No provider specified
-                accept_all: false,         // Don't auto-accept fixes
+                args: None,               // Use default args (-c -f)
             });
             if exit_code != ExitCode::SUCCESS {
                 return exit_code;

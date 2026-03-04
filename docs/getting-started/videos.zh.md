@@ -7,9 +7,13 @@
 几秒钟内上手 linthis — 安装、运行首次检查、查看结果。
 
 ```bash
-cargo install linthis
-cd my-project
-linthis
+pip install linthis
+linthis plugin add -g sample https://github.com/zhlinh/linthis-plugin-template
+linthis hook install
+linthis hook install --type agent
+linthis -i src/
+git add src/main.py
+linthis -s
 ```
 
 <video controls width="100%">
@@ -39,13 +43,12 @@ linthis --lang python,rust,typescript
 通过插件系统在团队间共享和复用检查配置。
 
 ```bash
-linthis plugin add my-org-standards
-linthis plugin init
+linthis plugin add -g sample https://github.com/zhlinh/linthis-plugin-template
 linthis
 ```
 
 <video controls width="100%">
-  <source src="/assets/videos/Plugin-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/PluginSystem-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
@@ -56,7 +59,7 @@ linthis
 让 AI 自动修复代码问题 — 修复前后对比。
 
 ```bash
-linthis --fix --ai --provider claude
+linthis fix --ai --provider claude-cli
 ```
 
 <video controls width="100%">
@@ -71,9 +74,9 @@ linthis --fix --ai --provider claude
 配置一次，每次提交自动检查 — pre-commit 自动集成。
 
 ```bash
-linthis init -g
-git commit -m "feat: 新功能"
-# linthis 自动运行
+linthis hook install
+linthis hook status
+git commit -m "feat: 添加新功能"
 ```
 
 <video controls width="100%">
@@ -83,27 +86,27 @@ git commit -m "feat: 新功能"
 
 ---
 
-## 第 6 集：编辑器集成
+## 第 6 集：AI Agent Hook
 
-支持 VS Code、JetBrains、Neovim 和 Claude Code — 边写边检查。
+将 linthis 集成到 AI 编程助手中，实现自动化代码质量检查。
+
+```bash
+linthis hook install --type agent --provider claude
+```
 
 <video controls width="100%">
-  <source src="/assets/videos/EditorSkills-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/AgentHook-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
 ---
 
-## 第 7 集：AI Agent Hook
+## 第 7 集：编辑器集成
 
-将 linthis 集成到 AI 编程助手中，实现自动化代码质量检查。
-
-```bash
-linthis hook install --ai --provider claude --accept-all
-```
+支持 VS Code、JetBrains、Neovim 和 Claude Code — 边写边检查。
 
 <video controls width="100%">
-  <source src="/assets/videos/AgentHook-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/EditorSkills-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
