@@ -227,7 +227,7 @@ codebuddy --version
 
 ## 观看演示
 
-观看 [AI 修复视频教程](../getting-started/videos.md#第-4-集ai-智能修复)，20 秒了解 AI 修复前后对比。
+观看 [AI 修复视频教程](../getting-started/videos.md#4-ai)，20 秒了解 AI 修复前后对比。
 
 ## 参见
 
