@@ -417,6 +417,10 @@ mv .git/hooks/pre-commit .git/hooks/pre-commit.backup
 # Create pre-commit.local to call other tools
 ```
 
+## See It in Action
+
+Watch the [Git Hooks video tutorial](../getting-started/videos.md#episode-5-git-hooks) for a 15-second demo.
+
 ## References
 
 - [Git documentation - init.templateDir](https://git-scm.com/docs/git-init#_template_directory)

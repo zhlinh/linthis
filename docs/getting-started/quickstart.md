@@ -104,6 +104,10 @@ linthis hook install --type pre-commit
 linthis --check-only --output github-actions
 ```
 
+## See It in Action
+
+Watch the [Quick Start video tutorial](videos.md#episode-1-quick-start) for a 20-second demo.
+
 ## Next Steps
 
 - [Configuration](configuration.md) - Learn about configuration options

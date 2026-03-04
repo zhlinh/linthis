@@ -341,6 +341,10 @@ message = "Use HTTPS instead of HTTP"
 severity = "warning"
 ```
 
+## 观看演示
+
+观看[插件系统视频教程](../getting-started/videos.md#第-3-集插件系统)，20 秒了解插件使用。
+
 ## 故障排除
 
 ### 插件未加载

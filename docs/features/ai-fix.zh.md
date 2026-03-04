@@ -225,6 +225,10 @@ codebuddy --version
 - 分批处理文件
 - 在请求之间添加延迟
 
+## 观看演示
+
+观看 [AI 修复视频教程](../getting-started/videos.md#第-4-集ai-智能修复)，20 秒了解 AI 修复前后对比。
+
 ## 参见
 
 - [CLI 参考](../reference/cli.zh.md) - 完整命令参考

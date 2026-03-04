@@ -341,6 +341,10 @@ message = "Use HTTPS instead of HTTP"
 severity = "warning"
 ```
 
+## See It in Action
+
+Watch the [Plugin System video tutorial](../getting-started/videos.md#episode-3-plugin-system) for a 20-second demo.
+
 ## Troubleshooting
 
 ### Plugin not loading
