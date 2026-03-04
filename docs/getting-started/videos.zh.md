@@ -13,7 +13,7 @@ linthis
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/QuickStart-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/QuickStart-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
@@ -28,7 +28,7 @@ linthis --lang python,rust,typescript
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/MultiLanguage-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/MultiLanguage-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
@@ -45,7 +45,7 @@ linthis
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/TencentPlugin-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/TencentPlugin-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
@@ -60,7 +60,7 @@ linthis --fix --ai --provider claude
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/AiFix-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/AiFix-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
@@ -77,7 +77,7 @@ git commit -m "feat: 新功能"
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/GitHooks-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/GitHooks-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
@@ -88,7 +88,7 @@ git commit -m "feat: 新功能"
 支持 VS Code、JetBrains、Neovim 和 Claude Code — 边写边检查。
 
 <video controls width="100%">
-  <source src="../assets/videos/EditorSkills-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/EditorSkills-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
@@ -103,7 +103,7 @@ linthis hook install --ai --provider claude --accept-all
 ```
 
 <video controls width="100%">
-  <source src="../assets/videos/AgentHook-zh.mp4" type="video/mp4">
+  <source src="/assets/videos/AgentHook-zh.mp4" type="video/mp4">
   您的浏览器不支持视频标签。
 </video>
 
