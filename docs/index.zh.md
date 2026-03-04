@@ -44,13 +44,13 @@ linthis --staged
 
 观看 linthis 功能演示短视频：
 
-1. [快速开始](getting-started/videos.md#第-1-集快速开始) — 安装并运行首次检查（20秒）
-2. [多语言支持](getting-started/videos.md#第-2-集多语言支持) — 自动检测 18+ 种语言（15秒）
-3. [插件系统](getting-started/videos.md#第-3-集插件系统) — 团队间共享配置（20秒）
-4. [AI 修复](getting-started/videos.md#第-4-集ai-智能修复) — AI 驱动的代码修复（20秒）
-5. [Git Hooks](getting-started/videos.md#第-5-集git-hooks) — 自动 pre-commit 检查（15秒）
-6. [编辑器集成](getting-started/videos.md#第-6-集编辑器集成) — VS Code、JetBrains、Neovim、Claude Code（15秒）
-7. [AI Agent Hook](getting-started/videos.md#第-7-集ai-agent-hook) — AI 编程助手集成（20秒）
+1. [快速开始](getting-started/videos.md#1) — 安装并运行首次检查（20秒）
+2. [多语言支持](getting-started/videos.md#2) — 自动检测 18+ 种语言（15秒）
+3. [插件系统](getting-started/videos.md#3) — 团队间共享配置（20秒）
+4. [AI 修复](getting-started/videos.md#4-ai) — AI 驱动的代码修复（20秒）
+5. [Git Hooks](getting-started/videos.md#5-git-hooks) — 自动 pre-commit 检查（15秒）
+6. [编辑器集成](getting-started/videos.md#6) — VS Code、JetBrains、Neovim、Claude Code（15秒）
+7. [AI Agent Hook](getting-started/videos.md#7-ai-agent-hook) — AI 编程助手集成（20秒）
 
 ## 为什么选择 linthis？
 

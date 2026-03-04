@@ -419,7 +419,7 @@ mv .git/hooks/pre-commit .git/hooks/pre-commit.backup
 
 ## 观看演示
 
-观看 [Git Hooks 视频教程](../getting-started/videos.md#第-5-集git-hooks)，15 秒了解自动化 pre-commit 检查。
+观看 [Git Hooks 视频教程](../getting-started/videos.md#5-git-hooks)，15 秒了解自动化 pre-commit 检查。
 
 ## 参考资料
 

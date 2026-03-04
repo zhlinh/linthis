@@ -106,7 +106,7 @@ linthis --check-only --output github-actions
 
 ## 观看演示
 
-观看[快速开始视频教程](videos.md#第-1-集快速开始)，20 秒了解基本用法。
+观看[快速开始视频教程](videos.md#1)，20 秒了解基本用法。
 
 ## 下一步
 
