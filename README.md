@@ -599,7 +599,7 @@ All modifications preserve TOML file format and comments.
 | C++         | clang-tidy, cpplint, cppcheck | clang-format       |
 | Objective-C | clang-tidy                    | clang-format       |
 | Swift       | swiftlint                     | swift-format       |
-| Kotlin      | detekt                        | ktlint             |
+| Kotlin      | ktlint, detekt                | ktlint             |
 | Lua         | luacheck                      | stylua             |
 | Dart        | dart analyze                  | dart format        |
 | Shell/Bash  | shellcheck                    | shfmt              |
