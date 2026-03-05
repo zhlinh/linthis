@@ -45,6 +45,31 @@ cargo build --release
 
 ## Quick Start
 
+Install linthis, add a plugin, set up hooks, and run your first check — all in under a minute.
+
+```bash
+# 1. Install
+pip install linthis
+
+# 2. Add team plugin (use your team's plugin URL)
+linthis plugin add -g sample https://github.com/zhlinh/linthis-plugin-template
+
+# 3. Install hooks
+linthis hook install                # Git pre-commit hook
+linthis hook install --type agent   # AI agent hook (Claude, Cursor, etc.)
+
+# 4. Run lint check
+linthis -i src/
+
+# 5. Check staged files before commit
+git add src/main.py
+linthis -s
+```
+
+<video src="docs/assets/videos/QuickStart-en.mp4" controls width="100%"></video>
+
+> See more video tutorials in the [Video Tutorials](https://zhlinh.github.io/linthis/getting-started/videos/) page.
+
 ### Initialize Configuration (Optional)
 
 ```bash
@@ -54,20 +79,15 @@ linthis init
 # Create global configuration file
 linthis init -g
 
-# Install pre-commit hooks (project-level)
-linthis hook install --type prek
-linthis hook install --type pre-commit
-linthis hook install --type git
-
-# Install pre-push hook
-linthis hook install --type git --event pre-push
-
-# Install commit-msg hook
-linthis hook install --type git --event commit-msg
+# Install hooks
+linthis hook install                              # Git pre-commit hook (default)
+linthis hook install --type agent --provider claude  # AI agent hook
+linthis hook install --type git --event pre-push  # Git pre-push hook
+linthis hook install --type prek                  # prek pre-commit hook
 
 # Force overwrite existing files
 linthis init --force
-linthis hook install --type prek --force
+linthis hook install --force
 ```
 
 ### Basic Usage
@@ -116,6 +136,8 @@ linthis --exclude "target/**" --exclude "node_modules/**"
 ## Plugin System
 
 linthis supports Git-based configuration plugins for easy sharing of code standards across projects and teams.
+
+<video src="docs/assets/videos/PluginSystem-en.mp4" controls width="100%"></video>
 
 ### Add Plugin
 
@@ -532,10 +554,13 @@ All modifications preserve TOML file format and comments.
 
 ### Hook Subcommand
 
+<video src="docs/assets/videos/GitHooks-en.mp4" controls width="100%"></video>
+
 | Command          | Short | Long            | Description                            |
 | ---------------- | ----- | --------------- | -------------------------------------- |
-| `hook install`   |       | `--type`        | Hook type (prek/pre-commit/git)        |
+| `hook install`   |       | `--type`        | Hook type (git/agent/prek/pre-commit)  |
 |                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg) |
+|                  |       | `--provider`    | AI agent provider (claude/cursor/windsurf/copilot/cline/codebuddy) |
 |                  | `-c`  | `--check-only`  | Hook only runs check                   |
 |                  | `-f`  | `--format-only` | Hook only runs format                  |
 |                  |       | `--force`       | Force overwrite existing hook          |
@@ -547,9 +572,12 @@ All modifications preserve TOML file format and comments.
 
 **Hook types**:
 
+- `git`: Traditional git hook (default)
+- `agent`: AI agent hook (Claude, Cursor, Windsurf, etc.)
 - `prek`: Rust-based pre-commit tool (faster)
 - `pre-commit`: Python-based standard tool
-- `git`: Traditional git hook
+
+<video src="docs/assets/videos/AgentHook-en.mp4" controls width="100%"></video>
 
 **Hook events**:
 
@@ -583,6 +611,8 @@ All modifications preserve TOML file format and comments.
 ## Editor Plugins
 
 linthis provides official plugins for popular editors, offering seamless integration with format-on-save, manual lint/format commands, and configurable settings.
+
+<video src="docs/assets/videos/EditorSkills-en.mp4" controls width="100%"></video>
 
 ### VSCode
 
