@@ -31,12 +31,15 @@
 linthis
 
 # 仅检查（不格式化）
+linthis -c
 linthis --check-only
 
 # 仅格式化（不检查）
+linthis -f
 linthis --format-only
 
 # 检查 Git 暂存文件
+linthis -s
 linthis --staged
 ```
 

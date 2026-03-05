@@ -16,7 +16,7 @@ linthis 支持 18 种编程语言，具有自动语言检测功能。
 | [C++](cpp.md) | clang-tidy, cpplint, cppcheck | clang-format | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` |
 | [Objective-C](objc.md) | clang-tidy | clang-format | `.m`, `.mm` |
 | [Swift](swift.md) | swiftlint | swift-format | `.swift` |
-| [Kotlin](kotlin.md) | detekt | ktlint | `.kt`, `.kts` |
+| [Kotlin](kotlin.md) | ktlint, detekt | ktlint | `.kt`, `.kts` |
 | [Lua](lua.md) | luacheck | stylua | `.lua` |
 | [Dart](dart.md) | dart analyze | dart format | `.dart` |
 | [Shell](shell.md) | shellcheck | shfmt | `.sh`, `.bash`, `.zsh`, `.ksh` |

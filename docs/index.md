@@ -31,12 +31,15 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 linthis
 
 # Check only (no formatting)
+linthis -c
 linthis --check-only
 
 # Format only (no checking)
+linthis -f
 linthis --format-only
 
 # Check Git staged files
+linthis -s
 linthis --staged
 ```
 
