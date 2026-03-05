@@ -274,9 +274,8 @@ fn handle_hook_status() -> ExitCode {
             any_agent_installed = true;
             let path = agent_rules_path(&git_root, p);
             println!("{} {} ({})", "✓".green(), p, path.display());
-            // Show extra info for Claude (Stop Hook)
-            if matches!(p, AgentProvider::Claude) {
-                let settings_path = git_root.join(".claude/settings.local.json");
+            // Show extra info for Claude/CodeBuddy (Stop Hook)
+            if let Some(settings_path) = agent_stop_hook_settings_path(&git_root, p) {
                 let has_stop_hook = settings_path.exists()
                     && std::fs::read_to_string(&settings_path)
                         .map(|c| c.contains("linthis"))
@@ -1009,6 +1008,26 @@ fn agent_rules_path(git_root: &std::path::Path, provider: &AgentProvider) -> Pat
     }
 }
 
+/// Get the Stop Hook settings file path for providers that support it
+fn agent_stop_hook_settings_path(git_root: &std::path::Path, provider: &AgentProvider) -> Option<PathBuf> {
+    match provider {
+        AgentProvider::Claude => Some(git_root.join(".claude/settings.local.json")),
+        AgentProvider::Codebuddy => Some(git_root.join(".codebuddy/settings.json")),
+        _ => None,
+    }
+}
+
+/// Print "Installed Stop Hook" message if the provider supports it
+fn print_stop_hook_installed(git_root: &std::path::Path, provider: &AgentProvider) {
+    if let Some(settings_path) = agent_stop_hook_settings_path(git_root, provider) {
+        println!(
+            "{} Installed Stop Hook → {}",
+            "✓".green(),
+            settings_path.display()
+        );
+    }
+}
+
 /// Print info about an already-installed agent provider (file path + content)
 fn print_agent_installed_info(git_root: &std::path::Path, provider: &AgentProvider) {
     let path = agent_rules_path(git_root, provider);
@@ -1018,9 +1037,8 @@ fn print_agent_installed_info(git_root: &std::path::Path, provider: &AgentProvid
         path.display()
     );
 
-    // For Claude, also show settings file
-    if matches!(provider, AgentProvider::Claude) {
-        let settings_path = git_root.join(".claude/settings.local.json");
+    // For Claude/CodeBuddy, also show settings file (Stop Hook)
+    if let Some(settings_path) = agent_stop_hook_settings_path(git_root, provider) {
         if settings_path.exists() {
             println!(
                 "       {} {}",
@@ -1236,6 +1254,9 @@ fn install_agent_provider(git_root: &std::path::Path, provider: &AgentProvider) 
         }
         AgentProvider::Codebuddy => {
             install_agent_dedicated_file(&rules_path, &agent_content_codebuddy_md())?;
+            // Also install Stop Hook
+            let settings_path = git_root.join(".codebuddy/settings.json");
+            install_agent_stop_hook(git_root, &settings_path)?;
         }
     }
 
@@ -1263,10 +1284,17 @@ fn uninstall_agent_provider(git_root: &std::path::Path, provider: &AgentProvider
         }
         AgentProvider::Cursor
         | AgentProvider::Windsurf
-        | AgentProvider::Cline
-        | AgentProvider::Codebuddy => {
+        | AgentProvider::Cline => {
             let path = agent_rules_path(git_root, provider);
             remove_agent_dedicated_file(&path)?;
+        }
+        AgentProvider::Codebuddy => {
+            let path = agent_rules_path(git_root, provider);
+            remove_agent_dedicated_file(&path)?;
+            let settings_path = git_root.join(".codebuddy/settings.json");
+            if settings_path.exists() {
+                remove_agent_stop_hook(&settings_path)?;
+            }
         }
     }
 
@@ -1331,17 +1359,18 @@ fn remove_agent_section_from_file(path: &std::path::Path) -> Result<(), String> 
     Ok(())
 }
 
-/// Install the Stop Hook into .claude/settings.local.json
+/// Install the Stop Hook into a settings JSON file (e.g. .claude/settings.local.json, .codebuddy/settings.json)
 fn install_agent_stop_hook(
-    git_root: &std::path::Path,
+    _git_root: &std::path::Path,
     settings_path: &std::path::Path,
 ) -> Result<(), String> {
     use std::fs;
 
-    let claude_dir = git_root.join(".claude");
-    if !claude_dir.exists() {
-        fs::create_dir_all(&claude_dir)
-            .map_err(|e| format!("Failed to create .claude directory: {}", e))?;
+    if let Some(parent) = settings_path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+        }
     }
 
     if settings_path.exists() {
@@ -1449,14 +1478,7 @@ fn handle_agent_hook_install(
             Ok(_) => {
                 let path = agent_rules_path(&git_root, p);
                 println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                if matches!(p, AgentProvider::Claude) {
-                    let settings_path = git_root.join(".claude/settings.local.json");
-                    println!(
-                        "{} Installed Stop Hook → {}",
-                        "✓".green(),
-                        settings_path.display()
-                    );
-                }
+                print_stop_hook_installed(&git_root, p);
                 return ExitCode::SUCCESS;
             }
             Err(e) => {
@@ -1486,14 +1508,7 @@ fn handle_agent_hook_install(
                 Ok(_) => {
                     let path = agent_rules_path(&git_root, p);
                     println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                    if matches!(p, AgentProvider::Claude) {
-                        let settings_path = git_root.join(".claude/settings.local.json");
-                        println!(
-                            "{} Installed Stop Hook → {}",
-                            "✓".green(),
-                            settings_path.display()
-                        );
-                    }
+                    print_stop_hook_installed(&git_root, p);
                     any_installed = true;
                 }
                 Err(e) => {
@@ -1613,14 +1628,7 @@ fn handle_agent_hook_install(
             Ok(_) => {
                 let path = agent_rules_path(&git_root, p);
                 println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                if matches!(p, AgentProvider::Claude) {
-                    let settings_path = git_root.join(".claude/settings.local.json");
-                    println!(
-                        "{} Installed Stop Hook → {}",
-                        "✓".green(),
-                        settings_path.display()
-                    );
-                }
+                print_stop_hook_installed(&git_root, p);
                 any_installed = true;
             }
             Err(e) => {
