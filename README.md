@@ -68,7 +68,7 @@ linthis -s
 
 <video src="docs/assets/videos/QuickStart-en.mp4" controls width="100%"></video>
 
-> See more video tutorials in the [Video Tutorials](https://zhlinh.github.io/linthis/getting-started/videos/) page.
+> See more video tutorials in the [Video Tutorials](docs/getting-started/videos/) page.
 
 ### Initialize Configuration (Optional)
 
@@ -422,12 +422,12 @@ linthis can automatically detect and migrate existing linter/formatter configura
 
 #### Supported Tools
 
-| Tool     | Detected Files                                                                                |
-| -------- | --------------------------------------------------------------------------------------------- |
-| ESLint   | `.eslintrc.js`, `.eslintrc.json`, `.eslintrc.yml`, `.eslintrc`, `eslint.config.js`, `package.json[eslintConfig]` |
+| Tool     | Detected Files                                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| ESLint   | `.eslintrc.js`, `.eslintrc.json`, `.eslintrc.yml`, `.eslintrc`, `eslint.config.js`, `package.json[eslintConfig]`       |
 | Prettier | `.prettierrc`, `.prettierrc.json`, `.prettierrc.yml`, `.prettierrc.js`, `prettier.config.js`, `package.json[prettier]` |
-| Black    | `pyproject.toml[tool.black]`                                                                  |
-| isort    | `pyproject.toml[tool.isort]`                                                                  |
+| Black    | `pyproject.toml[tool.black]`                                                                                           |
+| isort    | `pyproject.toml[tool.isort]`                                                                                           |
 
 #### Migration Commands
 
@@ -556,19 +556,19 @@ All modifications preserve TOML file format and comments.
 
 <video src="docs/assets/videos/GitHooks-en.mp4" controls width="100%"></video>
 
-| Command          | Short | Long            | Description                            |
-| ---------------- | ----- | --------------- | -------------------------------------- |
-| `hook install`   |       | `--type`        | Hook type (git/agent/prek/pre-commit)  |
-|                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg) |
+| Command          | Short | Long            | Description                                                        |
+| ---------------- | ----- | --------------- | ------------------------------------------------------------------ |
+| `hook install`   |       | `--type`        | Hook type (git/agent/prek/pre-commit)                              |
+|                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg)                        |
 |                  |       | `--provider`    | AI agent provider (claude/cursor/windsurf/copilot/cline/codebuddy) |
-|                  | `-c`  | `--check-only`  | Hook only runs check                   |
-|                  | `-f`  | `--format-only` | Hook only runs format                  |
-|                  |       | `--force`       | Force overwrite existing hook          |
-|                  | `-y`  | `--yes`         | Non-interactive mode                   |
-| `hook uninstall` |       | `--event`       | Hook event to uninstall                |
-|                  | `-y`  | `--yes`         | Non-interactive mode                   |
-| `hook status`    |       |                 | Show git hook status                   |
-| `hook check`     |       |                 | Check for hook conflicts               |
+|                  | `-c`  | `--check-only`  | Hook only runs check                                               |
+|                  | `-f`  | `--format-only` | Hook only runs format                                              |
+|                  |       | `--force`       | Force overwrite existing hook                                      |
+|                  | `-y`  | `--yes`         | Non-interactive mode                                               |
+| `hook uninstall` |       | `--event`       | Hook event to uninstall                                            |
+|                  | `-y`  | `--yes`         | Non-interactive mode                                               |
+| `hook status`    |       |                 | Show git hook status                                               |
+| `hook check`     |       |                 | Check for hook conflicts                                           |
 
 **Hook types**:
 
@@ -619,17 +619,20 @@ linthis provides official plugins for popular editors, offering seamless integra
 Install from [VS Marketplace](https://marketplace.visualstudio.com/items?itemName=zhlinh.linthis) or search "linthis" in VSCode Extensions.
 
 **Features:**
+
 - Format on Save (configurable)
 - Manual Lint/Format commands via Command Palette
 - Configurable executable path and additional arguments
 - Status bar integration
 
 **Installation via Command Palette:**
+
 ```
 ext install zhlinh.linthis
 ```
 
 **Configuration (settings.json):**
+
 ```json
 {
   "linthis.formatOnSave": true,
@@ -645,17 +648,20 @@ ext install zhlinh.linthis
 Install from [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/XXXXX-linthis) or search "linthis" in IDE Settings → Plugins.
 
 **Features:**
+
 - Format on Save (configurable)
 - Manual Lint/Format via Tools menu
 - Configurable executable path and additional arguments
 - Settings UI in Preferences → Tools → Linthis
 
 **Installation:**
+
 1. Open Settings/Preferences → Plugins
 2. Search for "linthis"
 3. Click Install and restart IDE
 
 **Configuration:**
+
 - Settings → Tools → Linthis
 - Enable/disable Format on Save
 - Set custom executable path
@@ -709,11 +715,13 @@ Plug 'zhlinh/linthis', { 'rtp': 'nvim-linthis' }
 ```
 
 **Features:**
+
 - Format on Save (configurable)
 - Commands: `:LinthisLint`, `:LinthisFormat`, `:LinthisLintFormat`
 - Configurable via `setup()` options
 
 **Configuration:**
+
 ```lua
 require("linthis").setup({
   format_on_save = true,
