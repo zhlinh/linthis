@@ -557,6 +557,9 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
         AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
         AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
         AiProviderKind::OpenAi => AiProviderConfig::openai(),
+        AiProviderKind::CodexCli => AiProviderConfig::codex_cli(),
+        AiProviderKind::Gemini => AiProviderConfig::gemini(),
+        AiProviderKind::GeminiCli => AiProviderConfig::gemini_cli(),
         AiProviderKind::Local => AiProviderConfig::local(),
         AiProviderKind::Mock => AiProviderConfig::mock(),
     };
@@ -572,11 +575,16 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
         AiProviderKind::CodeBuddy => std::env::var("CODEBUDDY_API_KEY").ok(),
-        AiProviderKind::OpenAi => std::env::var("OPENAI_API_KEY").ok(),
+        AiProviderKind::OpenAi | AiProviderKind::CodexCli => {
+            std::env::var("OPENAI_API_KEY").ok()
+        }
+        AiProviderKind::Gemini => std::env::var("GEMINI_API_KEY")
+            .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            .ok(),
         _ => None,
     };
 
-    // Set endpoint from environment for Claude or CodeBuddy
+    // Set endpoint from environment
     match provider_kind {
         AiProviderKind::Claude => {
             if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
@@ -610,6 +618,15 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
             }
             AiProviderKind::OpenAi => {
                 eprintln!("Set OPENAI_API_KEY environment variable");
+            }
+            AiProviderKind::CodexCli => {
+                eprintln!("Install Codex CLI (npm install -g @openai/codex)");
+            }
+            AiProviderKind::Gemini => {
+                eprintln!("Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable");
+            }
+            AiProviderKind::GeminiCli => {
+                eprintln!("Install Gemini CLI (npm install -g @google/gemini-cli)");
             }
             AiProviderKind::Local => {
                 eprintln!("Set LINTHIS_AI_ENDPOINT environment variable");
