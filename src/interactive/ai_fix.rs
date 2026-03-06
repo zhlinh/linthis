@@ -122,6 +122,9 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
         AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
         AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
         AiProviderKind::OpenAi => AiProviderConfig::openai(),
+        AiProviderKind::CodexCli => AiProviderConfig::codex_cli(),
+        AiProviderKind::Gemini => AiProviderConfig::gemini(),
+        AiProviderKind::GeminiCli => AiProviderConfig::gemini_cli(),
         AiProviderKind::Local => AiProviderConfig::local(),
         AiProviderKind::Mock => AiProviderConfig::mock(),
     };
@@ -131,17 +134,22 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
         provider_config.model = model.clone();
     }
 
-    // Set API key from environment (for Claude, try AUTH_TOKEN first)
+    // Set API key from environment
     provider_config.api_key = match config.provider {
         AiProviderKind::Claude => std::env::var("ANTHROPIC_AUTH_TOKEN")
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
         AiProviderKind::CodeBuddy => std::env::var("CODEBUDDY_API_KEY").ok(),
-        AiProviderKind::OpenAi => std::env::var("OPENAI_API_KEY").ok(),
+        AiProviderKind::OpenAi | AiProviderKind::CodexCli => {
+            std::env::var("OPENAI_API_KEY").ok()
+        }
+        AiProviderKind::Gemini => std::env::var("GEMINI_API_KEY")
+            .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            .ok(),
         _ => None,
     };
 
-    // Set endpoint from environment for Claude or CodeBuddy
+    // Set endpoint from environment
     match config.provider {
         AiProviderKind::Claude => {
             if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
@@ -166,6 +174,9 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
             AiProviderKind::CodeBuddy => "Set CODEBUDDY_API_KEY environment variable",
             AiProviderKind::CodeBuddyCli => "Install CodeBuddy CLI (codebuddy command must be available)",
             AiProviderKind::OpenAi => "Set OPENAI_API_KEY environment variable",
+            AiProviderKind::CodexCli => "Install Codex CLI (npm install -g @openai/codex)",
+            AiProviderKind::Gemini => "Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable",
+            AiProviderKind::GeminiCli => "Install Gemini CLI (npm install -g @google/gemini-cli)",
             AiProviderKind::Local => "Set LINTHIS_AI_ENDPOINT environment variable",
             AiProviderKind::Mock => "Mock provider should always be available",
         };
@@ -181,7 +192,13 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
 
 /// Check if provider is a CLI provider that supports direct file editing
 fn is_cli_provider(kind: AiProviderKind) -> bool {
-    matches!(kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli)
+    matches!(
+        kind,
+        AiProviderKind::ClaudeCli
+            | AiProviderKind::CodeBuddyCli
+            | AiProviderKind::CodexCli
+            | AiProviderKind::GeminiCli
+    )
 }
 
 /// Group issues by file path
@@ -221,6 +238,8 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
     let provider_config = match config.provider {
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
         AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
+        AiProviderKind::CodexCli => AiProviderConfig::codex_cli(),
+        AiProviderKind::GeminiCli => AiProviderConfig::gemini_cli(),
         _ => return fix_result,
     };
 
@@ -261,7 +280,13 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
         println!("    {} issues to fix", issues_data.len());
 
         // Start spinner with elapsed time in a background thread
-        let cli_name = if matches!(config.provider, AiProviderKind::ClaudeCli) { "Claude" } else { "CodeBuddy" };
+        let cli_name = match config.provider {
+            AiProviderKind::ClaudeCli => "Claude",
+            AiProviderKind::CodeBuddyCli => "CodeBuddy",
+            AiProviderKind::CodexCli => "Codex",
+            AiProviderKind::GeminiCli => "Gemini",
+            _ => "CLI",
+        };
         let spinner_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let spinner_running_clone = Arc::clone(&spinner_running);
 
@@ -414,7 +439,13 @@ fn run_cli_file_fix_parallel(
     use std::sync::Mutex;
 
     let mut fix_result = AiFixResult::default();
-    let cli_name = if matches!(config.provider, AiProviderKind::ClaudeCli) { "Claude" } else { "CodeBuddy" };
+    let cli_name = match config.provider {
+            AiProviderKind::ClaudeCli => "Claude",
+            AiProviderKind::CodeBuddyCli => "CodeBuddy",
+            AiProviderKind::CodexCli => "Codex",
+            AiProviderKind::GeminiCli => "Gemini",
+            _ => "CLI",
+        };
 
     // Prepare file data
     let file_data: Vec<(PathBuf, Vec<(usize, String, String)>, usize)> = file_list

@@ -195,8 +195,12 @@ pub fn print_fix_hint(issues: &[LintIssue]) {
     );
     eprintln!();
     eprintln!(
-        "  {} claude (default), claude-cli, codebuddy, codebuddy-cli",
+        "  {} claude (default), claude-cli, codebuddy, codebuddy-cli,",
         "Available providers:".cyan().bold()
+    );
+    eprintln!(
+        "  {}   openai, codex-cli, gemini, gemini-cli",
+        " ".repeat(21)
     );
 }
 

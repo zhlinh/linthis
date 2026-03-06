@@ -27,8 +27,14 @@ pub enum AiProviderKind {
     CodeBuddy,
     /// CodeBuddy CLI (codebuddy -p command)
     CodeBuddyCli,
-    /// OpenAI GPT
+    /// OpenAI GPT API
     OpenAi,
+    /// OpenAI Codex CLI (codex exec command)
+    CodexCli,
+    /// Google Gemini API
+    Gemini,
+    /// Gemini CLI (gemini command)
+    GeminiCli,
     /// Local LLM (Ollama, llama.cpp, etc.)
     Local,
     /// Mock provider for testing
@@ -45,6 +51,9 @@ impl std::str::FromStr for AiProviderKind {
             "codebuddy" | "buddy" => Ok(Self::CodeBuddy),
             "codebuddy-cli" | "codebuddycli" | "cli" => Ok(Self::CodeBuddyCli),
             "openai" | "gpt" => Ok(Self::OpenAi),
+            "codex-cli" | "codexcli" | "codex" => Ok(Self::CodexCli),
+            "gemini" | "google" => Ok(Self::Gemini),
+            "gemini-cli" | "geminicli" => Ok(Self::GeminiCli),
             "local" | "ollama" | "llama" => Ok(Self::Local),
             "mock" | "test" => Ok(Self::Mock),
             _ => Err(format!("Unknown AI provider: {}", s)),
@@ -63,6 +72,9 @@ pub const ALL_AI_PROVIDERS: &[(AiProviderKind, &str, &str)] = &[
         "CodeBuddy CLI",
     ),
     (AiProviderKind::OpenAi, "openai", "OpenAI GPT API"),
+    (AiProviderKind::CodexCli, "codex-cli", "OpenAI Codex CLI"),
+    (AiProviderKind::Gemini, "gemini", "Google Gemini API"),
+    (AiProviderKind::GeminiCli, "gemini-cli", "Gemini CLI"),
     (AiProviderKind::Local, "local", "Local LLM (Ollama)"),
 ];
 
@@ -72,25 +84,29 @@ pub fn is_provider_available(kind: AiProviderKind) -> bool {
         AiProviderKind::Claude => {
             env::var("ANTHROPIC_AUTH_TOKEN").is_ok() || env::var("ANTHROPIC_API_KEY").is_ok()
         }
-        AiProviderKind::ClaudeCli => Command::new("claude")
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false),
+        AiProviderKind::ClaudeCli => is_cli_available("claude"),
         AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").is_ok(),
-        AiProviderKind::CodeBuddyCli => Command::new("codebuddy")
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false),
+        AiProviderKind::CodeBuddyCli => is_cli_available("codebuddy"),
         AiProviderKind::OpenAi => env::var("OPENAI_API_KEY").is_ok(),
+        AiProviderKind::CodexCli => is_cli_available("codex"),
+        AiProviderKind::Gemini => {
+            env::var("GEMINI_API_KEY").is_ok() || env::var("GOOGLE_API_KEY").is_ok()
+        }
+        AiProviderKind::GeminiCli => is_cli_available("gemini"),
         AiProviderKind::Local => env::var("LINTHIS_AI_ENDPOINT").is_ok(),
         AiProviderKind::Mock => true,
     }
+}
+
+/// Check if a CLI command is available on the system.
+fn is_cli_available(cmd: &str) -> bool {
+    Command::new(cmd)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Detect which AI providers are available in the current environment.
@@ -108,8 +124,10 @@ pub fn detect_available_providers() -> Vec<(AiProviderKind, bool)> {
 ///
 /// Returns `Some((fallback_kind, message))` if a fallback is found, `None` otherwise.
 /// Only API↔CLI pairs within the same family are considered:
-/// - `claude` (API) → `claude-cli` (CLI)
-/// - `codebuddy` (API) → `codebuddy-cli` (CLI)
+/// - `claude` (API) ↔ `claude-cli` (CLI)
+/// - `codebuddy` (API) ↔ `codebuddy-cli` (CLI)
+/// - `openai` (API) ↔ `codex-cli` (CLI)
+/// - `gemini` (API) ↔ `gemini-cli` (CLI)
 pub fn try_fallback_provider(kind: AiProviderKind) -> Option<(AiProviderKind, String)> {
     // Already available, no fallback needed
     if is_provider_available(kind) {
@@ -140,6 +158,30 @@ pub fn try_fallback_provider(kind: AiProviderKind) -> Option<(AiProviderKind, St
             "codebuddy-cli",
             "codebuddy (API)",
             "Install CodeBuddy CLI to use codebuddy-cli provider",
+        ),
+        AiProviderKind::OpenAi => (
+            AiProviderKind::CodexCli,
+            "openai (API)",
+            "codex-cli",
+            "Set OPENAI_API_KEY to use OpenAI API directly",
+        ),
+        AiProviderKind::CodexCli => (
+            AiProviderKind::OpenAi,
+            "codex-cli",
+            "openai (API)",
+            "Install Codex CLI (npm i -g @openai/codex) to use codex-cli provider",
+        ),
+        AiProviderKind::Gemini => (
+            AiProviderKind::GeminiCli,
+            "gemini (API)",
+            "gemini-cli",
+            "Set GEMINI_API_KEY or GOOGLE_API_KEY to use Gemini API directly",
+        ),
+        AiProviderKind::GeminiCli => (
+            AiProviderKind::Gemini,
+            "gemini-cli",
+            "gemini (API)",
+            "Install Gemini CLI (npm install -g @google/gemini-cli) to use gemini-cli provider",
         ),
         _ => return None,
     };
@@ -255,6 +297,36 @@ impl AiProviderConfig {
         }
     }
 
+    /// Create Codex CLI configuration (uses `codex exec` command)
+    pub fn codex_cli() -> Self {
+        Self {
+            kind: AiProviderKind::CodexCli,
+            model: "codex-cli".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Create Gemini API configuration
+    ///
+    /// Uses environment variables:
+    /// - GEMINI_API_KEY or GOOGLE_API_KEY for authentication
+    pub fn gemini() -> Self {
+        Self {
+            kind: AiProviderKind::Gemini,
+            model: "gemini-2.5-flash".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Create Gemini CLI configuration (uses `gemini` command)
+    pub fn gemini_cli() -> Self {
+        Self {
+            kind: AiProviderKind::GeminiCli,
+            model: "gemini-cli".to_string(),
+            ..Default::default()
+        }
+    }
+
     /// Create local LLM configuration
     pub fn local() -> Self {
         Self {
@@ -319,7 +391,12 @@ impl AiProvider {
                 .or_else(|_| env::var("ANTHROPIC_API_KEY"))
                 .ok(),
             AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").ok(),
-            AiProviderKind::OpenAi => env::var("OPENAI_API_KEY").ok(),
+            AiProviderKind::OpenAi | AiProviderKind::CodexCli => {
+                env::var("OPENAI_API_KEY").ok()
+            }
+            AiProviderKind::Gemini => env::var("GEMINI_API_KEY")
+                .or_else(|_| env::var("GOOGLE_API_KEY"))
+                .ok(),
             _ => None,
         };
 
@@ -330,6 +407,9 @@ impl AiProvider {
                 AiProviderKind::CodeBuddy => "deepseek-v3.1".to_string(),
                 AiProviderKind::CodeBuddyCli => "codebuddy-cli".to_string(),
                 AiProviderKind::OpenAi => "gpt-4o".to_string(),
+                AiProviderKind::CodexCli => "codex-cli".to_string(),
+                AiProviderKind::Gemini => "gemini-2.5-flash".to_string(),
+                AiProviderKind::GeminiCli => "gemini-cli".to_string(),
                 AiProviderKind::Local => "codellama:7b".to_string(),
                 AiProviderKind::Mock => "mock".to_string(),
             }
@@ -378,6 +458,9 @@ impl AiProviderTrait for AiProvider {
             AiProviderKind::CodeBuddy => "CodeBuddy API",
             AiProviderKind::CodeBuddyCli => "CodeBuddy CLI",
             AiProviderKind::OpenAi => "OpenAI",
+            AiProviderKind::CodexCli => "Codex CLI",
+            AiProviderKind::Gemini => "Gemini API",
+            AiProviderKind::GeminiCli => "Gemini CLI",
             AiProviderKind::Local => "Local LLM",
             AiProviderKind::Mock => "Mock",
         }
@@ -385,33 +468,16 @@ impl AiProviderTrait for AiProvider {
 
     fn is_available(&self) -> bool {
         match self.config.kind {
-            AiProviderKind::Claude | AiProviderKind::CodeBuddy | AiProviderKind::OpenAi => {
-                self.config.api_key.is_some()
-            }
-            AiProviderKind::ClaudeCli => {
-                // Check if claude CLI is available
-                std::process::Command::new("claude")
-                    .arg("--version")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false)
-            }
-            AiProviderKind::CodeBuddyCli => {
-                // Check if codebuddy CLI is available
-                std::process::Command::new("codebuddy")
-                    .arg("--version")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false)
-            }
+            AiProviderKind::Claude
+            | AiProviderKind::CodeBuddy
+            | AiProviderKind::OpenAi
+            | AiProviderKind::Gemini => self.config.api_key.is_some(),
+            AiProviderKind::ClaudeCli => is_cli_available("claude"),
+            AiProviderKind::CodeBuddyCli => is_cli_available("codebuddy"),
+            AiProviderKind::CodexCli => is_cli_available("codex"),
+            AiProviderKind::GeminiCli => is_cli_available("gemini"),
             AiProviderKind::Local => {
-                // Check if local endpoint is reachable
                 if let Some(ref endpoint) = self.config.endpoint {
-                    // Simple check - in production, would ping the endpoint
                     !endpoint.is_empty()
                 } else {
                     false
@@ -428,6 +494,9 @@ impl AiProviderTrait for AiProvider {
             AiProviderKind::CodeBuddy => self.complete_codebuddy(prompt, system_prompt),
             AiProviderKind::CodeBuddyCli => self.complete_codebuddy_cli(prompt, system_prompt),
             AiProviderKind::OpenAi => self.complete_openai(prompt, system_prompt),
+            AiProviderKind::CodexCli => self.complete_codex_cli(prompt, system_prompt),
+            AiProviderKind::Gemini => self.complete_gemini(prompt, system_prompt),
+            AiProviderKind::GeminiCli => self.complete_gemini_cli(prompt, system_prompt),
             AiProviderKind::Local => self.complete_local(prompt, system_prompt),
             AiProviderKind::Mock => self.complete_mock(prompt, system_prompt),
         }
@@ -559,10 +628,10 @@ impl AiProvider {
         file_path: &std::path::Path,
         issues: &[(usize, String, String)], // (line, message, code)
     ) -> Result<String, String> {
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
 
         // Only works with CLI providers
-        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli) {
+        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli | AiProviderKind::CodexCli | AiProviderKind::GeminiCli) {
             return Err("fix_file_with_cli only works with CLI providers".to_string());
         }
 
@@ -606,23 +675,8 @@ If you're unsure about related locations, use Grep to search for the function na
         );
 
         // Run CLI with Edit tool allowed
-        let cli_cmd = match self.config.kind {
-            AiProviderKind::ClaudeCli => "claude",
-            AiProviderKind::CodeBuddyCli => "codebuddy",
-            _ => unreachable!(),
-        };
-
-        let mut cmd = Command::new(cli_cmd);
-        cmd.arg("-p")
-            .arg("--output-format")
-            .arg("text")
-            .arg("--allowedTools")
-            .arg("Edit,Read,Grep,Glob")  // Allow AI to search for related code
-            .arg("--dangerously-skip-permissions")  // Auto-accept tool permissions
-            .arg("--settings")
-            .arg(r#"{"hooks":{}}"#)  // Disable hooks to avoid side effects
-            .arg("--")  // Separate options from prompt
-            .arg(&prompt);
+        let provider_name = self.config.kind.cli_name();
+        let mut cmd = build_cli_fix_command(self.config.kind, &prompt);
 
         // Set working directory to file's parent
         if let Some(parent) = file_path.parent() {
@@ -635,17 +689,17 @@ If you're unsure about related locations, use Grep to search for the function na
 
         let child = cmd
             .spawn()
-            .map_err(|e| format!("Failed to spawn {} command: {}", cli_cmd, e))?;
+            .map_err(|e| format!("Failed to spawn {} command: {}", provider_name, e))?;
 
         let output = child
             .wait_with_output()
-            .map_err(|e| format!("Failed to wait for {} command: {}", cli_cmd, e))?;
+            .map_err(|e| format!("Failed to wait for {} command: {}", provider_name, e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // Restore original file on error
             let _ = std::fs::write(file_path, &original_content);
-            return Err(format!("{} CLI error: {}", cli_cmd, stderr));
+            return Err(format!("{} CLI error: {}", provider_name, stderr));
         }
 
         // Read modified content
@@ -668,9 +722,9 @@ If you're unsure about related locations, use Grep to search for the function na
         files: &[(&std::path::Path, &[(usize, String, String)])],
         working_dir: &std::path::Path,
     ) -> Result<std::collections::HashMap<std::path::PathBuf, String>, String> {
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
 
-        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli) {
+        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli | AiProviderKind::CodexCli | AiProviderKind::GeminiCli) {
             return Err("fix_files_batch_with_cli only works with CLI providers".to_string());
         }
 
@@ -730,24 +784,8 @@ If unsure about impact, use Grep extensively to find all references first."#,
             file_sections.join("\n\n")
         );
 
-        let cli_cmd = match self.config.kind {
-            AiProviderKind::ClaudeCli => "claude",
-            AiProviderKind::CodeBuddyCli => "codebuddy",
-            _ => unreachable!(),
-        };
-
-        let mut cmd = Command::new(cli_cmd);
-        cmd.arg("-p")
-            .arg("--output-format")
-            .arg("text")
-            .arg("--allowedTools")
-            .arg("Edit,Read,Grep,Glob")  // Allow AI to search for related code
-            .arg("--dangerously-skip-permissions")
-            .arg("--settings")
-            .arg(r#"{"hooks":{}}"#)
-            .arg("--")
-            .arg(&prompt);
-
+        let provider_name = self.config.kind.cli_name();
+        let mut cmd = build_cli_fix_command(self.config.kind, &prompt);
         cmd.current_dir(working_dir);
 
         cmd.stdin(Stdio::null())
@@ -756,11 +794,11 @@ If unsure about impact, use Grep extensively to find all references first."#,
 
         let child = cmd
             .spawn()
-            .map_err(|e| format!("Failed to spawn {} command: {}", cli_cmd, e))?;
+            .map_err(|e| format!("Failed to spawn {} command: {}", provider_name, e))?;
 
         let output = child
             .wait_with_output()
-            .map_err(|e| format!("Failed to wait for {} command: {}", cli_cmd, e))?;
+            .map_err(|e| format!("Failed to wait for {} command: {}", provider_name, e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -768,7 +806,7 @@ If unsure about impact, use Grep extensively to find all references first."#,
             for (path, content) in &originals {
                 let _ = std::fs::write(path, content);
             }
-            return Err(format!("{} CLI error: {}", cli_cmd, stderr));
+            return Err(format!("{} CLI error: {}", provider_name, stderr));
         }
 
         // Compare each file to generate diffs
@@ -957,6 +995,146 @@ If unsure about impact, use Grep extensively to find all references first."#,
             .ok_or_else(|| "No content in response".to_string())
     }
 
+    fn complete_codex_cli(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+        use std::process::{Command, Stdio};
+
+        let mut cmd = Command::new("codex");
+        cmd.arg("exec")
+            .arg("--dangerously-bypass-approvals-and-sandbox");
+
+        // Add the main prompt (with system prompt prepended if provided)
+        let full_prompt = if let Some(sys) = system_prompt {
+            format!("{}\n\n{}", sys, prompt)
+        } else {
+            prompt.to_string()
+        };
+        cmd.arg(&full_prompt);
+
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn codex command: {}", e))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to wait for codex command: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Codex CLI error: {}", stderr));
+        }
+
+        let response = String::from_utf8_lossy(&output.stdout).to_string();
+
+        if response.trim().is_empty() {
+            return Err("Empty response from Codex CLI".to_string());
+        }
+
+        Ok(response)
+    }
+
+    fn complete_gemini(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+        let api_key = env::var("GEMINI_API_KEY")
+            .or_else(|_| env::var("GOOGLE_API_KEY"))
+            .ok()
+            .or_else(|| self.config.api_key.clone())
+            .ok_or_else(|| "Gemini API key not set. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.".to_string())?;
+
+        let endpoint = self.config.endpoint.as_deref()
+            .unwrap_or("https://generativelanguage.googleapis.com");
+        let endpoint = endpoint.trim_end_matches('/');
+
+        let url = format!(
+            "{}/v1beta/models/{}:generateContent?key={}",
+            endpoint, self.config.model, api_key
+        );
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let mut body = serde_json::json!({
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": self.config.max_tokens,
+                "temperature": self.config.temperature
+            }
+        });
+
+        if let Some(sys) = system_prompt {
+            body["systemInstruction"] = serde_json::json!({
+                "parts": [{"text": sys}]
+            });
+        }
+
+        let response = client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().unwrap_or_default();
+            return Err(format!("API error ({}): {}", status, text));
+        }
+
+        let result: serde_json::Value = response.json()
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        result["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No content in response".to_string())
+    }
+
+    fn complete_gemini_cli(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+        use std::process::{Command, Stdio};
+
+        let mut cmd = Command::new("gemini");
+
+        // Gemini CLI uses positional prompt for non-interactive mode
+        // Prepend system prompt if provided
+        let full_prompt = if let Some(sys) = system_prompt {
+            format!("{}\n\n{}", sys, prompt)
+        } else {
+            prompt.to_string()
+        };
+        cmd.arg(&full_prompt);
+
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn gemini command: {}", e))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to wait for gemini command: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Gemini CLI error: {}", stderr));
+        }
+
+        let response = String::from_utf8_lossy(&output.stdout).to_string();
+
+        if response.trim().is_empty() {
+            return Err("Empty response from Gemini CLI".to_string());
+        }
+
+        Ok(response)
+    }
+
     fn complete_local(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
         let endpoint = self.config.endpoint.as_deref()
             .ok_or_else(|| "Local LLM endpoint not set. Set LINTHIS_AI_ENDPOINT environment variable.".to_string())?;
@@ -1036,6 +1214,55 @@ Note: This is a mock AI response for testing."#,
 }
 
 /// Generate unified diff between two strings
+/// Build a CLI command for fixing files, tailored to the provider kind.
+fn build_cli_fix_command(kind: AiProviderKind, prompt: &str) -> Command {
+    match kind {
+        AiProviderKind::ClaudeCli => {
+            let mut cmd = Command::new("claude");
+            cmd.arg("-p")
+                .arg("--output-format")
+                .arg("text")
+                .arg("--allowedTools")
+                .arg("Edit,Read,Grep,Glob")
+                .arg("--dangerously-skip-permissions")
+                .arg("--settings")
+                .arg(r#"{"hooks":{}}"#)
+                .arg("--")
+                .arg(prompt);
+            cmd
+        }
+        AiProviderKind::CodeBuddyCli => {
+            let mut cmd = Command::new("codebuddy");
+            cmd.arg("-p")
+                .arg("--output-format")
+                .arg("text")
+                .arg("--allowedTools")
+                .arg("Edit,Read,Grep,Glob")
+                .arg("--dangerously-skip-permissions")
+                .arg("--settings")
+                .arg(r#"{"hooks":{}}"#)
+                .arg("--")
+                .arg(prompt);
+            cmd
+        }
+        AiProviderKind::CodexCli => {
+            let mut cmd = Command::new("codex");
+            cmd.arg("exec")
+                .arg("--dangerously-bypass-approvals-and-sandbox")
+                .arg(prompt);
+            cmd
+        }
+        AiProviderKind::GeminiCli => {
+            let mut cmd = Command::new("gemini");
+            cmd.arg("-y") // YOLO mode: auto-accept all actions
+                .arg(prompt);
+            cmd
+        }
+        _ => unreachable!("build_cli_fix_command called with non-CLI provider"),
+    }
+}
+
+/// Generate unified diff between two strings
 fn generate_unified_diff(original: &str, modified: &str, file_path: &std::path::Path) -> String {
     use similar::{ChangeTag, TextDiff};
     use std::fmt::Write;
@@ -1089,6 +1316,11 @@ mod tests {
         assert_eq!("codebuddy-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodeBuddyCli);
         assert_eq!("cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodeBuddyCli);
         assert_eq!("openai".parse::<AiProviderKind>().unwrap(), AiProviderKind::OpenAi);
+        assert_eq!("codex-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodexCli);
+        assert_eq!("codex".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodexCli);
+        assert_eq!("gemini".parse::<AiProviderKind>().unwrap(), AiProviderKind::Gemini);
+        assert_eq!("google".parse::<AiProviderKind>().unwrap(), AiProviderKind::Gemini);
+        assert_eq!("gemini-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::GeminiCli);
         assert_eq!("local".parse::<AiProviderKind>().unwrap(), AiProviderKind::Local);
         assert_eq!("mock".parse::<AiProviderKind>().unwrap(), AiProviderKind::Mock);
     }
@@ -1128,6 +1360,9 @@ mod tests {
         assert_eq!(AiProviderKind::CodeBuddy.cli_name(), "codebuddy");
         assert_eq!(AiProviderKind::CodeBuddyCli.cli_name(), "codebuddy-cli");
         assert_eq!(AiProviderKind::OpenAi.cli_name(), "openai");
+        assert_eq!(AiProviderKind::CodexCli.cli_name(), "codex-cli");
+        assert_eq!(AiProviderKind::Gemini.cli_name(), "gemini");
+        assert_eq!(AiProviderKind::GeminiCli.cli_name(), "gemini-cli");
         assert_eq!(AiProviderKind::Local.cli_name(), "local");
     }
 
@@ -1147,5 +1382,14 @@ mod tests {
 
         let openai = AiProvider::new(AiProviderConfig::openai());
         assert_eq!(openai.name(), "OpenAI");
+
+        let codex_cli = AiProvider::new(AiProviderConfig::codex_cli());
+        assert_eq!(codex_cli.name(), "Codex CLI");
+
+        let gemini = AiProvider::new(AiProviderConfig::gemini());
+        assert_eq!(gemini.name(), "Gemini API");
+
+        let gemini_cli = AiProvider::new(AiProviderConfig::gemini_cli());
+        assert_eq!(gemini_cli.name(), "Gemini CLI");
     }
 }
