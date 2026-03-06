@@ -187,20 +187,15 @@ pub fn print_fix_hint(issues: &[LintIssue]) {
         "Tip:".cyan().bold()
     );
     eprintln!("       {}      - load last result and fix", "linthis fix".cyan());
-    eprintln!("       {} - AI-powered fix suggestions", "linthis fix --ai".cyan());
     eprintln!(
-        "       {} - {} auto-fix via CLI agent",
-        "linthis fix --ai --provider claude-cli --accept-all".cyan(),
+        "       {} - AI-powered fix suggestions ({} to choose agent)",
+        "linthis fix --ai".cyan(),
+        "--provider <name>".dimmed()
+    );
+    eprintln!(
+        "       {} - {} auto-fix via AI agent",
+        "linthis fix --ai -y".cyan(),
         "(dangerously)".red().bold()
-    );
-    eprintln!();
-    eprintln!(
-        "  {} claude (default), claude-cli, codebuddy, codebuddy-cli,",
-        "Available providers:".cyan().bold()
-    );
-    eprintln!(
-        "  {}   openai, codex-cli, gemini, gemini-cli",
-        " ".repeat(21)
     );
 }
 

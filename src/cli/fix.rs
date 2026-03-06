@@ -348,7 +348,7 @@ fn run_ai_fix_loop(
 
     // Create backup before making any changes
     let files_to_backup = collect_files_from_issues(&initial_result.issues);
-    let _backup_id = create_backup(&files_to_backup, "AI fix with --accept-all", options.quiet);
+    let _backup_id = create_backup(&files_to_backup, "AI fix with --yes", options.quiet);
 
     if !options.quiet {
         println!();
