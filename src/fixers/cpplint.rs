@@ -283,7 +283,9 @@ impl CpplintFixer {
 
         // Format: file:line: message [category] [confidence]
         // Example: test.h:8: #ifndef header guard has wrong style, please use: FOO_H_ [build/header_guard] [5]
-        let re = Regex::new(r"^([^:]+):(\d+):\s*(.+?)\s*\[([^\]]+)\]").unwrap();
+        // Note: use greedy `.+` for message to skip past any [...] in the message body
+        // (e.g., copyright messages contain "[year]") and match the last [category] [confidence]
+        let re = Regex::new(r"^([^:]+):(\d+):\s*(.+)\s+\[([^\]]+)\]\s*\[\d+\]\s*$").unwrap();
 
         for line in output.lines() {
             if let Some(caps) = re.captures(line) {
@@ -490,6 +492,12 @@ impl CpplintFixer {
         }
 
         if modified {
+            if debug {
+                eprintln!("[cpplint-fixer] Lines before write:");
+                for (i, line) in lines.iter().enumerate() {
+                    eprintln!("[cpplint-fixer]   [{}] {:?}", i, line);
+                }
+            }
             let new_content = lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" };
             fs::write(path, new_content).map_err(|e| format!("Failed to write file: {}", e))?;
         }
