@@ -292,12 +292,12 @@ pub struct AiConfig {
 ///
 /// Supports CLI providers, API providers, or both:
 ///
-/// ## CLI provider with template
+/// ## CLI provider with cli_style
 /// ```toml
 /// [ai.custom_providers.longcat]
 /// kind = "cli"
 /// command = "longcat"
-/// template = "claude-like"  # claude-like, codex-like, gemini-like
+/// cli_style = "claude"  # claude, codex, gemini
 /// ```
 ///
 /// ## CLI provider with custom args
@@ -320,7 +320,7 @@ pub struct AiConfig {
 /// model = "deepseek-chat"
 /// ```
 ///
-/// Template can be combined with custom args (custom args override template defaults).
+/// `cli_style` can be combined with custom args (custom args override style defaults).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomProvider {
     /// Provider kind: "cli" or "api" (default: "cli")
@@ -331,9 +331,9 @@ pub struct CustomProvider {
     /// CLI command name (e.g., "longcat")
     #[serde(default)]
     pub command: Option<String>,
-    /// Template to base args on: "claude-like", "codex-like", "gemini-like"
+    /// CLI style to base args on: "claude", "codex", "gemini"
     #[serde(default)]
-    pub template: Option<String>,
+    pub cli_style: Option<String>,
     /// Args for prompt mode (non-interactive completion).
     /// The prompt text is appended as the last argument.
     #[serde(default)]

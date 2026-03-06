@@ -142,11 +142,11 @@ const GEMINI_LIKE_TEMPLATE: CliTemplate = CliTemplate {
     system_prompt_arg: "",
 };
 
-fn resolve_template(name: &str) -> Option<&'static CliTemplate> {
+fn resolve_cli_style(name: &str) -> Option<&'static CliTemplate> {
     match name {
-        "claude-like" | "claude" => Some(&CLAUDE_LIKE_TEMPLATE),
-        "codex-like" | "codex" => Some(&CODEX_LIKE_TEMPLATE),
-        "gemini-like" | "gemini" => Some(&GEMINI_LIKE_TEMPLATE),
+        "claude" => Some(&CLAUDE_LIKE_TEMPLATE),
+        "codex" => Some(&CODEX_LIKE_TEMPLATE),
+        "gemini" => Some(&GEMINI_LIKE_TEMPLATE),
         _ => None,
     }
 }
@@ -158,11 +158,11 @@ pub fn resolve_custom_provider(
 ) -> Result<CustomProviderResolved, String> {
     let is_cli = config.kind != "api";
 
-    // Start from template defaults if specified
+    // Start from cli_style defaults if specified
     let template = config
-        .template
+        .cli_style
         .as_deref()
-        .and_then(resolve_template);
+        .and_then(resolve_cli_style);
 
     let (prompt_args, fix_args, sys_arg) = if let Some(tmpl) = template {
         (
