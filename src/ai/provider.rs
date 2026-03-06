@@ -66,6 +66,33 @@ pub const ALL_AI_PROVIDERS: &[(AiProviderKind, &str, &str)] = &[
     (AiProviderKind::Local, "local", "Local LLM (Ollama)"),
 ];
 
+/// Check if a single provider is available in the current environment.
+pub fn is_provider_available(kind: AiProviderKind) -> bool {
+    match kind {
+        AiProviderKind::Claude => {
+            env::var("ANTHROPIC_AUTH_TOKEN").is_ok() || env::var("ANTHROPIC_API_KEY").is_ok()
+        }
+        AiProviderKind::ClaudeCli => Command::new("claude")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false),
+        AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").is_ok(),
+        AiProviderKind::CodeBuddyCli => Command::new("codebuddy")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false),
+        AiProviderKind::OpenAi => env::var("OPENAI_API_KEY").is_ok(),
+        AiProviderKind::Local => env::var("LINTHIS_AI_ENDPOINT").is_ok(),
+        AiProviderKind::Mock => true,
+    }
+}
+
 /// Detect which AI providers are available in the current environment.
 ///
 /// Returns a list of (provider kind, is_available) tuples for all user-facing providers.
@@ -73,34 +100,72 @@ pub const ALL_AI_PROVIDERS: &[(AiProviderKind, &str, &str)] = &[
 pub fn detect_available_providers() -> Vec<(AiProviderKind, bool)> {
     ALL_AI_PROVIDERS
         .iter()
-        .map(|(kind, _, _)| {
-            let available = match kind {
-                AiProviderKind::Claude => {
-                    env::var("ANTHROPIC_AUTH_TOKEN").is_ok()
-                        || env::var("ANTHROPIC_API_KEY").is_ok()
-                }
-                AiProviderKind::ClaudeCli => Command::new("claude")
-                    .arg("--version")
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false),
-                AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").is_ok(),
-                AiProviderKind::CodeBuddyCli => Command::new("codebuddy")
-                    .arg("--version")
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false),
-                AiProviderKind::OpenAi => env::var("OPENAI_API_KEY").is_ok(),
-                AiProviderKind::Local => env::var("LINTHIS_AI_ENDPOINT").is_ok(),
-                AiProviderKind::Mock => true,
-            };
-            (*kind, available)
-        })
+        .map(|(kind, _, _)| (*kind, is_provider_available(*kind)))
         .collect()
+}
+
+/// Try to find a compatible fallback provider when the requested one is unavailable.
+///
+/// Returns `Some((fallback_kind, message))` if a fallback is found, `None` otherwise.
+/// Only API↔CLI pairs within the same family are considered:
+/// - `claude` (API) → `claude-cli` (CLI)
+/// - `codebuddy` (API) → `codebuddy-cli` (CLI)
+pub fn try_fallback_provider(kind: AiProviderKind) -> Option<(AiProviderKind, String)> {
+    // Already available, no fallback needed
+    if is_provider_available(kind) {
+        return None;
+    }
+
+    let (fallback, from_name, to_name, hint) = match kind {
+        AiProviderKind::Claude => (
+            AiProviderKind::ClaudeCli,
+            "claude (API)",
+            "claude-cli",
+            "Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY to use Claude API directly",
+        ),
+        AiProviderKind::ClaudeCli => (
+            AiProviderKind::Claude,
+            "claude-cli",
+            "claude (API)",
+            "Install Claude CLI to use claude-cli provider",
+        ),
+        AiProviderKind::CodeBuddy => (
+            AiProviderKind::CodeBuddyCli,
+            "codebuddy (API)",
+            "codebuddy-cli",
+            "Set CODEBUDDY_API_KEY to use CodeBuddy API directly",
+        ),
+        AiProviderKind::CodeBuddyCli => (
+            AiProviderKind::CodeBuddy,
+            "codebuddy-cli",
+            "codebuddy (API)",
+            "Install CodeBuddy CLI to use codebuddy-cli provider",
+        ),
+        _ => return None,
+    };
+
+    if is_provider_available(fallback) {
+        Some((
+            fallback,
+            format!(
+                "Provider {} is not available, falling back to {} ({})",
+                from_name, to_name, hint
+            ),
+        ))
+    } else {
+        None
+    }
+}
+
+impl AiProviderKind {
+    /// Get the CLI name for this provider kind (e.g., "claude", "claude-cli")
+    pub fn cli_name(&self) -> &'static str {
+        ALL_AI_PROVIDERS
+            .iter()
+            .find(|(k, _, _)| k == self)
+            .map(|(_, name, _)| *name)
+            .unwrap_or("unknown")
+    }
 }
 
 /// Configuration for AI provider
@@ -1042,6 +1107,28 @@ mod tests {
 
         let result = provider.complete("test prompt", None);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_mock_provider_available() {
+        // Mock is always available
+        assert!(is_provider_available(AiProviderKind::Mock));
+    }
+
+    #[test]
+    fn test_mock_no_fallback_needed() {
+        // Mock is always available, so no fallback needed
+        assert!(try_fallback_provider(AiProviderKind::Mock).is_none());
+    }
+
+    #[test]
+    fn test_cli_name() {
+        assert_eq!(AiProviderKind::Claude.cli_name(), "claude");
+        assert_eq!(AiProviderKind::ClaudeCli.cli_name(), "claude-cli");
+        assert_eq!(AiProviderKind::CodeBuddy.cli_name(), "codebuddy");
+        assert_eq!(AiProviderKind::CodeBuddyCli.cli_name(), "codebuddy-cli");
+        assert_eq!(AiProviderKind::OpenAi.cli_name(), "openai");
+        assert_eq!(AiProviderKind::Local.cli_name(), "local");
     }
 
     #[test]

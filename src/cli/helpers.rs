@@ -18,7 +18,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use super::commands::Cli;
-use linthis::ai::provider::{detect_available_providers, ALL_AI_PROVIDERS};
+use linthis::ai::provider::{
+    detect_available_providers, try_fallback_provider, AiProviderKind, ALL_AI_PROVIDERS,
+};
 use linthis::LintIssue;
 
 /// Run benchmark comparing ruff vs flake8+black for Python
@@ -110,7 +112,11 @@ pub fn find_latest_result_file() -> Option<PathBuf> {
     Some(result_files[0].path())
 }
 
-/// Resolve AI provider with priority: command line > env var > config > default
+/// Resolve AI provider with priority: command line > env var > config > default.
+///
+/// After resolving, checks if the provider is available. If not, tries to find
+/// a compatible fallback (e.g., `claude` API → `claude-cli`, or vice versa)
+/// and prints a warning message.
 ///
 /// Priority order:
 /// 1. CLI argument (--provider)
@@ -119,24 +125,37 @@ pub fn find_latest_result_file() -> Option<PathBuf> {
 /// 4. Default ("claude")
 pub fn resolve_ai_provider(cli_value: Option<&str>, config_value: Option<&str>) -> String {
     // Priority 1: command line argument
-    if let Some(value) = cli_value {
-        return value.to_string();
-    }
-
-    // Priority 2: environment variable
-    if let Ok(value) = std::env::var("LINTHIS_AI_PROVIDER") {
+    let resolved = if let Some(value) = cli_value {
+        value.to_string()
+    } else if let Ok(value) = std::env::var("LINTHIS_AI_PROVIDER") {
+        // Priority 2: environment variable
         if !value.is_empty() {
-            return value;
+            value
+        } else {
+            resolve_default_provider(config_value)
+        }
+    } else {
+        resolve_default_provider(config_value)
+    };
+
+    // Try to parse the resolved provider and check availability with fallback
+    if let Ok(kind) = resolved.parse::<AiProviderKind>() {
+        if let Some((fallback_kind, message)) = try_fallback_provider(kind) {
+            eprintln!("{} {}", "⚠ Warning:".yellow().bold(), message);
+            return fallback_kind.cli_name().to_string();
         }
     }
 
+    resolved
+}
+
+fn resolve_default_provider(config_value: Option<&str>) -> String {
     // Priority 3: config file value
     if let Some(value) = config_value {
         if !value.is_empty() {
             return value.to_string();
         }
     }
-
     // Priority 4: default
     "claude".to_string()
 }
