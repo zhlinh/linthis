@@ -35,7 +35,7 @@ mod prompts;
 
 pub use provider::{
     AiProvider, AiProviderConfig, AiProviderKind, AiProviderTrait, ALL_AI_PROVIDERS,
-    detect_available_providers,
+    detect_available_providers, is_provider_available, try_fallback_provider,
 };
 pub use suggestions::{
     AiSuggester, FixSuggestion, SuggestionOptions, SuggestionResult, SuggestionsReport,
