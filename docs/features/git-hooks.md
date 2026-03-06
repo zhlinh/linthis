@@ -133,15 +133,15 @@ Enable AI to automatically fix lint issues during hook execution using `--args`:
 
 ```bash
 # Install hook with AI auto-fix
-linthis hook install --args "-c -f --fix --ai --provider claude --accept-all"
+linthis hook install --args "-c -f --fix --ai --provider claude -y"
 
 # Check-only with AI fix (no formatting)
-linthis hook install --args "-c --fix --ai --provider codebuddy-cli --accept-all"
+linthis hook install --args "-c --fix --ai --provider codebuddy-cli -y"
 ```
 
 Generated hook command:
 ```bash
-linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude --accept-all
+linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude -y
 ```
 
 **Available AI Providers:**
@@ -155,7 +155,7 @@ linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude --accept-a
 | `openai` | OpenAI GPT API |
 | `local` | Local models (Ollama, llama.cpp, etc.) |
 
-**Warning:** Using `--accept-all` will automatically modify your files. Review the changes before committing if you're unsure.
+**Warning:** Using `-y` will automatically modify your files. Review the changes before committing if you're unsure.
 
 **Example: Different hook configurations**
 
@@ -170,10 +170,10 @@ linthis hook install --args "-c"
 linthis hook install --args "-c -f --fix --ai --provider claude"
 
 # Fully automated (no prompts, auto-accept all fixes)
-linthis hook install --args "-c -f --fix --ai --provider claude --accept-all"
+linthis hook install --args "-c -f --fix --ai --provider claude -y"
 
 # Pre-push hook with AI
-linthis hook install --event pre-push --args "-c -f --fix --ai --provider openai --accept-all"
+linthis hook install --event pre-push --args "-c -f --fix --ai --provider openai -y"
 ```
 
 ### Disable Hook Creation

@@ -280,7 +280,7 @@ linthis fix [OPTIONS]
 | `--fix` | 检查/格式化后进入修复模式 | `--fix` |
 | `--ai` | 使用 AI 进行修复建议（需要 `--fix`） | `--fix --ai` |
 | `--provider` | AI 提供商（需要 `--ai`） | `--provider claude` |
-| `--accept-all` | 自动接受所有修复（需要 `--fix`） | `--fix --accept-all` |
+| `-y` | 自动接受所有修复（需要 `--fix`） | `--fix -y` |
 
 ### AI 提供商
 
@@ -315,11 +315,11 @@ linthis --fix --ai --provider claude
 linthis --fix --ai --provider claude-cli
 
 # 自动接受所有 AI 修复（用于 CI/自动化）
-linthis --fix --ai --accept-all
-linthis --fix --ai --provider claude-cli --accept-all
+linthis --fix --ai -y
+linthis --fix --ai --provider claude-cli -y
 
 # 仅修复暂存文件并使用 AI
-linthis -s --fix --ai --provider claude-cli --accept-all
+linthis -s --fix --ai --provider claude-cli -y
 
 # 修复特定语言
 linthis -l python --fix --ai --provider claude

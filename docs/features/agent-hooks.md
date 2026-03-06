@@ -218,6 +218,6 @@ These are different features:
 | Command | Purpose |
 |---------|---------|
 | `linthis hook install --type agent --provider claude` | Install agent rules (code quality enforcement during AI coding) |
-| `linthis hook install --args "-c -f --fix --ai --provider claude --accept-all"` | Install git hook with AI auto-fix (fixes lint issues during git commit) |
+| `linthis hook install --args "-c -f --fix --ai --provider claude -y"` | Install git hook with AI auto-fix (fixes lint issues during git commit) |
 
 The `--provider` flag in `--type agent` context specifies the agent platform, while in `--args` context it specifies the AI fix provider.

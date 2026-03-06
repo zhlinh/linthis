@@ -280,7 +280,7 @@ linthis fix [OPTIONS]
 | `--fix` | Enter fix mode after check/format | `--fix` |
 | `--ai` | Use AI for fix suggestions (requires `--fix`) | `--fix --ai` |
 | `--provider` | AI provider (requires `--ai`) | `--provider claude` |
-| `--accept-all` | Auto-accept all fixes (requires `--fix`) | `--fix --accept-all` |
+| `-y` | Auto-accept all fixes (requires `--fix`) | `--fix -y` |
 
 ### AI Providers
 
@@ -315,11 +315,11 @@ linthis --fix --ai --provider claude
 linthis --fix --ai --provider claude-cli
 
 # Auto-accept all AI fixes (for CI/automation)
-linthis --fix --ai --accept-all
-linthis --fix --ai --provider claude-cli --accept-all
+linthis --fix --ai -y
+linthis --fix --ai --provider claude-cli -y
 
 # Fix only staged files with AI
-linthis -s --fix --ai --provider claude-cli --accept-all
+linthis -s --fix --ai --provider claude-cli -y
 
 # Fix specific language
 linthis -l python --fix --ai --provider claude

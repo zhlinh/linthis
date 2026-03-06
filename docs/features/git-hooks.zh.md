@@ -133,15 +133,15 @@ linthis init -g --hook-type git --force
 
 ```bash
 # 安装带 AI 自动修复的 hook
-linthis hook install --args "-c -f --fix --ai --provider claude --accept-all"
+linthis hook install --args "-c -f --fix --ai --provider claude -y"
 
 # 仅检查模式 + AI 修复（不格式化）
-linthis hook install --args "-c --fix --ai --provider codebuddy-cli --accept-all"
+linthis hook install --args "-c --fix --ai --provider codebuddy-cli -y"
 ```
 
 生成的 hook 命令：
 ```bash
-linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude --accept-all
+linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude -y
 ```
 
 **支持的 AI 提供者：**
@@ -155,7 +155,7 @@ linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude --accept-a
 | `openai` | OpenAI GPT API |
 | `local` | 本地模型（Ollama、llama.cpp 等） |
 
-**警告：** 使用 `--accept-all` 会自动修改文件。如果不确定，建议在提交前检查修改内容。
+**警告：** 使用 `-y` 会自动修改文件。如果不确定，建议在提交前检查修改内容。
 
 **示例：不同的 hook 配置**
 
@@ -170,10 +170,10 @@ linthis hook install --args "-c"
 linthis hook install --args "-c -f --fix --ai --provider claude"
 
 # 全自动（无提示，自动接受所有修复）
-linthis hook install --args "-c -f --fix --ai --provider claude --accept-all"
+linthis hook install --args "-c -f --fix --ai --provider claude -y"
 
 # Pre-push hook 带 AI
-linthis hook install --event pre-push --args "-c -f --fix --ai --provider openai --accept-all"
+linthis hook install --event pre-push --args "-c -f --fix --ai --provider openai -y"
 ```
 
 ### 禁用 Hook 创建
