@@ -244,24 +244,39 @@ impl CppFormatter {
             return Ok(false);
         }
 
+        // Respect LINTHIS_SKIP_CLANG_TIDY env var (same as checker)
+        if std::env::var("LINTHIS_SKIP_CLANG_TIDY").is_ok() {
+            return Ok(false);
+        }
+
+        // Find compile_commands.json - required for clang-tidy to work correctly.
+        // Without it, clang-tidy treats .h files as C (not C++), causing it to
+        // misidentify C++ keywords like "namespace" and corrupt the code.
+        let build_path = if let Some(ref build_path) = self.compile_commands_dir {
+            Some(build_path.clone())
+        } else {
+            Self::find_compile_commands(path)
+        };
+
+        if build_path.is_none() {
+            // Skip clang-tidy without compilation database to avoid miscompilation
+            return Ok(false);
+        }
+
         let mut cmd = Command::new("clang-tidy");
         cmd.arg(path);
         cmd.arg("--fix");
-        cmd.arg("--fix-errors"); // Also fix errors, not just warnings
+        // Note: do NOT use --fix-errors here. It applies "fixes" for compilation
+        // errors which can corrupt valid C++ code (e.g. inserting semicolons after
+        // "namespace foo" because it doesn't recognize "namespace" without proper
+        // compilation context).
 
         // Add config file if found
         if let Some(config) = Self::find_clang_tidy_config(path) {
             cmd.arg(format!("--config-file={}", config.display()));
         }
 
-        // Add compile_commands.json path
-        if let Some(ref build_path) = self.compile_commands_dir {
-            cmd.arg(format!("-p={}", build_path.display()));
-        } else if let Some(build_path) = Self::find_compile_commands(path) {
-            cmd.arg(format!("-p={}", build_path.display()));
-        } else {
-            cmd.arg("--");
-        }
+        cmd.arg(format!("-p={}", build_path.unwrap().display()));
 
         let output = cmd.output().map_err(|e| {
             crate::LintisError::formatter("clang-tidy", path, format!("Failed to run --fix: {}", e))
@@ -331,7 +346,8 @@ impl Formatter for CppFormatter {
             cmd.arg("-style=Google");
         }
 
-        let output = cmd.arg(path).output().map_err(|e| {
+        cmd.arg(path);
+        let output = cmd.output().map_err(|e| {
             crate::LintisError::formatter("clang-format", path, format!("Failed to run: {}", e))
         })?;
 
