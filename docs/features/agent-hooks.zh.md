@@ -218,6 +218,6 @@ Stop Hook（`.claude/settings.local.json`）在 Claude Code 完成任务前添�
 | 命令 | 用途 |
 |-----|------|
 | `linthis hook install --type agent --provider claude` | 安装 AI 助手规则（AI 编码过程中的代码质量检查） |
-| `linthis hook install --args "-c -f --fix --ai --provider claude --accept-all"` | 安装带 AI 自动修复的 git hook（git commit 时自动修复 lint 问题） |
+| `linthis hook install --args "-c -f --fix --ai --provider claude -y"` | 安装带 AI 自动修复的 git hook（git commit 时自动修复 lint 问题） |
 
 `--type agent` 中的 `--provider` 指定 AI 助手平台，而 `--args` 中的 `--provider` 指定 AI 修复提供者。

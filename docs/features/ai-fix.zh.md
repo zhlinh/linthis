@@ -12,7 +12,7 @@ linthis --fix --ai
 linthis --fix --ai --provider claude
 
 # 自动接受所有修复（用于 CI/自动化）
-linthis --fix --ai --provider claude-cli --accept-all
+linthis --fix --ai --provider claude-cli -y
 ```
 
 ## 支持的提供商
@@ -58,7 +58,7 @@ linthis -i src/ --fix --ai
 自动接受所有 AI 修复，无需提示：
 
 ```bash
-linthis --fix --ai --accept-all
+linthis --fix --ai -y
 ```
 
 ⚠️ **警告**：这将自动修改文件。请谨慎使用，并确保有版本控制。
@@ -116,13 +116,13 @@ model = "claude-sonnet-4-20250514"  # 可选：覆盖默认模型
 
 ```bash
 # 在 .git/hooks/pre-commit 或 .prek/pre-commit 中
-linthis -s --fix --ai --accept-all
+linthis -s --fix --ai -y
 ```
 
 更安全的 CI 用法（使用 Claude CLI）：
 
 ```bash
-linthis -s --fix --ai --provider claude-cli --accept-all
+linthis -s --fix --ai --provider claude-cli -y
 ```
 
 ## 示例
@@ -150,7 +150,7 @@ linthis -l python,typescript --fix --ai
 # GitHub Actions 示例
 - name: Lint and Fix
   run: |
-    linthis --fix --ai --provider claude --accept-all
+    linthis --fix --ai --provider claude -y
     git diff --exit-code || (git add -A && git commit -m "style: auto-fix lint issues")
 ```
 

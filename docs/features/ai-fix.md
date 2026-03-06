@@ -12,7 +12,7 @@ linthis --fix --ai
 linthis --fix --ai --provider claude
 
 # Auto-accept all fixes (for CI/automation)
-linthis --fix --ai --provider claude-cli --accept-all
+linthis --fix --ai --provider claude-cli -y
 ```
 
 ## Supported Providers
@@ -58,7 +58,7 @@ In interactive mode, for each issue you can:
 Automatically accept all AI fixes without prompting:
 
 ```bash
-linthis --fix --ai --accept-all
+linthis --fix --ai -y
 ```
 
 ⚠️ **Warning**: This will modify files automatically. Use with caution and ensure you have version control.
@@ -116,13 +116,13 @@ Use AI fix in pre-commit hooks to automatically fix issues:
 
 ```bash
 # In .git/hooks/pre-commit or .prek/pre-commit
-linthis -s --fix --ai --accept-all
+linthis -s --fix --ai -y
 ```
 
 For safer CI usage with Claude CLI:
 
 ```bash
-linthis -s --fix --ai --provider claude-cli --accept-all
+linthis -s --fix --ai --provider claude-cli -y
 ```
 
 ## Examples
@@ -150,7 +150,7 @@ linthis -l python,typescript --fix --ai
 # GitHub Actions example
 - name: Lint and Fix
   run: |
-    linthis --fix --ai --provider claude --accept-all
+    linthis --fix --ai --provider claude -y
     git diff --exit-code || (git add -A && git commit -m "style: auto-fix lint issues")
 ```
 
