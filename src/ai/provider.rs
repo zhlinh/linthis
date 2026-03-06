@@ -15,7 +15,7 @@ use std::env;
 use std::process::{Command, Stdio};
 
 /// Supported AI provider types
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AiProviderKind {
     /// Anthropic Claude API
@@ -37,6 +37,8 @@ pub enum AiProviderKind {
     GeminiCli,
     /// Local LLM (Ollama, llama.cpp, etc.)
     Local,
+    /// Custom provider defined in config
+    Custom(String),
     /// Mock provider for testing
     Mock,
 }
@@ -56,7 +58,7 @@ impl std::str::FromStr for AiProviderKind {
             "gemini-cli" | "geminicli" => Ok(Self::GeminiCli),
             "local" | "ollama" | "llama" => Ok(Self::Local),
             "mock" | "test" => Ok(Self::Mock),
-            _ => Err(format!("Unknown AI provider: {}", s)),
+            other => Ok(Self::Custom(other.to_string())),
         }
     }
 }
@@ -78,8 +80,163 @@ pub const ALL_AI_PROVIDERS: &[(AiProviderKind, &str, &str)] = &[
     (AiProviderKind::Local, "local", "Local LLM (Ollama)"),
 ];
 
+/// Resolved custom provider with all args computed (template + overrides).
+#[derive(Debug, Clone)]
+pub struct CustomProviderResolved {
+    /// Provider name
+    pub name: String,
+    /// Whether this is a CLI or API provider
+    pub is_cli: bool,
+    /// CLI command (for CLI providers)
+    pub command: Option<String>,
+    /// Args for prompt mode (prompt appended at end)
+    pub prompt_args: Vec<String>,
+    /// Args for fix mode (prompt appended at end)
+    pub fix_args: Vec<String>,
+    /// System prompt argument name
+    pub system_prompt_arg: Option<String>,
+    /// API style for API providers: "openai", "anthropic", "gemini"
+    pub api_style: Option<String>,
+    /// API endpoint
+    pub endpoint: Option<String>,
+    /// Model name
+    pub model: Option<String>,
+    /// API key environment variable
+    pub api_key_env: Option<String>,
+    /// Fallback provider name
+    pub fallback: Option<String>,
+}
+
+/// CLI arg templates for common coding agent styles.
+struct CliTemplate {
+    prompt_args: &'static [&'static str],
+    fix_args: &'static [&'static str],
+    system_prompt_arg: &'static str,
+}
+
+const CLAUDE_LIKE_TEMPLATE: CliTemplate = CliTemplate {
+    prompt_args: &["-p", "--output-format", "text"],
+    fix_args: &[
+        "-p",
+        "--output-format",
+        "text",
+        "--allowedTools",
+        "Edit,Read,Grep,Glob",
+        "--dangerously-skip-permissions",
+        "--settings",
+        r#"{"hooks":{}}"#,
+        "--",
+    ],
+    system_prompt_arg: "--system-prompt",
+};
+
+const CODEX_LIKE_TEMPLATE: CliTemplate = CliTemplate {
+    prompt_args: &["exec", "--dangerously-bypass-approvals-and-sandbox"],
+    fix_args: &["exec", "--dangerously-bypass-approvals-and-sandbox"],
+    system_prompt_arg: "",
+};
+
+const GEMINI_LIKE_TEMPLATE: CliTemplate = CliTemplate {
+    prompt_args: &[],
+    fix_args: &["-y"],
+    system_prompt_arg: "",
+};
+
+fn resolve_template(name: &str) -> Option<&'static CliTemplate> {
+    match name {
+        "claude-like" | "claude" => Some(&CLAUDE_LIKE_TEMPLATE),
+        "codex-like" | "codex" => Some(&CODEX_LIKE_TEMPLATE),
+        "gemini-like" | "gemini" => Some(&GEMINI_LIKE_TEMPLATE),
+        _ => None,
+    }
+}
+
+/// Resolve a custom provider config into a fully computed provider.
+pub fn resolve_custom_provider(
+    name: &str,
+    config: &crate::config::CustomProvider,
+) -> Result<CustomProviderResolved, String> {
+    let is_cli = config.kind != "api";
+
+    // Start from template defaults if specified
+    let template = config
+        .template
+        .as_deref()
+        .and_then(resolve_template);
+
+    let (prompt_args, fix_args, sys_arg) = if let Some(tmpl) = template {
+        (
+            tmpl.prompt_args.iter().map(|s| s.to_string()).collect(),
+            tmpl.fix_args.iter().map(|s| s.to_string()).collect(),
+            if tmpl.system_prompt_arg.is_empty() {
+                None
+            } else {
+                Some(tmpl.system_prompt_arg.to_string())
+            },
+        )
+    } else if is_cli {
+        // Default: just pass prompt as trailing arg (minimal)
+        (vec![], vec![], None)
+    } else {
+        (vec![], vec![], None)
+    };
+
+    // Override with explicit config values
+    let prompt_args = config.prompt_args.clone().unwrap_or(prompt_args);
+    let fix_args = config.fix_args.clone().unwrap_or(fix_args);
+    let system_prompt_arg = config.system_prompt_arg.clone().or(sys_arg);
+
+    if is_cli && config.command.is_none() {
+        return Err(format!(
+            "Custom CLI provider '{}' requires 'command' field",
+            name
+        ));
+    }
+
+    if !is_cli && config.api_style.is_none() {
+        return Err(format!(
+            "Custom API provider '{}' requires 'api_style' field (openai, anthropic, or gemini)",
+            name
+        ));
+    }
+
+    Ok(CustomProviderResolved {
+        name: name.to_string(),
+        is_cli,
+        command: config.command.clone(),
+        prompt_args,
+        fix_args,
+        system_prompt_arg,
+        api_style: config.api_style.clone(),
+        endpoint: config.endpoint.clone(),
+        model: config.model.clone(),
+        api_key_env: config.api_key_env.clone(),
+        fallback: config.fallback.clone(),
+    })
+}
+
+/// Thread-local storage for the resolved custom provider used by the current operation.
+/// This is set before provider operations and read by Custom provider implementations.
+use std::cell::RefCell;
+
+thread_local! {
+    static CUSTOM_PROVIDER: RefCell<Option<CustomProviderResolved>> = const { RefCell::new(None) };
+}
+
+/// Set the active custom provider for the current thread.
+pub fn set_custom_provider(provider: Option<CustomProviderResolved>) {
+    CUSTOM_PROVIDER.with(|p| {
+        *p.borrow_mut() = provider;
+    });
+}
+
+/// Get a clone of the active custom provider for the current thread.
+pub fn get_custom_provider() -> Option<CustomProviderResolved> {
+    CUSTOM_PROVIDER.with(|p| p.borrow().clone())
+}
+
 /// Check if a single provider is available in the current environment.
-pub fn is_provider_available(kind: AiProviderKind) -> bool {
+pub fn is_provider_available(kind: &AiProviderKind) -> bool {
     match kind {
         AiProviderKind::Claude => {
             env::var("ANTHROPIC_AUTH_TOKEN").is_ok() || env::var("ANTHROPIC_API_KEY").is_ok()
@@ -94,6 +251,21 @@ pub fn is_provider_available(kind: AiProviderKind) -> bool {
         }
         AiProviderKind::GeminiCli => is_cli_available("gemini"),
         AiProviderKind::Local => env::var("LINTHIS_AI_ENDPOINT").is_ok(),
+        AiProviderKind::Custom(_) => {
+            // Check custom provider availability via thread-local
+            if let Some(ref cp) = get_custom_provider() {
+                if cp.is_cli {
+                    cp.command.as_deref().map(is_cli_available).unwrap_or(false)
+                } else {
+                    cp.api_key_env
+                        .as_ref()
+                        .map(|env_name| env::var(env_name).is_ok())
+                        .unwrap_or(true)
+                }
+            } else {
+                false
+            }
+        }
         AiProviderKind::Mock => true,
     }
 }
@@ -116,19 +288,16 @@ fn is_cli_available(cmd: &str) -> bool {
 pub fn detect_available_providers() -> Vec<(AiProviderKind, bool)> {
     ALL_AI_PROVIDERS
         .iter()
-        .map(|(kind, _, _)| (*kind, is_provider_available(*kind)))
+        .map(|(kind, _, _)| (kind.clone(), is_provider_available(kind)))
         .collect()
 }
 
 /// Try to find a compatible fallback provider when the requested one is unavailable.
 ///
 /// Returns `Some((fallback_kind, message))` if a fallback is found, `None` otherwise.
-/// Only API↔CLI pairs within the same family are considered:
-/// - `claude` (API) ↔ `claude-cli` (CLI)
-/// - `codebuddy` (API) ↔ `codebuddy-cli` (CLI)
-/// - `openai` (API) ↔ `codex-cli` (CLI)
-/// - `gemini` (API) ↔ `gemini-cli` (CLI)
-pub fn try_fallback_provider(kind: AiProviderKind) -> Option<(AiProviderKind, String)> {
+/// For built-in providers, API↔CLI pairs within the same family are considered.
+/// For custom providers, uses the `fallback` field from config.
+pub fn try_fallback_provider(kind: &AiProviderKind) -> Option<(AiProviderKind, String)> {
     // Already available, no fallback needed
     if is_provider_available(kind) {
         return None;
@@ -139,54 +308,72 @@ pub fn try_fallback_provider(kind: AiProviderKind) -> Option<(AiProviderKind, St
             AiProviderKind::ClaudeCli,
             "claude (API)",
             "claude-cli",
-            "Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY to use Claude API directly",
+            "Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY to use Claude API directly".to_string(),
         ),
         AiProviderKind::ClaudeCli => (
             AiProviderKind::Claude,
             "claude-cli",
             "claude (API)",
-            "Install Claude CLI to use claude-cli provider",
+            "Install Claude CLI to use claude-cli provider".to_string(),
         ),
         AiProviderKind::CodeBuddy => (
             AiProviderKind::CodeBuddyCli,
             "codebuddy (API)",
             "codebuddy-cli",
-            "Set CODEBUDDY_API_KEY to use CodeBuddy API directly",
+            "Set CODEBUDDY_API_KEY to use CodeBuddy API directly".to_string(),
         ),
         AiProviderKind::CodeBuddyCli => (
             AiProviderKind::CodeBuddy,
             "codebuddy-cli",
             "codebuddy (API)",
-            "Install CodeBuddy CLI to use codebuddy-cli provider",
+            "Install CodeBuddy CLI to use codebuddy-cli provider".to_string(),
         ),
         AiProviderKind::OpenAi => (
             AiProviderKind::CodexCli,
             "openai (API)",
             "codex-cli",
-            "Set OPENAI_API_KEY to use OpenAI API directly",
+            "Set OPENAI_API_KEY to use OpenAI API directly".to_string(),
         ),
         AiProviderKind::CodexCli => (
             AiProviderKind::OpenAi,
             "codex-cli",
             "openai (API)",
-            "Install Codex CLI (npm i -g @openai/codex) to use codex-cli provider",
+            "Install Codex CLI (npm install -g @openai/codex) to use codex-cli provider".to_string(),
         ),
         AiProviderKind::Gemini => (
             AiProviderKind::GeminiCli,
             "gemini (API)",
             "gemini-cli",
-            "Set GEMINI_API_KEY or GOOGLE_API_KEY to use Gemini API directly",
+            "Set GEMINI_API_KEY or GOOGLE_API_KEY to use Gemini API directly".to_string(),
         ),
         AiProviderKind::GeminiCli => (
             AiProviderKind::Gemini,
             "gemini-cli",
             "gemini (API)",
-            "Install Gemini CLI (npm install -g @google/gemini-cli) to use gemini-cli provider",
+            "Install Gemini CLI (npm install -g @google/gemini-cli) to use gemini-cli provider".to_string(),
         ),
+        AiProviderKind::Custom(name) => {
+            // Check custom provider's fallback field
+            if let Some(ref cp) = get_custom_provider() {
+                if let Some(ref fb) = cp.fallback {
+                    let fallback_kind: AiProviderKind = fb.parse().unwrap_or_default();
+                    if is_provider_available(&fallback_kind) {
+                        return Some((
+                            fallback_kind,
+                            format!(
+                                "Custom provider '{}' is not available, falling back to {}",
+                                name, fb
+                            ),
+                        ));
+                    }
+                }
+            }
+            return None;
+        }
         _ => return None,
     };
 
-    if is_provider_available(fallback) {
+    if is_provider_available(&fallback) {
         Some((
             fallback,
             format!(
@@ -201,12 +388,15 @@ pub fn try_fallback_provider(kind: AiProviderKind) -> Option<(AiProviderKind, St
 
 impl AiProviderKind {
     /// Get the CLI name for this provider kind (e.g., "claude", "claude-cli")
-    pub fn cli_name(&self) -> &'static str {
-        ALL_AI_PROVIDERS
-            .iter()
-            .find(|(k, _, _)| k == self)
-            .map(|(_, name, _)| *name)
-            .unwrap_or("unknown")
+    pub fn cli_name(&self) -> String {
+        match self {
+            AiProviderKind::Custom(name) => name.clone(),
+            _ => ALL_AI_PROVIDERS
+                .iter()
+                .find(|(k, _, _)| k == self)
+                .map(|(_, name, _)| name.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+        }
     }
 }
 
@@ -401,7 +591,7 @@ impl AiProvider {
         };
 
         let model = env::var("LINTHIS_AI_MODEL").unwrap_or_else(|_| {
-            match kind {
+            match &kind {
                 AiProviderKind::Claude => "claude-sonnet-4-20250514".to_string(),
                 AiProviderKind::ClaudeCli => "claude-cli".to_string(),
                 AiProviderKind::CodeBuddy => "deepseek-v3.1".to_string(),
@@ -411,6 +601,7 @@ impl AiProvider {
                 AiProviderKind::Gemini => "gemini-2.5-flash".to_string(),
                 AiProviderKind::GeminiCli => "gemini-cli".to_string(),
                 AiProviderKind::Local => "codellama:7b".to_string(),
+                AiProviderKind::Custom(name) => name.clone(),
                 AiProviderKind::Mock => "mock".to_string(),
             }
         });
@@ -452,7 +643,7 @@ impl Default for AiProvider {
 
 impl AiProviderTrait for AiProvider {
     fn name(&self) -> &str {
-        match self.config.kind {
+        match &self.config.kind {
             AiProviderKind::Claude => "Claude API",
             AiProviderKind::ClaudeCli => "Claude CLI",
             AiProviderKind::CodeBuddy => "CodeBuddy API",
@@ -462,33 +653,17 @@ impl AiProviderTrait for AiProvider {
             AiProviderKind::Gemini => "Gemini API",
             AiProviderKind::GeminiCli => "Gemini CLI",
             AiProviderKind::Local => "Local LLM",
+            AiProviderKind::Custom(_) => "Custom",
             AiProviderKind::Mock => "Mock",
         }
     }
 
     fn is_available(&self) -> bool {
-        match self.config.kind {
-            AiProviderKind::Claude
-            | AiProviderKind::CodeBuddy
-            | AiProviderKind::OpenAi
-            | AiProviderKind::Gemini => self.config.api_key.is_some(),
-            AiProviderKind::ClaudeCli => is_cli_available("claude"),
-            AiProviderKind::CodeBuddyCli => is_cli_available("codebuddy"),
-            AiProviderKind::CodexCli => is_cli_available("codex"),
-            AiProviderKind::GeminiCli => is_cli_available("gemini"),
-            AiProviderKind::Local => {
-                if let Some(ref endpoint) = self.config.endpoint {
-                    !endpoint.is_empty()
-                } else {
-                    false
-                }
-            }
-            AiProviderKind::Mock => true,
-        }
+        is_provider_available(&self.config.kind)
     }
 
     fn complete(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
-        match self.config.kind {
+        match &self.config.kind {
             AiProviderKind::Claude => self.complete_claude(prompt, system_prompt),
             AiProviderKind::ClaudeCli => self.complete_claude_cli(prompt, system_prompt),
             AiProviderKind::CodeBuddy => self.complete_codebuddy(prompt, system_prompt),
@@ -498,6 +673,7 @@ impl AiProviderTrait for AiProvider {
             AiProviderKind::Gemini => self.complete_gemini(prompt, system_prompt),
             AiProviderKind::GeminiCli => self.complete_gemini_cli(prompt, system_prompt),
             AiProviderKind::Local => self.complete_local(prompt, system_prompt),
+            AiProviderKind::Custom(_) => self.complete_custom(prompt, system_prompt),
             AiProviderKind::Mock => self.complete_mock(prompt, system_prompt),
         }
     }
@@ -631,7 +807,7 @@ impl AiProvider {
         use std::process::Stdio;
 
         // Only works with CLI providers
-        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli | AiProviderKind::CodexCli | AiProviderKind::GeminiCli) {
+        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli | AiProviderKind::CodexCli | AiProviderKind::GeminiCli | AiProviderKind::Custom(_)) {
             return Err("fix_file_with_cli only works with CLI providers".to_string());
         }
 
@@ -676,7 +852,7 @@ If you're unsure about related locations, use Grep to search for the function na
 
         // Run CLI with Edit tool allowed
         let provider_name = self.config.kind.cli_name();
-        let mut cmd = build_cli_fix_command(self.config.kind, &prompt);
+        let mut cmd = build_cli_fix_command(&self.config.kind, &prompt);
 
         // Set working directory to file's parent
         if let Some(parent) = file_path.parent() {
@@ -724,7 +900,7 @@ If you're unsure about related locations, use Grep to search for the function na
     ) -> Result<std::collections::HashMap<std::path::PathBuf, String>, String> {
         use std::process::Stdio;
 
-        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli | AiProviderKind::CodexCli | AiProviderKind::GeminiCli) {
+        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli | AiProviderKind::CodexCli | AiProviderKind::GeminiCli | AiProviderKind::Custom(_)) {
             return Err("fix_files_batch_with_cli only works with CLI providers".to_string());
         }
 
@@ -785,7 +961,7 @@ If unsure about impact, use Grep extensively to find all references first."#,
         );
 
         let provider_name = self.config.kind.cli_name();
-        let mut cmd = build_cli_fix_command(self.config.kind, &prompt);
+        let mut cmd = build_cli_fix_command(&self.config.kind, &prompt);
         cmd.current_dir(working_dir);
 
         cmd.stdin(Stdio::null())
@@ -1185,6 +1361,173 @@ If unsure about impact, use Grep extensively to find all references first."#,
             .ok_or_else(|| "No response in output".to_string())
     }
 
+    fn complete_custom(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+        let cp = get_custom_provider()
+            .ok_or_else(|| "Custom provider not configured. Define it in [ai.custom_providers] config.".to_string())?;
+
+        if cp.is_cli {
+            // CLI custom provider: spawn command with prompt_args + prompt
+            use std::process::{Command, Stdio};
+
+            let cmd_name = cp.command.as_deref().unwrap_or("echo");
+            let mut cmd = Command::new(cmd_name);
+
+            for arg in &cp.prompt_args {
+                cmd.arg(arg);
+            }
+
+            // Add system prompt if supported and provided
+            if let (Some(ref sys_arg), Some(sys)) = (&cp.system_prompt_arg, system_prompt) {
+                if !sys_arg.is_empty() {
+                    cmd.arg(sys_arg).arg(sys);
+                }
+            }
+
+            cmd.arg(prompt);
+            cmd.stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+
+            let child = cmd.spawn()
+                .map_err(|e| format!("Failed to spawn '{}': {}", cmd_name, e))?;
+            let output = child.wait_with_output()
+                .map_err(|e| format!("Failed to wait for '{}': {}", cmd_name, e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("{} error: {}", cmd_name, stderr));
+            }
+
+            let response = String::from_utf8_lossy(&output.stdout).to_string();
+            if response.trim().is_empty() {
+                return Err(format!("Empty response from {}", cmd_name));
+            }
+            Ok(response)
+        } else {
+            // API custom provider: dispatch based on api_style
+            let api_key = cp.api_key_env.as_ref()
+                .and_then(|env_name| env::var(env_name).ok())
+                .or_else(|| self.config.api_key.clone())
+                .ok_or_else(|| format!("API key not set for custom provider '{}'", cp.name))?;
+
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            match cp.api_style.as_deref() {
+                Some("openai") => {
+                    let endpoint = cp.endpoint.as_deref()
+                        .unwrap_or("https://api.openai.com/v1/chat/completions");
+                    let model = cp.model.as_deref().unwrap_or("gpt-4");
+
+                    let mut messages = Vec::new();
+                    if let Some(sys) = system_prompt {
+                        messages.push(serde_json::json!({"role": "system", "content": sys}));
+                    }
+                    messages.push(serde_json::json!({"role": "user", "content": prompt}));
+
+                    let body = serde_json::json!({
+                        "model": model,
+                        "max_tokens": self.config.max_tokens,
+                        "temperature": self.config.temperature,
+                        "messages": messages
+                    });
+
+                    let response = client.post(endpoint)
+                        .header("Authorization", format!("Bearer {}", api_key))
+                        .header("content-type", "application/json")
+                        .json(&body).send()
+                        .map_err(|e| format!("Request failed: {}", e))?;
+
+                    if !response.status().is_success() {
+                        let status = response.status();
+                        let text = response.text().unwrap_or_default();
+                        return Err(format!("API error ({}): {}", status, text));
+                    }
+
+                    let result: serde_json::Value = response.json()
+                        .map_err(|e| format!("Failed to parse response: {}", e))?;
+                    result["choices"][0]["message"]["content"].as_str()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| "No content in response".to_string())
+                }
+                Some("anthropic") => {
+                    let endpoint = cp.endpoint.as_deref()
+                        .unwrap_or("https://api.anthropic.com/v1/messages");
+                    let model = cp.model.as_deref().unwrap_or("claude-sonnet-4-20250514");
+
+                    let mut body = serde_json::json!({
+                        "model": model,
+                        "max_tokens": self.config.max_tokens,
+                        "messages": [{"role": "user", "content": prompt}]
+                    });
+                    if let Some(sys) = system_prompt {
+                        body["system"] = serde_json::json!(sys);
+                    }
+
+                    let response = client.post(endpoint)
+                        .header("x-api-key", &api_key)
+                        .header("anthropic-version", "2023-06-01")
+                        .header("content-type", "application/json")
+                        .json(&body).send()
+                        .map_err(|e| format!("Request failed: {}", e))?;
+
+                    if !response.status().is_success() {
+                        let status = response.status();
+                        let text = response.text().unwrap_or_default();
+                        return Err(format!("API error ({}): {}", status, text));
+                    }
+
+                    let result: serde_json::Value = response.json()
+                        .map_err(|e| format!("Failed to parse response: {}", e))?;
+                    result["content"][0]["text"].as_str()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| "No content in response".to_string())
+                }
+                Some("gemini") => {
+                    let model = cp.model.as_deref().unwrap_or("gemini-2.0-flash");
+                    let endpoint = cp.endpoint.clone()
+                        .unwrap_or_else(|| format!(
+                            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+                            model
+                        ));
+                    let url = format!("{}?key={}", endpoint, api_key);
+
+                    let mut body = serde_json::json!({
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "maxOutputTokens": self.config.max_tokens,
+                            "temperature": self.config.temperature
+                        }
+                    });
+                    if let Some(sys) = system_prompt {
+                        body["systemInstruction"] = serde_json::json!({"parts": [{"text": sys}]});
+                    }
+
+                    let response = client.post(&url)
+                        .header("content-type", "application/json")
+                        .json(&body).send()
+                        .map_err(|e| format!("Request failed: {}", e))?;
+
+                    if !response.status().is_success() {
+                        let status = response.status();
+                        let text = response.text().unwrap_or_default();
+                        return Err(format!("API error ({}): {}", status, text));
+                    }
+
+                    let result: serde_json::Value = response.json()
+                        .map_err(|e| format!("Failed to parse response: {}", e))?;
+                    result["candidates"][0]["content"]["parts"][0]["text"].as_str()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| "No content in response".to_string())
+                }
+                Some(other) => Err(format!("Unknown api_style '{}' for custom provider '{}'", other, cp.name)),
+                None => Err(format!("Custom API provider '{}' requires 'api_style'", cp.name)),
+            }
+        }
+    }
+
     fn complete_mock(&self, prompt: &str, _system_prompt: Option<&str>) -> Result<String, String> {
         // Extract line number from prompt if available
         let line_num = if let Some(pos) = prompt.find("Line: ") {
@@ -1213,9 +1556,8 @@ Note: This is a mock AI response for testing."#,
     }
 }
 
-/// Generate unified diff between two strings
 /// Build a CLI command for fixing files, tailored to the provider kind.
-fn build_cli_fix_command(kind: AiProviderKind, prompt: &str) -> Command {
+fn build_cli_fix_command(kind: &AiProviderKind, prompt: &str) -> Command {
     match kind {
         AiProviderKind::ClaudeCli => {
             let mut cmd = Command::new("claude");
@@ -1257,6 +1599,19 @@ fn build_cli_fix_command(kind: AiProviderKind, prompt: &str) -> Command {
             cmd.arg("-y") // YOLO mode: auto-accept all actions
                 .arg(prompt);
             cmd
+        }
+        AiProviderKind::Custom(_) => {
+            if let Some(cp) = get_custom_provider() {
+                let cmd_name = cp.command.as_deref().unwrap_or("echo");
+                let mut cmd = Command::new(cmd_name);
+                for arg in &cp.fix_args {
+                    cmd.arg(arg);
+                }
+                cmd.arg(prompt);
+                cmd
+            } else {
+                panic!("Custom provider not set before build_cli_fix_command");
+            }
         }
         _ => unreachable!("build_cli_fix_command called with non-CLI provider"),
     }
@@ -1344,13 +1699,13 @@ mod tests {
     #[test]
     fn test_mock_provider_available() {
         // Mock is always available
-        assert!(is_provider_available(AiProviderKind::Mock));
+        assert!(is_provider_available(&AiProviderKind::Mock));
     }
 
     #[test]
     fn test_mock_no_fallback_needed() {
         // Mock is always available, so no fallback needed
-        assert!(try_fallback_provider(AiProviderKind::Mock).is_none());
+        assert!(try_fallback_provider(&AiProviderKind::Mock).is_none());
     }
 
     #[test]

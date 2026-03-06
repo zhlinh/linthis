@@ -551,7 +551,7 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
     );
     let provider_kind: AiProviderKind = provider_str.parse().unwrap_or_default();
 
-    let mut config = match provider_kind {
+    let mut config = match &provider_kind {
         AiProviderKind::Claude => AiProviderConfig::claude(),
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
         AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
@@ -561,6 +561,10 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
         AiProviderKind::Gemini => AiProviderConfig::gemini(),
         AiProviderKind::GeminiCli => AiProviderConfig::gemini_cli(),
         AiProviderKind::Local => AiProviderConfig::local(),
+        AiProviderKind::Custom(name) => AiProviderConfig {
+            kind: AiProviderKind::Custom(name.clone()),
+            ..AiProviderConfig::default()
+        },
         AiProviderKind::Mock => AiProviderConfig::mock(),
     };
 
@@ -570,7 +574,7 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
     }
 
     // Set API key from environment
-    config.api_key = match provider_kind {
+    config.api_key = match &provider_kind {
         AiProviderKind::Claude => std::env::var("ANTHROPIC_AUTH_TOKEN")
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
@@ -585,7 +589,7 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
     };
 
     // Set endpoint from environment
-    match provider_kind {
+    match &provider_kind {
         AiProviderKind::Claude => {
             if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
                 config.endpoint = Some(base_url);
@@ -609,7 +613,7 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
             "Error".red(),
             suggester.provider_name()
         );
-        match provider_kind {
+        match &provider_kind {
             AiProviderKind::Claude => {
                 eprintln!("Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable");
             }
