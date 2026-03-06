@@ -136,7 +136,7 @@ pub struct Cli {
     /// Enter fix mode after check/format to fix issues
     ///
     /// Can be combined with --ai for AI-powered fixes.
-    /// Useful in git hooks: linthis -c --fix --ai --accept-all
+    /// Useful in git hooks: linthis -c --fix --ai -y
     #[arg(long)]
     pub fix: bool,
 
@@ -153,7 +153,7 @@ pub struct Cli {
     /// Automatically accept all fix suggestions (requires --fix)
     ///
     /// Warning: This will modify files automatically. Use with caution.
-    #[arg(long, requires = "fix")]
+    #[arg(short = 'y', long = "yes", alias = "accept-all", requires = "fix")]
     pub accept_all: bool,
 
     /// Hook event: enable compact output format for git hooks
@@ -582,7 +582,7 @@ pub enum Commands {
         /// Automatically accept all AI suggestions without confirmation
         ///
         /// Warning: This will modify files automatically. Use with caution.
-        #[arg(long, requires = "ai")]
+        #[arg(short = 'y', long = "yes", alias = "accept-all", requires = "ai")]
         accept_all: bool,
 
         /// Number of parallel jobs for AI analysis (default: 4)
@@ -666,7 +666,7 @@ pub enum HookCommands {
         ///
         /// Default: "-c -f" (check + format).
         /// Examples: "-c" (check only), "-f" (format only),
-        /// "-c -f --fix --ai --provider claude --accept-all" (AI auto-fix)
+        /// "-c -f --fix --ai --provider claude -y" (AI auto-fix)
         #[arg(long, allow_hyphen_values = true)]
         args: Option<String>,
     },
