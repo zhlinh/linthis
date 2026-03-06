@@ -267,7 +267,8 @@ fn default_commit_msg_pattern() -> String {
 /// AI configuration section
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AiConfig {
-    /// AI provider to use: claude, claude-cli, codebuddy, codebuddy-cli, openai, local, mock
+    /// AI provider to use: claude, claude-cli, codebuddy, codebuddy-cli, openai,
+    /// codex-cli, gemini, gemini-cli, local, mock, or a custom provider name
     #[serde(default)]
     pub provider: Option<String>,
     /// Model name to use (overrides provider default)
@@ -282,6 +283,91 @@ pub struct AiConfig {
     /// Request timeout in seconds
     #[serde(default)]
     pub timeout_secs: Option<u64>,
+    /// Custom provider definitions (CLI or API)
+    #[serde(default)]
+    pub custom_providers: std::collections::HashMap<String, CustomProvider>,
+}
+
+/// Custom provider configuration.
+///
+/// Supports CLI providers, API providers, or both:
+///
+/// ## CLI provider with template
+/// ```toml
+/// [ai.custom_providers.longcat]
+/// kind = "cli"
+/// command = "longcat"
+/// template = "claude-like"  # claude-like, codex-like, gemini-like
+/// ```
+///
+/// ## CLI provider with custom args
+/// ```toml
+/// [ai.custom_providers.mybot]
+/// kind = "cli"
+/// command = "mybot"
+/// prompt_args = ["ask", "--no-interactive"]
+/// fix_args = ["ask", "--no-interactive", "--auto-approve"]
+/// system_prompt_arg = "--system"
+/// ```
+///
+/// ## API provider (OpenAI-compatible)
+/// ```toml
+/// [ai.custom_providers.deepseek]
+/// kind = "api"
+/// api_style = "openai"  # openai, anthropic, gemini
+/// endpoint = "https://api.deepseek.com/v1/chat/completions"
+/// api_key_env = "DEEPSEEK_API_KEY"
+/// model = "deepseek-chat"
+/// ```
+///
+/// Template can be combined with custom args (custom args override template defaults).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomProvider {
+    /// Provider kind: "cli" or "api" (default: "cli")
+    #[serde(default = "default_provider_kind")]
+    pub kind: String,
+
+    // --- CLI fields ---
+    /// CLI command name (e.g., "longcat")
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Template to base args on: "claude-like", "codex-like", "gemini-like"
+    #[serde(default)]
+    pub template: Option<String>,
+    /// Args for prompt mode (non-interactive completion).
+    /// The prompt text is appended as the last argument.
+    #[serde(default)]
+    pub prompt_args: Option<Vec<String>>,
+    /// Args for fix mode (direct file editing with tools).
+    /// The prompt text is appended as the last argument.
+    #[serde(default)]
+    pub fix_args: Option<Vec<String>>,
+    /// Argument name for passing system prompt (e.g., "--system-prompt")
+    #[serde(default)]
+    pub system_prompt_arg: Option<String>,
+
+    // --- API fields ---
+    /// API style: "openai", "anthropic", "gemini" (determines request/response format)
+    #[serde(default)]
+    pub api_style: Option<String>,
+    /// API endpoint URL
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    /// Model name
+    #[serde(default)]
+    pub model: Option<String>,
+
+    // --- Common fields ---
+    /// Environment variable name for API key (for availability detection and auth)
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    /// Fallback provider name when this one is unavailable
+    #[serde(default)]
+    pub fallback: Option<String>,
+}
+
+fn default_provider_kind() -> String {
+    "cli".to_string()
 }
 
 /// Source path configuration (CodeCC compatibility)

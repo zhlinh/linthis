@@ -25,7 +25,7 @@ use rayon::prelude::*;
 
 use crate::ai::{
     AiProvider, AiProviderConfig, AiProviderKind, AiSuggester, FixSuggestion, SuggestionOptions,
-    SuggestionResult,
+    SuggestionResult, get_custom_provider,
 };
 use crate::utils::types::{LintIssue, RunResult, Severity};
 
@@ -116,7 +116,7 @@ pub struct AiFixResult {
 
 /// Create an AI suggester from config
 pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
-    let mut provider_config = match config.provider {
+    let mut provider_config = match &config.provider {
         AiProviderKind::Claude => AiProviderConfig::claude(),
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
         AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
@@ -126,6 +126,10 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
         AiProviderKind::Gemini => AiProviderConfig::gemini(),
         AiProviderKind::GeminiCli => AiProviderConfig::gemini_cli(),
         AiProviderKind::Local => AiProviderConfig::local(),
+        AiProviderKind::Custom(name) => AiProviderConfig {
+            kind: AiProviderKind::Custom(name.clone()),
+            ..AiProviderConfig::default()
+        },
         AiProviderKind::Mock => AiProviderConfig::mock(),
     };
 
@@ -135,7 +139,7 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
     }
 
     // Set API key from environment
-    provider_config.api_key = match config.provider {
+    provider_config.api_key = match &config.provider {
         AiProviderKind::Claude => std::env::var("ANTHROPIC_AUTH_TOKEN")
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
@@ -150,7 +154,7 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
     };
 
     // Set endpoint from environment
-    match config.provider {
+    match &config.provider {
         AiProviderKind::Claude => {
             if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
                 provider_config.endpoint = Some(base_url);
@@ -168,7 +172,7 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
     let suggester = AiSuggester::with_provider(provider);
 
     if !suggester.is_available() {
-        let hint = match config.provider {
+        let hint = match &config.provider {
             AiProviderKind::Claude => "Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable",
             AiProviderKind::ClaudeCli => "Install Claude CLI (claude command must be available)",
             AiProviderKind::CodeBuddy => "Set CODEBUDDY_API_KEY environment variable",
@@ -178,6 +182,12 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
             AiProviderKind::Gemini => "Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable",
             AiProviderKind::GeminiCli => "Install Gemini CLI (npm install -g @google/gemini-cli)",
             AiProviderKind::Local => "Set LINTHIS_AI_ENDPOINT environment variable",
+            AiProviderKind::Custom(name) => {
+                return Err(format!(
+                    "Custom AI provider '{}' is not available. Check your config and ensure required tools/keys are set.",
+                    name
+                ));
+            }
             AiProviderKind::Mock => "Mock provider should always be available",
         };
         return Err(format!(
@@ -191,14 +201,17 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
 }
 
 /// Check if provider is a CLI provider that supports direct file editing
-fn is_cli_provider(kind: AiProviderKind) -> bool {
-    matches!(
-        kind,
+fn is_cli_provider(kind: &AiProviderKind) -> bool {
+    match kind {
         AiProviderKind::ClaudeCli
-            | AiProviderKind::CodeBuddyCli
-            | AiProviderKind::CodexCli
-            | AiProviderKind::GeminiCli
-    )
+        | AiProviderKind::CodeBuddyCli
+        | AiProviderKind::CodexCli
+        | AiProviderKind::GeminiCli => true,
+        AiProviderKind::Custom(_) => {
+            get_custom_provider().map(|cp| cp.is_cli).unwrap_or(false)
+        }
+        _ => false,
+    }
 }
 
 /// Group issues by file path
@@ -235,11 +248,15 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
     println!();
 
     // Create provider for CLI operations
-    let provider_config = match config.provider {
+    let provider_config = match &config.provider {
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
         AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
         AiProviderKind::CodexCli => AiProviderConfig::codex_cli(),
         AiProviderKind::GeminiCli => AiProviderConfig::gemini_cli(),
+        AiProviderKind::Custom(name) => AiProviderConfig {
+            kind: AiProviderKind::Custom(name.clone()),
+            ..AiProviderConfig::default()
+        },
         _ => return fix_result,
     };
 
@@ -280,12 +297,13 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
         println!("    {} issues to fix", issues_data.len());
 
         // Start spinner with elapsed time in a background thread
-        let cli_name = match config.provider {
-            AiProviderKind::ClaudeCli => "Claude",
-            AiProviderKind::CodeBuddyCli => "CodeBuddy",
-            AiProviderKind::CodexCli => "Codex",
-            AiProviderKind::GeminiCli => "Gemini",
-            _ => "CLI",
+        let cli_name: String = match &config.provider {
+            AiProviderKind::ClaudeCli => "Claude".into(),
+            AiProviderKind::CodeBuddyCli => "CodeBuddy".into(),
+            AiProviderKind::CodexCli => "Codex".into(),
+            AiProviderKind::GeminiCli => "Gemini".into(),
+            AiProviderKind::Custom(name) => name.clone(),
+            _ => "CLI".into(),
         };
         let spinner_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let spinner_running_clone = Arc::clone(&spinner_running);
@@ -439,11 +457,12 @@ fn run_cli_file_fix_parallel(
     use std::sync::Mutex;
 
     let mut fix_result = AiFixResult::default();
-    let cli_name = match config.provider {
+    let cli_name = match &config.provider {
             AiProviderKind::ClaudeCli => "Claude",
             AiProviderKind::CodeBuddyCli => "CodeBuddy",
             AiProviderKind::CodexCli => "Codex",
             AiProviderKind::GeminiCli => "Gemini",
+            AiProviderKind::Custom(name) => name.as_str(),
             _ => "CLI",
         };
 
@@ -1176,7 +1195,7 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     }
 
     // For CLI providers, use direct file editing mode
-    if is_cli_provider(config.provider) {
+    if is_cli_provider(&config.provider) {
         return run_cli_file_fix(issues, config);
     }
 

@@ -140,7 +140,7 @@ pub fn resolve_ai_provider(cli_value: Option<&str>, config_value: Option<&str>) 
 
     // Try to parse the resolved provider and check availability with fallback
     if let Ok(kind) = resolved.parse::<AiProviderKind>() {
-        if let Some((fallback_kind, message)) = try_fallback_provider(kind) {
+        if let Some((fallback_kind, message)) = try_fallback_provider(&kind) {
             eprintln!("{} {}", "⚠ Warning:".yellow().bold(), message);
             return fallback_kind.cli_name().to_string();
         }
