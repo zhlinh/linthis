@@ -19,16 +19,28 @@ use std::process::ExitCode;
 
 use super::commands::{AgentProvider, HookCommands, HookEvent, HookTool};
 
+/// Helper module for getting home directory (cross-platform, no external crate)
+mod dirs {
+    use std::path::PathBuf;
+
+    pub fn home_dir() -> Option<PathBuf> {
+        std::env::var("HOME")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
+    }
+}
+
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
-        HookCommands::Install { hook_type, hook_event, force, yes, provider, args } => {
-            handle_hook_install(hook_type, hook_event, force, yes, provider, args)
+        HookCommands::Install { hook_type, hook_event, force, yes, global, provider, args } => {
+            handle_hook_install(hook_type, hook_event, force, yes, global, provider, args)
         }
-        HookCommands::Uninstall { hook_type, hook_event, all, yes } => {
+        HookCommands::Uninstall { hook_type, hook_event, all, yes, global } => {
             // Agent type has its own uninstall flow
             if matches!(hook_type, Some(HookTool::Agent)) {
-                return handle_agent_hook_uninstall(yes);
+                return handle_agent_hook_uninstall(yes, global);
             }
             handle_hook_uninstall(hook_event, all, yes)
         }
@@ -50,6 +62,7 @@ fn handle_hook_install(
     hook_event: HookEvent,
     force: bool,
     yes: bool,
+    global: bool,
     provider: Option<String>,
     args: Option<String>,
 ) -> ExitCode {
@@ -76,7 +89,13 @@ fn handle_hook_install(
         if provider.is_some() && agent_provider.is_none() {
             return ExitCode::from(1);
         }
-        return handle_agent_hook_install(agent_provider, force, yes);
+        return handle_agent_hook_install(agent_provider, force, yes, global);
+    }
+
+    // --global is only valid with --type agent
+    if global {
+        eprintln!("{}: --global / -g is only supported with --type agent", "Error".red());
+        return ExitCode::from(1);
     }
 
     // Find git root
@@ -265,14 +284,14 @@ fn handle_hook_status() -> ExitCode {
     println!("  {} - runs before push to remote", "pre-push".cyan());
     println!("  {} - validates commit message format", "commit-msg".cyan());
 
-    // Check agent integration status
+    // Check agent integration status (project-level only for status display)
     println!("\n{}", "Agent Integration".bold());
     let mut any_agent_installed = false;
     for p in ALL_AGENT_PROVIDERS {
-        let installed = agent_is_installed(&git_root, p);
+        let installed = agent_is_installed(&git_root, p, false);
         if installed {
             any_agent_installed = true;
-            let path = agent_rules_path(&git_root, p);
+            let path = agent_rules_path(&git_root, p, false);
             println!("{} {} ({})", "✓".green(), p, path.display());
             // Show extra info for Claude/CodeBuddy (Stop Hook)
             if let Some(settings_path) = agent_stop_hook_settings_path(&git_root, p) {
@@ -333,7 +352,7 @@ fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool) ->
         }
 
         // Also uninstall agent hooks
-        let agent_result = handle_agent_hook_uninstall(yes);
+        let agent_result = handle_agent_hook_uninstall(yes, false);
         if agent_result == ExitCode::SUCCESS {
             any_uninstalled = true;
         }
@@ -977,7 +996,7 @@ fn agent_content_codebuddy_md() -> String {
     format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
 }
 
-/// Generate the Stop hook JSON content for .claude/settings.local.json
+/// Generate the Stop hook JSON content for .claude/settings.json
 fn agent_stop_hook_json() -> String {
     r#"{
   "hooks": {
@@ -996,30 +1015,43 @@ fn agent_stop_hook_json() -> String {
     .to_string()
 }
 
-/// Get the rules file path for a given agent provider
-fn agent_rules_path(git_root: &std::path::Path, provider: &AgentProvider) -> PathBuf {
+/// Get the rules file path for a given agent provider.
+///
+/// When `global` is true, `base` is the user home directory; otherwise it is
+/// the project git root.  Claude's project-level file is `CLAUDE.md` at the
+/// repo root, while the user-level file lives in `~/.claude/CLAUDE.md`.
+fn agent_rules_path(base: &std::path::Path, provider: &AgentProvider, global: bool) -> PathBuf {
     match provider {
-        AgentProvider::Claude => git_root.join("CLAUDE.md"),
-        AgentProvider::Cursor => git_root.join(".cursor/rules/linthis.mdc"),
-        AgentProvider::Windsurf => git_root.join(".windsurf/rules/linthis.md"),
-        AgentProvider::Copilot => git_root.join(".github/copilot-instructions.md"),
-        AgentProvider::Cline => git_root.join(".clinerules/linthis.md"),
-        AgentProvider::Codebuddy => git_root.join(".codebuddy/rules/linthis.md"),
+        AgentProvider::Claude => {
+            if global {
+                base.join(".claude/CLAUDE.md")
+            } else {
+                base.join("CLAUDE.md")
+            }
+        }
+        AgentProvider::Cursor => base.join(".cursor/rules/linthis.mdc"),
+        AgentProvider::Windsurf => base.join(".windsurf/rules/linthis.md"),
+        AgentProvider::Copilot => base.join(".github/copilot-instructions.md"),
+        AgentProvider::Cline => base.join(".clinerules/linthis.md"),
+        AgentProvider::Codebuddy => base.join(".codebuddy/rules/linthis.md"),
     }
 }
 
-/// Get the Stop Hook settings file path for providers that support it
-fn agent_stop_hook_settings_path(git_root: &std::path::Path, provider: &AgentProvider) -> Option<PathBuf> {
+/// Get the Stop Hook settings file path for providers that support it.
+///
+/// `base` is either the project git root (local) or the user home directory
+/// (global).
+fn agent_stop_hook_settings_path(base: &std::path::Path, provider: &AgentProvider) -> Option<PathBuf> {
     match provider {
-        AgentProvider::Claude => Some(git_root.join(".claude/settings.local.json")),
-        AgentProvider::Codebuddy => Some(git_root.join(".codebuddy/settings.json")),
+        AgentProvider::Claude => Some(base.join(".claude/settings.json")),
+        AgentProvider::Codebuddy => Some(base.join(".codebuddy/settings.json")),
         _ => None,
     }
 }
 
 /// Print "Installed Stop Hook" message if the provider supports it
-fn print_stop_hook_installed(git_root: &std::path::Path, provider: &AgentProvider) {
-    if let Some(settings_path) = agent_stop_hook_settings_path(git_root, provider) {
+fn print_stop_hook_installed(base: &std::path::Path, provider: &AgentProvider) {
+    if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
         println!(
             "{} Installed Stop Hook → {}",
             "✓".green(),
@@ -1029,8 +1061,8 @@ fn print_stop_hook_installed(git_root: &std::path::Path, provider: &AgentProvide
 }
 
 /// Print info about an already-installed agent provider (file path + content)
-fn print_agent_installed_info(git_root: &std::path::Path, provider: &AgentProvider) {
-    let path = agent_rules_path(git_root, provider);
+fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, global: bool) {
+    let path = agent_rules_path(base, provider, global);
     println!(
         "       {} {}",
         "File:".dimmed(),
@@ -1038,7 +1070,7 @@ fn print_agent_installed_info(git_root: &std::path::Path, provider: &AgentProvid
     );
 
     // For Claude/CodeBuddy, also show settings file (Stop Hook)
-    if let Some(settings_path) = agent_stop_hook_settings_path(git_root, provider) {
+    if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
         if settings_path.exists() {
             println!(
                 "       {} {}",
@@ -1073,8 +1105,8 @@ fn print_agent_installed_info(git_root: &std::path::Path, provider: &AgentProvid
 }
 
 /// Check if agent integration is installed for a given provider
-fn agent_is_installed(git_root: &std::path::Path, provider: &AgentProvider) -> bool {
-    let path = agent_rules_path(git_root, provider);
+fn agent_is_installed(base: &std::path::Path, provider: &AgentProvider, global: bool) -> bool {
+    let path = agent_rules_path(base, provider, global);
     match provider {
         // Append-style: check for section marker in file
         AgentProvider::Claude | AgentProvider::Copilot => {
@@ -1096,25 +1128,28 @@ fn agent_is_installed(git_root: &std::path::Path, provider: &AgentProvider) -> b
     }
 }
 
-/// Detect which agent providers are likely in use (by checking for their directories)
-fn detect_agent_providers(git_root: &std::path::Path) -> Vec<AgentProvider> {
+/// Detect which agent providers are likely in use (by checking for their directories).
+///
+/// `base` is either the project git root (local) or the user home directory
+/// (global).
+fn detect_agent_providers(base: &std::path::Path) -> Vec<AgentProvider> {
     let mut detected = Vec::new();
-    if git_root.join(".claude").exists() {
+    if base.join(".claude").exists() {
         detected.push(AgentProvider::Claude);
     }
-    if git_root.join(".cursor").exists() {
+    if base.join(".cursor").exists() {
         detected.push(AgentProvider::Cursor);
     }
-    if git_root.join(".windsurf").exists() {
+    if base.join(".windsurf").exists() {
         detected.push(AgentProvider::Windsurf);
     }
-    if git_root.join(".github").exists() {
+    if base.join(".github").exists() {
         detected.push(AgentProvider::Copilot);
     }
-    if git_root.join(".clinerules").exists() {
+    if base.join(".clinerules").exists() {
         detected.push(AgentProvider::Cline);
     }
-    if git_root.join(".codebuddy").exists() {
+    if base.join(".codebuddy").exists() {
         detected.push(AgentProvider::Codebuddy);
     }
     detected
@@ -1229,16 +1264,17 @@ fn install_agent_append_rules(
 }
 
 /// Install agent integration for a specific provider
-fn install_agent_provider(git_root: &std::path::Path, provider: &AgentProvider) -> Result<(), String> {
-    let rules_path = agent_rules_path(git_root, provider);
+fn install_agent_provider(base: &std::path::Path, provider: &AgentProvider, global: bool) -> Result<(), String> {
+    let rules_path = agent_rules_path(base, provider, global);
 
     match provider {
         AgentProvider::Claude => {
             // Install CLAUDE.md rules (append)
             install_agent_append_rules(&rules_path, &agent_content_claude_md(), "# Project Instructions\n")?;
             // Also install Stop Hook
-            let settings_path = git_root.join(".claude/settings.local.json");
-            install_agent_stop_hook(git_root, &settings_path)?;
+            if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+                install_agent_stop_hook(base, &settings_path)?;
+            }
         }
         AgentProvider::Cursor => {
             install_agent_dedicated_file(&rules_path, &agent_content_cursor_mdc())?;
@@ -1255,8 +1291,9 @@ fn install_agent_provider(git_root: &std::path::Path, provider: &AgentProvider) 
         AgentProvider::Codebuddy => {
             install_agent_dedicated_file(&rules_path, &agent_content_codebuddy_md())?;
             // Also install Stop Hook
-            let settings_path = git_root.join(".codebuddy/settings.json");
-            install_agent_stop_hook(git_root, &settings_path)?;
+            if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+                install_agent_stop_hook(base, &settings_path)?;
+            }
         }
     }
 
@@ -1264,20 +1301,21 @@ fn install_agent_provider(git_root: &std::path::Path, provider: &AgentProvider) 
 }
 
 /// Uninstall agent integration for a specific provider
-fn uninstall_agent_provider(git_root: &std::path::Path, provider: &AgentProvider) -> Result<(), String> {
+fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, global: bool) -> Result<(), String> {
     match provider {
         AgentProvider::Claude => {
-            let claude_md = agent_rules_path(git_root, provider);
+            let claude_md = agent_rules_path(base, provider, global);
             if claude_md.exists() {
                 remove_agent_section_from_file(&claude_md)?;
             }
-            let settings_path = git_root.join(".claude/settings.local.json");
-            if settings_path.exists() {
-                remove_agent_stop_hook(&settings_path)?;
+            if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+                if settings_path.exists() {
+                    remove_agent_stop_hook(&settings_path)?;
+                }
             }
         }
         AgentProvider::Copilot => {
-            let copilot_md = agent_rules_path(git_root, provider);
+            let copilot_md = agent_rules_path(base, provider, global);
             if copilot_md.exists() {
                 remove_agent_section_from_file(&copilot_md)?;
             }
@@ -1285,15 +1323,16 @@ fn uninstall_agent_provider(git_root: &std::path::Path, provider: &AgentProvider
         AgentProvider::Cursor
         | AgentProvider::Windsurf
         | AgentProvider::Cline => {
-            let path = agent_rules_path(git_root, provider);
+            let path = agent_rules_path(base, provider, global);
             remove_agent_dedicated_file(&path)?;
         }
         AgentProvider::Codebuddy => {
-            let path = agent_rules_path(git_root, provider);
+            let path = agent_rules_path(base, provider, global);
             remove_agent_dedicated_file(&path)?;
-            let settings_path = git_root.join(".codebuddy/settings.json");
-            if settings_path.exists() {
-                remove_agent_stop_hook(&settings_path)?;
+            if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+                if settings_path.exists() {
+                    remove_agent_stop_hook(&settings_path)?;
+                }
             }
         }
     }
@@ -1359,7 +1398,7 @@ fn remove_agent_section_from_file(path: &std::path::Path) -> Result<(), String> 
     Ok(())
 }
 
-/// Install the Stop Hook into a settings JSON file (e.g. .claude/settings.local.json, .codebuddy/settings.json)
+/// Install the Stop Hook into a settings JSON file (e.g. .claude/settings.json, .codebuddy/settings.json)
 fn install_agent_stop_hook(
     _git_root: &std::path::Path,
     settings_path: &std::path::Path,
@@ -1385,7 +1424,7 @@ fn install_agent_stop_hook(
 
         let hooks = json
             .as_object_mut()
-            .ok_or("settings.local.json root is not an object")?
+            .ok_or("settings.json root is not an object")?
             .entry("hooks")
             .or_insert_with(|| serde_json::json!({}));
 
@@ -1409,7 +1448,7 @@ fn install_agent_stop_hook(
     Ok(())
 }
 
-/// Remove the Stop Hook from .claude/settings.local.json
+/// Remove the Stop Hook from .claude/settings.json
 fn remove_agent_stop_hook(settings_path: &std::path::Path) -> Result<(), String> {
     use std::fs;
 
@@ -1442,43 +1481,64 @@ fn remove_agent_stop_hook(settings_path: &std::path::Path) -> Result<(), String>
     Ok(())
 }
 
-/// Install agent hooks with multi-provider support
+/// Install agent hooks with multi-provider support.
+///
+/// When `global` is true, rules are installed into the user home directory
+/// (`~/.claude/CLAUDE.md`, `~/.cursor/rules/linthis.mdc`, etc.) without
+/// requiring a git repository.  When false, rules are installed in the
+/// project git root (project-level).
 fn handle_agent_hook_install(
     provider: Option<AgentProvider>,
     force: bool,
     yes: bool,
+    global: bool,
 ) -> ExitCode {
     use std::io::{self, Write};
 
-    let git_root = match find_git_root() {
-        Some(root) => root,
-        None => {
-            eprintln!("{}: Not in a git repository", "Error".red());
-            return ExitCode::from(1);
+    // Resolve the base directory: home dir for global, git root for project-level.
+    let base = if global {
+        match dirs::home_dir() {
+            Some(home) => home,
+            None => {
+                eprintln!("{}: Could not determine home directory", "Error".red());
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        match find_git_root() {
+            Some(root) => root,
+            None => {
+                eprintln!("{}: Not in a git repository", "Error".red());
+                eprintln!("  Run this command from within a git repository, or use --global / -g to install user-level rules");
+                return ExitCode::from(1);
+            }
         }
     };
 
     println!("{}", "🤖 AI Coding Agent Integration".bold());
+    if global {
+        println!("  {} Installing user-level rules in {}", "→".dimmed(), base.display());
+    }
     println!();
 
     // If a specific provider was given, install just that one
     if let Some(ref p) = provider {
-        let installed = agent_is_installed(&git_root, p);
+        let installed = agent_is_installed(&base, p, global);
         if installed && !force {
             println!(
                 "{}: {} is already installed",
                 "Info".cyan(),
                 p
             );
-            print_agent_installed_info(&git_root, p);
+            print_agent_installed_info(&base, p, global);
             return ExitCode::SUCCESS;
         }
 
-        match install_agent_provider(&git_root, p) {
+        match install_agent_provider(&base, p, global) {
             Ok(_) => {
-                let path = agent_rules_path(&git_root, p);
+                let path = agent_rules_path(&base, p, global);
                 println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                print_stop_hook_installed(&git_root, p);
+                print_stop_hook_installed(&base, p);
                 return ExitCode::SUCCESS;
             }
             Err(e) => {
@@ -1490,7 +1550,7 @@ fn handle_agent_hook_install(
 
     // Auto-detect and install all if -y
     if yes {
-        let detected = detect_agent_providers(&git_root);
+        let detected = detect_agent_providers(&base);
         let targets: Vec<AgentProvider> = if detected.is_empty() {
             ALL_AGENT_PROVIDERS.to_vec()
         } else {
@@ -1499,16 +1559,16 @@ fn handle_agent_hook_install(
 
         let mut any_installed = false;
         for p in &targets {
-            if agent_is_installed(&git_root, p) && !force {
+            if agent_is_installed(&base, p, global) && !force {
                 println!("{}: {} already installed", "Info".cyan(), p);
-                print_agent_installed_info(&git_root, p);
+                print_agent_installed_info(&base, p, global);
                 continue;
             }
-            match install_agent_provider(&git_root, p) {
+            match install_agent_provider(&base, p, global) {
                 Ok(_) => {
-                    let path = agent_rules_path(&git_root, p);
+                    let path = agent_rules_path(&base, p, global);
                     println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                    print_stop_hook_installed(&git_root, p);
+                    print_stop_hook_installed(&base, p);
                     any_installed = true;
                 }
                 Err(e) => {
@@ -1525,13 +1585,13 @@ fn handle_agent_hook_install(
     }
 
     // Interactive menu
-    let detected = detect_agent_providers(&git_root);
+    let detected = detect_agent_providers(&base);
 
     // Build ordered list: detected/installed first, then others
     let mut ordered: Vec<&AgentProvider> = Vec::new();
     for p in ALL_AGENT_PROVIDERS {
         if detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p))
-            || agent_is_installed(&git_root, p)
+            || agent_is_installed(&base, p, global)
         {
             ordered.push(p);
         }
@@ -1547,7 +1607,7 @@ fn handle_agent_hook_install(
     println!();
 
     for (i, p) in ordered.iter().enumerate() {
-        let is_installed = agent_is_installed(&git_root, p);
+        let is_installed = agent_is_installed(&base, p, global);
         let is_detected = detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p));
         let mut status_parts = Vec::new();
         if is_installed {
@@ -1619,16 +1679,16 @@ fn handle_agent_hook_install(
     println!();
     let mut any_installed = false;
     for p in &selected {
-        if agent_is_installed(&git_root, p) && !force {
+        if agent_is_installed(&base, p, global) && !force {
             println!("{}: {} already installed", "Info".cyan(), p);
-            print_agent_installed_info(&git_root, p);
+            print_agent_installed_info(&base, p, global);
             continue;
         }
-        match install_agent_provider(&git_root, p) {
+        match install_agent_provider(&base, p, global) {
             Ok(_) => {
-                let path = agent_rules_path(&git_root, p);
+                let path = agent_rules_path(&base, p, global);
                 println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                print_stop_hook_installed(&git_root, p);
+                print_stop_hook_installed(&base, p);
                 any_installed = true;
             }
             Err(e) => {
@@ -1645,21 +1705,34 @@ fn handle_agent_hook_install(
     ExitCode::SUCCESS
 }
 
-/// Uninstall agent hooks for all installed providers
-fn handle_agent_hook_uninstall(yes: bool) -> ExitCode {
+/// Uninstall agent hooks for all installed providers.
+///
+/// When `global` is true, removes rules from the user home directory;
+/// otherwise removes from the project git root.
+fn handle_agent_hook_uninstall(yes: bool, global: bool) -> ExitCode {
     use std::io::{self, Write};
 
-    let git_root = match find_git_root() {
-        Some(root) => root,
-        None => {
-            return ExitCode::from(1);
+    let base = if global {
+        match dirs::home_dir() {
+            Some(home) => home,
+            None => {
+                eprintln!("{}: Could not determine home directory", "Error".red());
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        match find_git_root() {
+            Some(root) => root,
+            None => {
+                return ExitCode::from(1);
+            }
         }
     };
 
-    // Find all installed providers
+    // Find all installed providers in the target scope
     let installed: Vec<&AgentProvider> = ALL_AGENT_PROVIDERS
         .iter()
-        .filter(|p| agent_is_installed(&git_root, p))
+        .filter(|p| agent_is_installed(&base, p, global))
         .collect();
 
     if installed.is_empty() {
@@ -1669,7 +1742,7 @@ fn handle_agent_hook_uninstall(yes: bool) -> ExitCode {
     if !yes {
         println!("{}", "Agent Integration:".bold());
         for p in &installed {
-            let path = agent_rules_path(&git_root, p);
+            let path = agent_rules_path(&base, p, global);
             println!("  {} {} ({})", "✓".green(), p, path.display());
         }
         println!();
@@ -1686,7 +1759,7 @@ fn handle_agent_hook_uninstall(yes: bool) -> ExitCode {
 
     let mut any_removed = false;
     for p in &installed {
-        match uninstall_agent_provider(&git_root, p) {
+        match uninstall_agent_provider(&base, p, global) {
             Ok(_) => {
                 println!("{} Removed {} integration", "✓".green(), p);
                 any_removed = true;

@@ -658,6 +658,10 @@ pub enum HookCommands {
         #[arg(short = 'y', long)]
         yes: bool,
 
+        /// Install globally into user home directory (only with --type agent)
+        #[arg(short = 'g', long)]
+        global: bool,
+
         /// Agent provider (only with --type agent): claude, cursor, windsurf, copilot, cline, codebuddy
         #[arg(long)]
         provider: Option<String>,
@@ -687,6 +691,10 @@ pub enum HookCommands {
         /// Non-interactive mode
         #[arg(short = 'y', long)]
         yes: bool,
+
+        /// Uninstall from user home directory (only with --type agent)
+        #[arg(short = 'g', long)]
+        global: bool,
     },
     /// Show git hook status
     Status,
