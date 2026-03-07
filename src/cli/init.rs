@@ -265,6 +265,7 @@ pub fn handle_init_command(
                 hook_event: HookEvent::PreCommit, // Default to pre-commit hook
                 force,                     // Use force flag from init
                 yes: true,                 // Non-interactive mode
+                global: false,             // Project-level install
                 provider: None,            // No provider specified
                 args: None,               // Use default args (-c -f)
             });
