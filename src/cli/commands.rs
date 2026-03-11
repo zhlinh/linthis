@@ -224,17 +224,20 @@ pub enum AgentFixProvider {
     Droid,
     /// Augment Code Auggie CLI (auggie --print "prompt")
     Auggie,
+    /// CodeBuddy CLI (codebuddy -p "prompt")
+    Codebuddy,
 }
 
 impl std::fmt::Display for AgentFixProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AgentFixProvider::Claude  => write!(f, "Claude Code"),
-            AgentFixProvider::Codex   => write!(f, "Codex"),
-            AgentFixProvider::Gemini  => write!(f, "Gemini"),
-            AgentFixProvider::Cursor  => write!(f, "Cursor"),
-            AgentFixProvider::Droid   => write!(f, "Droid"),
-            AgentFixProvider::Auggie  => write!(f, "Auggie"),
+            AgentFixProvider::Claude    => write!(f, "Claude Code"),
+            AgentFixProvider::Codex     => write!(f, "Codex"),
+            AgentFixProvider::Gemini    => write!(f, "Gemini"),
+            AgentFixProvider::Cursor    => write!(f, "Cursor"),
+            AgentFixProvider::Droid     => write!(f, "Droid"),
+            AgentFixProvider::Auggie    => write!(f, "Auggie"),
+            AgentFixProvider::Codebuddy => write!(f, "CodeBuddy"),
         }
     }
 }
@@ -243,28 +246,31 @@ impl std::fmt::Display for AgentFixProvider {
 #[derive(Clone, Debug, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum AgentProvider {
-    /// Claude Code (.claude/ directory)
+    /// Claude Code (CLAUDE.md / .claude/)
     Claude,
-    /// Cursor (.cursor/ directory)
+    /// OpenAI Codex (AGENTS.md / .codex/)
+    Codex,
+    /// Google Gemini (.gemini/)
+    Gemini,
+    /// Cursor (.cursor/)
     Cursor,
-    /// Windsurf (.windsurf/ directory)
-    Windsurf,
-    /// GitHub Copilot (.github/ directory)
-    Copilot,
-    /// Cline (.clinerules/ directory)
-    Cline,
-    /// CodeBuddy (.codebuddy/ directory)
+    /// Factory Droid (.droid/)
+    Droid,
+    /// Augment Code (.augment/)
+    Auggie,
+    /// CodeBuddy (.codebuddy/)
     Codebuddy,
 }
 
 impl std::fmt::Display for AgentProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AgentProvider::Claude => write!(f, "Claude Code"),
-            AgentProvider::Cursor => write!(f, "Cursor"),
-            AgentProvider::Windsurf => write!(f, "Windsurf"),
-            AgentProvider::Copilot => write!(f, "GitHub Copilot"),
-            AgentProvider::Cline => write!(f, "Cline"),
+            AgentProvider::Claude    => write!(f, "Claude Code"),
+            AgentProvider::Codex     => write!(f, "Codex"),
+            AgentProvider::Gemini    => write!(f, "Gemini"),
+            AgentProvider::Cursor    => write!(f, "Cursor"),
+            AgentProvider::Droid     => write!(f, "Droid"),
+            AgentProvider::Auggie    => write!(f, "Auggie"),
             AgentProvider::Codebuddy => write!(f, "CodeBuddy"),
         }
     }
@@ -698,9 +704,26 @@ pub enum Commands {
 /// Hook subcommands
 #[derive(clap::Subcommand, Debug)]
 pub enum HookCommands {
-    /// Install git hook (pre-commit, pre-push, or commit-msg)
+    /// Install git hooks or AI agent rules
+    ///
+    /// Hook types (--type):
+    ///
+    ///   {git,prek,pre-commit}             Traditional shell hook
+    ///
+    ///   {git,prek,pre-commit}-with-agent  Shell hook + AI auto-fix on failure
+    ///
+    ///   agent                             AI coding agent rules (Claude, Cursor, etc.)
     Install {
         /// Hook tool to use [default: git]
+        ///
+        /// Shell hooks:
+        ///   git, prek, pre-commit
+        ///
+        /// Shell hook + AI auto-fix on failure:
+        ///   git-with-agent, prek-with-agent, pre-commit-with-agent
+        ///
+        /// AI agent rules installation:
+        ///   agent
         #[arg(long = "type", value_name = "TYPE")]
         hook_type: Option<HookTool>,
 
@@ -717,13 +740,19 @@ pub enum HookCommands {
         yes: bool,
 
         /// Install globally:
+        ///
         /// - For --type agent: installs rules into user home directory (~/.claude/, ~/.cursor/, etc.)
+        ///
         /// - For other types: installs hook into ~/.config/git/hooks/ and sets core.hooksPath
         ///   (Strategy B: local hook takes priority; global runs linthis only when local has no linthis)
         #[arg(short = 'g', long)]
         global: bool,
 
-        /// Agent provider (only with --type agent): claude, cursor, windsurf, copilot, cline, codebuddy
+        /// AI provider: claude, codex, gemini, cursor, droid, auggie, codebuddy
+        ///
+        /// For --type agent: installs rules/settings files for the provider
+        ///
+        /// For --type *-with-agent: uses the provider's headless CLI to auto-fix
         #[arg(long)]
         provider: Option<String>,
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-linthis can integrate with AI coding agents (Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, CodeBuddy) to automatically enforce code quality rules during AI-assisted development.
+linthis can integrate with AI coding agents (Claude Code, Codex, Gemini, Cursor, Droid, Auggie, CodeBuddy) to automatically enforce code quality rules during AI-assisted development.
 
 When installed, the agent will run `linthis` checks after modifying code and fix any issues before committing — all without manual intervention.
 
@@ -11,11 +11,12 @@ When installed, the agent will run `linthis` checks after modifying code and fix
 | Agent | Rules File | Detection | Strategy |
 |-------|-----------|-----------|----------|
 | Claude Code | `CLAUDE.md` + `.claude/settings.json` | `.claude/` dir | Append section + Stop Hook |
+| Codex | `AGENTS.md` | `AGENTS.md` or `.codex/` | Append section |
+| Gemini | `.gemini/instructions.md` | `.gemini/` dir | Dedicated file |
 | Cursor | `.cursor/rules/linthis.mdc` | `.cursor/` dir | Dedicated file |
-| Windsurf | `.windsurf/rules/linthis.md` | `.windsurf/` dir | Dedicated file |
-| GitHub Copilot | `.github/copilot-instructions.md` | `.github/` dir | Append section |
-| Cline | `.clinerules/linthis.md` | `.clinerules/` dir | Dedicated file |
-| CodeBuddy | `.codebuddy/rules/linthis.md` + `.codebuddy/settings.json` | `.codebuddy/` dir | Dedicated file |
+| Droid | `.droid/rules/linthis.md` | `.droid/` dir | Dedicated file |
+| Auggie | `.augment/rules/linthis.md` | `.augment/` dir | Dedicated file |
+| CodeBuddy | `.codebuddy/rules/linthis.md` + `.codebuddy/settings.json` | `.codebuddy/` dir | Dedicated file + Stop Hook |
 
 ## Quick Start
 
@@ -25,17 +26,20 @@ When installed, the agent will run `linthis` checks after modifying code and fix
 # Install for Claude Code
 linthis hook install --type agent --provider claude
 
+# Install for Codex
+linthis hook install --type agent --provider codex
+
+# Install for Gemini
+linthis hook install --type agent --provider gemini
+
 # Install for Cursor
 linthis hook install --type agent --provider cursor
 
-# Install for Windsurf
-linthis hook install --type agent --provider windsurf
+# Install for Droid
+linthis hook install --type agent --provider droid
 
-# Install for GitHub Copilot
-linthis hook install --type agent --provider copilot
-
-# Install for Cline
-linthis hook install --type agent --provider cline
+# Install for Auggie
+linthis hook install --type agent --provider auggie
 
 # Install for CodeBuddy
 linthis hook install --type agent --provider codebuddy
@@ -64,17 +68,18 @@ Output:
 Select agent(s) to integrate with linthis:
 
   1. Claude Code  (installed)
-  2. Cursor        (detected)
-  3. Windsurf
-  4. GitHub Copilot (detected)
-  5. Cline
-  6. CodeBuddy
+  2. Codex
+  3. Gemini
+  4. Cursor       (detected)
+  5. Droid
+  6. Auggie
+  7. CodeBuddy
 
-  7. All detected agents
-  8. All agents
-  9. Cancel
+  8. All detected agents
+  9. All agents
+  10. Cancel
 
-Choose (comma-separated for multiple, e.g. 1,2):
+Choose (comma-separated for multiple, e.g. 1,4):
 ```
 
 ### Global Installation
@@ -94,10 +99,11 @@ When `--global` is set, rules are written to user-level locations instead of the
 | Agent | Project-level | Global (`--global`) |
 |-------|--------------|---------------------|
 | Claude Code | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| Codex | `AGENTS.md` | `~/.codex/AGENTS.md` |
+| Gemini | `.gemini/instructions.md` | `~/.gemini/instructions.md` |
 | Cursor | `.cursor/rules/linthis.mdc` | `~/.cursor/rules/linthis.mdc` |
-| Windsurf | `.windsurf/rules/linthis.md` | `~/.windsurf/rules/linthis.md` |
-| GitHub Copilot | `.github/copilot-instructions.md` | *(project-only)* |
-| Cline | `.clinerules/linthis.md` | `~/.clinerules/linthis.md` |
+| Droid | `.droid/rules/linthis.md` | `~/.droid/rules/linthis.md` |
+| Auggie | `.augment/rules/linthis.md` | `~/.augment/rules/linthis.md` |
 | CodeBuddy | `.codebuddy/rules/linthis.md` | `~/.codebuddy/rules/linthis.md` |
 
 ## What Gets Installed
@@ -109,6 +115,24 @@ Two files are created:
 1. **`CLAUDE.md`** — A `## Linthis Agent Rules` section is appended (or the file is created if it doesn't exist)
 2. **`.claude/settings.json`** — A Stop Hook that triggers linthis checks before the agent finishes
 
+### Codex
+
+A `## Linthis Agent Rules` section is appended to:
+
+```
+AGENTS.md
+```
+
+If the file doesn't exist, it is created with a default header.
+
+### Gemini
+
+A dedicated rules file:
+
+```
+.gemini/instructions.md
+```
+
 ### Cursor
 
 A dedicated rules file with YAML frontmatter:
@@ -119,39 +143,28 @@ A dedicated rules file with YAML frontmatter:
 
 The `alwaysApply: true` frontmatter ensures the rules are active for all conversations.
 
-### Windsurf
+### Droid
 
 A dedicated rules file:
 
 ```
-.windsurf/rules/linthis.md
+.droid/rules/linthis.md
 ```
 
-### GitHub Copilot
-
-A `## Linthis Agent Rules` section is appended to:
-
-```
-.github/copilot-instructions.md
-```
-
-If the file doesn't exist, it is created with a default header.
-
-### Cline
+### Auggie
 
 A dedicated rules file:
 
 ```
-.clinerules/linthis.md
+.augment/rules/linthis.md
 ```
 
 ### CodeBuddy
 
-A dedicated rules file:
+Two files are created:
 
-```
-.codebuddy/rules/linthis.md
-```
+1. **`.codebuddy/rules/linthis.md`** — A dedicated rules file
+2. **`.codebuddy/settings.json`** — A Stop Hook that triggers linthis checks before the agent finishes
 
 ## How It Works
 
@@ -195,6 +208,7 @@ linthis hook install --type git-with-agent --provider claude --global
 | `cursor` | `cursor-agent` | `cursor-agent chat '...'` |
 | `droid` | `droid` | `droid exec --auto low '...'` |
 | `auggie` | `auggie` | `auggie --print '...'` |
+| `codebuddy` | `codebuddy` | `codebuddy -p '...'` |
 
 ### Generated Hook Script
 
@@ -224,8 +238,8 @@ exit $LINTHIS_EXIT
 |---------|---------------|----------------------|
 | Hook type | Agent rules file | Git hook (pre-commit) |
 | Trigger | AI agent finishes a task | `git commit` |
-| `--provider` values | `claude`, `cursor`, `windsurf`, `copilot`, `cline`, `codebuddy` | `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie` |
-| What it installs | Rules file + Stop Hook | Shell script in `.git/hooks/` |
+| `--provider` values | `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy` | `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy` |
+| What it installs | Rules file (+ Stop Hook for claude/codebuddy) | Shell script in `.git/hooks/` |
 
 ## Check Status
 
@@ -251,10 +265,11 @@ Global Hooks (~/.config/git/hooks/):
 
 Agent Integration
 ✓ Claude Code (CLAUDE.md)
+✗ Codex (not installed)
+✗ Gemini (not installed)
 ✗ Cursor (not installed)
-✗ Windsurf (not installed)
-✗ GitHub Copilot (not installed)
-✗ Cline (not installed)
+✗ Droid (not installed)
+✗ Auggie (not installed)
 ✗ CodeBuddy (not installed)
 ```
 
@@ -279,17 +294,17 @@ linthis hook uninstall --type agent --global -y
 ```
 
 The uninstall command removes:
-- Linthis sections from `CLAUDE.md` and `.github/copilot-instructions.md`
-- Dedicated rule files (`.cursor/rules/linthis.mdc`, etc.)
+- Linthis sections from `CLAUDE.md` and `AGENTS.md` (append-style files)
+- Dedicated rule files (`.cursor/rules/linthis.mdc`, `.gemini/instructions.md`, etc.)
 - Claude Code Stop Hook (`.claude/settings.json`)
 - CodeBuddy Stop Hook (`.codebuddy/settings.json`)
 - Empty directories created by linthis
 
 ## FAQ
 
-### Q1: Will this overwrite my existing CLAUDE.md or copilot-instructions.md?
+### Q1: Will this overwrite my existing CLAUDE.md or AGENTS.md?
 
-**No.** For append-style files (CLAUDE.md, copilot-instructions.md), linthis only adds a `## Linthis Agent Rules` section. Your existing content is preserved. If the section already exists, it won't be duplicated.
+**No.** For append-style files (`CLAUDE.md`, `AGENTS.md`), linthis only adds a `## Linthis Agent Rules` section. Your existing content is preserved. If the section already exists, it won't be duplicated.
 
 ### Q2: Can I customize the rules?
 
@@ -306,13 +321,14 @@ linthis hook install --type agent --provider cursor
 
 ### Q4: How does detection work?
 
-linthis checks for agent-specific directories in your project root:
+linthis checks for agent-specific directories/files in your project root:
 
 - `.claude/` → Claude Code
+- `AGENTS.md` or `.codex/` → Codex
+- `.gemini/` → Gemini
 - `.cursor/` → Cursor
-- `.windsurf/` → Windsurf
-- `.github/` → GitHub Copilot
-- `.clinerules/` → Cline
+- `.droid/` → Droid
+- `.augment/` → Auggie
 - `.codebuddy/` → CodeBuddy
 
 When using `-y` (auto-install), only detected agents are configured. If no agents are detected, all are installed.
@@ -331,6 +347,6 @@ There are three distinct approaches:
 | Agent rules (global) | `linthis hook install --type agent --provider claude --global` | Same as above, but installed to `~/.claude/CLAUDE.md` — applies to all projects |
 | Git hook with agent fallback | `linthis hook install --type git-with-agent --provider claude` | Installs a git pre-commit hook; if linthis fails, the AI CLI is invoked to fix issues before re-checking |
 
-The `--provider` flag means different things depending on context:
-- In `--type agent`: specifies the **agent platform** to install rules for (`claude`, `cursor`, `windsurf`, `copilot`, `cline`, `codebuddy`)
-- In `--type *-with-agent`: specifies the **AI CLI binary** to invoke for auto-fix (`claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`)
+The `--provider` flag accepts the same set of values for both types (`claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy`), but the implementation differs:
+- In `--type agent`: installs **rules/settings files** so the AI enforces linting during coding sessions
+- In `--type *-with-agent`: invokes the provider's **headless CLI** to auto-fix issues on git hook failure

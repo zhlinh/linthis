@@ -76,7 +76,7 @@ linthis hook install [OPTIONS]
 | `--event` | Hook 事件：`pre-commit`（默认）、`pre-push`、`commit-msg` |
 | `--args` | Hook 脚本中 linthis 命令的额外参数（默认：`-c -f`） |
 | `-g, --global` | 全局安装：agent 类型 → 用户主目录；其他类型 → `~/.config/git/hooks/` + `core.hooksPath` |
-| `--provider` | 用于 `--type agent`：agent 平台（`claude`、`cursor`、`windsurf`、`copilot`、`cline`、`codebuddy`）。用于 `*-with-agent`：AI 修复 CLI（`claude`、`codex`、`gemini`、`cursor`、`droid`、`auggie`） |
+| `--provider` | AI 提供商：`claude`、`codex`、`gemini`、`cursor`、`droid`、`auggie`、`codebuddy`。用于 `--type agent`：安装规则/设置文件。用于 `*-with-agent`：使用无头 CLI 自动修复。 |
 | `--force` | 强制覆盖现有 hook |
 | `-y, --yes` | 非交互模式 |
 
