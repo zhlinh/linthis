@@ -210,15 +210,15 @@ impl HookTool {
 pub enum AgentFixProvider {
     /// Anthropic Claude Code CLI (claude -p "prompt")
     Claude,
-    /// OpenAI Codex CLI (codex "prompt")
+    /// OpenAI Codex CLI (codex exec "prompt")
     Codex,
     /// Google Gemini CLI (gemini -p "prompt")
     Gemini,
-    /// Cursor AI agent CLI (cursor-agent "prompt")
+    /// Cursor AI agent CLI (cursor-agent chat "prompt")
     Cursor,
-    /// Factory Droid CLI (droid "prompt")
+    /// Factory Droid CLI (droid exec --auto low "prompt")
     Droid,
-    /// Augment Code Auggie CLI (aug "prompt")
+    /// Augment Code Auggie CLI (auggie --print "prompt")
     Auggie,
 }
 
