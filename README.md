@@ -573,7 +573,7 @@ All modifications preserve TOML file format and comments.
 | `hook install`   |       | `--type`        | Hook type (git/git-with-agent/agent/prek/prek-with-agent/pre-commit/pre-commit-with-agent)                                                              |
 |                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg)                                                                                                             |
 |                  | `-g`  | `--global`      | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath`                                                        |
-|                  |       | `--provider`    | For `--type agent`: `claude`/`cursor`/`windsurf`/`copilot`/`cline`/`codebuddy`. For `*-with-agent`: `claude`/`codex`/`gemini`/`cursor`/`droid`/`auggie` |
+|                  |       | `--provider`    | AI provider: `claude`/`codex`/`gemini`/`cursor`/`droid`/`auggie`/`codebuddy`. For `--type agent`: installs rules files. For `*-with-agent`: uses headless CLI to auto-fix. |
 |                  | `-c`  | `--check-only`  | Hook only runs check                                                                                                                                    |
 |                  | `-f`  | `--format-only` | Hook only runs format                                                                                                                                   |
 |                  |       | `--force`       | Force overwrite existing hook                                                                                                                           |

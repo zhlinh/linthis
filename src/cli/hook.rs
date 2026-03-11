@@ -89,14 +89,15 @@ fn handle_hook_install(
         // Parse provider as AgentProvider if given
         let agent_provider = provider.as_deref().and_then(|p| {
             match p.to_lowercase().as_str() {
-                "claude" => Some(AgentProvider::Claude),
-                "cursor" => Some(AgentProvider::Cursor),
-                "windsurf" => Some(AgentProvider::Windsurf),
-                "copilot" => Some(AgentProvider::Copilot),
-                "cline" => Some(AgentProvider::Cline),
+                "claude"    => Some(AgentProvider::Claude),
+                "codex"     => Some(AgentProvider::Codex),
+                "gemini"    => Some(AgentProvider::Gemini),
+                "cursor"    => Some(AgentProvider::Cursor),
+                "droid"     => Some(AgentProvider::Droid),
+                "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
                 "codebuddy" => Some(AgentProvider::Codebuddy),
                 _ => {
-                    eprintln!("{}: Unknown agent provider '{}'. Valid options: claude, cursor, windsurf, copilot, cline, codebuddy", "Error".red(), p);
+                    eprintln!("{}: Unknown agent provider '{}'. Valid options: claude, codex, gemini, cursor, droid, auggie, codebuddy", "Error".red(), p);
                     None
                 }
             }
@@ -1308,40 +1309,44 @@ const ALL_AGENT_FIX_PROVIDERS: &[AgentFixProvider] = &[
     AgentFixProvider::Cursor,
     AgentFixProvider::Droid,
     AgentFixProvider::Auggie,
+    AgentFixProvider::Codebuddy,
 ];
 
 /// Return the binary name used to invoke the agent CLI headlessly.
 /// Used for PATH detection via `which`.
 fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
     match provider {
-        AgentFixProvider::Claude  => "claude",
-        AgentFixProvider::Codex   => "codex",
-        AgentFixProvider::Gemini  => "gemini",
-        AgentFixProvider::Cursor  => "cursor-agent",
-        AgentFixProvider::Droid   => "droid",
-        AgentFixProvider::Auggie  => "auggie",
+        AgentFixProvider::Claude    => "claude",
+        AgentFixProvider::Codex     => "codex",
+        AgentFixProvider::Gemini    => "gemini",
+        AgentFixProvider::Cursor    => "cursor-agent",
+        AgentFixProvider::Droid     => "droid",
+        AgentFixProvider::Auggie    => "auggie",
+        AgentFixProvider::Codebuddy => "codebuddy",
     }
 }
 
 /// Build the headless shell command that invokes the agent with a prompt.
 ///
 /// Commands confirmed from official docs:
-/// - Claude:  `claude -p '...'`          (claude -p / --print)
-/// - Codex:   `codex exec '...'`         (codex exec subcommand for non-interactive)
-/// - Gemini:  `gemini -p '...'`          (gemini -p / --prompt)
-/// - Cursor:  `cursor-agent chat '...'`  (cursor-agent chat subcommand)
-/// - Droid:   `droid exec --auto low '...'` (droid exec with --auto for edits)
-/// - Auggie:  `auggie --print '...'`     (auggie --print for headless/non-interactive)
+/// - Claude:    `claude -p '...'`             (claude -p / --print)
+/// - Codex:     `codex exec '...'`            (codex exec subcommand for non-interactive)
+/// - Gemini:    `gemini -p '...'`             (gemini -p / --prompt)
+/// - Cursor:    `cursor-agent chat '...'`     (cursor-agent chat subcommand)
+/// - Droid:     `droid exec --auto low '...'` (droid exec with --auto for edits)
+/// - Auggie:    `auggie --print '...'`        (auggie --print for headless/non-interactive)
+/// - Codebuddy: `codebuddy -p '...'`         (codebuddy -p / --prompt)
 fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str) -> String {
     // Escape single quotes in prompt for shell safety
     let escaped = prompt.replace('\'', "'\\''");
     match provider {
-        AgentFixProvider::Claude  => format!("claude -p '{}'", escaped),
-        AgentFixProvider::Codex   => format!("codex exec '{}'", escaped),
-        AgentFixProvider::Gemini  => format!("gemini -p '{}'", escaped),
-        AgentFixProvider::Cursor  => format!("cursor-agent chat '{}'", escaped),
-        AgentFixProvider::Droid   => format!("droid exec --auto low '{}'", escaped),
-        AgentFixProvider::Auggie  => format!("auggie --print '{}'", escaped),
+        AgentFixProvider::Claude    => format!("claude -p '{}'", escaped),
+        AgentFixProvider::Codex     => format!("codex exec '{}'", escaped),
+        AgentFixProvider::Gemini    => format!("gemini -p '{}'", escaped),
+        AgentFixProvider::Cursor    => format!("cursor-agent chat '{}'", escaped),
+        AgentFixProvider::Droid     => format!("droid exec --auto low '{}'", escaped),
+        AgentFixProvider::Auggie    => format!("auggie --print '{}'", escaped),
+        AgentFixProvider::Codebuddy => format!("codebuddy -p '{}'", escaped),
     }
 }
 
@@ -1364,12 +1369,13 @@ fn resolve_agent_fix_provider(
 ) -> Result<AgentFixProvider, ExitCode> {
     if let Some(p) = provider {
         let parsed = match p.to_lowercase().as_str() {
-            "claude"        => Some(AgentFixProvider::Claude),
-            "codex"         => Some(AgentFixProvider::Codex),
-            "gemini"        => Some(AgentFixProvider::Gemini),
-            "cursor"        => Some(AgentFixProvider::Cursor),
-            "droid"         => Some(AgentFixProvider::Droid),
-            "auggie" | "aug" => Some(AgentFixProvider::Auggie),
+            "claude"             => Some(AgentFixProvider::Claude),
+            "codex"              => Some(AgentFixProvider::Codex),
+            "gemini"             => Some(AgentFixProvider::Gemini),
+            "cursor"             => Some(AgentFixProvider::Cursor),
+            "droid"              => Some(AgentFixProvider::Droid),
+            "auggie" | "aug" | "augment" => Some(AgentFixProvider::Auggie),
+            "codebuddy"          => Some(AgentFixProvider::Codebuddy),
             _ => None,
         };
         return parsed.ok_or_else(|| {
@@ -1600,10 +1606,11 @@ fn handle_precommit_with_agent_install(
 /// All supported agent providers (in display order)
 const ALL_AGENT_PROVIDERS: &[AgentProvider] = &[
     AgentProvider::Claude,
+    AgentProvider::Codex,
+    AgentProvider::Gemini,
     AgentProvider::Cursor,
-    AgentProvider::Windsurf,
-    AgentProvider::Copilot,
-    AgentProvider::Cline,
+    AgentProvider::Droid,
+    AgentProvider::Auggie,
     AgentProvider::Codebuddy,
 ];
 
@@ -1645,6 +1652,16 @@ fn agent_content_claude_md() -> String {
     format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rules_body())
 }
 
+/// Content for Codex AGENTS.md (append section)
+fn agent_content_codex_md() -> String {
+    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rules_body())
+}
+
+/// Content for Gemini .gemini/instructions.md (dedicated file)
+fn agent_content_gemini_md() -> String {
+    format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
+}
+
 /// Content for Cursor .cursor/rules/linthis.mdc (dedicated file with YAML frontmatter)
 fn agent_content_cursor_mdc() -> String {
     format!(
@@ -1661,18 +1678,13 @@ alwaysApply: true
     )
 }
 
-/// Content for Windsurf .windsurf/rules/linthis.md (dedicated file)
-fn agent_content_windsurf_md() -> String {
+/// Content for Droid .droid/rules/linthis.md (dedicated file)
+fn agent_content_droid_md() -> String {
     format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
 }
 
-/// Content for GitHub Copilot .github/copilot-instructions.md (append section)
-fn agent_content_copilot_md() -> String {
-    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rules_body())
-}
-
-/// Content for Cline .clinerules/linthis.md (dedicated file)
-fn agent_content_cline_md() -> String {
+/// Content for Auggie .augment/rules/linthis.md (dedicated file)
+fn agent_content_auggie_md() -> String {
     format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
 }
 
@@ -1714,10 +1726,17 @@ fn agent_rules_path(base: &std::path::Path, provider: &AgentProvider, global: bo
                 base.join("CLAUDE.md")
             }
         }
-        AgentProvider::Cursor => base.join(".cursor/rules/linthis.mdc"),
-        AgentProvider::Windsurf => base.join(".windsurf/rules/linthis.md"),
-        AgentProvider::Copilot => base.join(".github/copilot-instructions.md"),
-        AgentProvider::Cline => base.join(".clinerules/linthis.md"),
+        AgentProvider::Codex => {
+            if global {
+                base.join(".codex/AGENTS.md")
+            } else {
+                base.join("AGENTS.md")
+            }
+        }
+        AgentProvider::Gemini   => base.join(".gemini/instructions.md"),
+        AgentProvider::Cursor   => base.join(".cursor/rules/linthis.mdc"),
+        AgentProvider::Droid    => base.join(".droid/rules/linthis.md"),
+        AgentProvider::Auggie   => base.join(".augment/rules/linthis.md"),
         AgentProvider::Codebuddy => base.join(".codebuddy/rules/linthis.md"),
     }
 }
@@ -1769,7 +1788,7 @@ fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, 
     if let Ok(content) = std::fs::read_to_string(&path) {
         match provider {
             // Append-style: extract the linthis section
-            AgentProvider::Claude | AgentProvider::Copilot => {
+            AgentProvider::Claude | AgentProvider::Codex => {
                 if let Some(start) = content.find(AGENT_SECTION_MARKER) {
                     let section = &content[start..];
                     println!("       {}:", "Content".dimmed());
@@ -1794,16 +1813,17 @@ fn agent_is_installed(base: &std::path::Path, provider: &AgentProvider, global: 
     let path = agent_rules_path(base, provider, global);
     match provider {
         // Append-style: check for section marker in file
-        AgentProvider::Claude | AgentProvider::Copilot => {
+        AgentProvider::Claude | AgentProvider::Codex => {
             path.exists()
                 && std::fs::read_to_string(&path)
                     .map(|c| c.contains(AGENT_SECTION_MARKER))
                     .unwrap_or(false)
         }
         // Dedicated file: check if file exists and contains linthis
-        AgentProvider::Cursor
-        | AgentProvider::Windsurf
-        | AgentProvider::Cline
+        AgentProvider::Gemini
+        | AgentProvider::Cursor
+        | AgentProvider::Droid
+        | AgentProvider::Auggie
         | AgentProvider::Codebuddy => {
             path.exists()
                 && std::fs::read_to_string(&path)
@@ -1822,17 +1842,20 @@ fn detect_agent_providers(base: &std::path::Path) -> Vec<AgentProvider> {
     if base.join(".claude").exists() {
         detected.push(AgentProvider::Claude);
     }
+    if base.join("AGENTS.md").exists() || base.join(".codex").exists() {
+        detected.push(AgentProvider::Codex);
+    }
+    if base.join(".gemini").exists() {
+        detected.push(AgentProvider::Gemini);
+    }
     if base.join(".cursor").exists() {
         detected.push(AgentProvider::Cursor);
     }
-    if base.join(".windsurf").exists() {
-        detected.push(AgentProvider::Windsurf);
+    if base.join(".droid").exists() {
+        detected.push(AgentProvider::Droid);
     }
-    if base.join(".github").exists() {
-        detected.push(AgentProvider::Copilot);
-    }
-    if base.join(".clinerules").exists() {
-        detected.push(AgentProvider::Cline);
+    if base.join(".augment").exists() {
+        detected.push(AgentProvider::Auggie);
     }
     if base.join(".codebuddy").exists() {
         detected.push(AgentProvider::Codebuddy);
@@ -1850,19 +1873,21 @@ pub fn detect_agent_providers_lightweight() -> Vec<(&'static str, bool)> {
         .iter()
         .map(|p| {
             let name = match p {
-                AgentProvider::Claude => "Claude Code",
-                AgentProvider::Cursor => "Cursor",
-                AgentProvider::Windsurf => "Windsurf",
-                AgentProvider::Copilot => "GitHub Copilot",
-                AgentProvider::Cline => "Cline",
+                AgentProvider::Claude    => "Claude Code",
+                AgentProvider::Codex     => "Codex",
+                AgentProvider::Gemini    => "Gemini",
+                AgentProvider::Cursor    => "Cursor",
+                AgentProvider::Droid     => "Droid",
+                AgentProvider::Auggie    => "Auggie",
                 AgentProvider::Codebuddy => "CodeBuddy",
             };
             let dir = match p {
-                AgentProvider::Claude => ".claude",
-                AgentProvider::Cursor => ".cursor",
-                AgentProvider::Windsurf => ".windsurf",
-                AgentProvider::Copilot => ".github",
-                AgentProvider::Cline => ".clinerules",
+                AgentProvider::Claude    => ".claude",
+                AgentProvider::Codex     => "AGENTS.md",
+                AgentProvider::Gemini    => ".gemini",
+                AgentProvider::Cursor    => ".cursor",
+                AgentProvider::Droid     => ".droid",
+                AgentProvider::Auggie    => ".augment",
                 AgentProvider::Codebuddy => ".codebuddy",
             };
             (name, root.join(dir).exists())
@@ -1961,17 +1986,21 @@ fn install_agent_provider(base: &std::path::Path, provider: &AgentProvider, glob
                 install_agent_stop_hook(base, &settings_path)?;
             }
         }
+        AgentProvider::Codex => {
+            // Install AGENTS.md rules (append)
+            install_agent_append_rules(&rules_path, &agent_content_codex_md(), "# Agent Instructions\n")?;
+        }
+        AgentProvider::Gemini => {
+            install_agent_dedicated_file(&rules_path, &agent_content_gemini_md())?;
+        }
         AgentProvider::Cursor => {
             install_agent_dedicated_file(&rules_path, &agent_content_cursor_mdc())?;
         }
-        AgentProvider::Windsurf => {
-            install_agent_dedicated_file(&rules_path, &agent_content_windsurf_md())?;
+        AgentProvider::Droid => {
+            install_agent_dedicated_file(&rules_path, &agent_content_droid_md())?;
         }
-        AgentProvider::Copilot => {
-            install_agent_append_rules(&rules_path, &agent_content_copilot_md(), "# Copilot Instructions\n")?;
-        }
-        AgentProvider::Cline => {
-            install_agent_dedicated_file(&rules_path, &agent_content_cline_md())?;
+        AgentProvider::Auggie => {
+            install_agent_dedicated_file(&rules_path, &agent_content_auggie_md())?;
         }
         AgentProvider::Codebuddy => {
             install_agent_dedicated_file(&rules_path, &agent_content_codebuddy_md())?;
@@ -1989,9 +2018,9 @@ fn install_agent_provider(base: &std::path::Path, provider: &AgentProvider, glob
 fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, global: bool) -> Result<(), String> {
     match provider {
         AgentProvider::Claude => {
-            let claude_md = agent_rules_path(base, provider, global);
-            if claude_md.exists() {
-                remove_agent_section_from_file(&claude_md)?;
+            let rules_md = agent_rules_path(base, provider, global);
+            if rules_md.exists() {
+                remove_agent_section_from_file(&rules_md)?;
             }
             if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
                 if settings_path.exists() {
@@ -1999,15 +2028,16 @@ fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, gl
                 }
             }
         }
-        AgentProvider::Copilot => {
-            let copilot_md = agent_rules_path(base, provider, global);
-            if copilot_md.exists() {
-                remove_agent_section_from_file(&copilot_md)?;
+        AgentProvider::Codex => {
+            let agents_md = agent_rules_path(base, provider, global);
+            if agents_md.exists() {
+                remove_agent_section_from_file(&agents_md)?;
             }
         }
-        AgentProvider::Cursor
-        | AgentProvider::Windsurf
-        | AgentProvider::Cline => {
+        AgentProvider::Gemini
+        | AgentProvider::Cursor
+        | AgentProvider::Droid
+        | AgentProvider::Auggie => {
             let path = agent_rules_path(base, provider, global);
             remove_agent_dedicated_file(&path)?;
         }
