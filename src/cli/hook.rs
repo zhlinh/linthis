@@ -942,7 +942,8 @@ const ALL_AGENT_FIX_PROVIDERS: &[AgentFixProvider] = &[
     AgentFixProvider::Auggie,
 ];
 
-/// Return the binary name used to invoke the agent CLI headlessly
+/// Return the binary name used to invoke the agent CLI headlessly.
+/// Used for PATH detection via `which`.
 fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
     match provider {
         AgentFixProvider::Claude  => "claude",
@@ -950,25 +951,29 @@ fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
         AgentFixProvider::Gemini  => "gemini",
         AgentFixProvider::Cursor  => "cursor-agent",
         AgentFixProvider::Droid   => "droid",
-        AgentFixProvider::Auggie  => "aug",
+        AgentFixProvider::Auggie  => "auggie",
     }
 }
 
 /// Build the headless shell command that invokes the agent with a prompt.
-/// The prompt is embedded as a single-quoted string in the script.
+///
+/// Commands confirmed from official docs:
+/// - Claude:  `claude -p '...'`          (claude -p / --print)
+/// - Codex:   `codex exec '...'`         (codex exec subcommand for non-interactive)
+/// - Gemini:  `gemini -p '...'`          (gemini -p / --prompt)
+/// - Cursor:  `cursor-agent chat '...'`  (cursor-agent chat subcommand)
+/// - Droid:   `droid exec --auto low '...'` (droid exec with --auto for edits)
+/// - Auggie:  `auggie --print '...'`     (auggie --print for headless/non-interactive)
 fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str) -> String {
     // Escape single quotes in prompt for shell safety
     let escaped = prompt.replace('\'', "'\\''");
     match provider {
         AgentFixProvider::Claude  => format!("claude -p '{}'", escaped),
-        AgentFixProvider::Codex   => format!("codex '{}'", escaped),
+        AgentFixProvider::Codex   => format!("codex exec '{}'", escaped),
         AgentFixProvider::Gemini  => format!("gemini -p '{}'", escaped),
-        // TODO: confirm cursor-agent headless flag
-        AgentFixProvider::Cursor  => format!("cursor-agent '{}'", escaped),
-        // TODO: confirm droid headless flag
-        AgentFixProvider::Droid   => format!("droid '{}'", escaped),
-        // TODO: confirm aug headless flag
-        AgentFixProvider::Auggie  => format!("aug '{}'", escaped),
+        AgentFixProvider::Cursor  => format!("cursor-agent chat '{}'", escaped),
+        AgentFixProvider::Droid   => format!("droid exec --auto low '{}'", escaped),
+        AgentFixProvider::Auggie  => format!("auggie --print '{}'", escaped),
     }
 }
 
