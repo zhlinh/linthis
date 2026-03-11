@@ -621,7 +621,7 @@ fn main() -> ExitCode {
     let path_options = PathCollectionOptions {
         staged: cli.staged,
         since: cli.since.clone(),
-        uncommitted: cli.uncommitted,
+        modified: cli.modified,
         no_default_excludes: cli.no_default_excludes,
         no_gitignore: cli.no_gitignore,
         exclude: cli.exclude.clone().unwrap_or_default(),

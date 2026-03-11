@@ -17,6 +17,7 @@ linthis [OPTIONS] [COMMAND]
 | `-c` | `--check-only` | Check only, no formatting | `-c` |
 | `-f` | `--format-only` | Format only, no checking | `-f` |
 | `-s` | `--staged` | Check Git staged files only | `-s` |
+| `-m` | `--modified` | Check all locally modified files (staged + unstaged) | `-m` |
 | `-l` | `--lang` | Languages (comma-separated) | `-l python,rust` |
 | `-o` | `--output` | Output format | `-o json` |
 | `-v` | `--verbose` | Verbose output | `-v` |
