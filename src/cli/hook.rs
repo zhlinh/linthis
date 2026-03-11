@@ -17,7 +17,7 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use super::commands::{AgentProvider, HookCommands, HookEvent, HookTool};
+use super::commands::{AgentFixProvider, AgentProvider, HookCommands, HookEvent, HookTool};
 
 /// Helper module for getting home directory (cross-platform, no external crate)
 mod dirs {
@@ -67,6 +67,22 @@ fn handle_hook_install(
     args: Option<String>,
 ) -> ExitCode {
     use std::io::{self, Write};
+
+    // *-with-agent types: install base hook + agent fix fallback
+    if hook_type.as_ref().map(|t| t.has_agent_fix()).unwrap_or(false) {
+        let fix_provider = match resolve_agent_fix_provider(provider.as_deref(), yes) {
+            Ok(p)  => p,
+            Err(e) => return e,
+        };
+        let base = hook_type.as_ref().unwrap().base_tool().clone();
+        return match &base {
+            HookTool::Git => handle_git_with_agent_install(&hook_event, force, &fix_provider, &args),
+            HookTool::Prek | HookTool::PreCommit => {
+                handle_precommit_with_agent_install(&base, &hook_event, force, &fix_provider, &args)
+            }
+            _ => ExitCode::from(1),
+        };
+    }
 
     // Agent type has its own installation flow
     if matches!(hook_type, Some(HookTool::Agent)) {
@@ -598,7 +614,10 @@ fn install_hooks(tool: &HookTool, hook_event: &HookEvent) -> Result<(), String> 
     let (cmd, tool_name) = match tool {
         HookTool::Prek => ("prek", "prek"),
         HookTool::PreCommit => ("pre-commit", "pre-commit"),
-        HookTool::Git | HookTool::Agent => return Ok(()), // Git/Agent hooks don't need install step
+        HookTool::Git | HookTool::Agent
+        | HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent => {
+            return Ok(()) // handled separately
+        }
     };
 
     let hook_type_arg = hook_event.hook_filename();
@@ -647,8 +666,9 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
     let hook_filename = hook_event.hook_filename();
 
     match tool {
-        HookTool::Agent => {
-            // Agent hooks are handled separately in handle_agent_hook_install
+        HookTool::Agent
+        | HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent => {
+            // Handled separately before create_hook_config is called
             return Ok(());
         }
         HookTool::Prek | HookTool::PreCommit => {
@@ -905,6 +925,298 @@ fn hook_action(hook_event: &HookEvent) -> &'static str {
         HookEvent::PreCommit => "commit",
         HookEvent::PrePush => "push",
         HookEvent::CommitMsg => "commit",
+    }
+}
+
+// =============================================================================
+// Agent Fix Provider (--type *-with-agent) helpers
+// =============================================================================
+
+/// All AgentFixProvider variants in detection-priority order
+const ALL_AGENT_FIX_PROVIDERS: &[AgentFixProvider] = &[
+    AgentFixProvider::Claude,
+    AgentFixProvider::Codex,
+    AgentFixProvider::Gemini,
+    AgentFixProvider::Cursor,
+    AgentFixProvider::Droid,
+    AgentFixProvider::Auggie,
+];
+
+/// Return the binary name used to invoke the agent CLI headlessly
+fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
+    match provider {
+        AgentFixProvider::Claude  => "claude",
+        AgentFixProvider::Codex   => "codex",
+        AgentFixProvider::Gemini  => "gemini",
+        AgentFixProvider::Cursor  => "cursor-agent",
+        AgentFixProvider::Droid   => "droid",
+        AgentFixProvider::Auggie  => "aug",
+    }
+}
+
+/// Build the headless shell command that invokes the agent with a prompt.
+/// The prompt is embedded as a single-quoted string in the script.
+fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str) -> String {
+    // Escape single quotes in prompt for shell safety
+    let escaped = prompt.replace('\'', "'\\''");
+    match provider {
+        AgentFixProvider::Claude  => format!("claude -p '{}'", escaped),
+        AgentFixProvider::Codex   => format!("codex '{}'", escaped),
+        AgentFixProvider::Gemini  => format!("gemini -p '{}'", escaped),
+        // TODO: confirm cursor-agent headless flag
+        AgentFixProvider::Cursor  => format!("cursor-agent '{}'", escaped),
+        // TODO: confirm droid headless flag
+        AgentFixProvider::Droid   => format!("droid '{}'", escaped),
+        // TODO: confirm aug headless flag
+        AgentFixProvider::Auggie  => format!("aug '{}'", escaped),
+    }
+}
+
+/// Detect which AgentFixProvider CLIs are available in PATH
+fn detect_agent_fix_providers() -> Vec<AgentFixProvider> {
+    ALL_AGENT_FIX_PROVIDERS
+        .iter()
+        .filter(|p| is_command_available(agent_fix_bin(p)))
+        .cloned()
+        .collect()
+}
+
+/// Resolve AgentFixProvider from an optional --provider string.
+/// - If specified: parse and validate.
+/// - If not specified + yes: auto-detect first available CLI.
+/// - If not specified + interactive: show selection menu.
+fn resolve_agent_fix_provider(
+    provider: Option<&str>,
+    yes: bool,
+) -> Result<AgentFixProvider, ExitCode> {
+    if let Some(p) = provider {
+        let parsed = match p.to_lowercase().as_str() {
+            "claude"        => Some(AgentFixProvider::Claude),
+            "codex"         => Some(AgentFixProvider::Codex),
+            "gemini"        => Some(AgentFixProvider::Gemini),
+            "cursor"        => Some(AgentFixProvider::Cursor),
+            "droid"         => Some(AgentFixProvider::Droid),
+            "auggie" | "aug" => Some(AgentFixProvider::Auggie),
+            _ => None,
+        };
+        return parsed.ok_or_else(|| {
+            eprintln!(
+                "{}: Unknown agent fix provider '{}'. Valid: claude, codex, gemini, cursor, droid, auggie",
+                "Error".red(), p
+            );
+            ExitCode::from(1)
+        });
+    }
+
+    let detected = detect_agent_fix_providers();
+
+    if yes {
+        // Auto-detect: use first available, default to claude
+        return Ok(detected.into_iter().next().unwrap_or(AgentFixProvider::Claude));
+    }
+
+    // Interactive menu
+    use std::io::{self, Write};
+
+    println!("{}", "Select AI agent for automatic fix:".bold());
+    println!();
+
+    for (i, p) in ALL_AGENT_FIX_PROVIDERS.iter().enumerate() {
+        let available = is_command_available(agent_fix_bin(p));
+        let tag = if available {
+            format!(" {}", "(detected)".cyan())
+        } else {
+            String::new()
+        };
+        println!("  {}. {}{}", i + 1, p, tag);
+    }
+    println!();
+    print!("Choose [1-{}]: ", ALL_AGENT_FIX_PROVIDERS.len());
+    io::stdout().flush().unwrap();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).ok();
+    let n: usize = input.trim().parse().unwrap_or(0);
+
+    if n >= 1 && n <= ALL_AGENT_FIX_PROVIDERS.len() {
+        Ok(ALL_AGENT_FIX_PROVIDERS[n - 1].clone())
+    } else {
+        println!("Installation cancelled");
+        Err(ExitCode::SUCCESS)
+    }
+}
+
+/// Build the full git hook shell script with agent fix fallback.
+fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixProvider) -> String {
+    let prompt = format!(
+        "Staged files have linthis lint errors. \
+         Run 'linthis -s -c' to inspect them. \
+         Fix all issues by editing the files directly (do NOT use linthis --fix). \
+         Verify with 'linthis -s -c' until it passes cleanly."
+    );
+    let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt);
+    format!(
+        "#!/bin/sh\n\
+         \n\
+         LINTHIS_CMD=\"{linthis}\"\n\
+         \n\
+         $LINTHIS_CMD\n\
+         LINTHIS_EXIT=$?\n\
+         \n\
+         if [ $LINTHIS_EXIT -ne 0 ]; then\n\
+         \x20 echo \"[linthis] Lint errors detected. Invoking {provider} to fix...\"\n\
+         \x20 {agent}\n\
+         \x20 # Re-verify after agent fix\n\
+         \x20 $LINTHIS_CMD\n\
+         \x20 LINTHIS_EXIT=$?\n\
+         fi\n\
+         \n\
+         exit $LINTHIS_EXIT\n",
+        linthis = linthis_cmd,
+        provider = fix_provider,
+        agent = agent_cmd,
+    )
+}
+
+/// Install a git hook with agent fix fallback
+fn handle_git_with_agent_install(
+    hook_event: &HookEvent,
+    force: bool,
+    fix_provider: &AgentFixProvider,
+    args: &Option<String>,
+) -> ExitCode {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => {
+            eprintln!("{}: Not in a git repository", "Error".red());
+            return ExitCode::from(1);
+        }
+    };
+
+    let hook_filename = hook_event.hook_filename();
+    let hook_path = git_root.join(".git/hooks").join(hook_filename);
+    let linthis_cmd = build_hook_command(hook_event, args);
+    let content = build_git_with_agent_hook_script(&linthis_cmd, fix_provider);
+
+    if hook_path.exists() && !force {
+        eprintln!(
+            "{}: {} already exists. Use --force to overwrite.",
+            "Warning".yellow(),
+            hook_path.display()
+        );
+        return ExitCode::from(1);
+    }
+
+    if let Some(parent) = hook_path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            eprintln!("{}: Failed to create hooks directory: {}", "Error".red(), e);
+            return ExitCode::from(2);
+        }
+    }
+
+    match fs::write(&hook_path, &content) {
+        Ok(_) => {
+            #[cfg(unix)]
+            {
+                if let Ok(meta) = fs::metadata(&hook_path) {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o755);
+                    let _ = fs::set_permissions(&hook_path, perms);
+                }
+            }
+            println!("{} Created {} (git-with-agent, {})", "✓".green(), hook_path.display(), fix_provider);
+            println!("  {} On lint failure: {}", "→".dimmed(), agent_fix_bin(fix_provider).cyan());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{}: Failed to create {}: {}", "Error".red(), hook_path.display(), e);
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// Install prek/pre-commit config + a wrapper git hook with agent fix fallback
+fn handle_precommit_with_agent_install(
+    base_tool: &HookTool,
+    hook_event: &HookEvent,
+    force: bool,
+    fix_provider: &AgentFixProvider,
+    args: &Option<String>,
+) -> ExitCode {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    // 1. Install the base prek/pre-commit config
+    if let Err(exit) = create_hook_config(base_tool, hook_event, force, args) {
+        return exit;
+    }
+
+    // 2. Wrap with a git hook script that calls prek/pre-commit and
+    //    invokes the agent on failure
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => return ExitCode::from(1),
+    };
+
+    let tool_cmd = match base_tool {
+        HookTool::Prek       => "prek run",
+        HookTool::PreCommit  => "pre-commit run --all-files",
+        _ => return ExitCode::from(1),
+    };
+
+    let prompt = format!(
+        "The {tool} pre-commit check failed with lint errors. \
+         Run '{tool_cmd}' to see them. Fix all issues by editing the files directly. \
+         Verify by running '{tool_cmd}' again until it passes.",
+        tool = fix_provider,
+        tool_cmd = tool_cmd,
+    );
+    let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt);
+    let wrapper = format!(
+        "#!/bin/sh\n\
+         \n\
+         {tool_cmd}\n\
+         EXIT=$?\n\
+         \n\
+         if [ $EXIT -ne 0 ]; then\n\
+         \x20 echo \"[linthis] Errors detected. Invoking {provider} to fix...\"\n\
+         \x20 {agent}\n\
+         \x20 {tool_cmd}\n\
+         \x20 EXIT=$?\n\
+         fi\n\
+         \n\
+         exit $EXIT\n",
+        tool_cmd = tool_cmd,
+        provider = fix_provider,
+        agent = agent_cmd,
+    );
+
+    let hook_filename = hook_event.hook_filename();
+    let hook_path = git_root.join(".git/hooks").join(hook_filename);
+
+    match fs::write(&hook_path, &wrapper) {
+        Ok(_) => {
+            #[cfg(unix)]
+            {
+                if let Ok(meta) = fs::metadata(&hook_path) {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o755);
+                    let _ = fs::set_permissions(&hook_path, perms);
+                }
+            }
+            println!("{} Created wrapper {} ({}-with-agent, {})", "✓".green(), hook_path.display(), match base_tool { HookTool::Prek => "prek", _ => "pre-commit" }, fix_provider);
+            println!("  {} On failure: {}", "→".dimmed(), agent_fix_bin(fix_provider).cyan());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{}: Failed to create wrapper hook: {}", "Error".red(), e);
+            ExitCode::from(2)
+        }
     }
 }
 
