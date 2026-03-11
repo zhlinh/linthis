@@ -712,7 +712,10 @@ pub enum HookCommands {
         #[arg(short = 'y', long)]
         yes: bool,
 
-        /// Install globally into user home directory (only with --type agent)
+        /// Install globally:
+        /// - For --type agent: installs rules into user home directory (~/.claude/, ~/.cursor/, etc.)
+        /// - For other types: installs hook into ~/.config/git/hooks/ and sets core.hooksPath
+        ///   (Strategy B: local hook takes priority; global runs linthis only when local has no linthis)
         #[arg(short = 'g', long)]
         global: bool,
 
@@ -746,7 +749,9 @@ pub enum HookCommands {
         #[arg(short = 'y', long)]
         yes: bool,
 
-        /// Uninstall from user home directory (only with --type agent)
+        /// Uninstall from global location:
+        /// - For --type agent: removes rules from user home directory
+        /// - For other types: removes hook from ~/.config/git/hooks/ and unsets core.hooksPath if empty
         #[arg(short = 'g', long)]
         global: bool,
     },

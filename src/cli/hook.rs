@@ -42,7 +42,7 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             if matches!(hook_type, Some(HookTool::Agent)) {
                 return handle_agent_hook_uninstall(yes, global);
             }
-            handle_hook_uninstall(hook_event, all, yes)
+            handle_hook_uninstall(hook_event, all, yes, global)
         }
         HookCommands::Status => {
             handle_hook_status()
@@ -108,10 +108,9 @@ fn handle_hook_install(
         return handle_agent_hook_install(agent_provider, force, yes, global);
     }
 
-    // --global is only valid with --type agent
+    // Global non-agent hook: install into ~/.config/git/hooks
     if global {
-        eprintln!("{}: --global / -g is only supported with --type agent", "Error".red());
-        return ExitCode::from(1);
+        return handle_global_hook_install(hook_type, &hook_event, force, yes, &args);
     }
 
     // Find git root
@@ -226,6 +225,328 @@ fn handle_hook_install_impl(
     ExitCode::SUCCESS
 }
 
+// =============================================================================
+// Global hook installation (git config --global core.hooksPath)
+// =============================================================================
+
+/// Global hooks directory (XDG standard).
+fn global_hooks_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(".config/git/hooks"))
+}
+
+/// Build the global hook script with the hook event name substituted.
+fn build_global_hook_script_for_event(
+    hook_event: &HookEvent,
+    args: &Option<String>,
+    fix_provider: Option<&AgentFixProvider>,
+) -> String {
+    let linthis_cmd = build_hook_command(hook_event, args);
+    let fix_block = match fix_provider {
+        None => String::new(),
+        Some(p) => {
+            let prompt = format!(
+                "Staged files have linthis lint errors. \
+                 Run 'linthis -s -c' to inspect them. \
+                 Fix all issues by editing the files directly (do NOT use linthis --fix). \
+                 Verify with 'linthis -s -c' until it passes cleanly."
+            );
+            let agent_cmd = agent_fix_headless_cmd(p, &prompt);
+            format!(
+                "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
+                 \x20\x20\x20 echo \"[linthis] Lint errors detected. Invoking {provider} to fix...\"\n\
+                 \x20\x20\x20 {agent}\n\
+                 \x20\x20\x20 $LINTHIS_CMD\n\
+                 \x20\x20\x20 LINTHIS_EXIT=$?\n\
+                 \x20 fi\n",
+                provider = p,
+                agent = agent_cmd,
+            )
+        }
+    };
+    let fix_block_direct = match fix_provider {
+        None => String::new(),
+        Some(p) => {
+            let prompt = format!(
+                "Staged files have linthis lint errors. \
+                 Run 'linthis -s -c' to inspect them. \
+                 Fix all issues by editing the files directly (do NOT use linthis --fix). \
+                 Verify with 'linthis -s -c' until it passes cleanly."
+            );
+            let agent_cmd = agent_fix_headless_cmd(p, &prompt);
+            format!(
+                "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
+                 \x20\x20\x20 echo \"[linthis] Lint errors detected. Invoking {provider} to fix...\"\n\
+                 \x20\x20\x20 {agent}\n\
+                 \x20\x20\x20 $LINTHIS_CMD\n\
+                 \x20\x20\x20 LINTHIS_EXIT=$?\n\
+                 \x20 fi\n",
+                provider = p,
+                agent = agent_cmd,
+            )
+        }
+    };
+
+    let event_name = hook_event.hook_filename();
+    format!(
+        "#!/bin/sh\n\
+         # linthis-hook\n\
+         \n\
+         LINTHIS_CMD=\"{linthis}\"\n\
+         \n\
+         # Locate the local project hook (git-dir aware)\n\
+         GIT_DIR=\"$(git rev-parse --git-dir 2>/dev/null)\"\n\
+         LOCAL_HOOK=\"\"\n\
+         if [ -n \"$GIT_DIR\" ]; then\n\
+         \x20 LOCAL_HOOK=\"$GIT_DIR/hooks/{event}\"\n\
+         fi\n\
+         \n\
+         if [ -f \"$LOCAL_HOOK\" ] && [ -x \"$LOCAL_HOOK\" ]; then\n\
+         \x20 if grep -qE '^[^#]*linthis' \"$LOCAL_HOOK\" 2>/dev/null; then\n\
+         \x20\x20\x20 # Local hook already calls linthis — delegate entirely\n\
+         \x20\x20\x20 exec \"$LOCAL_HOOK\" \"$@\"\n\
+         \x20 else\n\
+         \x20\x20\x20 # Local hook exists but has no linthis — run linthis first, then delegate\n\
+         \x20\x20\x20 $LINTHIS_CMD\n\
+         \x20\x20\x20 LINTHIS_EXIT=$?\n\
+         {fix_local}\
+         \x20\x20\x20 \"$LOCAL_HOOK\" \"$@\"\n\
+         \x20\x20\x20 LOCAL_EXIT=$?\n\
+         \x20\x20\x20 [ $LINTHIS_EXIT -ne 0 ] && exit $LINTHIS_EXIT\n\
+         \x20\x20\x20 exit $LOCAL_EXIT\n\
+         \x20 fi\n\
+         else\n\
+         \x20 # No local hook — run linthis directly\n\
+         \x20 $LINTHIS_CMD\n\
+         \x20 LINTHIS_EXIT=$?\n\
+         {fix_direct}\
+         \x20 exit $LINTHIS_EXIT\n\
+         fi\n",
+        linthis = linthis_cmd,
+        event = event_name,
+        fix_local = fix_block,
+        fix_direct = fix_block_direct,
+    )
+}
+
+/// Install a global git hook into ~/.config/git/hooks/<event>.
+///
+/// After writing the script, configures `git config --global core.hooksPath`
+/// to point at that directory.
+fn handle_global_hook_install(
+    hook_type: Option<HookTool>,
+    hook_event: &HookEvent,
+    force: bool,
+    yes: bool,
+    args: &Option<String>,
+) -> ExitCode {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::io::{self, Write};
+
+    // Resolve agent fix provider for *-with-agent types
+    let fix_provider: Option<AgentFixProvider> =
+        if hook_type.as_ref().map(|t| t.has_agent_fix()).unwrap_or(false) {
+            match resolve_agent_fix_provider(None, yes) {
+                Ok(p) => Some(p),
+                Err(e) => return e,
+            }
+        } else {
+            None
+        };
+
+    let hooks_dir = match global_hooks_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("{}: Could not determine home directory", "Error".red());
+            return ExitCode::from(1);
+        }
+    };
+
+    let hook_filename = hook_event.hook_filename();
+    let hook_path = hooks_dir.join(hook_filename);
+
+    // Confirm with user unless --yes
+    if !yes {
+        println!(
+            "This will install a global {} hook at {}",
+            hook_filename.cyan(),
+            hook_path.display()
+        );
+        println!(
+            "and set {} in your global git config.",
+            "core.hooksPath".cyan()
+        );
+        print!("Continue? [y/N]: ");
+        io::stdout().flush().ok();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).ok();
+        if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+            println!("Installation cancelled");
+            return ExitCode::SUCCESS;
+        }
+    }
+
+    // Check if already exists
+    if hook_path.exists() && !force {
+        if let Ok(existing) = fs::read_to_string(&hook_path) {
+            if existing.contains("# linthis-hook") {
+                println!(
+                    "{}: Global {} hook already installed at {}",
+                    "Info".cyan(),
+                    hook_filename,
+                    hook_path.display()
+                );
+                return ExitCode::SUCCESS;
+            }
+        }
+        eprintln!(
+            "{}: {} already exists (not by linthis). Use --force to overwrite.",
+            "Warning".yellow(),
+            hook_path.display()
+        );
+        return ExitCode::from(1);
+    }
+
+    // Create directory
+    if let Err(e) = fs::create_dir_all(&hooks_dir) {
+        eprintln!("{}: Failed to create {}: {}", "Error".red(), hooks_dir.display(), e);
+        return ExitCode::from(2);
+    }
+
+    // Generate script
+    let content = build_global_hook_script_for_event(hook_event, args, fix_provider.as_ref());
+
+    // Write hook file
+    match fs::write(&hook_path, &content) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("{}: Failed to write {}: {}", "Error".red(), hook_path.display(), e);
+            return ExitCode::from(2);
+        }
+    }
+
+    // Make executable on Unix
+    #[cfg(unix)]
+    {
+        if let Ok(meta) = fs::metadata(&hook_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(&hook_path, perms);
+        }
+    }
+
+    // Set git config --global core.hooksPath
+    let hooks_dir_str = hooks_dir.to_string_lossy().to_string();
+    let git_config_result = std::process::Command::new("git")
+        .args(["config", "--global", "core.hooksPath", &hooks_dir_str])
+        .status();
+
+    match git_config_result {
+        Ok(status) if status.success() => {
+            println!("{} Installed global {} hook → {}", "✓".green(), hook_filename, hook_path.display());
+            println!("{} Set {} = {}", "✓".green(), "core.hooksPath".cyan(), hooks_dir_str);
+            println!();
+            println!("  {}", "How it works (Strategy B — local takes priority):".dimmed());
+            println!("  {} If local hook has linthis → global delegates entirely", "·".dimmed());
+            println!("  {} If local hook has no linthis → global runs linthis first, then delegates", "·".dimmed());
+            println!("  {} No local hook → global runs linthis directly", "·".dimmed());
+        }
+        Ok(_) | Err(_) => {
+            println!("{} Installed global {} hook → {}", "✓".green(), hook_filename, hook_path.display());
+            eprintln!(
+                "{}: Failed to set core.hooksPath automatically. Run manually:\n  git config --global core.hooksPath {}",
+                "Warning".yellow(),
+                hooks_dir_str
+            );
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Uninstall a global git hook from ~/.config/git/hooks/<event>.
+///
+/// If no linthis hooks remain in that directory, also unsets `core.hooksPath`.
+fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool) -> ExitCode {
+    use std::fs;
+    use std::io::{self, Write};
+
+    let hooks_dir = match global_hooks_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("{}: Could not determine home directory", "Error".red());
+            return ExitCode::from(1);
+        }
+    };
+
+    let events_to_remove: Vec<HookEvent> = if all {
+        vec![HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg]
+    } else {
+        vec![hook_event.unwrap_or(HookEvent::PreCommit)]
+    };
+
+    let mut any_removed = false;
+
+    for event in &events_to_remove {
+        let hook_path = hooks_dir.join(event.hook_filename());
+        if !hook_path.exists() {
+            continue;
+        }
+
+        let has_linthis = fs::read_to_string(&hook_path)
+            .map(|c| c.contains("# linthis-hook"))
+            .unwrap_or(false);
+
+        if !has_linthis {
+            continue;
+        }
+
+        if !yes {
+            print!("Remove global {} hook at {}? [y/N]: ", event.hook_filename().cyan(), hook_path.display());
+            io::stdout().flush().ok();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input).ok();
+            if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+                println!("Skipped {}", event.hook_filename());
+                continue;
+            }
+        }
+
+        match fs::remove_file(&hook_path) {
+            Ok(_) => {
+                println!("{} Removed global {} hook", "✓".green(), event.hook_filename());
+                any_removed = true;
+            }
+            Err(e) => {
+                eprintln!("{}: Failed to remove {}: {}", "Error".red(), hook_path.display(), e);
+            }
+        }
+    }
+
+    if !any_removed {
+        println!("{}: No global linthis hooks found", "Info".cyan());
+        return ExitCode::SUCCESS;
+    }
+
+    // Check if any linthis hooks remain; if not, unset core.hooksPath
+    let remaining = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg]
+        .iter()
+        .any(|e| {
+            let p = hooks_dir.join(e.hook_filename());
+            p.exists() && fs::read_to_string(&p).map(|c| c.contains("# linthis-hook")).unwrap_or(false)
+        });
+
+    if !remaining {
+        let _ = std::process::Command::new("git")
+            .args(["config", "--global", "--unset", "core.hooksPath"])
+            .status();
+        println!("{} Unset global {}", "✓".green(), "core.hooksPath".cyan());
+    }
+
+    ExitCode::SUCCESS
+}
+
 /// Show git hook status
 fn handle_hook_status() -> ExitCode {
     // Find git root
@@ -247,12 +568,15 @@ fn handle_hook_status() -> ExitCode {
     let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
     let mut any_hook_installed = false;
 
+    // --- Project-level hooks ---
+    println!("{}", "Project Hooks (.git/hooks/):".bold());
     for event in &hook_events {
         let hook_path = git_root.join(".git/hooks").join(event.hook_filename());
 
         if hook_path.exists() {
             any_hook_installed = true;
-            println!("{} {} ({})", "✓".green(), event.hook_filename(), event.description());
+            println!("{} {} [project]", "✓".green(), hook_path.display());
+            println!("    {}", event.description().dimmed());
 
             if let Ok(content) = std::fs::read_to_string(&hook_path) {
                 let has_linthis = content.contains("linthis");
@@ -280,6 +604,45 @@ fn handle_hook_status() -> ExitCode {
         } else {
             println!("{} {} (not installed)", "✗".red(), event.hook_filename());
         }
+    }
+
+    // --- Global hooks ---
+    println!();
+    println!("{}", "Global Hooks (~/.config/git/hooks/):".bold());
+    let global_hooks_path = global_hooks_dir();
+    // Check if core.hooksPath is configured
+    let core_hooks_path = std::process::Command::new("git")
+        .args(["config", "--global", "core.hooksPath"])
+        .output()
+        .ok()
+        .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None });
+
+    if let Some(ref path_str) = core_hooks_path {
+        println!("  {} = {}", "core.hooksPath".cyan(), path_str);
+    } else {
+        println!("  {} (core.hooksPath not set)", "ℹ".cyan());
+    }
+
+    let mut any_global_hook = false;
+    if let Some(ref ghooks_dir) = global_hooks_path {
+        for event in &hook_events {
+            let hook_path = ghooks_dir.join(event.hook_filename());
+            if hook_path.exists() {
+                any_global_hook = true;
+                if let Ok(content) = std::fs::read_to_string(&hook_path) {
+                    let has_linthis = content.contains("# linthis-hook");
+                    if has_linthis {
+                        println!("{} {} [global]", "✓".green(), hook_path.display());
+                        println!("    {} Strategy B: local hook takes priority", "ℹ".dimmed());
+                    } else {
+                        println!("{} {} [global, not by linthis]", "⚠".yellow(), hook_path.display());
+                    }
+                }
+            }
+        }
+    }
+    if !any_global_hook {
+        println!("  {} No global linthis hooks installed", "ℹ".cyan());
     }
 
     // Check for prek/pre-commit config
@@ -345,7 +708,11 @@ fn handle_hook_status() -> ExitCode {
 }
 
 /// Uninstall git hook (specific event or all)
-fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool) -> ExitCode {
+fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool, global: bool) -> ExitCode {
+    if global {
+        return handle_global_hook_uninstall(hook_event, all, yes);
+    }
+
     // Find git root
     let git_root = match find_git_root() {
         Some(root) => root,
@@ -448,7 +815,7 @@ fn uninstall_single_hook(git_root: &std::path::Path, hook_event: &HookEvent, yes
                     // Remove only linthis lines
                     let new_content: String = existing_content
                         .lines()
-                        .filter(|line| !line.contains("linthis") && !line.contains("# linthis hook"))
+                        .filter(|line| !line.contains("linthis") && !line.contains("# linthis-hook"))
                         .collect::<Vec<_>>()
                         .join("\n");
 
@@ -484,7 +851,7 @@ fn uninstall_single_hook(git_root: &std::path::Path, hook_event: &HookEvent, yes
         if has_other_content {
             let new_content: String = existing_content
                 .lines()
-                .filter(|line| !line.contains("linthis") && !line.contains("# linthis hook"))
+                .filter(|line| !line.contains("linthis") && !line.contains("# linthis-hook"))
                 .collect::<Vec<_>>()
                 .join("\n");
 
@@ -825,16 +1192,17 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                 if !new_content.ends_with('\n') {
                     new_content.push('\n');
                 }
-                new_content.push_str("\n# linthis hook\n");
+                new_content.push_str("\n# linthis-hook\n");
                 new_content.push_str(&linthis_hook_line);
                 new_content.push('\n');
 
                 match fs::write(&hook_path, new_content) {
                     Ok(_) => {
                         println!(
-                            "{} Added linthis to existing {}",
+                            "{} Added linthis to existing {} {} [project]",
                             "✓".green(),
-                            hook_path.display()
+                            hook_path.display(),
+                            "(appended)".dimmed()
                         );
                         Ok(())
                     }
@@ -849,8 +1217,8 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                     }
                 }
             } else {
-                // Create new hook file
-                let content = format!("#!/bin/sh\n{}\n", linthis_hook_line);
+                // Create new hook file (include # linthis-hook marker for global hook detection)
+                let content = format!("#!/bin/sh\n# linthis-hook\n{}\n", linthis_hook_line);
 
                 match fs::write(&hook_path, content) {
                     Ok(_) => {
@@ -870,7 +1238,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                             })?;
                         }
 
-                        println!("{} Created {}", "✓".green(), hook_path.display());
+                        println!("{} Created {} [project]", "✓".green(), hook_path.display());
                         #[cfg(not(unix))]
                         {
                             println!("\nNext steps:");

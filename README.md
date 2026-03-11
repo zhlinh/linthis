@@ -55,8 +55,9 @@ pip install linthis
 linthis plugin add -g sample https://github.com/zhlinh/linthis-plugin-template
 
 # 3. Install hooks
-linthis hook install                # Git pre-commit hook
-linthis hook install --type agent   # AI agent hook (Claude, Cursor, etc.)
+linthis hook install                                           # git pre-commit hook
+linthis hook install --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
+linthis hook install --type agent --provider claude            # AI agent hook (Claude, Cursor, etc.)
 
 # 4. Run lint check
 linthis -i src/
@@ -79,11 +80,17 @@ linthis init
 # Create global configuration file
 linthis init -g
 
-# Install hooks
-linthis hook install                              # Git pre-commit hook (default)
-linthis hook install --type agent --provider claude  # AI agent hook
-linthis hook install --type git --event pre-push  # Git pre-push hook
-linthis hook install --type prek                  # prek pre-commit hook
+# Project-level hooks
+linthis hook install                                           # git pre-commit hook
+linthis hook install --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
+linthis hook install --type agent --provider claude           # AI agent rules (Claude Code)
+linthis hook install --type prek                              # prek pre-commit hook
+linthis hook install --event pre-push                         # git pre-push hook
+
+# Global hooks (apply to all repos on this machine)
+linthis hook install --global                                 # global git pre-commit
+linthis hook install --global --type git-with-agent --provider claude  # global + AI auto-fix
+linthis hook install --type agent --provider claude --global  # AI agent rules (user home)
 
 # Force overwrite existing files
 linthis init --force
@@ -556,26 +563,34 @@ All modifications preserve TOML file format and comments.
 
 <video src="docs/assets/videos/GitHooks-en.mp4" controls width="100%"></video>
 
-| Command          | Short | Long            | Description                                                        |
-| ---------------- | ----- | --------------- | ------------------------------------------------------------------ |
-| `hook install`   |       | `--type`        | Hook type (git/agent/prek/pre-commit)                              |
-|                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg)                        |
-|                  |       | `--provider`    | AI agent provider (claude/cursor/windsurf/copilot/cline/codebuddy) |
-|                  | `-c`  | `--check-only`  | Hook only runs check                                               |
-|                  | `-f`  | `--format-only` | Hook only runs format                                              |
-|                  |       | `--force`       | Force overwrite existing hook                                      |
-|                  | `-y`  | `--yes`         | Non-interactive mode                                               |
-| `hook uninstall` |       | `--event`       | Hook event to uninstall                                            |
-|                  | `-y`  | `--yes`         | Non-interactive mode                                               |
-| `hook status`    |       |                 | Show git hook status                                               |
-| `hook check`     |       |                 | Check for hook conflicts                                           |
+| Command          | Short | Long            | Description                                                                                         |
+| ---------------- | ----- | --------------- | --------------------------------------------------------------------------------------------------- |
+| `hook install`   |       | `--type`        | Hook type (git/git-with-agent/agent/prek/prek-with-agent/pre-commit/pre-commit-with-agent)          |
+|                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg)                                                         |
+|                  | `-g`  | `--global`      | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath`   |
+|                  |       | `--provider`    | For `--type agent`: `claude`/`cursor`/`windsurf`/`copilot`/`cline`/`codebuddy`. For `*-with-agent`: `claude`/`codex`/`gemini`/`cursor`/`droid`/`auggie` |
+|                  | `-c`  | `--check-only`  | Hook only runs check                                                                                |
+|                  | `-f`  | `--format-only` | Hook only runs format                                                                               |
+|                  |       | `--force`       | Force overwrite existing hook                                                                       |
+|                  | `-y`  | `--yes`         | Non-interactive mode                                                                                |
+| `hook uninstall` |       | `--event`       | Hook event to uninstall                                                                             |
+|                  | `-g`  | `--global`      | Uninstall global hook                                                                               |
+|                  |       | `--all`         | Uninstall all hooks                                                                                 |
+|                  | `-y`  | `--yes`         | Non-interactive mode                                                                                |
+| `hook status`    |       |                 | Show git hook status (Project Hooks and Global Hooks sections)                                      |
+| `hook check`     |       |                 | Check for hook conflicts                                                                            |
 
 **Hook types**:
 
 - `git`: Traditional git hook (default)
+- `git-with-agent`: git hook + AI agent auto-fix on failure
 - `agent`: AI agent hook (Claude, Cursor, Windsurf, etc.)
 - `prek`: Rust-based pre-commit tool (faster)
+- `prek-with-agent`: prek hook + AI agent auto-fix on failure
 - `pre-commit`: Python-based standard tool
+- `pre-commit-with-agent`: pre-commit hook + AI agent auto-fix on failure
+
+**Global hooks**: Use `-g` / `--global` with any hook type. For `agent` type, installs rules to the user home directory. For all other types, installs to `~/.config/git/hooks/` and sets `git config --global core.hooksPath`. Local hooks take priority over global hooks (Strategy B).
 
 <video src="docs/assets/videos/AgentHook-en.mp4" controls width="100%"></video>
 
