@@ -173,15 +173,69 @@ pub struct Cli {
 pub enum HookTool {
     /// Traditional git hook
     Git,
+    /// Git hook with AI agent fix fallback on failure
+    GitWithAgent,
     /// AI coding agent integration (Claude Code, Cursor, etc.)
     Agent,
     /// Prek (Rust-based, faster)
     Prek,
+    /// Prek with AI agent fix fallback on failure
+    PrekWithAgent,
     /// Pre-commit (Python-based, standard)
     PreCommit,
+    /// Pre-commit with AI agent fix fallback on failure
+    PreCommitWithAgent,
 }
 
-/// AI coding agent providers
+impl HookTool {
+    /// Returns the base tool without the agent fix variant, if applicable
+    pub fn base_tool(&self) -> &HookTool {
+        match self {
+            HookTool::GitWithAgent => &HookTool::Git,
+            HookTool::PrekWithAgent => &HookTool::Prek,
+            HookTool::PreCommitWithAgent => &HookTool::PreCommit,
+            other => other,
+        }
+    }
+
+    /// Returns true if this type includes an AI agent fix fallback
+    pub fn has_agent_fix(&self) -> bool {
+        matches!(self, HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent)
+    }
+}
+
+/// AI agent CLI providers for automatic fix on hook failure (--type *-with-agent)
+#[derive(Clone, Debug, clap::ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum AgentFixProvider {
+    /// Anthropic Claude Code CLI (claude -p "prompt")
+    Claude,
+    /// OpenAI Codex CLI (codex "prompt")
+    Codex,
+    /// Google Gemini CLI (gemini -p "prompt")
+    Gemini,
+    /// Cursor AI agent CLI (cursor-agent "prompt")
+    Cursor,
+    /// Factory Droid CLI (droid "prompt")
+    Droid,
+    /// Augment Code Auggie CLI (aug "prompt")
+    Auggie,
+}
+
+impl std::fmt::Display for AgentFixProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentFixProvider::Claude  => write!(f, "Claude Code"),
+            AgentFixProvider::Codex   => write!(f, "Codex"),
+            AgentFixProvider::Gemini  => write!(f, "Gemini"),
+            AgentFixProvider::Cursor  => write!(f, "Cursor"),
+            AgentFixProvider::Droid   => write!(f, "Droid"),
+            AgentFixProvider::Auggie  => write!(f, "Auggie"),
+        }
+    }
+}
+
+/// AI coding agent providers (for rules/settings installation, --type agent)
 #[derive(Clone, Debug, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum AgentProvider {
