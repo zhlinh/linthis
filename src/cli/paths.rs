@@ -22,8 +22,8 @@ pub struct PathCollectionOptions {
     pub staged: bool,
     /// Check files changed since this ref
     pub since: Option<String>,
-    /// Whether to check uncommitted files
-    pub uncommitted: bool,
+    /// Whether to check locally modified files (staged + unstaged)
+    pub modified: bool,
     /// Whether to skip default exclude patterns
     pub no_default_excludes: bool,
     /// Whether to skip .gitignore patterns
@@ -209,7 +209,7 @@ pub fn collect_paths(options: &PathCollectionOptions) -> PathCollectionResult {
                 2,
             ),
         }
-    } else if options.uncommitted {
+    } else if options.modified {
         match linthis::utils::get_uncommitted_files() {
             Ok(files) => {
                 if files.is_empty() {

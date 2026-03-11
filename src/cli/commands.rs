@@ -46,9 +46,13 @@ pub struct Cli {
     #[arg(long, value_name = "REF")]
     pub since: Option<String>,
 
-    /// Check only uncommitted files (staged + unstaged)
-    #[arg(long)]
-    pub uncommitted: bool,
+    /// Check only locally modified files (staged + unstaged).
+    ///
+    /// Covers all files showing `modified:` in `git status` — both staged
+    /// (index) and unstaged (working tree) changes in tracked files.
+    /// Requires a git repository.
+    #[arg(long, short = 'm', alias = "uncommitted")]
+    pub modified: bool,
 
     /// Ignore cache and force re-checking all files
     #[arg(long)]

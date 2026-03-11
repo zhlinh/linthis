@@ -51,13 +51,13 @@ Install linthis, add a plugin, set up hooks, and run your first check — all in
 # 1. Install
 pip install linthis
 
-# 2. Add team plugin (use your team's plugin URL)
+# 2. Add team plugin (-g is user scope, use your team's plugin URL)
 linthis plugin add -g sample https://github.com/zhlinh/linthis-plugin-template
 
-# 3. Install hooks
-linthis hook install                                           # git pre-commit hook
-linthis hook install --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
-linthis hook install --type agent --provider claude            # AI agent hook (Claude, Cursor, etc.)
+# 3. Install hooks (-g is user scope)
+linthis hook install -g                                           # git pre-commit hook
+linthis hook install -g --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
+linthis hook install -g --type agent --provider claude            # AI agent hook (Claude, Cursor, etc.)
 
 # 4. Run lint check
 linthis -i src/
@@ -69,7 +69,7 @@ linthis -s
 
 <video src="docs/assets/videos/QuickStart-en.mp4" controls width="100%"></video>
 
-> See more video tutorials in the [Video Tutorials](docs/getting-started/videos/) page.
+> See more video tutorials in the [Video Tutorials](docs/getting-started/videos.md) page.
 
 ### Initialize Configuration (Optional)
 
@@ -81,7 +81,7 @@ linthis init
 linthis init -g
 
 # Project-level hooks
-linthis hook install                                           # git pre-commit hook
+linthis hook install                                          # git pre-commit hook
 linthis hook install --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
 linthis hook install --type agent --provider claude           # AI agent rules (Claude Code)
 linthis hook install --type prek                              # prek pre-commit hook
@@ -118,6 +118,10 @@ linthis --format-only
 # Check Git staged files (suitable for pre-commit hook)
 linthis -s
 linthis --staged
+
+# Check all locally modified files (staged + unstaged)
+linthis -m
+linthis --modified
 ```
 
 ### Specify Languages
@@ -495,23 +499,24 @@ All modifications preserve TOML file format and comments.
 
 ### Main Command Options
 
-| Short | Long                    | Description                                   | Example                 |
-| ----- | ----------------------- | --------------------------------------------- | ----------------------- |
-| `-i`  | `--include`             | Specify files or directories to check         | `-i src -i lib`         |
-| `-e`  | `--exclude`             | Exclude patterns (can be used multiple times) | `-e "*.test.js"`        |
-| `-c`  | `--check-only`          | Check only, no formatting                     | `-c`                    |
-| `-f`  | `--format-only`         | Format only, no checking                      | `-f`                    |
-| `-s`  | `--staged`              | Check only Git staged files                   | `-s`                    |
-| `-l`  | `--lang`                | Specify languages (comma-separated)           | `-l python,rust`        |
-| `-o`  | `--output`              | Output format: human, json, github-actions    | `-o json`               |
-| `-v`  | `--verbose`             | Verbose output                                | `-v`                    |
-| `-q`  | `--quiet`               | Quiet mode (errors only)                      | `-q`                    |
-|       | `--config`              | Specify config file path                      | `--config custom.toml`  |
-|       | `--init`                | Initialize .linthis/config.toml config file   | `--init`                |
-|       | `--preset`              | Format preset                                 | `--preset google`       |
-|       | `--no-default-excludes` | Disable default exclude rules                 | `--no-default-excludes` |
-|       | `--no-gitignore`        | Disable .gitignore rules                      | `--no-gitignore`        |
-|       | `--no-plugin`           | Skip loading plugins, use default config      | `--no-plugin`           |
+| Short | Long                    | Description                                          | Example                 |
+| ----- | ----------------------- | ---------------------------------------------------- | ----------------------- |
+| `-i`  | `--include`             | Specify files or directories to check                | `-i src -i lib`         |
+| `-e`  | `--exclude`             | Exclude patterns (can be used multiple times)        | `-e "*.test.js"`        |
+| `-c`  | `--check-only`          | Check only, no formatting                            | `-c`                    |
+| `-f`  | `--format-only`         | Format only, no checking                             | `-f`                    |
+| `-s`  | `--staged`              | Check only Git staged files                          | `-s`                    |
+| `-m`  | `--modified`            | Check all locally modified files (staged + unstaged) | `-m`                    |
+| `-l`  | `--lang`                | Specify languages (comma-separated)                  | `-l python,rust`        |
+| `-o`  | `--output`              | Output format: human, json, github-actions           | `-o json`               |
+| `-v`  | `--verbose`             | Verbose output                                       | `-v`                    |
+| `-q`  | `--quiet`               | Quiet mode (errors only)                             | `-q`                    |
+|       | `--config`              | Specify config file path                             | `--config custom.toml`  |
+|       | `--init`                | Initialize .linthis/config.toml config file          | `--init`                |
+|       | `--preset`              | Format preset                                        | `--preset google`       |
+|       | `--no-default-excludes` | Disable default exclude rules                        | `--no-default-excludes` |
+|       | `--no-gitignore`        | Disable .gitignore rules                             | `--no-gitignore`        |
+|       | `--no-plugin`           | Skip loading plugins, use default config             | `--no-plugin`           |
 
 ### Plugin Management Subcommands
 
@@ -563,22 +568,22 @@ All modifications preserve TOML file format and comments.
 
 <video src="docs/assets/videos/GitHooks-en.mp4" controls width="100%"></video>
 
-| Command          | Short | Long            | Description                                                                                         |
-| ---------------- | ----- | --------------- | --------------------------------------------------------------------------------------------------- |
-| `hook install`   |       | `--type`        | Hook type (git/git-with-agent/agent/prek/prek-with-agent/pre-commit/pre-commit-with-agent)          |
-|                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg)                                                         |
-|                  | `-g`  | `--global`      | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath`   |
+| Command          | Short | Long            | Description                                                                                                                                             |
+| ---------------- | ----- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hook install`   |       | `--type`        | Hook type (git/git-with-agent/agent/prek/prek-with-agent/pre-commit/pre-commit-with-agent)                                                              |
+|                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg)                                                                                                             |
+|                  | `-g`  | `--global`      | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath`                                                        |
 |                  |       | `--provider`    | For `--type agent`: `claude`/`cursor`/`windsurf`/`copilot`/`cline`/`codebuddy`. For `*-with-agent`: `claude`/`codex`/`gemini`/`cursor`/`droid`/`auggie` |
-|                  | `-c`  | `--check-only`  | Hook only runs check                                                                                |
-|                  | `-f`  | `--format-only` | Hook only runs format                                                                               |
-|                  |       | `--force`       | Force overwrite existing hook                                                                       |
-|                  | `-y`  | `--yes`         | Non-interactive mode                                                                                |
-| `hook uninstall` |       | `--event`       | Hook event to uninstall                                                                             |
-|                  | `-g`  | `--global`      | Uninstall global hook                                                                               |
-|                  |       | `--all`         | Uninstall all hooks                                                                                 |
-|                  | `-y`  | `--yes`         | Non-interactive mode                                                                                |
-| `hook status`    |       |                 | Show git hook status (Project Hooks and Global Hooks sections)                                      |
-| `hook check`     |       |                 | Check for hook conflicts                                                                            |
+|                  | `-c`  | `--check-only`  | Hook only runs check                                                                                                                                    |
+|                  | `-f`  | `--format-only` | Hook only runs format                                                                                                                                   |
+|                  |       | `--force`       | Force overwrite existing hook                                                                                                                           |
+|                  | `-y`  | `--yes`         | Non-interactive mode                                                                                                                                    |
+| `hook uninstall` |       | `--event`       | Hook event to uninstall                                                                                                                                 |
+|                  | `-g`  | `--global`      | Uninstall global hook                                                                                                                                   |
+|                  |       | `--all`         | Uninstall all hooks                                                                                                                                     |
+|                  | `-y`  | `--yes`         | Non-interactive mode                                                                                                                                    |
+| `hook status`    |       |                 | Show git hook status (Project Hooks and Global Hooks sections)                                                                                          |
+| `hook check`     |       |                 | Check for hook conflicts                                                                                                                                |
 
 **Hook types**:
 

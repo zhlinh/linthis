@@ -17,6 +17,7 @@ linthis [OPTIONS] [COMMAND]
 | `-c` | `--check-only` | 仅检查，不格式化 | `-c` |
 | `-f` | `--format-only` | 仅格式化，不检查 | `-f` |
 | `-s` | `--staged` | 仅检查 Git 暂存文件 | `-s` |
+| `-m` | `--modified` | 检查所有本地修改文件（暂存 + 未暂存） | `-m` |
 | `-l` | `--lang` | 语言（逗号分隔） | `-l python,rust` |
 | `-o` | `--output` | 输出格式 | `-o json` |
 | `-v` | `--verbose` | 详细输出 | `-v` |
