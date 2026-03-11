@@ -71,20 +71,28 @@ linthis hook install [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--type` | Hook type: `git` (default), `agent`, `prek`, `pre-commit` |
+| `--type` | Hook type: `git` (default), `git-with-agent`, `agent`, `prek`, `prek-with-agent`, `pre-commit`, `pre-commit-with-agent` |
 | `--event` | Hook event: `pre-commit` (default), `pre-push`, `commit-msg` |
 | `--args` | Extra arguments for the linthis command in hook script (default: `-c -f`) |
-| `--provider` | Agent provider (only with `--type agent`): `claude`, `cursor`, `windsurf`, `copilot`, `cline`, `codebuddy` |
+| `-g, --global` | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath` |
+| `--provider` | For `--type agent`: agent platform (`claude`, `cursor`, `windsurf`, `copilot`, `cline`, `codebuddy`). For `*-with-agent`: AI fix CLI (`claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`) |
 | `--force` | Force overwrite existing |
 | `-y, --yes` | Non-interactive mode |
 
 **Examples:**
 
 ```bash
-linthis hook install                                  # Default git hook (check + format)
-linthis hook install --event pre-push                 # Pre-push hook
-linthis hook install --args "-c"                      # Check-only hook
-linthis hook install --type agent --provider claude   # Agent integration
+# Project-level hooks
+linthis hook install                                           # Default git hook (check + format)
+linthis hook install --event pre-push                         # Pre-push hook
+linthis hook install --args "-c"                              # Check-only hook
+linthis hook install --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
+linthis hook install --type agent --provider claude           # Agent integration
+
+# Global hooks (apply to all repos on this machine)
+linthis hook install --global                                 # Global git pre-commit
+linthis hook install --global --type git-with-agent --provider claude  # Global + AI auto-fix
+linthis hook install --type agent --provider claude --global  # AI agent rules (user home)
 ```
 
 ### hook uninstall
@@ -96,7 +104,17 @@ linthis hook uninstall [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--event` | Hook event to uninstall |
+| `-g, --global` | Uninstall global hook |
+| `--all` | Uninstall all hooks |
 | `-y, --yes` | Non-interactive mode |
+
+**Examples:**
+
+```bash
+linthis hook uninstall                  # Uninstall project pre-commit hook
+linthis hook uninstall --global         # Uninstall global pre-commit hook
+linthis hook uninstall --global --all   # Uninstall all global hooks
+```
 
 ### hook status
 

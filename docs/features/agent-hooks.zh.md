@@ -10,12 +10,12 @@ linthis 可以与 AI 编程助手（Claude Code、Cursor、Windsurf、GitHub Cop
 
 | AI 助手 | 规则文件 | 检测方式 | 安装策略 |
 |--------|---------|---------|---------|
-| Claude Code | `CLAUDE.md` + `.claude/settings.local.json` | `.claude/` 目录 | 追加段落 + Stop Hook |
+| Claude Code | `CLAUDE.md` + `.claude/settings.json` | `.claude/` 目录 | 追加段落 + Stop Hook |
 | Cursor | `.cursor/rules/linthis.mdc` | `.cursor/` 目录 | 独立文件 |
 | Windsurf | `.windsurf/rules/linthis.md` | `.windsurf/` 目录 | 独立文件 |
 | GitHub Copilot | `.github/copilot-instructions.md` | `.github/` 目录 | 追加段落 |
 | Cline | `.clinerules/linthis.md` | `.clinerules/` 目录 | 独立文件 |
-| CodeBuddy | `.codebuddy/rules/linthis.md` | `.codebuddy/` 目录 | 独立文件 |
+| CodeBuddy | `.codebuddy/rules/linthis.md` + `.codebuddy/settings.json` | `.codebuddy/` 目录 | 独立文件 |
 
 ## 快速开始
 
@@ -77,6 +77,29 @@ Select agent(s) to integrate with linthis:
 Choose (comma-separated for multiple, e.g. 1,2):
 ```
 
+### 全局安装
+
+将 AI 助手规则安装到用户主目录，使其对所有项目生效（而非仅当前项目）：
+
+```bash
+# 为指定提供者全局安装 AI 助手规则
+linthis hook install --type agent --provider claude --global
+
+# 为所有检测到的提供者全局安装
+linthis hook install --type agent -g
+```
+
+使用 `--global` 时，规则文件写入用户级别路径而非项目根目录：
+
+| AI 助手 | 项目级别 | 全局（`--global`） |
+|--------|---------|------------------|
+| Claude Code | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| Cursor | `.cursor/rules/linthis.mdc` | `~/.cursor/rules/linthis.mdc` |
+| Windsurf | `.windsurf/rules/linthis.md` | `~/.windsurf/rules/linthis.md` |
+| GitHub Copilot | `.github/copilot-instructions.md` | *(仅项目级别)* |
+| Cline | `.clinerules/linthis.md` | `~/.clinerules/linthis.md` |
+| CodeBuddy | `.codebuddy/rules/linthis.md` | `~/.codebuddy/rules/linthis.md` |
+
 ## 安装内容详解
 
 ### Claude Code
@@ -84,7 +107,7 @@ Choose (comma-separated for multiple, e.g. 1,2):
 创建两个文件：
 
 1. **`CLAUDE.md`** — 追加 `## Linthis Agent Rules` 段落（如果文件不存在则创建）
-2. **`.claude/settings.local.json`** — Stop Hook，在 AI 助手结束前触发 linthis 检查
+2. **`.claude/settings.json`** — Stop Hook，在 AI 助手结束前触发 linthis 检查
 
 ### Cursor
 
@@ -141,9 +164,72 @@ Choose (comma-separated for multiple, e.g. 1,2):
 
 这确保 AI 助手生成符合代码规范的代码，具有正确的上下文感知能力，而非依赖自动修复工具。
 
+## Git Hook 与 AI 自动修复（--type *-with-agent）
+
+这些是 **git hook 类型**（与 `--type agent` 不同），在 git commit 时 linthis 检查失败后自动调用 AI CLI 工具进行修复，然后重新运行 linthis 验证结果。
+
+### 安装
+
+```bash
+# 安装带 Claude Code 自动修复回退的 pre-commit git hook
+linthis hook install --type git-with-agent --provider claude
+
+# 其他 AI CLI 提供者
+linthis hook install --type git-with-agent --provider codex
+linthis hook install --type prek-with-agent --provider gemini
+linthis hook install --type pre-commit-with-agent --provider cursor
+linthis hook install --type git-with-agent --provider droid
+linthis hook install --type git-with-agent --provider auggie
+
+# 全局安装（写入 ~/.config/git/hooks/）
+linthis hook install --type git-with-agent --provider claude --global
+```
+
+### 支持的提供者
+
+| 提供者 | CLI 可执行文件 | 无交互命令 |
+|--------|-------------|-----------|
+| `claude` | `claude` | `claude -p '...'` |
+| `codex` | `codex` | `codex exec '...'` |
+| `gemini` | `gemini` | `gemini -p '...'` |
+| `cursor` | `cursor-agent` | `cursor-agent chat '...'` |
+| `droid` | `droid` | `droid exec --auto low '...'` |
+| `auggie` | `auggie` | `auggie --print '...'` |
+
+### 生成的 Hook 脚本示例
+
+以下是使用 `--type git-with-agent --provider claude` 时写入 `.git/hooks/pre-commit` 的脚本：
+
+```bash
+#!/bin/sh
+
+LINTHIS_CMD="linthis -s -c -f --hook-event=pre-commit"
+
+$LINTHIS_CMD
+LINTHIS_EXIT=$?
+
+if [ $LINTHIS_EXIT -ne 0 ]; then
+  echo "[linthis] Lint errors detected. Invoking Claude Code to fix..."
+  claude -p 'Staged files have linthis lint errors. Run '\''linthis -s -c'\'' to inspect them. Fix all issues by editing the files directly (do NOT use linthis --fix). Verify with '\''linthis -s -c'\'' until it passes cleanly.'
+  $LINTHIS_CMD
+  LINTHIS_EXIT=$?
+fi
+
+exit $LINTHIS_EXIT
+```
+
+### 与 --type agent 的区别
+
+| 特性 | `--type agent` | `--type *-with-agent` |
+|-----|---------------|----------------------|
+| Hook 类型 | AI 助手规则文件 | git hook（pre-commit） |
+| 触发时机 | AI 助手完成任务时 | 执行 `git commit` 时 |
+| `--provider` 可选值 | `claude`, `cursor`, `windsurf`, `copilot`, `cline`, `codebuddy` | `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie` |
+| 安装内容 | 规则文件 + Stop Hook | `.git/hooks/` 中的 Shell 脚本 |
+
 ## 查看状态
 
-查看已安装的 AI 助手：
+查看已安装的 hook 和 AI 助手：
 
 ```bash
 linthis hook status
@@ -151,14 +237,25 @@ linthis hook status
 
 输出：
 ```
-Hook Status:
-  Agent Hooks:
-    ✓ Claude Code  (installed)
-    ✓ Cursor       (installed)
-    ✗ Windsurf
-    ✗ GitHub Copilot
-    ✗ Cline
-    ✗ CodeBuddy
+Git Hook Status
+Repository: /path/to/repo
+
+Project Hooks (.git/hooks/):
+✓ /path/.git/hooks/pre-commit [project]
+    pre-commit (runs before commit)
+    ✓ linthis
+
+Global Hooks (~/.config/git/hooks/):
+  ℹ (core.hooksPath not set)
+  ℹ No global linthis hooks installed
+
+Agent Integration
+✓ Claude Code (CLAUDE.md)
+✗ Cursor (not installed)
+✗ Windsurf (not installed)
+✗ GitHub Copilot (not installed)
+✗ Cline (not installed)
+✗ CodeBuddy (not installed)
 ```
 
 ## 卸载
@@ -169,10 +266,23 @@ Hook Status:
 linthis hook uninstall --all -y
 ```
 
-这会移除：
+移除指定提供者的 AI 助手规则：
+
+```bash
+linthis hook uninstall --type agent --provider claude -y
+```
+
+移除全局安装的 AI 助手规则：
+
+```bash
+linthis hook uninstall --type agent --global -y
+```
+
+卸载命令会移除：
 - `CLAUDE.md` 和 `.github/copilot-instructions.md` 中的 linthis 段落
 - 独立规则文件（`.cursor/rules/linthis.mdc` 等）
-- Claude Code Stop Hook（`.claude/settings.local.json`）
+- Claude Code Stop Hook（`.claude/settings.json`）
+- CodeBuddy Stop Hook（`.codebuddy/settings.json`）
 - linthis 创建的空目录
 
 ## 常见问题
@@ -209,15 +319,18 @@ linthis 检查项目根目录下的特定目录：
 
 ### Q5：什么是 Claude Code Stop Hook？
 
-Stop Hook（`.claude/settings.local.json`）在 Claude Code 完成任务前添加自动检查，提示 AI 助手对所有修改过的文件运行 linthis，确保不会遗漏任何 lint 问题。
+Stop Hook（`.claude/settings.json`）在 Claude Code 完成任务前添加自动检查，提示 AI 助手对所有修改过的文件运行 linthis，确保不会遗漏任何 lint 问题。
 
-### Q6：这和 git hook 的 AI 自动修复有什么区别？
+### Q6：AI 辅助 lint 检查有哪几种方式？
 
-这是两个不同的功能：
+共有三种不同的方式：
 
-| 命令 | 用途 |
-|-----|------|
-| `linthis hook install --type agent --provider claude` | 安装 AI 助手规则（AI 编码过程中的代码质量检查） |
-| `linthis hook install --args "-c -f --fix --ai --provider claude -y"` | 安装带 AI 自动修复的 git hook（git commit 时自动修复 lint 问题） |
+| 方式 | 命令 | 工作原理 |
+|-----|------|---------|
+| AI 助手规则（项目级别） | `linthis hook install --type agent --provider claude` | 将规则安装到 AI 助手的配置文件，让 AI 在编码过程中主动执行 lint 检查 |
+| AI 助手规则（全局） | `linthis hook install --type agent --provider claude --global` | 同上，但安装到 `~/.claude/CLAUDE.md`，对所有项目生效 |
+| Git hook 带 AI 修复回退 | `linthis hook install --type git-with-agent --provider claude` | 安装 git pre-commit hook；如果 linthis 检查失败，自动调用 AI CLI 工具修复后重新验证 |
 
-`--type agent` 中的 `--provider` 指定 AI 助手平台，而 `--args` 中的 `--provider` 指定 AI 修复提供者。
+`--provider` 参数的含义取决于使用场景：
+- `--type agent` 中：指定要安装规则的 **AI 助手平台**（`claude`、`cursor`、`windsurf`、`copilot`、`cline`、`codebuddy`）
+- `--type *-with-agent` 中：指定用于自动修复的 **AI CLI 工具**（`claude`、`codex`、`gemini`、`cursor`、`droid`、`auggie`）

@@ -1,421 +1,352 @@
-# 全局 Git Hook 模板
+# Git Hooks
 
 ## 概述
 
-linthis 支持创建全局 Git hook 模板，让所有新创建的 Git 仓库自动包含 linthis pre-commit hook —— "一次配置，永久受益"。
+linthis 与 Git 的 hook 系统集成，在提交（或推送）时自动运行 lint 检查和格式化。Hook 可以在两个作用域安装：
+
+- **项目级** — 写入单个仓库的 `.git/hooks/<event>`
+- **全局** — 写入 `~/.config/git/hooks/<event>`，通过 `git config --global core.hooksPath` 对机器上所有仓库生效
+
+全局 hook 采用 **策略 B**：本地项目 hook 优先。如果本地 `.git/hooks/<event>` 已调用 `linthis`，全局 hook 完全委托给它。如果本地 hook 存在但不调用 `linthis`，全局 hook 先运行 `linthis`，再链式调用本地 hook。如果没有本地 hook，全局 hook 直接运行 `linthis`。此设计保证对其他 hook 工具零干扰。
+
+所有六种 hook 类型——`git`、`prek`、`pre-commit`、`git-with-agent`、`prek-with-agent`、`pre-commit-with-agent`——均支持在两个作用域安装。
+
+---
 
 ## 快速开始
 
-### 1. 创建全局 Hook 模板
+### 项目级 hook
 
 ```bash
-# 创建全局配置 + Git hook 模板
-linthis init -g --hook-type git
-
-# 或简写（-g 默认使用 git hook 模板）
-linthis init -g
-```
-
-输出：
-```
-✓ Created /Users/username/.linthis/config.toml
-✓ Created /Users/username/.linthis/.git-template/hooks/pre-commit
-✓ Configured git global template: init.templateDir
-  All new repositories will include this hook
-
-Next steps:
-  • New repositories will automatically include the linthis hook
-  • For existing repositories, run: git init
-  • Or manually copy the hook to .git/hooks/pre-commit
-```
-
-### 2. 自动应用
-
-创建新仓库时，hook 自动包含：
-
-```bash
-# 创建新仓库
-mkdir my-project
-cd my-project
-git init
-
-# Hook 已自动创建
-ls .git/hooks/pre-commit  # ✓ 存在
-```
-
-### 3. 应用到现有仓库
-
-对于现有仓库，运行 `git init` 重新应用模板：
-
-```bash
-cd existing-project
-git init  # 复制模板 hooks
-```
-
-## 目录结构
-
-全局 hook 模板存储在：
-```
-~/.linthis/
-├── config.toml              # 全局配置
-└── .git-template/           # Git 模板目录
-    └── hooks/
-        └── pre-commit       # Pre-commit hook 模板
-```
-
-## Git 配置
-
-linthis 自动配置 Git 全局设置：
-
-```bash
-# 查看配置
-git config --global --get init.templateDir
-# 输出：/Users/username/.linthis/.git-template
-```
-
-此设置使 `git init` 和 `git clone` 自动应用模板。
-
-## 默认 Hook 内容
-
-```bash
-#!/bin/sh
-# linthis pre-commit hook (global template)
-linthis -s -c -f -w
-```
-
-参数说明：
-- `-s`：仅检查暂存文件
-- `-c`：运行检查
-- `-f`：运行格式化
-- `-w`：将警告视为错误（严格模式）
-
-## 高级用法
-
-### 自定义 Hook 行为
-
-#### 仅检查模式
-
-```bash
-linthis init -g --hook-type git --hook-check-only
-```
-
-生成的 hook：
-```bash
-#!/bin/sh
-# linthis pre-commit hook (global template)
-linthis -s -c -w
-```
-
-#### 仅格式化模式
-
-```bash
-linthis init -g --hook-type git --hook-format-only
-```
-
-生成的 hook：
-```bash
-#!/bin/sh
-# linthis pre-commit hook (global template)
-linthis -s -f -w
-```
-
-### 强制覆盖
-
-如果模板已存在，使用 `--force` 覆盖：
-
-```bash
-linthis init -g --hook-type git --force
-```
-
-### AI 智能自动修复
-
-使用 `--args` 启用 AI 在 hook 执行时自动修复 lint 问题：
-
-```bash
-# 安装带 AI 自动修复的 hook
-linthis hook install --args "-c -f --fix --ai --provider claude -y"
-
-# 仅检查模式 + AI 修复（不格式化）
-linthis hook install --args "-c --fix --ai --provider codebuddy-cli -y"
-```
-
-生成的 hook 命令：
-```bash
-linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude -y
-```
-
-**支持的 AI 提供者：**
-
-| 提供者 | 描述 |
-|--------|------|
-| `claude` | Anthropic Claude API（需要 API 密钥） |
-| `claude-cli` | Claude CLI 工具（使用 `claude -p` 命令） |
-| `codebuddy` | CodeBuddy API |
-| `codebuddy-cli` | CodeBuddy CLI 工具 |
-| `openai` | OpenAI GPT API |
-| `local` | 本地模型（Ollama、llama.cpp 等） |
-
-**警告：** 使用 `-y` 会自动修改文件。如果不确定，建议在提交前检查修改内容。
-
-**示例：不同的 hook 配置**
-
-```bash
-# 默认 hook（检查 + 格式化）
+# 默认：git pre-commit hook
 linthis hook install
 
-# 仅检查模式（不格式化）
-linthis hook install --args "-c"
+# git pre-push hook
+linthis hook install --event pre-push
 
-# 基础 AI 修复（交互式 - 每个修复会提示确认）
-linthis hook install --args "-c -f --fix --ai --provider claude"
+# prek hook（适用于使用 prek 的项目）
+linthis hook install --type prek
 
-# 全自动（无提示，自动接受所有修复）
-linthis hook install --args "-c -f --fix --ai --provider claude -y"
-
-# Pre-push hook 带 AI
-linthis hook install --event pre-push --args "-c -f --fix --ai --provider openai -y"
+# pre-commit hook（适用于使用 pre-commit 框架的项目）
+linthis hook install --type pre-commit
 ```
 
-### 禁用 Hook 创建
-
-仅创建全局配置而不创建 hook 模板：
+### 全局 hook
 
 ```bash
-linthis init -g --no-hook
+# 全局 git pre-commit hook（对所有仓库生效）
+linthis hook install --global
+
+# 全局 git pre-push hook
+linthis hook install --global --event pre-push
+
+# 全局 hook，非交互式
+linthis hook install --global -y
 ```
 
-## 全局模板 vs 项目级 Hook
+运行 `linthis hook install --global` 后，该命令会：
 
-| 功能 | 全局模板 (`-g`) | 项目级 Hook |
-|-----|----------------|-------------|
-| 作用域 | 所有新仓库 | 仅当前项目 |
-| 位置 | `~/.linthis/.git-template/` | `.git/hooks/` |
-| 可提交 | 否 | 否（.git 不被追踪） |
-| 团队共享 | 否 | 需要 prek/pre-commit |
-| 使用场景 | 个人开发环境 | 单个项目 |
+1. 将 hook 脚本写入 `~/.config/git/hooks/pre-commit`
+2. 执行 `git config --global core.hooksPath ~/.config/git/hooks`
 
-## 团队协作建议
+机器上的每个仓库都会立即使用该 hook，无需对现有仓库重新运行 `git init`。
 
-### 个人开发者
+---
 
-使用全局模板：
+## Hook 类型
+
+| 类型 | 运行器 | 触发方式 | 说明 |
+|------|--------|---------|------|
+| `git` | Git 原生 | `.git/hooks/<event>` | 默认类型；无需额外工具 |
+| `prek` | [prek](https://github.com/prek-dev/prek) | prek 运行器 | 需要安装 prek；配置文件可提交到仓库 |
+| `pre-commit` | [pre-commit 框架](https://pre-commit.com) | pre-commit 运行器 | 需要安装 pre-commit；配置文件可提交 |
+| `git-with-agent` | Git 原生 | `.git/hooks/<event>` | 与 `git` 相同，lint 失败时额外触发 AI 智能修复 |
+| `prek-with-agent` | prek | prek 运行器 | 与 `prek` 相同，lint 失败时额外触发 AI 智能修复 |
+| `pre-commit-with-agent` | pre-commit 框架 | pre-commit 运行器 | 与 `pre-commit` 相同，lint 失败时额外触发 AI 智能修复 |
+
+---
+
+## 全局 Hook
+
+### 安装
+
 ```bash
-linthis init -g
+# 安装全局 pre-commit hook（git 类型）
+linthis hook install --global
+
+# 安装全局 pre-push hook
+linthis hook install --global --event pre-push
+
+# 安装带 agent 修复的全局 hook
+linthis hook install --global --type git-with-agent --provider claude
+
+# 非交互式（跳过确认提示）
+linthis hook install --global -y
 ```
 
-### 团队项目
+### 工作原理
 
-使用 prek 或 pre-commit（配置可提交）：
+`--global` 执行两个操作：
+
+1. **写入** `~/.config/git/hooks/<event>` — hook 脚本文件
+2. **设置** `git config --global core.hooksPath ~/.config/git/hooks`
+
+Git 的 `core.hooksPath` 使 Git 对所有仓库都从该目录查找 hook，立即生效，无需逐仓库配置。
+
+### 目录结构
+
+```
+~/.config/git/hooks/
+├── pre-commit     # 由 linthis hook install --global 安装
+├── pre-push       # 由 linthis hook install --global --event pre-push 安装
+└── ...
+```
+
+### 策略 B 详解
+
+全局 hook 不会盲目运行，而是先检查当前仓库的本地 `.git/hooks/<event>`：
+
+| 本地 hook 状态 | 全局 hook 行为 |
+|----------------|----------------|
+| 无本地 hook | 直接运行 `linthis` |
+| 本地 hook 存在，**未**调用 `linthis` | 先运行 `linthis`，再委托给本地 hook |
+| 本地 hook 存在，**已**调用 `linthis` | 完全委托（`exec "$LOCAL_HOOK" "$@"`）——`linthis` 不会重复运行 |
+
+检测使用 `grep -qE '^[^#]*linthis'`——匹配任何包含 `linthis` 的非注释行，注释行的修改不影响检测结果。
+
+### 生成的全局 hook 脚本示例（pre-commit，git 类型）
 
 ```bash
-# 在项目目录中
-linthis init --hook-type prek
-# 或
-linthis init --hook-type pre-commit
+#!/bin/sh
+# linthis-hook
+
+LINTHIS_CMD="linthis -s -c -f --hook-event=pre-commit"
+
+# Locate the local project hook (git-dir aware)
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)"
+LOCAL_HOOK=""
+if [ -n "$GIT_DIR" ]; then
+  LOCAL_HOOK="$GIT_DIR/hooks/pre-commit"
+fi
+
+if [ -f "$LOCAL_HOOK" ] && [ -x "$LOCAL_HOOK" ]; then
+  if grep -qE '^[^#]*linthis' "$LOCAL_HOOK" 2>/dev/null; then
+    # Local hook already calls linthis — delegate entirely
+    exec "$LOCAL_HOOK" "$@"
+  else
+    # Local hook exists but has no linthis — run linthis first, then delegate
+    $LINTHIS_CMD
+    LINTHIS_EXIT=$?
+    "$LOCAL_HOOK" "$@"
+    LOCAL_EXIT=$?
+    [ $LINTHIS_EXIT -ne 0 ] && exit $LINTHIS_EXIT
+    exit $LOCAL_EXIT
+  fi
+else
+  # No local hook — run linthis directly
+  $LINTHIS_CMD
+  LINTHIS_EXIT=$?
+  exit $LINTHIS_EXIT
+fi
 ```
 
-这样配置文件可以提交到仓库，团队共享。
+---
+
+## *-with-agent Hook 类型
+
+`git-with-agent`、`prek-with-agent` 和 `pre-commit-with-agent` 类型添加了 AI agent 修复兜底机制。当 `linthis` 以非零状态码退出（lint 失败）时，hook 会以无头模式调用指定的 agent CLI 尝试自动修复，然后重新运行 `linthis` 验证结果。
+
+### 支持的 provider
+
+| `--provider` 值 | Agent CLI | 无头模式命令 |
+|----------------|-----------|------------|
+| `claude` | Claude Code CLI | `claude -p '<prompt>'` |
+| `codex` | OpenAI Codex CLI | `codex exec '<prompt>'` |
+| `gemini` | Google Gemini CLI | `gemini -p '<prompt>'` |
+| `cursor` | Cursor agent | `cursor-agent chat '<prompt>'` |
+| `droid` | Droid | `droid exec --auto low '<prompt>'` |
+| `auggie` | Auggie | `auggie --print '<prompt>'` |
+
+### 示例
+
+```bash
+# 项目级：git hook，使用 Claude 修复兜底
+linthis hook install --type git-with-agent --provider claude
+
+# 项目级：prek hook，使用 Gemini 修复兜底
+linthis hook install --type prek-with-agent --provider gemini
+
+# 项目级：pre-commit hook，使用 Codex 修复兜底
+linthis hook install --type pre-commit-with-agent --provider codex
+
+# 全局：git hook，使用 Claude 修复兜底
+linthis hook install --global --type git-with-agent --provider claude
+
+# 全局：pre-commit hook，使用 Gemini 修复兜底
+linthis hook install --global --type pre-commit-with-agent --provider gemini
+```
+
+---
+
+## hook status
+
+查看所有已安装 hook 的当前状态：
+
+```bash
+linthis hook status
+```
+
+输出示例：
+
+```
+Git Hook Status
+Repository: /path/to/repo
+
+Project Hooks (.git/hooks/):
+✓ /path/.git/hooks/pre-commit [project]
+    pre-commit (runs before commit)
+    ✓ linthis
+
+Global Hooks (~/.config/git/hooks/):
+  core.hooksPath = /Users/username/.config/git/hooks
+  ✓ /Users/username/.config/git/hooks/pre-commit [global]
+      ℹ Strategy B: local hook takes priority
+```
+
+状态输出包含：
+
+- 已安装的项目级 hook 及其是否包含 `linthis` 调用
+- 已安装的全局 hook
+- 当前生效的 `core.hooksPath` 设置
+- 正在使用的委托策略
+
+---
+
+## 全局 vs 项目级对比
+
+| 功能 | 全局（`--global`） | 项目级 |
+|------|---------------------|--------|
+| 作用域 | 机器上的所有仓库 | 仅当前仓库 |
+| 位置 | `~/.config/git/hooks/` | `.git/hooks/` |
+| 修改的 Git 配置 | `core.hooksPath`（全局） | 无 |
+| 对现有仓库立即生效 | 是 | 是 |
+| 可提交到仓库 | 否 | 否（`.git/` 不被追踪） |
+| 团队共享 | 否 | 需要 prek 或 pre-commit 类型 |
+| Hook 共存 | 策略 B（自动委托） | 手动链式调用 |
+| 支持的类型 | 全部六种类型 | 全部六种类型 |
+
+---
+
+## 卸载
+
+### 删除指定的全局 hook
+
+```bash
+# 删除全局 pre-commit hook
+linthis hook uninstall --global
+
+# 删除全局 pre-push hook
+linthis hook uninstall --global --event pre-push
+
+# 非交互式
+linthis hook uninstall --global -y
+```
+
+### 删除所有全局 hook
+
+```bash
+linthis hook uninstall --global --all
+
+# 非交互式
+linthis hook uninstall --global --all -y
+```
+
+`--all` 会删除 `~/.config/git/hooks/` 中的所有 hook 脚本，如果没有其他 hook 剩余，还会取消 `core.hooksPath` 设置。
+
+### 删除项目级 hook
+
+```bash
+# 删除项目 pre-commit hook
+linthis hook uninstall
+
+# 删除项目 pre-push hook
+linthis hook uninstall --event pre-push
+```
+
+---
+
+## 命令参考
+
+```bash
+# 项目级安装
+linthis hook install                                               # git pre-commit
+linthis hook install --event pre-push                             # git pre-push
+linthis hook install --type prek                                   # prek
+linthis hook install --type pre-commit                             # pre-commit 框架
+linthis hook install --type git-with-agent --provider claude       # git + agent 修复
+linthis hook install --type prek-with-agent --provider gemini      # prek + agent 修复
+linthis hook install --type pre-commit-with-agent --provider codex # pre-commit + agent 修复
+
+# 全局安装
+linthis hook install --global                                      # 全局 git pre-commit
+linthis hook install --global --event pre-push                     # 全局 git pre-push
+linthis hook install --global --type git-with-agent --provider claude  # 全局 + agent 修复
+linthis hook install --global -y                                   # 非交互式
+
+# 卸载
+linthis hook uninstall                                             # 删除项目 pre-commit
+linthis hook uninstall --global                                    # 删除全局 pre-commit
+linthis hook uninstall --global --all                              # 删除所有全局 hook
+linthis hook uninstall --global -y                                 # 非交互式
+
+# 状态
+linthis hook status
+```
+
+---
 
 ## 常见问题
 
-### Q1：如何卸载全局 hook 模板？
+### Q1：全局 hook 和项目级 hook 可以共存吗？
+
+可以。这正是策略 B 的主要使用场景。如果项目有调用 `linthis` 的 `.git/hooks/pre-commit`，全局 hook 会检测到并完全委托——`linthis` 只运行一次，不会重复。如果项目 hook 不调用 `linthis`，全局 hook 会先运行 `linthis`，再调用项目 hook。
+
+### Q2：策略 B 如何检测本地 hook 是否调用 linthis？
+
+运行 `grep -qE '^[^#]*linthis' "$LOCAL_HOOK"`。该模式匹配任何包含字符串 `linthis` 的非注释行（`^[^#]*`）。以 `#` 开头的注释行会被忽略。因此修改注释（例如添加 `# previously used linthis`）不会影响检测结果——只有可执行行才算数。
+
+### Q3：如何针对特定仓库禁用全局 hook？
+
+安装一个调用 `linthis` 的项目级 hook。全局 hook 会检测到并委托，项目 hook 成为唯一入口，你可以完全控制该仓库中 `linthis` 的调用方式。
+
+如果你希望某个仓库完全不运行 `linthis`，最简洁的方式是卸载全局 hook，改用项目级 hook 管理。
+
+### Q4：全局 hook 会影响不使用 linthis 的仓库吗？
+
+hook 会尝试运行 `linthis -s -c -f --hook-event=pre-commit`。如果仓库没有 linthis 配置文件（`.linthis/config.toml`、`.linthis.toml` 或 `linthis.toml`），`linthis` 会立即退出且不报错，提交正常进行。
+
+### Q5：我使用了 `--type git-with-agent`，但 agent CLI 未安装会怎样？
+
+hook 首先运行 `linthis`。如果 `linthis` 成功退出，agent 永远不会被调用。如果 `linthis` 失败且 agent CLI 二进制文件不存在，hook 会打印警告并以原始 `linthis` 退出码退出，提交依然被阻断。
+
+### Q6：`--type prek` 或 `--type pre-commit` 可以与 `--global` 一起使用吗？
+
+可以。所有六种 hook 类型都支持 `--global`。写入 `~/.config/git/hooks/<event>` 的 hook 脚本会调用相应的运行器（`prek` 或 `pre-commit`）而非直接调用 `linthis`。策略 B 委托逻辑同样适用。
+
+### Q7：如何查看当前生效的 `core.hooksPath`？
 
 ```bash
-# 删除模板目录
-rm -rf ~/.linthis/.git-template
-
-# 取消 git 配置
-git config --global --unset init.templateDir
+git config --global --get core.hooksPath
+# 输出：/Users/username/.config/git/hooks
 ```
 
-### Q2：如何跳过某些仓库的 linthis？
+如果没有输出，说明未设置全局 `core.hooksPath`，Git 按常规使用各仓库的 `.git/hooks/` 目录。
 
-**方法 1**（推荐）：不创建 linthis 配置文件
-
-Hook 会自动检测；如果没有 linthis 配置，linthis 不会运行。
-
-**方法 2**：删除 hook
-
-```bash
-# 删除项目中的 hook
-cd my-project
-rm .git/hooks/pre-commit
-```
-
-### Q3：可以同时使用全局模板和项目级 prek 吗？
-
-可以，但不推荐。建议方式：
-- 个人项目：使用全局模板
-- 团队项目：使用项目级 prek/pre-commit
-
-### Q4：Hook 不执行？
-
-检查权限：
-```bash
-ls -l ~/.linthis/.git-template/hooks/pre-commit
-# 应显示 -rwxr-xr-x（可执行）
-
-# 如果不可执行，手动设置
-chmod +x ~/.linthis/.git-template/hooks/pre-commit
-```
-
-### Q5：为什么 `-g --hook-type prek` 显示警告？
-
-全局模板仅支持 git hook 类型，因为：
-- prek/pre-commit 需要在项目目录运行 `prek install`
-- 它们的配置文件（.pre-commit-config.yaml）是项目级的
-
-对于 prek/pre-commit，在项目目录中使用：
-```bash
-linthis init --hook-type prek
-```
-
-### Q6：如何与其他 hook 工具（husky、pre-commit）共存？
-
-**选项 1**：使用 `.git/hooks/pre-commit.local`
-
-全局 hook 自动链接到 `.local` 文件：
-
-```bash
-# 将其他工具命令放在 .local 文件中
-cat > .git/hooks/pre-commit.local << 'EOF'
-#!/bin/sh
-# 运行其他检查
-npm run lint
-pytest
-EOF
-chmod +x .git/hooks/pre-commit.local
-```
-
-执行顺序：
-1. linthis（如果配置存在）
-2. .local 中的命令
-
-**选项 2**：禁用全局 hook，使用工具自己的 hook
-
-```bash
-# 不在项目中创建 linthis 配置
-# 全局 hook 会跳过，不影响其他工具
-```
-
-### Q7：会影响不使用 linthis 的项目吗？
-
-**不会！** Hook 使用智能检测：
-
-- 仅在 linthis 配置文件存在时运行
-- 没有配置的项目完全不受影响
-- 验证：创建不带 linthis 配置的新项目，hook 不执行任何 linthis 命令
-
-## 智能执行机制
-
-全局 hook 模板使用**智能条件执行**，永不干扰其他项目：
-
-### 工作流程
-
-1. **创建模板**：linthis 在 `~/.linthis/.git-template/hooks/` 创建智能 pre-commit
-2. **配置 Git**：设置 `git config --global init.templateDir`
-3. **自动应用**：`git init` 将模板目录内容复制到 `.git/`
-4. **Hook 执行**：Git 在提交时自动运行 `.git/hooks/pre-commit`
-
-### 智能检测逻辑
-
-Hook 按以下顺序执行：
-
-```bash
-1. 检查项目是否有 linthis 配置：
-   - .linthis/config.toml
-   - .linthis.toml
-   - linthis.toml
-
-2. 如果配置存在 → 运行 linthis
-   如果没有配置 → 跳过 linthis（无影响）
-
-3. 检查项目特定 hook：
-   - .git/hooks/pre-commit.local
-
-4. 如果存在 → 链式执行
-```
-
-### Hook 源码
-
-生成的智能 hook 内容：
-
-```bash
-#!/bin/sh
-# linthis pre-commit hook (global template)
-# This hook is installed globally and will only run if the project uses linthis
-
-# Check if this project uses linthis
-if [ -f ".linthis/config.toml" ] || [ -f ".linthis.toml" ] || [ -f "linthis.toml" ]; then
-    # Run linthis for this project
-    linthis -s -c -f -w || exit 1
-fi
-
-# Chain to project-specific hook if it exists
-# This allows projects to have their own hooks alongside linthis
-if [ -f ".git/hooks/pre-commit.local" ]; then
-    .git/hooks/pre-commit.local || exit 1
-fi
-```
-
-## 使用场景
-
-### 场景 1：使用 linthis 的项目
-
-```bash
-my-rust-project/
-├── .linthis/
-│   └── config.toml     # ✓ 有配置
-└── .git/
-    └── hooks/
-        └── pre-commit  # 会运行 linthis
-```
-
-**结果**：提交时自动运行 linthis 检查和格式化
-
-### 场景 2：不使用 linthis 的项目
-
-```bash
-other-project/
-└── .git/
-    └── hooks/
-        └── pre-commit  # ✗ 没有 linthis 配置
-```
-
-**结果**：Hook 跳过 linthis，对项目无影响
-
-### 场景 3：有额外 hook 需求的项目
-
-```bash
-complex-project/
-├── .linthis/
-│   └── config.toml       # ✓ 有配置
-└── .git/
-    └── hooks/
-        ├── pre-commit        # 运行 linthis
-        └── pre-commit.local  # 然后运行这个
-```
-
-**结果**：先运行 linthis，然后运行项目特定检查
-
-### 场景 4：使用其他 hook 工具的项目
-
-如果项目使用 husky、pre-commit 等：
-
-```bash
-# 选项 1：删除全局 hook，使用工具自己的 hook
-rm .git/hooks/pre-commit
-# 然后 husky/pre-commit 会创建自己的 hook
-
-# 选项 2：将工具命令放在 pre-commit.local 中
-mv .git/hooks/pre-commit .git/hooks/pre-commit.backup
-# 创建 pre-commit.local 调用其他工具
-```
-
-## 观看演示
-
-观看 [Git Hooks 视频教程](../getting-started/videos.md#5-git-hooks)，15 秒了解自动化 pre-commit 检查。
+---
 
 ## 参考资料
 
-- [Git 文档 - init.templateDir](https://git-scm.com/docs/git-init#_template_directory)
+- [AI 智能修复](./ai-fix.md) — AI provider 详情
+- [AI 编程助手集成](./agent-hooks.md) — 基于规则的 agent 集成
+- [CLI 参考](../reference/cli.md) — 完整命令参考
+- [Git 文档 — core.hooksPath](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corehooksPath)

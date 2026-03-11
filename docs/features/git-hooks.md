@@ -1,421 +1,361 @@
-# Global Git Hook Template
+# Git Hooks
 
 ## Overview
 
-linthis supports creating global Git hook templates, allowing all newly created Git repositories to automatically include linthis pre-commit hooks - "configure once, benefit forever".
+linthis integrates with Git's hook system to run lint checks and formatting automatically at commit time (or push time). Hooks can be installed at two scopes:
+
+- **Project-level** — written to `.git/hooks/<event>` in a single repository
+- **Global** — written to `~/.config/git/hooks/<event>` and activated for every repository on the machine via `git config --global core.hooksPath`
+
+Global hooks use **Strategy B**: a local project hook takes priority. If the local `.git/hooks/<event>` already calls `linthis`, the global hook delegates to it entirely. If a local hook exists but does not call `linthis`, the global hook runs `linthis` first and then chains to the local hook. If there is no local hook at all, the global hook runs `linthis` directly. This design guarantees zero interference with other hook tools.
+
+All six hook types — `git`, `prek`, `pre-commit`, `git-with-agent`, `prek-with-agent`, `pre-commit-with-agent` — are supported at both scopes.
+
+---
 
 ## Quick Start
 
-### 1. Create Global Hook Template
+### Project-level hooks
 
 ```bash
-# Create global config + Git hook template
-linthis init -g --hook-type git
-
-# Or shorthand (-g defaults to git hook template)
-linthis init -g
-```
-
-Output:
-```
-✓ Created /Users/username/.linthis/config.toml
-✓ Created /Users/username/.linthis/.git-template/hooks/pre-commit
-✓ Configured git global template: init.templateDir
-  All new repositories will include this hook
-
-Next steps:
-  • New repositories will automatically include the linthis hook
-  • For existing repositories, run: git init
-  • Or manually copy the hook to .git/hooks/pre-commit
-```
-
-### 2. Automatic Application
-
-When creating new repositories, hooks are automatically included:
-
-```bash
-# Create new repository
-mkdir my-project
-cd my-project
-git init
-
-# Hook is already created
-ls .git/hooks/pre-commit  # ✓ exists
-```
-
-### 3. Apply to Existing Repositories
-
-For existing repositories, run `git init` to reapply the template:
-
-```bash
-cd existing-project
-git init  # Copies template hooks
-```
-
-## Directory Structure
-
-Global hook template is stored at:
-```
-~/.linthis/
-├── config.toml              # Global config
-└── .git-template/           # Git template directory
-    └── hooks/
-        └── pre-commit       # Pre-commit hook template
-```
-
-## Git Configuration
-
-linthis automatically configures Git global settings:
-
-```bash
-# View configuration
-git config --global --get init.templateDir
-# Output: /Users/username/.linthis/.git-template
-```
-
-This setting makes `git init` and `git clone` automatically apply the template.
-
-## Default Hook Content
-
-```bash
-#!/bin/sh
-# linthis pre-commit hook (global template)
-linthis -s -c -f -w
-```
-
-Parameters:
-- `-s`: Check staged files only
-- `-c`: Run checks
-- `-f`: Run formatting
-- `-w`: Treat warnings as errors (strict mode)
-
-## Advanced Usage
-
-### Custom Hook Behavior
-
-#### Check-Only Mode
-
-```bash
-linthis init -g --hook-type git --hook-check-only
-```
-
-Generated hook:
-```bash
-#!/bin/sh
-# linthis pre-commit hook (global template)
-linthis -s -c -w
-```
-
-#### Format-Only Mode
-
-```bash
-linthis init -g --hook-type git --hook-format-only
-```
-
-Generated hook:
-```bash
-#!/bin/sh
-# linthis pre-commit hook (global template)
-linthis -s -f -w
-```
-
-### Force Overwrite
-
-If template already exists, use `--force` to overwrite:
-
-```bash
-linthis init -g --hook-type git --force
-```
-
-### AI-Powered Auto-Fix
-
-Enable AI to automatically fix lint issues during hook execution using `--args`:
-
-```bash
-# Install hook with AI auto-fix
-linthis hook install --args "-c -f --fix --ai --provider claude -y"
-
-# Check-only with AI fix (no formatting)
-linthis hook install --args "-c --fix --ai --provider codebuddy-cli -y"
-```
-
-Generated hook command:
-```bash
-linthis -s -c -f --hook-event=pre-commit --fix --ai --provider claude -y
-```
-
-**Available AI Providers:**
-
-| Provider | Description |
-|----------|-------------|
-| `claude` | Anthropic Claude API (requires API key) |
-| `claude-cli` | Claude CLI tool (uses `claude -p` command) |
-| `codebuddy` | CodeBuddy API |
-| `codebuddy-cli` | CodeBuddy CLI tool |
-| `openai` | OpenAI GPT API |
-| `local` | Local models (Ollama, llama.cpp, etc.) |
-
-**Warning:** Using `-y` will automatically modify your files. Review the changes before committing if you're unsure.
-
-**Example: Different hook configurations**
-
-```bash
-# Default hook (check + format)
+# Default: git pre-commit hook
 linthis hook install
 
-# Check-only hook (no formatting)
-linthis hook install --args "-c"
+# Git pre-push hook
+linthis hook install --event pre-push
 
-# Basic AI fix (interactive - will prompt for each fix)
-linthis hook install --args "-c -f --fix --ai --provider claude"
+# prek hook (for projects using prek)
+linthis hook install --type prek
 
-# Fully automated (no prompts, auto-accept all fixes)
-linthis hook install --args "-c -f --fix --ai --provider claude -y"
-
-# Pre-push hook with AI
-linthis hook install --event pre-push --args "-c -f --fix --ai --provider openai -y"
+# pre-commit hook (for projects using pre-commit framework)
+linthis hook install --type pre-commit
 ```
 
-### Disable Hook Creation
-
-Create only global config without hook template:
+### Global hooks
 
 ```bash
-linthis init -g --no-hook
+# Global git pre-commit hook (applied to every repository)
+linthis hook install --global
+
+# Global git pre-push hook
+linthis hook install --global --event pre-push
+
+# Global hook, non-interactive
+linthis hook install --global -y
 ```
 
-## Global vs Project-Level Hooks
+After running `linthis hook install --global`, the command:
 
-| Feature | Global Template (`-g`) | Project-Level Hook |
-|---------|------------------------|-------------------|
-| Scope | All new repositories | Current project only |
-| Location | `~/.linthis/.git-template/` | `.git/hooks/` |
-| Committable | No | No (.git not tracked) |
-| Team sharing | No | Requires prek/pre-commit |
-| Use case | Personal dev environment | Single project |
+1. Writes a hook script to `~/.config/git/hooks/pre-commit`
+2. Runs `git config --global core.hooksPath ~/.config/git/hooks`
 
-## Team Collaboration Recommendations
+Every repository on the machine will now run that hook. No `git init` re-run is required for existing repositories.
 
-### Individual Developers
+---
 
-Use global template:
+## Hook Types
+
+| Type | Runner | Trigger | Notes |
+|------|--------|---------|-------|
+| `git` | Git native | `.git/hooks/<event>` | Default type; no extra tooling required |
+| `prek` | [prek](https://github.com/prek-dev/prek) | prek's runner | Requires prek installed; config committed to repo |
+| `pre-commit` | [pre-commit framework](https://pre-commit.com) | pre-commit runner | Requires pre-commit installed; config committed |
+| `git-with-agent` | Git native | `.git/hooks/<event>` | Same as `git`, plus AI agent fix fallback on lint failure |
+| `prek-with-agent` | prek | prek's runner | Same as `prek`, plus AI agent fix fallback |
+| `pre-commit-with-agent` | pre-commit framework | pre-commit runner | Same as `pre-commit`, plus AI agent fix fallback |
+
+---
+
+## Global Hooks
+
+### Installing
+
 ```bash
-linthis init -g
+# Install global pre-commit hook (git type)
+linthis hook install --global
+
+# Install global pre-push hook
+linthis hook install --global --event pre-push
+
+# Install global hook with agent fix fallback
+linthis hook install --global --type git-with-agent --provider claude
+
+# Non-interactive (skip confirmation prompts)
+linthis hook install --global -y
 ```
 
-### Team Projects
+### How it works
 
-Use prek or pre-commit (config is committable):
+`--global` performs two actions:
+
+1. **Writes** `~/.config/git/hooks/<event>` — the hook script
+2. **Sets** `git config --global core.hooksPath ~/.config/git/hooks`
+
+Git's `core.hooksPath` makes Git look in that directory for all hooks, for every repository, immediately — no per-repo setup needed.
+
+### Directory layout
+
+```
+~/.config/git/hooks/
+├── pre-commit     # installed by linthis hook install --global
+├── pre-push       # installed by linthis hook install --global --event pre-push
+└── ...
+```
+
+### Strategy B explained
+
+The global hook does not run blindly. Before running `linthis`, it inspects the local `.git/hooks/<event>` of the current repository:
+
+| Local hook state | Global hook behaviour |
+|------------------|-----------------------|
+| No local hook | Runs `linthis` directly |
+| Local hook exists, **does not** call `linthis` | Runs `linthis` first, then delegates to the local hook |
+| Local hook exists, **calls `linthis`** | Delegates entirely (`exec "$LOCAL_HOOK" "$@"`) — linthis is not double-run |
+
+Detection uses `grep -qE '^[^#]*linthis'` — it matches any non-comment line containing `linthis`, so renaming comments does not affect the result.
+
+### Generated global hook script (pre-commit, git type)
 
 ```bash
-# In project directory
-linthis init --hook-type prek
-# Or
-linthis init --hook-type pre-commit
+#!/bin/sh
+# linthis-hook
+
+LINTHIS_CMD="linthis -s -c -f --hook-event=pre-commit"
+
+# Locate the local project hook (git-dir aware)
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)"
+LOCAL_HOOK=""
+if [ -n "$GIT_DIR" ]; then
+  LOCAL_HOOK="$GIT_DIR/hooks/pre-commit"
+fi
+
+if [ -f "$LOCAL_HOOK" ] && [ -x "$LOCAL_HOOK" ]; then
+  if grep -qE '^[^#]*linthis' "$LOCAL_HOOK" 2>/dev/null; then
+    # Local hook already calls linthis — delegate entirely
+    exec "$LOCAL_HOOK" "$@"
+  else
+    # Local hook exists but has no linthis — run linthis first, then delegate
+    $LINTHIS_CMD
+    LINTHIS_EXIT=$?
+    "$LOCAL_HOOK" "$@"
+    LOCAL_EXIT=$?
+    [ $LINTHIS_EXIT -ne 0 ] && exit $LINTHIS_EXIT
+    exit $LOCAL_EXIT
+  fi
+else
+  # No local hook — run linthis directly
+  $LINTHIS_CMD
+  LINTHIS_EXIT=$?
+  exit $LINTHIS_EXIT
+fi
 ```
 
-This way, config files can be committed to the repository for team sharing.
+---
+
+## *-with-agent Hook Types
+
+The `git-with-agent`, `prek-with-agent`, and `pre-commit-with-agent` types add an AI agent fix fallback. When `linthis` exits with a non-zero status (lint failure), the hook invokes the chosen agent CLI in headless mode to attempt an automatic fix, then re-runs `linthis` to verify the result.
+
+### Supported providers
+
+| `--provider` value | Agent CLI | Headless command |
+|--------------------|-----------|-----------------|
+| `claude` | Claude Code CLI | `claude -p '<prompt>'` |
+| `codex` | OpenAI Codex CLI | `codex exec '<prompt>'` |
+| `gemini` | Google Gemini CLI | `gemini -p '<prompt>'` |
+| `cursor` | Cursor agent | `cursor-agent chat '<prompt>'` |
+| `droid` | Droid | `droid exec --auto low '<prompt>'` |
+| `auggie` | Auggie | `auggie --print '<prompt>'` |
+
+### Examples
+
+```bash
+# Project-level: git hook with Claude fix fallback
+linthis hook install --type git-with-agent --provider claude
+
+# Project-level: prek hook with Gemini fix fallback
+linthis hook install --type prek-with-agent --provider gemini
+
+# Project-level: pre-commit hook with Codex fix fallback
+linthis hook install --type pre-commit-with-agent --provider codex
+
+# Global: git hook with Claude fix fallback
+linthis hook install --global --type git-with-agent --provider claude
+
+# Global: pre-commit hook with Gemini fix fallback
+linthis hook install --global --type pre-commit-with-agent --provider gemini
+```
+
+---
+
+## hook status
+
+Check the current state of all installed hooks:
+
+```bash
+linthis hook status
+```
+
+Example output:
+
+```
+Git Hook Status
+Repository: /path/to/repo
+
+Project Hooks (.git/hooks/):
+✓ /path/.git/hooks/pre-commit [project]
+    pre-commit (runs before commit)
+    ✓ linthis
+
+Global Hooks (~/.config/git/hooks/):
+  core.hooksPath = /Users/username/.config/git/hooks
+  ✓ /Users/username/.config/git/hooks/pre-commit [global]
+      ℹ Strategy B: local hook takes priority
+```
+
+The status output shows:
+
+- Which project-level hooks are installed and whether they contain a `linthis` call
+- Which global hooks are installed
+- The active `core.hooksPath` setting
+- The delegation strategy in use
+
+---
+
+## Global vs Project Comparison
+
+| Feature | Global (`--global`) | Project-level |
+|---------|---------------------|---------------|
+| Scope | Every repository on the machine | Current repository only |
+| Location | `~/.config/git/hooks/` | `.git/hooks/` |
+| Git config changed | `core.hooksPath` (global) | None |
+| Works for existing repos | Yes, immediately | Yes, immediately |
+| Committable to repo | No | No (`.git/` is not tracked) |
+| Team sharing | No | Requires prek or pre-commit type |
+| Hook coexistence | Strategy B (auto-delegation) | Manual chaining |
+| Supported types | All six types | All six types |
+
+---
+
+## Uninstall
+
+### Remove a specific global hook
+
+```bash
+# Remove global pre-commit hook
+linthis hook uninstall --global
+
+# Remove global pre-push hook
+linthis hook uninstall --global --event pre-push
+
+# Non-interactive
+linthis hook uninstall --global -y
+```
+
+### Remove all global hooks
+
+```bash
+linthis hook uninstall --global --all
+
+# Non-interactive
+linthis hook uninstall --global --all -y
+```
+
+`--all` removes all hook scripts from `~/.config/git/hooks/` and unsets `core.hooksPath` if no other hooks remain.
+
+### Remove a project-level hook
+
+```bash
+# Remove the project pre-commit hook
+linthis hook uninstall
+
+# Remove the project pre-push hook
+linthis hook uninstall --event pre-push
+```
+
+---
+
+## Command Reference
+
+```bash
+# Project-level install
+linthis hook install                                               # git pre-commit
+linthis hook install --event pre-push                             # git pre-push
+linthis hook install --type prek                                   # prek
+linthis hook install --type pre-commit                             # pre-commit framework
+linthis hook install --type git-with-agent --provider claude       # git + agent fix
+linthis hook install --type prek-with-agent --provider gemini      # prek + agent fix
+linthis hook install --type pre-commit-with-agent --provider codex # pre-commit + agent fix
+
+# Global install
+linthis hook install --global                                      # global git pre-commit
+linthis hook install --global --event pre-push                     # global git pre-push
+linthis hook install --global --type git-with-agent --provider claude  # global + agent fix
+linthis hook install --global -y                                   # non-interactive
+
+# Uninstall
+linthis hook uninstall                                             # remove project pre-commit
+linthis hook uninstall --global                                    # remove global pre-commit
+linthis hook uninstall --global --all                              # remove all global hooks
+linthis hook uninstall --global -y                                 # non-interactive
+
+# Status
+linthis hook status
+```
+
+---
 
 ## FAQ
 
-### Q1: How to uninstall global hook template?
+### Q1: Can a global hook and a project-level hook coexist?
+
+Yes. This is Strategy B's primary use case. If the project has a `.git/hooks/pre-commit` that calls `linthis`, the global hook detects it and delegates entirely — `linthis` runs once, not twice. If the project hook does not call `linthis`, the global hook prepends `linthis` before calling the project hook.
+
+### Q2: How does Strategy B detect whether the local hook calls linthis?
+
+It runs `grep -qE '^[^#]*linthis' "$LOCAL_HOOK"`. The pattern matches any non-comment line (`^[^#]*`) that contains the string `linthis`. Comment lines starting with `#` are ignored. This means renaming a comment or adding a note like `# previously used linthis` does not affect detection — only executable lines matter.
+
+### Q3: How do I disable the global hook for a specific repository?
+
+Install a project-level hook that calls `linthis`. The global hook will detect it and delegate, so the project hook is the sole entry point. You then have full control over how `linthis` is invoked in that repository.
+
+Alternatively, install any project-level hook that does not call `linthis`. The global hook will still run `linthis` before it — to suppress that, remove the global hook for that event or use `--event` to choose a different event scope.
+
+If you want `linthis` to be completely silent in one repository, create a no-op project hook:
 
 ```bash
-# Delete template directory
-rm -rf ~/.linthis/.git-template
-
-# Unset git config
-git config --global --unset init.templateDir
+printf '#!/bin/sh\n# intentionally no linthis\nexit 0\n' > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
 ```
 
-### Q2: How to skip linthis for certain repositories?
+The global hook will see that this hook does not call `linthis`, so it will run `linthis` first. To suppress `linthis` entirely in that repo, the cleanest approach is to uninstall the global hook and rely on project-level hooks only.
 
-**Method 1** (Recommended): Don't create linthis config file
+### Q4: Will the global hook affect repositories that do not use linthis?
 
-The hook auto-detects; if no linthis config exists, linthis won't run.
+The hook will attempt to run `linthis -s -c -f --hook-event=pre-commit`. If the repository has no linthis configuration (`.linthis/config.toml`, `.linthis.toml`, or `linthis.toml`), `linthis` exits immediately with no errors. The commit proceeds normally.
 
-**Method 2**: Delete the hook
+### Q5: What happens if the agent CLI is not installed but I used `--type git-with-agent`?
+
+The hook first runs `linthis`. If `linthis` exits cleanly, the agent is never invoked. If `linthis` fails and the agent CLI binary is missing, the hook prints a warning and exits with the original `linthis` exit code so the commit is still blocked.
+
+### Q6: Can I use `--type prek` or `--type pre-commit` with `--global`?
+
+Yes. All six hook types are supported with `--global`. The hook script written to `~/.config/git/hooks/<event>` will invoke the appropriate runner (`prek` or `pre-commit`) rather than `linthis` directly. The same Strategy B delegation logic applies.
+
+### Q7: How do I check which `core.hooksPath` is active?
 
 ```bash
-# Delete hook in project
-cd my-project
-rm .git/hooks/pre-commit
+git config --global --get core.hooksPath
+# Output: /Users/username/.config/git/hooks
 ```
 
-### Q3: Can I use both global template and project-level prek?
+If this returns nothing, no global `core.hooksPath` is set and Git is using `.git/hooks/` per-repository as usual.
 
-Yes, but not recommended. Suggested approach:
-- Personal projects: Use global template
-- Team projects: Use project-level prek/pre-commit
+---
 
-### Q4: Hook not executing?
+## See Also
 
-Check permissions:
-```bash
-ls -l ~/.linthis/.git-template/hooks/pre-commit
-# Should show -rwxr-xr-x (executable)
-
-# If not executable, set manually
-chmod +x ~/.linthis/.git-template/hooks/pre-commit
-```
-
-### Q5: Why does `-g --hook-type prek` show a warning?
-
-Global template only supports git hook type because:
-- prek/pre-commit requires running `prek install` in project directory
-- Their config files (.pre-commit-config.yaml) are project-level
-
-For prek/pre-commit, use in project directory:
-```bash
-linthis init --hook-type prek
-```
-
-### Q6: How to coexist with other hook tools (husky, pre-commit)?
-
-**Option 1**: Use `.git/hooks/pre-commit.local`
-
-Global hook automatically chains to `.local` file:
-
-```bash
-# Put other tool commands in .local file
-cat > .git/hooks/pre-commit.local << 'EOF'
-#!/bin/sh
-# Run other checks
-npm run lint
-pytest
-EOF
-chmod +x .git/hooks/pre-commit.local
-```
-
-Execution order:
-1. linthis (if config exists)
-2. Commands in .local
-
-**Option 2**: Disable global hook, use tool's own hook
-
-```bash
-# Don't create linthis config in project
-# Global hook will skip, won't affect other tools
-```
-
-### Q7: Will it affect projects not using linthis?
-
-**No!** Hook uses smart detection:
-
-- Only runs if linthis config file exists
-- Projects without config are completely unaffected
-- Verified: Creating new project without linthis config, hook doesn't execute any linthis commands
-
-## Smart Execution Mechanism
-
-The global hook template uses **smart conditional execution**, never interfering with other projects:
-
-### Workflow
-
-1. **Create template**: linthis creates smart pre-commit in `~/.linthis/.git-template/hooks/`
-2. **Configure Git**: Sets `git config --global init.templateDir`
-3. **Auto-apply**: `git init` copies template directory content to `.git/`
-4. **Hook execution**: Git automatically runs `.git/hooks/pre-commit` on commit
-
-### Smart Detection Logic
-
-Hook executes in this order:
-
-```bash
-1. Check if project has linthis config:
-   - .linthis/config.toml
-   - .linthis.toml
-   - linthis.toml
-
-2. If config exists → Run linthis
-   If no config → Skip linthis (no impact)
-
-3. Check for project-specific hook:
-   - .git/hooks/pre-commit.local
-
-4. If exists → Chain execute
-```
-
-### Hook Source Code
-
-Generated smart hook content:
-
-```bash
-#!/bin/sh
-# linthis pre-commit hook (global template)
-# This hook is installed globally and will only run if the project uses linthis
-
-# Check if this project uses linthis
-if [ -f ".linthis/config.toml" ] || [ -f ".linthis.toml" ] || [ -f "linthis.toml" ]; then
-    # Run linthis for this project
-    linthis -s -c -f -w || exit 1
-fi
-
-# Chain to project-specific hook if it exists
-# This allows projects to have their own hooks alongside linthis
-if [ -f ".git/hooks/pre-commit.local" ]; then
-    .git/hooks/pre-commit.local || exit 1
-fi
-```
-
-## Usage Scenarios
-
-### Scenario 1: Project Using linthis
-
-```bash
-my-rust-project/
-├── .linthis/
-│   └── config.toml     # ✓ Has config
-└── .git/
-    └── hooks/
-        └── pre-commit  # Will run linthis
-```
-
-**Result**: Automatically runs linthis check and format on commit
-
-### Scenario 2: Project Not Using linthis
-
-```bash
-other-project/
-└── .git/
-    └── hooks/
-        └── pre-commit  # ✗ No linthis config
-```
-
-**Result**: Hook skips linthis, no impact on project
-
-### Scenario 3: Project with Additional Hook Needs
-
-```bash
-complex-project/
-├── .linthis/
-│   └── config.toml       # ✓ Has config
-└── .git/
-    └── hooks/
-        ├── pre-commit        # Runs linthis
-        └── pre-commit.local  # Then runs this
-```
-
-**Result**: Runs linthis first, then project-specific checks
-
-### Scenario 4: Project Using Other Hook Tools
-
-If project uses husky, pre-commit, etc.:
-
-```bash
-# Option 1: Remove global hook, use tool's own hook
-rm .git/hooks/pre-commit
-# Then husky/pre-commit will create its own hook
-
-# Option 2: Put tool commands in pre-commit.local
-mv .git/hooks/pre-commit .git/hooks/pre-commit.backup
-# Create pre-commit.local to call other tools
-```
-
-## See It in Action
-
-Watch the [Git Hooks video tutorial](../getting-started/videos.md#episode-5-git-hooks) for a 15-second demo.
-
-## References
-
-- [Git documentation - init.templateDir](https://git-scm.com/docs/git-init#_template_directory)
+- [AI-Powered Fix](./ai-fix.md) — AI provider details
+- [AI Coding Agent Integration](./agent-hooks.md) — Rules-based agent integration
+- [CLI Reference](../reference/cli.md) — Complete command reference
+- [Git documentation — core.hooksPath](https://git-scm.com/docs/git-config#Documentation/git-config.txt-corehooksPath)

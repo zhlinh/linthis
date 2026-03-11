@@ -71,20 +71,28 @@ linthis hook install [OPTIONS]
 
 | 选项 | 描述 |
 |-----|------|
-| `--type` | Hook 类型：`git`（默认）、`agent`、`prek`、`pre-commit` |
+| `--type` | Hook 类型：`git`（默认）、`git-with-agent`、`agent`、`prek`、`prek-with-agent`、`pre-commit`、`pre-commit-with-agent` |
 | `--event` | Hook 事件：`pre-commit`（默认）、`pre-push`、`commit-msg` |
 | `--args` | Hook 脚本中 linthis 命令的额外参数（默认：`-c -f`） |
-| `--provider` | Agent 提供者（仅 `--type agent`）：`claude`、`cursor`、`windsurf`、`copilot`、`cline`、`codebuddy` |
+| `-g, --global` | 全局安装：agent 类型 → 用户主目录；其他类型 → `~/.config/git/hooks/` + `core.hooksPath` |
+| `--provider` | 用于 `--type agent`：agent 平台（`claude`、`cursor`、`windsurf`、`copilot`、`cline`、`codebuddy`）。用于 `*-with-agent`：AI 修复 CLI（`claude`、`codex`、`gemini`、`cursor`、`droid`、`auggie`） |
 | `--force` | 强制覆盖现有 hook |
 | `-y, --yes` | 非交互模式 |
 
 **示例：**
 
 ```bash
-linthis hook install                                  # 默认 git hook（检查 + 格式化）
-linthis hook install --event pre-push                 # Pre-push hook
-linthis hook install --args "-c"                      # 仅检查模式
-linthis hook install --type agent --provider claude   # Agent 集成
+# 项目级 hook
+linthis hook install                                           # 默认 git hook（检查 + 格式化）
+linthis hook install --event pre-push                         # Pre-push hook
+linthis hook install --args "-c"                              # 仅检查模式
+linthis hook install --type git-with-agent --provider claude  # git hook + AI 自动修复失败
+linthis hook install --type agent --provider claude           # Agent 集成
+
+# 全局 hook（适用于此机器上的所有仓库）
+linthis hook install --global                                 # 全局 git pre-commit
+linthis hook install --global --type git-with-agent --provider claude  # 全局 + AI 自动修复
+linthis hook install --type agent --provider claude --global  # AI agent 规则（用户主目录）
 ```
 
 ### hook uninstall
@@ -96,7 +104,17 @@ linthis hook uninstall [OPTIONS]
 | 选项 | 描述 |
 |-----|------|
 | `--event` | 要卸载的 hook 事件 |
+| `-g, --global` | 卸载全局 hook |
+| `--all` | 卸载所有 hook |
 | `-y, --yes` | 非交互模式 |
+
+**示例：**
+
+```bash
+linthis hook uninstall                  # 卸载项目 pre-commit hook
+linthis hook uninstall --global         # 卸载全局 pre-commit hook
+linthis hook uninstall --global --all   # 卸载所有全局 hook
+```
 
 ### hook status
 
