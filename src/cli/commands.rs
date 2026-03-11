@@ -549,6 +549,19 @@ pub enum Commands {
         #[command(subcommand)]
         action: ReportCommands,
     },
+    /// Validate commit message format (Conventional Commits)
+    ///
+    /// Accepts either a path to the commit message file (as used by git's
+    /// commit-msg hook) or the message string directly.
+    ///
+    /// Example usage:
+    ///   linthis cmsg "feat: add new feature"
+    ///   linthis cmsg "fix(api): handle null response"
+    ///   linthis cmsg .git/COMMIT_EDITMSG
+    Cmsg {
+        /// Path to commit message file, or the commit message string directly.
+        msg_or_file: String,
+    },
     /// Watch files for changes and auto-lint
     ///
     /// Monitors directories for file changes and automatically runs lint checks
@@ -793,9 +806,12 @@ pub enum HookCommands {
     /// Check for hook conflicts
     Check,
     /// Validate commit message format (used by commit-msg hook)
+    ///
+    /// Deprecated: use `linthis cmsg` instead.
+    #[command(hide = true)]
     CommitMsgCheck {
-        /// Path to the commit message file
-        msg_file: PathBuf,
+        /// Path to commit message file, or the commit message string directly.
+        msg_or_file: String,
     },
 }
 

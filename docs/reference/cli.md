@@ -86,12 +86,14 @@ linthis hook install [OPTIONS]
 # Project-level hooks
 linthis hook install                                           # Default git hook (check + format)
 linthis hook install --event pre-push                         # Pre-push hook
+linthis hook install --event commit-msg                       # Commit message format hook
 linthis hook install --args "-c"                              # Check-only hook
 linthis hook install --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
 linthis hook install --type agent --provider claude           # Agent integration
 
 # Global hooks (apply to all repos on this machine)
 linthis hook install --global                                 # Global git pre-commit
+linthis hook install --global --event commit-msg              # Global commit-msg hook
 linthis hook install --global --type git-with-agent --provider claude  # Global + AI auto-fix
 linthis hook install --type agent --provider claude --global  # AI agent rules (user home)
 ```
@@ -345,6 +347,52 @@ linthis -l python --fix --ai --provider claude
 ```
 
 See [AI-Powered Fix](../features/ai-fix.md) for detailed documentation.
+
+---
+
+## cmsg
+
+Validate commit message format (Conventional Commits).
+
+```bash
+linthis cmsg <MSG_OR_FILE>
+```
+
+| Argument | Description |
+|----------|-------------|
+| `MSG_OR_FILE` | Path to a commit message file (e.g. `.git/COMMIT_EDITMSG`), or the commit message string directly |
+
+**Examples:**
+
+```bash
+# Validate a commit message string directly
+linthis cmsg "feat: add login page"
+linthis cmsg "fix(auth): handle token expiry"
+
+# Validate via file path (used by git commit-msg hook)
+linthis cmsg .git/COMMIT_EDITMSG
+
+# Install the commit-msg hook (calls linthis cmsg automatically)
+linthis hook install --event commit-msg
+linthis hook install --global --event commit-msg
+```
+
+The default pattern enforces [Conventional Commits](https://www.conventionalcommits.org/) format:
+
+```
+type(scope)?: description
+```
+
+Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
+
+**Config (`.linthis.toml`):**
+
+```toml
+[hooks]
+commit_msg_pattern = '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}'
+require_ticket = false
+# ticket_pattern = '^(PROJ-\d+|feat|fix|...)'
+```
 
 ---
 

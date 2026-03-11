@@ -86,11 +86,13 @@ linthis hook install --type git-with-agent --provider claude  # git hook + AI au
 linthis hook install --type agent --provider claude           # AI agent rules (Claude Code)
 linthis hook install --type prek                              # prek pre-commit hook
 linthis hook install --event pre-push                         # git pre-push hook
+linthis hook install --event commit-msg                       # commit message format hook
 
 # Global hooks (apply to all repos on this machine)
 linthis hook install --global                                 # global git pre-commit
 linthis hook install --global --type git-with-agent --provider claude  # global + AI auto-fix
 linthis hook install --type agent --provider claude --global  # AI agent rules (user home)
+linthis hook install --global --event commit-msg              # global commit message format hook
 
 # Force overwrite existing files
 linthis init --force
@@ -603,7 +605,37 @@ All modifications preserve TOML file format and comments.
 
 - `pre-commit`: Run before commit (default, checks staged files)
 - `pre-push`: Run before push (checks all files)
-- `commit-msg`: Validate commit message format
+- `commit-msg`: Validate commit message format (calls `linthis cmsg "$1"`)
+
+### cmsg Subcommand
+
+Validate commit message format directly — without going through a hook.
+
+| Command | Description |
+| ------- | ----------- |
+| `cmsg <msg-or-file>` | Validate a commit message string or file path |
+
+```bash
+# Validate a message string directly
+linthis cmsg "feat: add new feature"
+linthis cmsg "fix(api): handle null response"
+
+# Validate from a file (git hook usage)
+linthis cmsg .git/COMMIT_EDITMSG
+
+# Install the commit-msg hook (calls `linthis cmsg "$1"` automatically)
+linthis hook install --event commit-msg
+```
+
+The default format follows [Conventional Commits](https://www.conventionalcommits.org/):
+`type(scope)?: description` — where `type` is one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+The pattern is configurable via `.linthis/config.toml`:
+
+```toml
+[hooks]
+commit_msg_pattern = "^(feat|fix|docs|...)\\(\\S+\\)?: .{1,72}"
+```
 
 ## Supported Languages
 

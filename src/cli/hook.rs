@@ -50,8 +50,8 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
         HookCommands::Check => {
             handle_hook_check()
         }
-        HookCommands::CommitMsgCheck { msg_file } => {
-            handle_commit_msg_check(&msg_file)
+        HookCommands::CommitMsgCheck { msg_or_file } => {
+            handle_commit_msg_check(&msg_or_file)
         }
     }
 }
@@ -242,6 +242,20 @@ fn build_global_hook_script_for_event(
     fix_provider: Option<&AgentFixProvider>,
 ) -> String {
     let linthis_cmd = build_hook_command(hook_event, args);
+
+    // For commit-msg, git passes the message file as $1.  Strip the literal
+    // "$1" from the command string so it is not embedded inside the variable
+    // assignment (which would break with paths containing spaces).  We instead
+    // call `$LINTHIS_CMD "$@"` at every invocation site so the argument is
+    // forwarded correctly.  For pre-commit / pre-push, "$@" expands to nothing,
+    // so the change is a no-op for those events.
+    let linthis_cmd_var = match hook_event {
+        HookEvent::CommitMsg => linthis_cmd
+            .trim_end_matches(" \"$1\"")
+            .to_string(),
+        _ => linthis_cmd.clone(),
+    };
+
     let fix_block = match fix_provider {
         None => String::new(),
         Some(p) => {
@@ -256,7 +270,7 @@ fn build_global_hook_script_for_event(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
                  \x20\x20\x20 echo \"[linthis] Lint errors detected. Invoking {provider} to fix...\"\n\
                  \x20\x20\x20 {agent}\n\
-                 \x20\x20\x20 $LINTHIS_CMD\n\
+                 \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
                  \x20\x20\x20 LINTHIS_EXIT=$?\n\
                  \x20 fi\n",
                 provider = p,
@@ -278,7 +292,7 @@ fn build_global_hook_script_for_event(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
                  \x20\x20\x20 echo \"[linthis] Lint errors detected. Invoking {provider} to fix...\"\n\
                  \x20\x20\x20 {agent}\n\
-                 \x20\x20\x20 $LINTHIS_CMD\n\
+                 \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
                  \x20\x20\x20 LINTHIS_EXIT=$?\n\
                  \x20 fi\n",
                 provider = p,
@@ -307,7 +321,7 @@ fn build_global_hook_script_for_event(
          \x20\x20\x20 exec \"$LOCAL_HOOK\" \"$@\"\n\
          \x20 else\n\
          \x20\x20\x20 # Local hook exists but has no linthis — run linthis first, then delegate\n\
-         \x20\x20\x20 $LINTHIS_CMD\n\
+         \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
          \x20\x20\x20 LINTHIS_EXIT=$?\n\
          {fix_local}\
          \x20\x20\x20 \"$LOCAL_HOOK\" \"$@\"\n\
@@ -317,12 +331,12 @@ fn build_global_hook_script_for_event(
          \x20 fi\n\
          else\n\
          \x20 # No local hook — run linthis directly\n\
-         \x20 $LINTHIS_CMD\n\
+         \x20 $LINTHIS_CMD \"$@\"\n\
          \x20 LINTHIS_EXIT=$?\n\
          {fix_direct}\
          \x20 exit $LINTHIS_EXIT\n\
          fi\n",
-        linthis = linthis_cmd,
+        linthis = linthis_cmd_var,
         event = event_name,
         fix_local = fix_block,
         fix_direct = fix_block_direct,
@@ -1283,7 +1297,7 @@ fn build_hook_command(
         }
         HookEvent::CommitMsg => {
             // For commit-msg: validate commit message using the msg file passed as $1
-            "linthis hook commit-msg-check \"$1\"".to_string()
+            "linthis cmsg \"$1\"".to_string()
         }
     }
 }
@@ -2493,7 +2507,15 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool) -> ExitCode {
 }
 
 /// Handle commit message validation
-pub fn handle_commit_msg_check(msg_file: &std::path::Path) -> ExitCode {
+///
+/// `msg_or_file` may be either a path to the commit message file (as passed by
+/// git's commit-msg hook) or the commit message string itself.  When the value
+/// resolves to an existing file it is read from disk; otherwise the value is
+/// used as the message content directly, which is convenient for CI/testing:
+///
+///   linthis hook commit-msg-check .git/COMMIT_EDITMSG
+///   linthis hook commit-msg-check "feat: add new feature"
+pub fn handle_commit_msg_check(msg_or_file: &str) -> ExitCode {
     use linthis::config::Config;
     use regex::Regex;
     use std::fs;
@@ -2502,13 +2524,19 @@ pub fn handle_commit_msg_check(msg_file: &std::path::Path) -> ExitCode {
     let project_root = linthis::utils::get_project_root();
     let config = Config::load_merged(&project_root);
 
-    // Read the commit message from file
-    let commit_msg = match fs::read_to_string(msg_file) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("{}: Failed to read commit message file: {}", "Error".red(), e);
-            return ExitCode::from(1);
+    // Accept either a file path or a raw message string
+    let path = std::path::Path::new(msg_or_file);
+    let commit_msg = if path.exists() {
+        match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("{}: Failed to read commit message file: {}", "Error".red(), e);
+                return ExitCode::from(1);
+            }
         }
+    } else {
+        // Treat as a direct commit message string
+        msg_or_file.to_string()
     };
 
     // Skip if empty (allows empty commits with --allow-empty-message)

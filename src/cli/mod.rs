@@ -39,7 +39,7 @@ pub use helpers::{
     print_fix_hint, resolve_ai_provider, run_benchmark, select_ai_provider_interactive,
     strip_ansi_codes,
 };
-pub use hook::handle_hook_command;
+pub use hook::{handle_commit_msg_check, handle_hook_command};
 pub use init::{handle_config_command, handle_init_command, init_linter_configs};
 pub use license::handle_license_command;
 pub use paths::{collect_paths, PathCollectionOptions, PathCollectionResult};

@@ -24,6 +24,9 @@ linthis hook install
 # Git pre-push hook
 linthis hook install --event pre-push
 
+# Commit message format hook
+linthis hook install --event commit-msg
+
 # prek hook (for projects using prek)
 linthis hook install --type prek
 
@@ -113,6 +116,44 @@ The global hook does not run blindly. Before running `linthis`, it inspects the 
 | Local hook exists, **calls `linthis`** | Delegates entirely (`exec "$LOCAL_HOOK" "$@"`) — linthis is not double-run |
 
 Detection uses `grep -qE '^[^#]*linthis'` — it matches any non-comment line containing `linthis`, so renaming comments does not affect the result.
+
+### Generated global hook script (commit-msg, git type)
+
+```bash
+#!/bin/sh
+# linthis-hook
+
+LINTHIS_CMD="linthis cmsg"
+
+# Locate the local project hook (git-dir aware)
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)"
+LOCAL_HOOK=""
+if [ -n "$GIT_DIR" ]; then
+  LOCAL_HOOK="$GIT_DIR/hooks/commit-msg"
+fi
+
+if [ -f "$LOCAL_HOOK" ] && [ -x "$LOCAL_HOOK" ]; then
+  if grep -qE '^[^#]*linthis' "$LOCAL_HOOK" 2>/dev/null; then
+    # Local hook already calls linthis — delegate entirely
+    exec "$LOCAL_HOOK" "$@"
+  else
+    # Local hook exists but has no linthis — run linthis first, then delegate
+    $LINTHIS_CMD "$@"
+    LINTHIS_EXIT=$?
+    "$LOCAL_HOOK" "$@"
+    LOCAL_EXIT=$?
+    [ $LINTHIS_EXIT -ne 0 ] && exit $LINTHIS_EXIT
+    exit $LOCAL_EXIT
+  fi
+else
+  # No local hook — run linthis directly
+  $LINTHIS_CMD "$@"
+  LINTHIS_EXIT=$?
+  exit $LINTHIS_EXIT
+fi
+```
+
+Note: `$@` passes git's `$1` (the message file path) safely, even for paths with spaces.
 
 ### Generated global hook script (pre-commit, git type)
 
