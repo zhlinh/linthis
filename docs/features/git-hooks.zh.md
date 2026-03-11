@@ -24,6 +24,9 @@ linthis hook install
 # git pre-push hook
 linthis hook install --event pre-push
 
+# commit message 格式检查 hook
+linthis hook install --event commit-msg
+
 # prek hook（适用于使用 prek 的项目）
 linthis hook install --type prek
 
@@ -113,6 +116,44 @@ Git 的 `core.hooksPath` 使 Git 对所有仓库都从该目录查找 hook，立
 | 本地 hook 存在，**已**调用 `linthis` | 完全委托（`exec "$LOCAL_HOOK" "$@"`）——`linthis` 不会重复运行 |
 
 检测使用 `grep -qE '^[^#]*linthis'`——匹配任何包含 `linthis` 的非注释行，注释行的修改不影响检测结果。
+
+### 生成的全局 hook 脚本示例（commit-msg，git 类型）
+
+```bash
+#!/bin/sh
+# linthis-hook
+
+LINTHIS_CMD="linthis cmsg"
+
+# Locate the local project hook (git-dir aware)
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)"
+LOCAL_HOOK=""
+if [ -n "$GIT_DIR" ]; then
+  LOCAL_HOOK="$GIT_DIR/hooks/commit-msg"
+fi
+
+if [ -f "$LOCAL_HOOK" ] && [ -x "$LOCAL_HOOK" ]; then
+  if grep -qE '^[^#]*linthis' "$LOCAL_HOOK" 2>/dev/null; then
+    # Local hook already calls linthis — delegate entirely
+    exec "$LOCAL_HOOK" "$@"
+  else
+    # Local hook exists but has no linthis — run linthis first, then delegate
+    $LINTHIS_CMD "$@"
+    LINTHIS_EXIT=$?
+    "$LOCAL_HOOK" "$@"
+    LOCAL_EXIT=$?
+    [ $LINTHIS_EXIT -ne 0 ] && exit $LINTHIS_EXIT
+    exit $LOCAL_EXIT
+  fi
+else
+  # No local hook — run linthis directly
+  $LINTHIS_CMD "$@"
+  LINTHIS_EXIT=$?
+  exit $LINTHIS_EXIT
+fi
+```
+
+注意：`$@` 将 git 的 `$1`（消息文件路径）安全传递，即使路径包含空格也能正确处理。
 
 ### 生成的全局 hook 脚本示例（pre-commit，git 类型）
 

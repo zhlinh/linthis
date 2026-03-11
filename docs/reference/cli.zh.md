@@ -86,12 +86,14 @@ linthis hook install [OPTIONS]
 # 项目级 hook
 linthis hook install                                           # 默认 git hook（检查 + 格式化）
 linthis hook install --event pre-push                         # Pre-push hook
+linthis hook install --event commit-msg                       # Commit message 格式检查 hook
 linthis hook install --args "-c"                              # 仅检查模式
 linthis hook install --type git-with-agent --provider claude  # git hook + AI 自动修复失败
 linthis hook install --type agent --provider claude           # Agent 集成
 
 # 全局 hook（适用于此机器上的所有仓库）
 linthis hook install --global                                 # 全局 git pre-commit
+linthis hook install --global --event commit-msg              # 全局 commit-msg hook
 linthis hook install --global --type git-with-agent --provider claude  # 全局 + AI 自动修复
 linthis hook install --type agent --provider claude --global  # AI agent 规则（用户主目录）
 ```
@@ -345,6 +347,52 @@ linthis -l python --fix --ai --provider claude
 ```
 
 详见 [AI 智能修复](../features/ai-fix.zh.md)。
+
+---
+
+## cmsg
+
+验证 commit message 格式（Conventional Commits）。
+
+```bash
+linthis cmsg <MSG_OR_FILE>
+```
+
+| 参数 | 描述 |
+|-----|------|
+| `MSG_OR_FILE` | commit message 文件路径（如 `.git/COMMIT_EDITMSG`），或直接传入 commit message 字符串 |
+
+**示例：**
+
+```bash
+# 直接验证 commit message 字符串
+linthis cmsg "feat: add login page"
+linthis cmsg "fix(auth): handle token expiry"
+
+# 通过文件路径验证（由 git commit-msg hook 调用）
+linthis cmsg .git/COMMIT_EDITMSG
+
+# 安装 commit-msg hook（自动调用 linthis cmsg）
+linthis hook install --event commit-msg
+linthis hook install --global --event commit-msg
+```
+
+默认模式要求遵循 [Conventional Commits](https://www.conventionalcommits.org/) 格式：
+
+```
+type(scope)?: description
+```
+
+允许的类型：`feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore`、`revert`
+
+**配置（`.linthis.toml`）：**
+
+```toml
+[hooks]
+commit_msg_pattern = '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}'
+require_ticket = false
+# ticket_pattern = '^(PROJ-\d+|feat|fix|...)'
+```
 
 ---
 
