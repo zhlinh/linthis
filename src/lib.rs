@@ -546,6 +546,18 @@ pub enum RunMode {
     FormatOnly,
 }
 
+/// Controls how missing tools are auto-installed during linting
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ToolInstallMode {
+    /// Silently install without prompting
+    Auto,
+    /// Prompt user before installing (default); falls back to Disabled in non-TTY
+    #[default]
+    Prompt,
+    /// Never auto-install; show warning only
+    Disabled,
+}
+
 /// Progress information for callbacks
 #[derive(Debug, Clone)]
 pub struct Progress {
@@ -580,6 +592,8 @@ pub struct RunOptions {
     pub no_cache: bool,
     /// Config resolver for plugin configs (priority-based lookup)
     pub config_resolver: Option<SharedConfigResolver>,
+    /// How to handle missing tools during linting
+    pub tool_install_mode: ToolInstallMode,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -610,6 +624,7 @@ impl Default for RunOptions {
             plugins: Vec::new(),
             no_cache: false,
             config_resolver: None,
+            tool_install_mode: ToolInstallMode::Prompt,
         }
     }
 }
@@ -798,6 +813,323 @@ fn get_formatter_install_hint(lang: Language) -> String {
         }
         Language::CSharp => "Install: dotnet tool install -g dotnet-format".to_string(),
     }
+}
+
+/// Get auto-install commands for a missing tool.
+/// Returns a list of candidate commands to try in order (first that succeeds wins).
+/// Each command is split into [program, arg1, arg2, ...].
+fn get_auto_install_commands(lang: Language, is_checker: bool) -> Vec<Vec<String>> {
+    macro_rules! cmd {
+        ($($s:expr),+) => { vec![$($s.to_string()),+] }
+    }
+
+    match (lang, is_checker) {
+        // Rust
+        (Language::Rust, true) => vec![cmd!["rustup", "component", "add", "clippy"]],
+        (Language::Rust, false) => vec![cmd!["rustup", "component", "add", "rustfmt"]],
+
+        // Python (ruff handles both check + format)
+        (Language::Python, _) => vec![cmd!["pip3", "install", "ruff"]],
+
+        // Go
+        (Language::Go, true) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "golangci-lint"]]
+            } else {
+                vec![cmd!["go", "install", "github.com/golangci/golangci-lint/cmd/golangci-lint@latest"]]
+            }
+        }
+        (Language::Go, false) => vec![], // gofmt ships with Go
+
+        // TypeScript / JavaScript
+        (Language::TypeScript | Language::JavaScript, true) => {
+            vec![cmd!["npm", "install", "-g", "eslint"]]
+        }
+        (Language::TypeScript | Language::JavaScript, false) => {
+            vec![cmd!["npm", "install", "-g", "prettier"]]
+        }
+
+        // Java
+        (Language::Java, true) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "checkstyle"]]
+            } else if cfg!(target_os = "windows") {
+                vec![cmd!["choco", "install", "checkstyle"]]
+            } else {
+                vec![cmd!["sudo", "apt-get", "install", "-y", "checkstyle"]]
+            }
+        }
+        (Language::Java, false) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "google-java-format"]]
+            } else {
+                vec![]
+            }
+        }
+
+        // C / C++ / Objective-C
+        (Language::Cpp | Language::ObjectiveC, true) => {
+            if cfg!(target_os = "macos") {
+                vec![
+                    cmd!["brew", "install", "llvm"],
+                    cmd!["pip3", "install", "cpplint"],
+                ]
+            } else if cfg!(target_os = "windows") {
+                vec![
+                    cmd!["choco", "install", "llvm"],
+                    cmd!["pip3", "install", "cpplint"],
+                ]
+            } else {
+                vec![
+                    cmd!["sudo", "apt-get", "install", "-y", "clang-tidy"],
+                    cmd!["pip3", "install", "cpplint"],
+                ]
+            }
+        }
+        (Language::Cpp | Language::ObjectiveC, false) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "clang-format"]]
+            } else if cfg!(target_os = "windows") {
+                vec![cmd!["choco", "install", "llvm"]]
+            } else {
+                vec![cmd!["sudo", "apt-get", "install", "-y", "clang-format"]]
+            }
+        }
+
+        // Dart
+        (Language::Dart, _) => vec![], // requires full Dart SDK, cannot auto-install
+
+        // Swift
+        (Language::Swift, true) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "swiftlint"]]
+            } else {
+                vec![]
+            }
+        }
+        (Language::Swift, false) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "swift-format"]]
+            } else {
+                vec![]
+            }
+        }
+
+        // Kotlin
+        (Language::Kotlin, _) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "ktlint"]]
+            } else if cfg!(target_os = "windows") {
+                vec![cmd!["choco", "install", "ktlint"]]
+            } else {
+                vec![]
+            }
+        }
+
+        // Lua
+        (Language::Lua, true) => vec![cmd!["luarocks", "install", "luacheck"]],
+        (Language::Lua, false) => vec![cmd!["cargo", "install", "stylua"]],
+
+        // Shell
+        (Language::Shell, true) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "shellcheck"]]
+            } else if cfg!(target_os = "windows") {
+                vec![cmd!["choco", "install", "shellcheck"]]
+            } else {
+                vec![cmd!["sudo", "apt-get", "install", "-y", "shellcheck"]]
+            }
+        }
+        (Language::Shell, false) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "shfmt"]]
+            } else if cfg!(target_os = "windows") {
+                vec![cmd!["choco", "install", "shfmt"]]
+            } else {
+                vec![
+                    cmd!["sudo", "apt-get", "install", "-y", "shfmt"],
+                    cmd!["go", "install", "mvdan.cc/sh/v3/cmd/shfmt@latest"],
+                ]
+            }
+        }
+
+        // Ruby
+        (Language::Ruby, _) => vec![cmd!["gem", "install", "rubocop"]],
+
+        // PHP
+        (Language::Php, true) => {
+            vec![cmd!["composer", "global", "require", "squizlabs/php_codesniffer"]]
+        }
+        (Language::Php, false) => {
+            vec![cmd!["composer", "global", "require", "friendsofphp/php-cs-fixer"]]
+        }
+
+        // Scala
+        (Language::Scala, true) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "scalafix"]]
+            } else {
+                vec![cmd!["cs", "install", "scalafix"]]
+            }
+        }
+        (Language::Scala, false) => {
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "scalafmt"]]
+            } else {
+                vec![cmd!["cs", "install", "scalafmt"]]
+            }
+        }
+
+        // C#
+        (Language::CSharp, _) => {
+            vec![cmd!["dotnet", "tool", "install", "-g", "dotnet-format"]]
+        }
+    }
+}
+
+/// Try to install a tool by running the given command.
+/// Returns Ok(()) on success, Err(message) on failure.
+fn try_install_tool(command: &[String]) -> std::result::Result<(), String> {
+    if command.is_empty() {
+        return Err("empty install command".to_string());
+    }
+    let output = std::process::Command::new(&command[0])
+        .args(&command[1..])
+        .output()
+        .map_err(|e| format!("failed to run `{}`: {}", command.join(" "), e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!(
+            "`{}` failed (exit {}): {}",
+            command.join(" "),
+            output.status.code().unwrap_or(-1),
+            stderr.trim()
+        ))
+    }
+}
+
+type InstalledTool = (Language, bool);
+type FailedTool = (Language, bool, String);
+
+/// Pre-flight: auto-install missing tools for detected languages.
+/// Returns (installed_tools, failed_tools).
+fn pre_flight_install(
+    file_langs: &[(&std::path::PathBuf, Language)],
+    run_mode: &RunMode,
+    install_mode: &ToolInstallMode,
+    quiet: bool,
+) -> (Vec<InstalledTool>, Vec<FailedTool>) {
+    use std::collections::HashSet;
+
+    let mut seen: HashSet<(Language, bool)> = HashSet::new();
+    let mut installed: Vec<InstalledTool> = Vec::new();
+    let mut failed: Vec<FailedTool> = Vec::new();
+
+    for (_, lang) in file_langs {
+        let lang = *lang;
+
+        // Determine which tools to check based on run mode
+        let check_checker = matches!(run_mode, RunMode::Both | RunMode::CheckOnly);
+        let check_formatter = matches!(run_mode, RunMode::Both | RunMode::FormatOnly);
+
+        for is_checker in [true, false] {
+            if is_checker && !check_checker {
+                continue;
+            }
+            if !is_checker && !check_formatter {
+                continue;
+            }
+            if !seen.insert((lang, is_checker)) {
+                continue;
+            }
+
+            // Check if tool is already available
+            let available = if is_checker {
+                get_checker(lang).map(|c| c.is_available()).unwrap_or(true)
+            } else {
+                get_formatter(lang).map(|f| f.is_available()).unwrap_or(true)
+            };
+
+            if available {
+                continue;
+            }
+
+            let tool_name = get_tool_name(lang, is_checker);
+
+            // Resolve effective mode: Disabled skips, Prompt in non-TTY also skips
+            let effective_mode = match install_mode {
+                ToolInstallMode::Disabled => continue,
+                ToolInstallMode::Prompt
+                    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) =>
+                {
+                    continue
+                }
+                other => other,
+            };
+
+            let commands = get_auto_install_commands(lang, is_checker);
+            if commands.is_empty() {
+                continue;
+            }
+
+            // Prompt mode: ask before installing
+            if matches!(effective_mode, ToolInstallMode::Prompt) {
+                use std::io::Write;
+                eprint!("\r\x1b[K");
+                eprint!(
+                    "\x1b[33m?\x1b[0m Missing {} tool \x1b[1m{}\x1b[0m — install now? [y/N] ",
+                    lang.name(),
+                    tool_name
+                );
+                let _ = std::io::stderr().flush();
+                let mut input = String::new();
+                if std::io::stdin().read_line(&mut input).is_err()
+                    || !input.trim().eq_ignore_ascii_case("y")
+                {
+                    continue;
+                }
+            }
+
+            if !quiet {
+                eprint!("\r\x1b[K");
+                eprintln!(
+                    "\x1b[36mInstalling\x1b[0m: {} (missing {} tool for {})",
+                    tool_name,
+                    if is_checker { "linter" } else { "formatter" },
+                    lang.name()
+                );
+            }
+
+            let mut install_ok = false;
+            let mut last_err = String::new();
+
+            for cmd in &commands {
+                match try_install_tool(cmd) {
+                    Ok(()) => {
+                        install_ok = true;
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = e.to_string();
+                    }
+                }
+            }
+
+            if install_ok {
+                if !quiet {
+                    eprintln!("\x1b[32mInstalled\x1b[0m:  {}", tool_name);
+                }
+                installed.push((lang, is_checker));
+            } else {
+                failed.push((lang, is_checker, last_err));
+            }
+        }
+    }
+
+    (installed, failed)
 }
 
 /// Warn about missing tool (once per tool) and record for reporting
@@ -1045,6 +1377,37 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // Set total_files to actual processable files count
     result.total_files = file_langs.len();
+
+    // Pre-flight: auto-install missing tools
+    if !file_langs.is_empty() {
+        let (installed, failed) = pre_flight_install(&file_langs, &options.mode, &options.tool_install_mode, options.quiet);
+        if !installed.is_empty() || !failed.is_empty() {
+            // Re-print scanning line after install output
+            if !options.quiet {
+                use std::io::Write;
+                eprint!("\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...", SPINNER_CHARS[1], files.len());
+                let _ = std::io::stderr().flush();
+            }
+        }
+        if !failed.is_empty() && !options.quiet {
+            eprint!("\r\x1b[K");
+            for (lang, is_checker, err) in &failed {
+                let tool_name = get_tool_name(*lang, *is_checker);
+                let hint = if *is_checker {
+                    get_checker_install_hint(*lang)
+                } else {
+                    get_formatter_install_hint(*lang)
+                };
+                eprintln!(
+                    "\x1b[33mWarning\x1b[0m: Failed to install {} — {}\n  Manual install: {}",
+                    tool_name, err, hint
+                );
+            }
+            use std::io::Write;
+            eprint!("\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...", SPINNER_CHARS[1], files.len());
+            let _ = std::io::stderr().flush();
+        }
+    }
 
     // Load cache if enabled (only for check modes)
     let project_root = utils::get_project_root();
