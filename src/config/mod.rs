@@ -269,7 +269,7 @@ fn default_commit_msg_pattern() -> String {
 }
 
 /// Tool auto-install configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolAutoInstallConfig {
     /// Enable/disable tool auto-install
     #[serde(default = "default_tool_auto_install_enabled")]
