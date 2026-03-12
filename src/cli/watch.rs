@@ -234,6 +234,7 @@ fn run_lint(config: &WatchConfig) -> Result<RunResult, String> {
         plugins: Vec::new(),
         no_cache: false,
         config_resolver: None,
+        tool_install_mode: linthis::ToolInstallMode::Disabled,
     };
 
     run(&options).map_err(|e| e.to_string())
