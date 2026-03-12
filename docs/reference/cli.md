@@ -74,7 +74,7 @@ linthis hook install [OPTIONS]
 |--------|-------------|
 | `--type` | Hook type: `git` (default), `git-with-agent`, `agent`, `prek`, `prek-with-agent`, `pre-commit`, `pre-commit-with-agent` |
 | `--event` | Hook event: `pre-commit` (default), `pre-push`, `commit-msg` |
-| `--args` | Extra arguments for the linthis command in hook script (default: `-c -f`) |
+| `--args` | Extra arguments for the linthis command in hook script (default: none, runs check + format) |
 | `-g, --global` | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath` |
 | `--provider` | AI provider: `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy`. For `--type agent`: installs rules/settings files. For `*-with-agent`: uses headless CLI to auto-fix. |
 | `--force` | Force overwrite existing |

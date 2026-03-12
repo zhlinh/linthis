@@ -1284,16 +1284,19 @@ fn build_hook_command(
 ) -> String {
     match hook_event {
         HookEvent::PreCommit => {
-            // For pre-commit: check staged files with hook event output
-            // Default args: "-c -f" (check + format)
-            let extra = args.as_deref().unwrap_or("-c -f");
-            format!("linthis -s {} --hook-event=pre-commit", extra)
+            // For pre-commit: check + format staged files (default: both modes)
+            // Pass extra args as-is; no flags = RunMode::Both (check + format)
+            match args.as_deref() {
+                Some(extra) => format!("linthis -s {} --hook-event=pre-commit", extra),
+                None => "linthis -s --hook-event=pre-commit".to_string(),
+            }
         }
         HookEvent::PrePush => {
-            // For pre-push: check all files (more comprehensive) with hook event output
-            // Default args: "-c -f" (check + format)
-            let extra = args.as_deref().unwrap_or("-c -f");
-            format!("linthis {} --hook-event=pre-push", extra)
+            // For pre-push: check + format all files (default: both modes)
+            match args.as_deref() {
+                Some(extra) => format!("linthis {} --hook-event=pre-push", extra),
+                None => "linthis --hook-event=pre-push".to_string(),
+            }
         }
         HookEvent::CommitMsg => {
             // For commit-msg: validate commit message using the msg file passed as $1
