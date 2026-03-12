@@ -202,13 +202,13 @@ linthis hook install --type git-with-agent --provider claude --global
 
 | Provider | CLI Binary | Headless Command |
 |----------|-----------|-----------------|
-| `claude` | `claude` | `claude -p --permission-mode acceptEdits '...'` |
+| `claude` | `claude` | `claude -p --dangerously-skip-permissions '...'` |
 | `codex` | `codex` | `codex exec --ask-for-approval never '...'` |
 | `gemini` | `gemini` | `gemini -p --approval-mode=auto_edit '...'` |
 | `cursor` | `cursor-agent` | `cursor-agent chat --force '...'` |
 | `droid` | `droid` | `droid exec --auto high '...'` |
 | `auggie` | `auggie` | `auggie --print '...'` |
-| `codebuddy` | `codebuddy` | `codebuddy -p --permission-mode acceptEdits '...'` |
+| `codebuddy` | `codebuddy` | `codebuddy -p --dangerously-skip-permissions '...'` |
 
 ### Generated Hook Script
 
@@ -224,7 +224,7 @@ LINTHIS_EXIT=$?
 
 if [ $LINTHIS_EXIT -ne 0 ]; then
   echo "[linthis] Lint errors detected. Invoking Claude Code to fix..."
-  claude -p --permission-mode acceptEdits 'Staged files have linthis lint errors. Run '\''linthis -s -c'\'' to inspect them. Fix all issues by editing the files directly (do NOT use linthis --fix). Verify with '\''linthis -s -c'\'' until it passes cleanly.'
+  claude -p --dangerously-skip-permissions 'Staged files have linthis lint errors. Run '\''linthis -s -c'\'' to inspect them. Fix all issues by editing the files directly (do NOT use linthis --fix). Verify with '\''linthis -s -c'\'' until it passes cleanly.'
   $LINTHIS_CMD
   LINTHIS_EXIT=$?
 fi
