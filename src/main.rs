@@ -648,6 +648,25 @@ fn main() -> ExitCode {
         }
     };
 
+    // Load config for tool_auto_install and other runtime settings
+    let runtime_project_root = linthis::utils::get_project_root();
+    let runtime_config = linthis::config::Config::load_merged(&runtime_project_root);
+
+    // Resolve tool_install_mode: CLI flag > config > default
+    let tool_install_mode = if cli.no_tool_auto_install {
+        ToolInstallMode::Disabled
+    } else {
+        match &runtime_config.tool_auto_install {
+            Some(cfg) if !cfg.enabled => ToolInstallMode::Disabled,
+            Some(cfg) => match cfg.mode.as_str() {
+                "auto" => ToolInstallMode::Auto,
+                "disabled" => ToolInstallMode::Disabled,
+                _ => ToolInstallMode::Prompt,
+            },
+            None => ToolInstallMode::Prompt,
+        }
+    };
+
     // Build options with ConfigResolver for plugin configs
     let options = RunOptions {
         paths,
@@ -663,7 +682,7 @@ fn main() -> ExitCode {
         } else {
             Some(Arc::new(config_resolver))
         },
-        tool_install_mode: ToolInstallMode::Prompt,
+        tool_install_mode,
     };
 
     // Parse output format (hook_mode overrides output format)

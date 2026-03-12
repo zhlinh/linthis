@@ -122,6 +122,10 @@ pub struct Cli {
     #[arg(long)]
     pub benchmark: bool,
 
+    /// Disable tool auto-install (overrides config)
+    #[arg(long, default_value_t = false)]
+    pub no_tool_auto_install: bool,
+
     /// Skip loading plugins, use default configuration
     #[arg(long)]
     pub no_plugin: bool,
