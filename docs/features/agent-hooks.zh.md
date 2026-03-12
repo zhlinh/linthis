@@ -203,13 +203,13 @@ linthis hook install --type git-with-agent --provider claude --global
 
 | 提供者 | CLI 可执行文件 | 无交互命令 |
 |--------|-------------|-----------|
-| `claude` | `claude` | `claude -p '...'` |
-| `codex` | `codex` | `codex exec '...'` |
-| `gemini` | `gemini` | `gemini -p '...'` |
-| `cursor` | `cursor-agent` | `cursor-agent chat '...'` |
-| `droid` | `droid` | `droid exec --auto low '...'` |
+| `claude` | `claude` | `claude -p --permission-mode acceptEdits '...'` |
+| `codex` | `codex` | `codex exec --ask-for-approval never '...'` |
+| `gemini` | `gemini` | `gemini -p --approval-mode=auto_edit '...'` |
+| `cursor` | `cursor-agent` | `cursor-agent chat --force '...'` |
+| `droid` | `droid` | `droid exec --auto high '...'` |
 | `auggie` | `auggie` | `auggie --print '...'` |
-| `codebuddy` | `codebuddy` | `codebuddy -p '...'` |
+| `codebuddy` | `codebuddy` | `codebuddy -p --permission-mode acceptEdits '...'` |
 
 ### 生成的 Hook 脚本示例
 
@@ -225,7 +225,7 @@ LINTHIS_EXIT=$?
 
 if [ $LINTHIS_EXIT -ne 0 ]; then
   echo "[linthis] Lint errors detected. Invoking Claude Code to fix..."
-  claude -p 'Staged files have linthis lint errors. Run '\''linthis -s -c'\'' to inspect them. Fix all issues by editing the files directly (do NOT use linthis --fix). Verify with '\''linthis -s -c'\'' until it passes cleanly.'
+  claude -p --permission-mode acceptEdits 'Staged files have linthis lint errors. Run '\''linthis -s -c'\'' to inspect them. Fix all issues by editing the files directly (do NOT use linthis --fix). Verify with '\''linthis -s -c'\'' until it passes cleanly.'
   $LINTHIS_CMD
   LINTHIS_EXIT=$?
 fi
