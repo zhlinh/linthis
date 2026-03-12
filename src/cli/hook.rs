@@ -1354,13 +1354,13 @@ fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str) -> String {
     // Escape single quotes in prompt for shell safety
     let escaped = prompt.replace('\'', "'\\''");
     match provider {
-        AgentFixProvider::Claude    => format!("claude -p --permission-mode acceptEdits '{}'", escaped),
+        AgentFixProvider::Claude    => format!("claude -p --dangerously-skip-permissions '{}'", escaped),
         AgentFixProvider::Codex     => format!("codex exec --ask-for-approval never '{}'", escaped),
         AgentFixProvider::Gemini    => format!("gemini -p --approval-mode=auto_edit '{}'", escaped),
         AgentFixProvider::Cursor    => format!("cursor-agent chat --force '{}'", escaped),
         AgentFixProvider::Droid     => format!("droid exec --auto high '{}'", escaped),
         AgentFixProvider::Auggie    => format!("auggie --print '{}'", escaped),
-        AgentFixProvider::Codebuddy => format!("codebuddy -p --permission-mode acceptEdits '{}'", escaped),
+        AgentFixProvider::Codebuddy => format!("codebuddy -p --dangerously-skip-permissions '{}'", escaped),
     }
 }
 
