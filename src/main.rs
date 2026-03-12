@@ -606,7 +606,9 @@ fn main() -> ExitCode {
     }
 
     // Determine run mode
-    let mode = if cli.check_only {
+    let mode = if cli.check_only && cli.format_only {
+        RunMode::Both
+    } else if cli.check_only {
         RunMode::CheckOnly
     } else if cli.format_only {
         RunMode::FormatOnly
