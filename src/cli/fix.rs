@@ -146,6 +146,7 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
         plugins: vec![],
         no_cache: false,
         config_resolver: None,
+        tool_install_mode: linthis::ToolInstallMode::Prompt,
     };
 
     match run(&run_options) {
@@ -446,6 +447,7 @@ fn run_ai_fix_loop(
             plugins: vec![],
             no_cache: true, // Don't use cache for recheck
             config_resolver: None,
+            tool_install_mode: linthis::ToolInstallMode::Disabled,
         };
 
         match run(&run_options) {

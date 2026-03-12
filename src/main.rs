@@ -28,7 +28,7 @@ use cli::{
 use linthis::config::resolver::{ConfigResolver, ConfigSource, ResolvedConfig};
 use linthis::lsp::{run_lsp_server_with_config, LspMode};
 use linthis::utils::output::{format_result_with_hook_type, OutputFormat};
-use linthis::{run, Language, RunMode, RunOptions};
+use linthis::{run, Language, RunMode, RunOptions, ToolInstallMode};
 use std::sync::Arc;
 
 /// Inject dynamic help text showing detected AI/agent providers into clap commands.
@@ -663,6 +663,7 @@ fn main() -> ExitCode {
         } else {
             Some(Arc::new(config_resolver))
         },
+        tool_install_mode: ToolInstallMode::Prompt,
     };
 
     // Parse output format (hook_mode overrides output format)
