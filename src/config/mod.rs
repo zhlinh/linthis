@@ -139,6 +139,10 @@ pub struct Config {
     #[serde(default)]
     pub self_auto_update: Option<crate::self_update::SelfUpdateConfig>,
 
+    /// Tool auto-install configuration
+    #[serde(default)]
+    pub tool_auto_install: Option<ToolAutoInstallConfig>,
+
     /// Performance settings
     #[serde(default)]
     pub performance: PerformanceConfig,
@@ -262,6 +266,35 @@ fn default_hook_parallel() -> bool {
 
 fn default_commit_msg_pattern() -> String {
     r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}".to_string()
+}
+
+/// Tool auto-install configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolAutoInstallConfig {
+    /// Enable/disable tool auto-install
+    #[serde(default = "default_tool_auto_install_enabled")]
+    pub enabled: bool,
+
+    /// Install mode: "auto", "prompt", or "disabled"
+    #[serde(default = "default_tool_auto_install_mode")]
+    pub mode: String,
+}
+
+fn default_tool_auto_install_enabled() -> bool {
+    true
+}
+
+fn default_tool_auto_install_mode() -> String {
+    "prompt".to_string()
+}
+
+impl Default for ToolAutoInstallConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_tool_auto_install_enabled(),
+            mode: default_tool_auto_install_mode(),
+        }
+    }
 }
 
 /// AI configuration section
@@ -491,6 +524,7 @@ const KNOWN_FIELDS: &[&str] = &[
     "plugins",
     "self_auto_update",
     "plugin_auto_sync",
+    "tool_auto_install",
     "rules",
     "rust",
     "python",
@@ -698,6 +732,11 @@ max_complexity = 20
 
 # [python]
 # excludes = ["*_test.py"]
+
+# Tool auto-install configuration
+# [tool_auto_install]
+# enabled = true
+# mode = "prompt"  # auto = install silently; prompt = ask before installing; disabled = never install
 "#
         .to_string()
     }
