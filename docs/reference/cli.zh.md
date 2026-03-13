@@ -355,12 +355,17 @@ linthis -l python --fix --ai --provider claude
 验证 commit message 格式（Conventional Commits）。
 
 ```bash
-linthis cmsg <MSG_OR_FILE>
+linthis cmsg <MSG_OR_FILE> [OPTIONS]
 ```
 
 | 参数 | 描述 |
 |-----|------|
 | `MSG_OR_FILE` | commit message 文件路径（如 `.git/COMMIT_EDITMSG`），或直接传入 commit message 字符串 |
+
+| 选项 | 描述 |
+|-----|------|
+| `--auto-fix` | 当验证失败时，使用 AI 自动重写 commit message |
+| `--provider` | AI 自动修复所用提供商（需要 `--auto-fix`） |
 
 **示例：**
 
@@ -371,6 +376,10 @@ linthis cmsg "fix(auth): handle token expiry"
 
 # 通过文件路径验证（由 git commit-msg hook 调用）
 linthis cmsg .git/COMMIT_EDITMSG
+
+# 验证失败时 AI 自动重写（并写回文件）
+linthis cmsg .git/COMMIT_EDITMSG --auto-fix
+linthis cmsg .git/COMMIT_EDITMSG --auto-fix --provider claude-cli
 
 # 安装 commit-msg hook（自动调用 linthis cmsg）
 linthis hook install --event commit-msg
@@ -388,10 +397,100 @@ type(scope)?: description
 **配置（`.linthis.toml`）：**
 
 ```toml
-[hooks]
+[cmsg]
 commit_msg_pattern = '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}'
 require_ticket = false
 # ticket_pattern = '^(PROJ-\d+|feat|fix|...)'
+```
+
+---
+
+## format
+
+格式化文件，自动备份并支持撤销。
+
+```bash
+linthis format [OPTIONS]
+```
+
+| 选项 | 描述 |
+|-----|------|
+| `-s, --staged` | 仅格式化 Git 暂存文件 |
+| `-m, --modified` | 仅格式化本地修改文件（暂存 + 未暂存） |
+| `-i, --include` | 要格式化的文件/目录 |
+| `--undo` | 从上次备份恢复文件 |
+| `--list-backups` | 列出可用的备份 |
+| `--source` | 撤销时使用的备份来源（默认：最新） |
+
+**示例：**
+
+```bash
+linthis format                        # 格式化所有文件
+linthis format -s                     # 格式化暂存文件
+linthis format -m                     # 格式化修改过的文件
+linthis format -i src/main.rs         # 格式化指定文件
+linthis format --undo                 # 撤销上次格式化
+linthis format --list-backups         # 列出可用备份
+```
+
+每次格式化操作前会自动创建备份。如果格式化结果不符合预期，可通过 `--undo` 恢复。
+
+---
+
+## review
+
+AI 代码审查，支持自动创建 PR/MR。
+
+```bash
+linthis review [OPTIONS]
+```
+
+| 选项 | 描述 |
+|-----|------|
+| `-b, --background` | 在后台运行 review（非阻塞） |
+| `--auto-fix` | Review + 自动修复 + 创建 PR/MR |
+| `-r, --reviewer` | 指定 PR/MR 的审查人（可重复） |
+| `--provider` | AI 提供商 |
+| `--base` | 对比的基础分支/提交 |
+| `--head` | 要 review 的 HEAD 引用（默认：`HEAD`） |
+| `--no-pr` | 仅生成报告，不创建 PR/MR |
+| `--notify` | 通知渠道（可重复） |
+| `--status` | 查看后台 review 状态 |
+| `--dry-run` | 预览自动修复操作，不推送或创建 PR |
+| `--clean` | 清理旧的 review 产物 |
+| `-o, --output` | 输出格式：`markdown`（默认）或 `json` |
+
+**示例：**
+
+```bash
+linthis review                        # 对当前分支与远端进行 review
+linthis review --auto-fix             # Review + 自动修复 + 创建 PR
+linthis review -r alice -r bob        # 指定审查人
+linthis review --base main            # 与 main 分支对比
+linthis review --background           # 后台运行（非阻塞）
+linthis review --status               # 查看后台 review 状态
+linthis review --no-pr                # 仅生成 Markdown 报告
+linthis review --dry-run              # 预览操作，不推送
+```
+
+**支持的平台：**
+
+| 平台 | 识别方式 | CLI 工具 |
+|-----|---------|---------|
+| GitHub | `github.com` remote | `gh` |
+| GitLab | `gitlab.com` / 自托管 | `glab` |
+
+**配置（`.linthis.toml`）：**
+
+```toml
+[review]
+enabled = true
+auto_fix = false
+provider = "claude-cli"
+retention_days = 30
+
+[review.reviewers]
+default = ["alice", "bob"]
 ```
 
 ---

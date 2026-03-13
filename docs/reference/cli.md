@@ -355,12 +355,17 @@ See [AI-Powered Fix](../features/ai-fix.md) for detailed documentation.
 Validate commit message format (Conventional Commits).
 
 ```bash
-linthis cmsg <MSG_OR_FILE>
+linthis cmsg <MSG_OR_FILE> [OPTIONS]
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `MSG_OR_FILE` | Path to a commit message file (e.g. `.git/COMMIT_EDITMSG`), or the commit message string directly |
+
+| Option | Description |
+|--------|-------------|
+| `--auto-fix` | Automatically rewrite invalid commit messages using AI |
+| `--provider` | AI provider for auto-fix (requires `--auto-fix`) |
 
 **Examples:**
 
@@ -371,6 +376,10 @@ linthis cmsg "fix(auth): handle token expiry"
 
 # Validate via file path (used by git commit-msg hook)
 linthis cmsg .git/COMMIT_EDITMSG
+
+# AI rewrite on failure (rewrites and writes back to file)
+linthis cmsg .git/COMMIT_EDITMSG --auto-fix
+linthis cmsg .git/COMMIT_EDITMSG --auto-fix --provider claude-cli
 
 # Install the commit-msg hook (calls linthis cmsg automatically)
 linthis hook install --event commit-msg
@@ -388,10 +397,100 @@ Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `buil
 **Config (`.linthis.toml`):**
 
 ```toml
-[hooks]
+[cmsg]
 commit_msg_pattern = '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}'
 require_ticket = false
 # ticket_pattern = '^(PROJ-\d+|feat|fix|...)'
+```
+
+---
+
+## format
+
+Format files with automatic backup and undo support.
+
+```bash
+linthis format [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-s, --staged` | Format only Git staged files |
+| `-m, --modified` | Format only locally modified files (staged + unstaged) |
+| `-i, --include` | Files/directories to format |
+| `--undo` | Restore files from the last backup |
+| `--list-backups` | List available backups |
+| `--source` | Backup source for undo (default: latest) |
+
+**Examples:**
+
+```bash
+linthis format                        # Format all files
+linthis format -s                     # Format staged files
+linthis format -m                     # Format modified files
+linthis format -i src/main.rs         # Format specific file
+linthis format --undo                 # Undo last format
+linthis format --list-backups         # List available backups
+```
+
+A backup is automatically created before each format operation. Use `--undo` to revert if the result is unwanted.
+
+---
+
+## review
+
+AI-powered code review with PR/MR creation support.
+
+```bash
+linthis review [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-b, --background` | Run review in background (non-blocking) |
+| `--auto-fix` | Review + auto-fix + create PR/MR with fixes |
+| `-r, --reviewer` | Specify reviewer(s) for PR/MR (repeatable) |
+| `--provider` | AI provider to use |
+| `--base` | Base branch/commit for diff comparison |
+| `--head` | HEAD ref to review (default: `HEAD`) |
+| `--no-pr` | Generate report only, do not create PR/MR |
+| `--notify` | Notification channels (repeatable) |
+| `--status` | Check status of background reviews |
+| `--dry-run` | Preview auto-fix actions without pushing or creating PR |
+| `--clean` | Remove old review artifacts |
+| `-o, --output` | Output format: `markdown` (default) or `json` |
+
+**Examples:**
+
+```bash
+linthis review                        # Review current branch vs remote
+linthis review --auto-fix             # Review + auto-fix + create PR
+linthis review -r alice -r bob        # Specify reviewers
+linthis review --base main            # Diff against main branch
+linthis review --background           # Run in background (non-blocking)
+linthis review --status               # Check background review status
+linthis review --no-pr                # Generate Markdown report only
+linthis review --dry-run              # Preview without pushing
+```
+
+**Supported Platforms:**
+
+| Platform | Detection | CLI Tool |
+|----------|-----------|----------|
+| GitHub | `github.com` remote | `gh` |
+| GitLab | `gitlab.com` / self-hosted | `glab` |
+
+**Config (`.linthis.toml`):**
+
+```toml
+[review]
+enabled = true
+auto_fix = false
+provider = "claude-cli"
+retention_days = 30
+
+[review.reviewers]
+default = ["alice", "bob"]
 ```
 
 ---

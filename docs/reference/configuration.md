@@ -325,6 +325,7 @@ max_complexity = 25
 linelength = 120
 cpplint_filter = "-build/c++11,-whitespace/tab"
 clang_tidy_ignored_checks = ["clang-analyzer-osx.cocoa.RetainCount"]
+fn_length = 80
 ```
 
 | Field | Type | Default | Description |
@@ -335,19 +336,27 @@ clang_tidy_ignored_checks = ["clang-analyzer-osx.cocoa.RetainCount"]
 | `linelength` | Integer | `80` | Line length for cpplint |
 | `cpplint_filter` | String | - | Cpplint filter rules |
 | `clang_tidy_ignored_checks` | Array | `[]` | Clang-tidy checks to ignore |
+| `fn_length` | Integer | `80` | Max Objective-C method SLOC (non-blank, non-comment lines) |
 | `rules` | RulesConfig | - | Language-specific rule overrides |
 
 ---
 
 ### `[oc]` / `[objectivec]`
 
-Objective-C specific options. Same fields as `[cpp]`.
+Objective-C specific options. Includes all fields from `[cpp]`, plus `fn_length` for method length checking.
 
 ```toml
 [oc]
 linelength = 150
 cpplint_filter = "-build/header_guard"
+fn_length = 80  # Max method SLOC (non-blank, non-comment lines). Default: 80
 ```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `fn_length` | Integer | `80` | Max Objective-C method SLOC (non-blank, non-comment lines) |
+
+All other fields same as `[cpp]`.
 
 ---
 
@@ -562,6 +571,57 @@ filepath_regex = ["generated/.*"]
 [source.third_party_source]
 filepath_regex = ["vendor/.*", "third_party/.*"]
 ```
+
+---
+
+## Review Configuration
+
+### `[review]`
+
+Configure the AI-powered code review feature.
+
+```toml
+[review]
+enabled = true
+auto_fix = false
+provider = "claude-cli"
+retention_days = 30
+
+[review.reviewers]
+default = ["alice", "bob"]
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | Boolean | `true` | Enable/disable review feature |
+| `auto_fix` | Boolean | `false` | Enable auto-fix mode (create fix branch + PR/MR) |
+| `provider` | String | - | AI provider override for review |
+| `retention_days` | Integer | `30` | Retention days for review artifacts |
+
+### `[review.reviewers]`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `default` | Array | `[]` | Default reviewers (platform usernames) |
+
+### `[review.platforms.<name>]`
+
+Configure custom Git platforms for PR/MR creation.
+
+```toml
+[review.platforms.my-gitlab]
+pr_create = "glab mr create --title '{title}' --description '{body}'"
+pr_list = "glab mr list"
+reviewer_flag = "--reviewer"
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pr_create` | String | Yes | Command template for creating PR/MR |
+| `pr_list` | String | No | Command template for listing PRs/MRs |
+| `reviewer_flag` | String | No | Flag name for specifying reviewers (default: `--reviewer`) |
+| `install_cmd` | String | No | Install command for the CLI tool |
+| `install_hint` | String | No | Human-readable install hint shown when tool is missing |
 
 ---
 
