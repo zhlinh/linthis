@@ -703,7 +703,7 @@ fn handle_hook_status() -> ExitCode {
         let installed = agent_is_installed(&git_root, p, false);
         if installed {
             any_agent_installed = true;
-            let path = agent_rules_path(&git_root, p, false);
+            let path = agent_skill_path(&git_root, p, false);
             println!("{} {} ({})", "✓".green(), p, path.display());
             // Show extra info for Claude/CodeBuddy (Stop Hook)
             if let Some(settings_path) = agent_stop_hook_settings_path(&git_root, p) {
@@ -1722,100 +1722,143 @@ const ALL_AGENT_PROVIDERS: &[AgentProvider] = &[
     AgentProvider::Codebuddy,
 ];
 
-/// The section marker used in append-style files (CLAUDE.md, copilot-instructions.md)
-const AGENT_SECTION_MARKER: &str = "## Linthis Agent Rules";
+/// The section marker used in append-style files (CLAUDE.md, AGENTS.md)
+const AGENT_SECTION_MARKER: &str = "## Linthis Lint Rule";
+/// Legacy section marker for backward compatibility (uninstall/detection)
+const AGENT_SECTION_MARKER_LEGACY: &str = "## Linthis Agent Rules";
 
-/// Shared lint rules body (provider-agnostic)
-fn agent_lint_rules_body() -> String {
-    r#"### After modifying code files
+/// Shared lint rule body (provider-agnostic)
+fn agent_lint_rule_body() -> String {
+    r#"## Mandatory: Always Run Before Commit
 
-After editing code files, run linthis to check for issues:
+**Before executing any `git commit`, you MUST:**
 
-```bash
-linthis -i <file1> -i <file2> -c
-```
+1. Run `linthis -s` to check staged files
+2. If ANY issues found (errors OR warnings), you MUST fix them
+3. After fixing, re-run `linthis -s` to confirm all issues are resolved
+4. Only proceed with commit after linthis shows 0 issues
 
-- Use separate `-i` flags for each modified file
-- Use `-c` (check-only) — do NOT use `--fix` or `linthis fix`
-- If lint issues are found, **fix them yourself by editing the code directly**, then re-run linthis to confirm
+## How to Fix Issues
 
-### Before committing
+**When linthis finds ANY issues (errors or warnings), you MUST:**
 
-Always run linthis on staged files before any `git commit`:
+1. Read the lint result file at `.linthis/result/result-*.json`
+2. Read the source files that have issues
+3. Fix the issues by editing the source files directly (DO NOT use `linthis fix --auto`)
+4. After fixing, re-run `linthis -s` to confirm 0 issues
+5. Only then proceed with git commit
 
-```bash
-linthis -s -c
-```
+## Commit Message Rules
 
-If issues are found, fix them by editing the code, re-stage, and re-check until clean.
+- Format: `type(scope)?: description`
+- Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+- Use: `linthis cmsg "your message"` to validate
 
-### Commit message format
+## Key Commands
 
-All commit messages MUST follow Conventional Commits format:
+| Action | Command |
+|--------|---------|
+| Check staged files | `linthis -s` |
+| Check specific files | `linthis -i <file>` |
+| Validate commit msg | `linthis cmsg "message"` |
 
-```
-type(scope)?: description
-```
+## Important
 
-Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-
-Examples:
-- `feat: add user authentication`
-- `fix(api): handle null response`
-- `docs: update README`
-
-Validate with: `linthis cmsg "your message"`
-
-### Key principle
-
-Never rely on `linthis --fix` or `linthis fix` for automated fixing. Always read the lint errors, understand them, and apply fixes manually through code edits. This ensures higher quality fixes with proper context awareness."#
+- Use `linthis fix --auto` to fix all issues automatically
+- After fix, must re-run `linthis -s` to verify 0 issues
+- Only commit when linthis shows no issues"#
         .to_string()
 }
 
 /// Content for CLAUDE.md (append section)
 fn agent_content_claude_md() -> String {
-    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rules_body())
+    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rule_body())
 }
 
 /// Content for Codex AGENTS.md (append section)
 fn agent_content_codex_md() -> String {
-    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rules_body())
+    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rule_body())
 }
 
 /// Content for Gemini .gemini/instructions.md (dedicated file)
 fn agent_content_gemini_md() -> String {
-    format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
+    format!(
+        "---\nname: linthis-lint\ndescription: Enforce code style checking before commits using linthis\n---\n\n# Linthis Lint Rule\n\n{}\n",
+        agent_lint_rule_body()
+    )
 }
 
 /// Content for Cursor .cursor/rules/linthis.mdc (dedicated file with YAML frontmatter)
 fn agent_content_cursor_mdc() -> String {
     format!(
         r#"---
-description: Linthis lint rules for code quality
+description: Enforce code style checking before commits using linthis
 alwaysApply: true
 ---
 
-# Linthis Agent Rules
+# Linthis Lint Rule
 
 {}
 "#,
-        agent_lint_rules_body()
+        agent_lint_rule_body()
     )
 }
 
 /// Content for Droid .droid/rules/linthis.md (dedicated file)
 fn agent_content_droid_md() -> String {
-    format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
+    format!(
+        "---\nname: linthis-lint\ndescription: Enforce code style checking before commits using linthis\n---\n\n# Linthis Lint Rule\n\n{}\n",
+        agent_lint_rule_body()
+    )
 }
 
 /// Content for Auggie .augment/rules/linthis.md (dedicated file)
 fn agent_content_auggie_md() -> String {
-    format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
+    format!(
+        "---\nname: linthis-lint\ndescription: Enforce code style checking before commits using linthis\n---\n\n# Linthis Lint Rule\n\n{}\n",
+        agent_lint_rule_body()
+    )
 }
 
-/// Content for CodeBuddy .codebuddy/rules/linthis.md (dedicated file)
+/// Content for CodeBuddy CODEBUDDY.md (append section)
 fn agent_content_codebuddy_md() -> String {
-    format!("# Linthis Agent Rules\n\n{}\n", agent_lint_rules_body())
+    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rule_body())
+}
+
+/// Content for CodeBuddy .codebuddy/rules/linthis/RULE.mdc (dedicated rule file)
+fn agent_content_codebuddy_rule_mdc() -> String {
+    let now = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        // ISO 8601 UTC timestamp
+        let s = secs;
+        let days = s / 86400;
+        let time_of_day = s % 86400;
+        let h = time_of_day / 3600;
+        let m = (time_of_day % 3600) / 60;
+        let sec = time_of_day % 60;
+        // Days since epoch to Y-M-D (simplified)
+        let mut y = 1970i64;
+        let mut remaining = days as i64;
+        loop {
+            let days_in_year = if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 366 } else { 365 };
+            if remaining < days_in_year { break; }
+            remaining -= days_in_year;
+            y += 1;
+        }
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let month_days: [i64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let mut mo = 0usize;
+        for (i, &d) in month_days.iter().enumerate() {
+            if remaining < d { mo = i; break; }
+            remaining -= d;
+        }
+        format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z", y, mo + 1, remaining + 1, h, m, sec)
+    };
+    format!(
+        "---\ndescription: Enforce code style checking before commits using linthis\nalwaysApply: requested\nenabled: true\nupdatedAt: {}\nprovider: \n---\n\n# Linthis Lint Rule\n\n{}\n",
+        now, agent_lint_rule_body()
+    )
 }
 
 /// Generate the Stop hook JSON content for .claude/settings.json
@@ -1837,12 +1880,12 @@ fn agent_stop_hook_json() -> String {
     .to_string()
 }
 
-/// Get the rules file path for a given agent provider.
+/// Get the skill file path for a given agent provider.
 ///
 /// When `global` is true, `base` is the user home directory; otherwise it is
 /// the project git root.  Claude's project-level file is `CLAUDE.md` at the
 /// repo root, while the user-level file lives in `~/.claude/CLAUDE.md`.
-fn agent_rules_path(base: &std::path::Path, provider: &AgentProvider, global: bool) -> PathBuf {
+fn agent_skill_path(base: &std::path::Path, provider: &AgentProvider, global: bool) -> PathBuf {
     match provider {
         AgentProvider::Claude => {
             if global {
@@ -1862,7 +1905,13 @@ fn agent_rules_path(base: &std::path::Path, provider: &AgentProvider, global: bo
         AgentProvider::Cursor   => base.join(".cursor/rules/linthis.mdc"),
         AgentProvider::Droid    => base.join(".droid/rules/linthis.md"),
         AgentProvider::Auggie   => base.join(".augment/rules/linthis.md"),
-        AgentProvider::Codebuddy => base.join(".codebuddy/rules/linthis.md"),
+        AgentProvider::Codebuddy => {
+            if global {
+                base.join(".codebuddy/CODEBUDDY.md")
+            } else {
+                base.join("CODEBUDDY.md")
+            }
+        }
     }
 }
 
@@ -1878,8 +1927,18 @@ fn agent_stop_hook_settings_path(base: &std::path::Path, provider: &AgentProvide
     }
 }
 
-/// Print "Installed Stop Hook" message if the provider supports it
-fn print_stop_hook_installed(base: &std::path::Path, provider: &AgentProvider) {
+/// Print extra installed file messages (RULE.mdc, Stop Hook)
+fn print_extra_installed(base: &std::path::Path, provider: &AgentProvider) {
+    // CodeBuddy RULE.mdc
+    if matches!(provider, AgentProvider::Codebuddy) {
+        let rule_path = base.join(".codebuddy/rules/linthis/RULE.mdc");
+        println!(
+            "{} Installed Rule → {}",
+            "✓".green(),
+            rule_path.display()
+        );
+    }
+    // Stop Hook
     if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
         println!(
             "{} Installed Stop Hook → {}",
@@ -1891,12 +1950,24 @@ fn print_stop_hook_installed(base: &std::path::Path, provider: &AgentProvider) {
 
 /// Print info about an already-installed agent provider (file path + content)
 fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, global: bool) {
-    let path = agent_rules_path(base, provider, global);
+    let path = agent_skill_path(base, provider, global);
     println!(
         "       {} {}",
         "File:".dimmed(),
         path.display()
     );
+
+    // For CodeBuddy, also show RULE.mdc
+    if matches!(provider, AgentProvider::Codebuddy) {
+        let rule_path = base.join(".codebuddy/rules/linthis/RULE.mdc");
+        if rule_path.exists() {
+            println!(
+                "       {} {}",
+                "File:".dimmed(),
+                rule_path.display()
+            );
+        }
+    }
 
     // For Claude/CodeBuddy, also show settings file (Stop Hook)
     if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
@@ -1913,8 +1984,10 @@ fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, 
     if let Ok(content) = std::fs::read_to_string(&path) {
         match provider {
             // Append-style: extract the linthis section
-            AgentProvider::Claude | AgentProvider::Codex => {
-                if let Some(start) = content.find(AGENT_SECTION_MARKER) {
+            AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Codebuddy => {
+                let start = content.find(AGENT_SECTION_MARKER)
+                    .or_else(|| content.find(AGENT_SECTION_MARKER_LEGACY));
+                if let Some(start) = start {
                     let section = &content[start..];
                     println!("       {}:", "Content".dimmed());
                     for line in section.lines() {
@@ -1935,21 +2008,20 @@ fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, 
 
 /// Check if agent integration is installed for a given provider
 fn agent_is_installed(base: &std::path::Path, provider: &AgentProvider, global: bool) -> bool {
-    let path = agent_rules_path(base, provider, global);
+    let path = agent_skill_path(base, provider, global);
     match provider {
-        // Append-style: check for section marker in file
-        AgentProvider::Claude | AgentProvider::Codex => {
+        // Append-style: check for section marker in file (current or legacy)
+        AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Codebuddy => {
             path.exists()
                 && std::fs::read_to_string(&path)
-                    .map(|c| c.contains(AGENT_SECTION_MARKER))
+                    .map(|c| c.contains(AGENT_SECTION_MARKER) || c.contains(AGENT_SECTION_MARKER_LEGACY))
                     .unwrap_or(false)
         }
         // Dedicated file: check if file exists and contains linthis
         AgentProvider::Gemini
         | AgentProvider::Cursor
         | AgentProvider::Droid
-        | AgentProvider::Auggie
-        | AgentProvider::Codebuddy => {
+        | AgentProvider::Auggie => {
             path.exists()
                 && std::fs::read_to_string(&path)
                     .map(|c| c.contains("linthis") || c.contains("Linthis"))
@@ -1982,7 +2054,7 @@ fn detect_agent_providers(base: &std::path::Path) -> Vec<AgentProvider> {
     if base.join(".augment").exists() {
         detected.push(AgentProvider::Auggie);
     }
-    if base.join(".codebuddy").exists() {
+    if base.join("CODEBUDDY.md").exists() || base.join(".codebuddy").exists() {
         detected.push(AgentProvider::Codebuddy);
     }
     detected
@@ -2006,21 +2078,21 @@ pub fn detect_agent_providers_lightweight() -> Vec<(&'static str, bool)> {
                 AgentProvider::Auggie    => "Auggie",
                 AgentProvider::Codebuddy => "CodeBuddy",
             };
-            let dir = match p {
-                AgentProvider::Claude    => ".claude",
-                AgentProvider::Codex     => "AGENTS.md",
-                AgentProvider::Gemini    => ".gemini",
-                AgentProvider::Cursor    => ".cursor",
-                AgentProvider::Droid     => ".droid",
-                AgentProvider::Auggie    => ".augment",
-                AgentProvider::Codebuddy => ".codebuddy",
+            let detected = match p {
+                AgentProvider::Claude    => root.join(".claude").exists(),
+                AgentProvider::Codex     => root.join("AGENTS.md").exists(),
+                AgentProvider::Gemini    => root.join(".gemini").exists(),
+                AgentProvider::Cursor    => root.join(".cursor").exists(),
+                AgentProvider::Droid     => root.join(".droid").exists(),
+                AgentProvider::Auggie    => root.join(".augment").exists(),
+                AgentProvider::Codebuddy => root.join("CODEBUDDY.md").exists() || root.join(".codebuddy").exists(),
             };
-            (name, root.join(dir).exists())
+            (name, detected)
         })
         .collect()
 }
 
-/// Install a dedicated rules file (Cursor, Windsurf, Cline, CodeBuddy)
+/// Install a dedicated skill file (Cursor, Windsurf, Cline, CodeBuddy)
 fn install_agent_dedicated_file(path: &std::path::Path, content: &str) -> Result<(), String> {
     use std::fs;
 
@@ -2038,8 +2110,8 @@ fn install_agent_dedicated_file(path: &std::path::Path, content: &str) -> Result
     Ok(())
 }
 
-/// Install rules by appending a section to an existing file (Claude CLAUDE.md, Copilot copilot-instructions.md)
-fn install_agent_append_rules(
+/// Install skill by appending a section to an existing file (Claude CLAUDE.md, Codex AGENTS.md)
+fn install_agent_append_skill(
     path: &std::path::Path,
     content: &str,
     default_header: &str,
@@ -2050,30 +2122,30 @@ fn install_agent_append_rules(
         let existing = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
-        let new_content = if existing.contains(AGENT_SECTION_MARKER) {
-            // Replace existing section
-            if let Some(start) = existing.find(AGENT_SECTION_MARKER) {
-                let after_marker = &existing[start + AGENT_SECTION_MARKER.len()..];
-                let section_end = after_marker
-                    .find("\n## ")
-                    .map(|pos| start + AGENT_SECTION_MARKER.len() + pos)
-                    .unwrap_or(existing.len());
+        // Find existing section (current or legacy marker)
+        let found = existing.find(AGENT_SECTION_MARKER)
+            .map(|s| (s, AGENT_SECTION_MARKER.len()))
+            .or_else(|| existing.find(AGENT_SECTION_MARKER_LEGACY)
+                .map(|s| (s, AGENT_SECTION_MARKER_LEGACY.len())));
 
-                let mut result = existing[..start].trim_end().to_string();
-                result.push_str(content);
-                let remaining = existing[section_end..].trim_start();
-                if !remaining.is_empty() {
-                    result.push_str(remaining);
-                    if !result.ends_with('\n') {
-                        result.push('\n');
-                    }
+        let new_content = if let Some((start, marker_len)) = found {
+            // Replace existing section
+            let after_marker = &existing[start + marker_len..];
+            let section_end = after_marker
+                .find("\n## ")
+                .map(|pos| start + marker_len + pos)
+                .unwrap_or(existing.len());
+
+            let mut result = existing[..start].trim_end().to_string();
+            result.push_str(content);
+            let remaining = existing[section_end..].trim_start();
+            if !remaining.is_empty() {
+                result.push_str(remaining);
+                if !result.ends_with('\n') {
+                    result.push('\n');
                 }
-                result
-            } else {
-                let mut result = existing.trim_end().to_string();
-                result.push_str(content);
-                result
             }
+            result
         } else {
             let mut result = existing.trim_end().to_string();
             result.push_str(content);
@@ -2100,35 +2172,39 @@ fn install_agent_append_rules(
 
 /// Install agent integration for a specific provider
 fn install_agent_provider(base: &std::path::Path, provider: &AgentProvider, global: bool) -> Result<(), String> {
-    let rules_path = agent_rules_path(base, provider, global);
+    let skill_path = agent_skill_path(base, provider, global);
 
     match provider {
         AgentProvider::Claude => {
-            // Install CLAUDE.md rules (append)
-            install_agent_append_rules(&rules_path, &agent_content_claude_md(), "# Project Instructions\n")?;
+            // Install CLAUDE.md skill (append)
+            install_agent_append_skill(&skill_path, &agent_content_claude_md(), "# Project Instructions\n")?;
             // Also install Stop Hook
             if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
                 install_agent_stop_hook(base, &settings_path)?;
             }
         }
         AgentProvider::Codex => {
-            // Install AGENTS.md rules (append)
-            install_agent_append_rules(&rules_path, &agent_content_codex_md(), "# Agent Instructions\n")?;
+            // Install AGENTS.md skill (append)
+            install_agent_append_skill(&skill_path, &agent_content_codex_md(), "# Agent Instructions\n")?;
         }
         AgentProvider::Gemini => {
-            install_agent_dedicated_file(&rules_path, &agent_content_gemini_md())?;
+            install_agent_dedicated_file(&skill_path, &agent_content_gemini_md())?;
         }
         AgentProvider::Cursor => {
-            install_agent_dedicated_file(&rules_path, &agent_content_cursor_mdc())?;
+            install_agent_dedicated_file(&skill_path, &agent_content_cursor_mdc())?;
         }
         AgentProvider::Droid => {
-            install_agent_dedicated_file(&rules_path, &agent_content_droid_md())?;
+            install_agent_dedicated_file(&skill_path, &agent_content_droid_md())?;
         }
         AgentProvider::Auggie => {
-            install_agent_dedicated_file(&rules_path, &agent_content_auggie_md())?;
+            install_agent_dedicated_file(&skill_path, &agent_content_auggie_md())?;
         }
         AgentProvider::Codebuddy => {
-            install_agent_dedicated_file(&rules_path, &agent_content_codebuddy_md())?;
+            // Install CODEBUDDY.md skill (append)
+            install_agent_append_skill(&skill_path, &agent_content_codebuddy_md(), "# Project Instructions\n")?;
+            // Install .codebuddy/rules/linthis/RULE.mdc
+            let rule_path = base.join(".codebuddy/rules/linthis/RULE.mdc");
+            install_agent_dedicated_file(&rule_path, &agent_content_codebuddy_rule_mdc())?;
             // Also install Stop Hook
             if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
                 install_agent_stop_hook(base, &settings_path)?;
@@ -2143,7 +2219,7 @@ fn install_agent_provider(base: &std::path::Path, provider: &AgentProvider, glob
 fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, global: bool) -> Result<(), String> {
     match provider {
         AgentProvider::Claude => {
-            let rules_md = agent_rules_path(base, provider, global);
+            let rules_md = agent_skill_path(base, provider, global);
             if rules_md.exists() {
                 remove_agent_section_from_file(&rules_md)?;
             }
@@ -2154,7 +2230,7 @@ fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, gl
             }
         }
         AgentProvider::Codex => {
-            let agents_md = agent_rules_path(base, provider, global);
+            let agents_md = agent_skill_path(base, provider, global);
             if agents_md.exists() {
                 remove_agent_section_from_file(&agents_md)?;
             }
@@ -2163,12 +2239,24 @@ fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, gl
         | AgentProvider::Cursor
         | AgentProvider::Droid
         | AgentProvider::Auggie => {
-            let path = agent_rules_path(base, provider, global);
+            let path = agent_skill_path(base, provider, global);
             remove_agent_dedicated_file(&path)?;
         }
         AgentProvider::Codebuddy => {
-            let path = agent_rules_path(base, provider, global);
-            remove_agent_dedicated_file(&path)?;
+            let codebuddy_md = agent_skill_path(base, provider, global);
+            if codebuddy_md.exists() {
+                remove_agent_section_from_file(&codebuddy_md)?;
+            }
+            // Remove .codebuddy/rules/linthis/RULE.mdc
+            let rule_mdc = base.join(".codebuddy/rules/linthis/RULE.mdc");
+            if rule_mdc.exists() {
+                remove_agent_dedicated_file(&rule_mdc)?;
+            }
+            // Also try removing legacy dedicated file (.codebuddy/rules/linthis.md)
+            let legacy_path = base.join(".codebuddy/rules/linthis.md");
+            if legacy_path.exists() {
+                remove_agent_dedicated_file(&legacy_path)?;
+            }
             if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
                 if settings_path.exists() {
                     remove_agent_stop_hook(&settings_path)?;
@@ -2180,7 +2268,7 @@ fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, gl
     Ok(())
 }
 
-/// Remove a dedicated rules file and clean up empty parent directories
+/// Remove a dedicated skill file and clean up empty parent directories
 fn remove_agent_dedicated_file(path: &std::path::Path) -> Result<(), String> {
     use std::fs;
 
@@ -2207,33 +2295,41 @@ fn remove_agent_dedicated_file(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Remove the linthis section from a file (CLAUDE.md, copilot-instructions.md)
+/// Remove the linthis section from a file (CLAUDE.md, AGENTS.md)
+/// Handles both current and legacy section markers.
 fn remove_agent_section_from_file(path: &std::path::Path) -> Result<(), String> {
     use std::fs;
 
     let existing = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
-    if let Some(start) = existing.find(AGENT_SECTION_MARKER) {
-        let after_marker = &existing[start + AGENT_SECTION_MARKER.len()..];
-        let section_end = after_marker
-            .find("\n## ")
-            .map(|pos| start + AGENT_SECTION_MARKER.len() + pos)
-            .unwrap_or(existing.len());
+    // Try current marker first, then legacy
+    let (start, marker_len) = if let Some(s) = existing.find(AGENT_SECTION_MARKER) {
+        (s, AGENT_SECTION_MARKER.len())
+    } else if let Some(s) = existing.find(AGENT_SECTION_MARKER_LEGACY) {
+        (s, AGENT_SECTION_MARKER_LEGACY.len())
+    } else {
+        return Ok(());
+    };
 
-        let mut result = existing[..start].trim_end().to_string();
-        let remaining = existing[section_end..].trim_start();
-        if !remaining.is_empty() {
-            result.push_str("\n\n");
-            result.push_str(remaining);
-        }
-        if !result.ends_with('\n') {
-            result.push('\n');
-        }
+    let after_marker = &existing[start + marker_len..];
+    let section_end = after_marker
+        .find("\n## ")
+        .map(|pos| start + marker_len + pos)
+        .unwrap_or(existing.len());
 
-        fs::write(path, result)
-            .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    let mut result = existing[..start].trim_end().to_string();
+    let remaining = existing[section_end..].trim_start();
+    if !remaining.is_empty() {
+        result.push_str("\n\n");
+        result.push_str(remaining);
     }
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+
+    fs::write(path, result)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
 
     Ok(())
 }
@@ -2323,9 +2419,9 @@ fn remove_agent_stop_hook(settings_path: &std::path::Path) -> Result<(), String>
 
 /// Install agent hooks with multi-provider support.
 ///
-/// When `global` is true, rules are installed into the user home directory
+/// When `global` is true, skills are installed into the user home directory
 /// (`~/.claude/CLAUDE.md`, `~/.cursor/rules/linthis.mdc`, etc.) without
-/// requiring a git repository.  When false, rules are installed in the
+/// requiring a git repository.  When false, skills are installed in the
 /// project git root (project-level).
 fn handle_agent_hook_install(
     provider: Option<AgentProvider>,
@@ -2349,7 +2445,7 @@ fn handle_agent_hook_install(
             Some(root) => root,
             None => {
                 eprintln!("{}: Not in a git repository", "Error".red());
-                eprintln!("  Run this command from within a git repository, or use --global / -g to install user-level rules");
+                eprintln!("  Run this command from within a git repository, or use --global / -g to install user-level skills");
                 return ExitCode::from(1);
             }
         }
@@ -2357,7 +2453,7 @@ fn handle_agent_hook_install(
 
     println!("{}", "🤖 AI Coding Agent Integration".bold());
     if global {
-        println!("  {} Installing user-level rules in {}", "→".dimmed(), base.display());
+        println!("  {} Installing user-level skills in {}", "→".dimmed(), base.display());
     }
     println!();
 
@@ -2376,9 +2472,9 @@ fn handle_agent_hook_install(
 
         match install_agent_provider(&base, p, global) {
             Ok(_) => {
-                let path = agent_rules_path(&base, p, global);
+                let path = agent_skill_path(&base, p, global);
                 println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                print_stop_hook_installed(&base, p);
+                print_extra_installed(&base, p);
                 return ExitCode::SUCCESS;
             }
             Err(e) => {
@@ -2406,9 +2502,9 @@ fn handle_agent_hook_install(
             }
             match install_agent_provider(&base, p, global) {
                 Ok(_) => {
-                    let path = agent_rules_path(&base, p, global);
+                    let path = agent_skill_path(&base, p, global);
                     println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                    print_stop_hook_installed(&base, p);
+                    print_extra_installed(&base, p);
                     any_installed = true;
                 }
                 Err(e) => {
@@ -2526,9 +2622,9 @@ fn handle_agent_hook_install(
         }
         match install_agent_provider(&base, p, global) {
             Ok(_) => {
-                let path = agent_rules_path(&base, p, global);
+                let path = agent_skill_path(&base, p, global);
                 println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                print_stop_hook_installed(&base, p);
+                print_extra_installed(&base, p);
                 any_installed = true;
             }
             Err(e) => {
@@ -2547,7 +2643,7 @@ fn handle_agent_hook_install(
 
 /// Uninstall agent hooks for all installed providers.
 ///
-/// When `global` is true, removes rules from the user home directory;
+/// When `global` is true, removes skills from the user home directory;
 /// otherwise removes from the project git root.
 fn handle_agent_hook_uninstall(yes: bool, global: bool) -> ExitCode {
     use std::io::{self, Write};
@@ -2582,7 +2678,7 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool) -> ExitCode {
     if !yes {
         println!("{}", "Agent Integration:".bold());
         for p in &installed {
-            let path = agent_rules_path(&base, p, global);
+            let path = agent_skill_path(&base, p, global);
             println!("  {} {} ({})", "✓".green(), p, path.display());
         }
         println!();
