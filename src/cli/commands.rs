@@ -716,6 +716,68 @@ pub enum Commands {
         #[arg(long)]
         list_backups: bool,
     },
+    /// AI-powered code review
+    ///
+    /// Analyze git diffs using AI to find code quality, security, and architecture issues.
+    /// Supports background execution via pre-push hooks, auto-fix with PR/MR creation,
+    /// and configurable notifications.
+    ///
+    /// Example usage:
+    ///   linthis review                      # Review current branch vs remote
+    ///   linthis review --auto-fix           # Review + auto-fix + create PR
+    ///   linthis review -r alice -r bob      # Specify reviewers
+    ///   linthis review --base main          # Diff against main branch
+    ///   linthis review --background         # Run in background
+    ///   linthis review --status             # Check background review status
+    Review {
+        /// Run review in background (async, non-blocking)
+        #[arg(long, short = 'b')]
+        background: bool,
+
+        /// Enable AI auto-fix and create PR/MR with fixes
+        #[arg(long)]
+        auto_fix: bool,
+
+        /// Specify reviewer(s) for PR/MR (repeatable)
+        #[arg(long = "reviewer", short = 'r')]
+        reviewers: Option<Vec<String>>,
+
+        /// AI provider to use
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// Base branch/commit for diff comparison
+        #[arg(long)]
+        base: Option<String>,
+
+        /// HEAD ref to review (default: HEAD)
+        #[arg(long, default_value = "HEAD")]
+        head: String,
+
+        /// Generate report only, do not create PR/MR
+        #[arg(long)]
+        no_pr: bool,
+
+        /// Notification channels to use (repeatable)
+        #[arg(long)]
+        notify: Option<Vec<String>>,
+
+        /// Check status of background reviews
+        #[arg(long)]
+        status: bool,
+
+        /// Preview auto-fix actions without pushing or creating PR
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Remove old review artifacts
+        #[arg(long)]
+        clean: bool,
+
+        /// Output format: markdown or json
+        #[arg(short, long, default_value = "markdown")]
+        output: String,
+    },
 }
 
 /// Hook subcommands
