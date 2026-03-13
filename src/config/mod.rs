@@ -1362,6 +1362,17 @@ mod tests {
     }
 
     #[test]
+    fn test_cpp_fn_length_from_toml() {
+        let toml = r#"
+            [cpp]
+            fn_length = 50
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        let cpp = config.language_overrides.cpp.unwrap();
+        assert_eq!(cpp.fn_length, Some(50));
+    }
+
+    #[test]
     fn test_oc_fn_length_default_is_none() {
         let toml = r#"
             [oc]
