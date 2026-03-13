@@ -1536,15 +1536,24 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
         "#!/bin/sh\n\
          {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
+         _STAGED_FILES=$(git diff --cached --name-only)\n\
          \n\
          $LINTHIS_CMD\n\
          LINTHIS_EXIT=$?\n\
+         # Re-stage files modified by linthis -f (auto-format), regardless of exit code\n\
+         if [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         fi\n\
          \n\
          if [ $LINTHIS_EXIT -ne 0 ]; then\n\
          \x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
          \x20 start_timer \"Fixing with {provider}\"\n\
          \x20 {agent}\n\
          \x20 stop_timer\n\
+         \x20 # Re-stage files modified by agent fix\n\
+         \x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20   echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20 fi\n\
          \x20 # Re-verify after agent fix\n\
          \x20 echo \"[linthis] Re-verifying...\" >&2\n\
          \x20 $LINTHIS_CMD\n\
