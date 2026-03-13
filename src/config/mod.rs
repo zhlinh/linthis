@@ -347,6 +347,12 @@ pub struct PlatformConfig {
     /// Flag name for specifying reviewers
     #[serde(default = "default_reviewer_flag")]
     pub reviewer_flag: String,
+    /// Install command for the CLI tool (run via sh)
+    #[serde(default)]
+    pub install_cmd: Option<String>,
+    /// Human-readable install hint (shown when tool is missing)
+    #[serde(default)]
+    pub install_hint: Option<String>,
 }
 
 fn default_reviewer_flag() -> String {

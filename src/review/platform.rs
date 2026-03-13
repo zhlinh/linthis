@@ -11,11 +11,15 @@ fn builtin_platforms() -> HashMap<String, PlatformConfig> {
         pr_create: "gh pr create".to_string(),
         pr_list: Some("gh pr list".to_string()),
         reviewer_flag: "--reviewer".to_string(),
+        install_cmd: None,
+        install_hint: Some("Install: https://cli.github.com/\n  Auth: gh auth login".to_string()),
     });
     map.insert("gitlab.com".to_string(), PlatformConfig {
         pr_create: "glab mr create".to_string(),
         pr_list: Some("glab mr list".to_string()),
         reviewer_flag: "--reviewer".to_string(),
+        install_cmd: None,
+        install_hint: Some("Install: https://gitlab.com/gitlab-org/cli\n  Auth: glab auth login".to_string()),
     });
     map
 }
@@ -71,7 +75,7 @@ pub fn resolve_platform(
         .or_else(|| builtin_platforms().get(domain).cloned())
 }
 
-/// Check if the platform CLI tool is available.
+/// Check if the platform CLI tool is available, offering auto-install if possible.
 pub fn check_tool_available(platform: &PlatformConfig) -> Result<(), String> {
     let tool = platform.pr_create.split_whitespace().next().unwrap_or("");
     let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
@@ -82,12 +86,63 @@ pub fn check_tool_available(platform: &PlatformConfig) -> Result<(), String> {
     match output {
         Ok(o) if o.status.success() => Ok(()),
         _ => {
-            let install_hint = match tool {
-                "gh" => "Install: https://cli.github.com/\n  Auth: gh auth login",
-                "glab" => "Install: https://gitlab.com/gitlab-org/cli\n  Auth: glab auth login",
-                _ => "Ensure the CLI tool is installed and in PATH",
+            // Try auto-install if install_cmd is configured and we have a TTY
+            if let Some(ref install_cmd) = platform.install_cmd {
+                let hint_msg = platform.install_hint.as_deref().unwrap_or("Install CLI tool");
+                if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                    eprintln!("⚠ {} is required for PR creation but not found.", tool);
+                    eprint!("  {} Install now? [Y/n] ", hint_msg);
+
+                    let mut answer = String::new();
+                    if std::io::stdin().read_line(&mut answer).is_ok() {
+                        let answer = answer.trim().to_lowercase();
+                        if answer.is_empty() || answer == "y" || answer == "yes" {
+                            eprintln!("  → Installing {}...", tool);
+                            let status = Command::new("sh")
+                                .arg("-c")
+                                .arg(install_cmd)
+                                .status();
+
+                            match status {
+                                Ok(s) if s.success() => {
+                                    eprintln!("  ✓ {} installed successfully", tool);
+                                    return Ok(());
+                                }
+                                Ok(s) => {
+                                    return Err(format!(
+                                        "Installation failed (exit {}). Try manually:\n  {}",
+                                        s.code().unwrap_or(-1),
+                                        install_cmd,
+                                    ));
+                                }
+                                Err(e) => {
+                                    return Err(format!(
+                                        "Failed to run installer: {}. Try manually:\n  {}",
+                                        e, install_cmd,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                // Non-interactive or user declined
+                return Err(format!(
+                    "⚠ {} is required for PR creation.\n  {}\n  Install: {}",
+                    tool, hint_msg, install_cmd,
+                ));
+            }
+
+            // No install_cmd — fall back to static hints
+            let hint = if let Some(ref hint) = platform.install_hint {
+                hint.clone()
+            } else {
+                match tool {
+                    "gh" => "Install: https://cli.github.com/\n  Auth: gh auth login".to_string(),
+                    "glab" => "Install: https://gitlab.com/gitlab-org/cli\n  Auth: glab auth login".to_string(),
+                    _ => "Ensure the CLI tool is installed and in PATH".to_string(),
+                }
             };
-            Err(format!("⚠ {} is required for PR creation.\n  {}", tool, install_hint))
+            Err(format!("⚠ {} is required for PR creation.\n  {}", tool, hint))
         }
     }
 }
@@ -237,6 +292,8 @@ mod tests {
             pr_create: "custom-gh pr create".to_string(),
             pr_list: None,
             reviewer_flag: "--assignee".to_string(),
+            install_cmd: None,
+            install_hint: None,
         });
         let result = resolve_platform("github.com", &user).unwrap();
         assert!(result.pr_create.contains("custom-gh"));
