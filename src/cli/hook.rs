@@ -1734,21 +1734,19 @@ fn agent_lint_rule_body() -> String {
 **Before executing any `git commit`, you MUST run:**
 
 ```bash
-FILES=$(git diff --cached --name-only) && linthis -s && echo "$FILES" | xargs git add
+linthis -s
 ```
 
-This single command: captures staged files → runs linthis (auto-fixes formatting) → re-stages the fixed files.
+`linthis -s` checks staged files, auto-fixes formatting issues, and **automatically re-stages** the formatted files. No manual `git add` needed.
 
-`linthis -s` auto-fixes formatting issues ("Fixed N issues by formatting" is normal). The `git add` at the end is critical — linthis modifies files on disk but does NOT update the git index.
-
-If linthis still reports remaining issues after auto-format, fix them manually, then re-run the command above.
+If linthis reports remaining issues after auto-format, fix them manually, then re-run `linthis -s`.
 
 ## How to Fix Remaining Issues
 
 1. Read the lint result file at `.linthis/result/result-*.json`
 2. Read the source files that have issues
 3. Fix the issues by editing the source files directly
-4. Re-run: `FILES=$(git diff --cached --name-only) && linthis -s && echo "$FILES" | xargs git add`
+4. Re-run: `git add <fixed-files> && linthis -s`
 5. Repeat until linthis shows 0 issues, then proceed with git commit
 
 ## Commit Message Rules
@@ -1761,10 +1759,10 @@ If linthis still reports remaining issues after auto-format, fix them manually, 
 
 | Action | Command |
 |--------|---------|
-| Lint + re-stage (use this!) | `FILES=$(git diff --cached --name-only) && linthis -s && echo "$FILES" \| xargs git add` |
-| Check specific files | `linthis -i <file>` |
-| Check only (no fix) | `linthis -s -c` |
-| Auto-fix all issues | `linthis fix --auto` |
+| Lint staged files (use this!) | `linthis -s` |
+| Lint + format specific files | `linthis -i <file>` |
+| Format only (no lint) | `linthis -s -f` |
+| Undo last format | `linthis format --undo` |
 | Validate commit msg | `linthis cmsg "message"` |"#
         .to_string()
 }
