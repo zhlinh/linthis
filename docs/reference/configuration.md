@@ -246,6 +246,21 @@ Configure git hook behavior.
 [hooks]
 timeout = 60
 parallel = true
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `timeout` | Integer | `60` | Hook timeout in seconds |
+| `parallel` | Boolean | `true` | Enable parallel execution |
+
+---
+
+## Commit Message Validation (`[cmsg]`)
+
+Configure commit message validation rules used by `linthis cmsg`.
+
+```toml
+[cmsg]
 commit_msg_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\(.+\\))?: .{1,72}"
 require_ticket = false
 ticket_pattern = "\\[\\w+-\\d+\\]"
@@ -253,8 +268,6 @@ ticket_pattern = "\\[\\w+-\\d+\\]"
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `timeout` | Integer | `60` | Hook timeout in seconds |
-| `parallel` | Boolean | `true` | Enable parallel execution |
 | `commit_msg_pattern` | String | Conventional Commits | Regex for valid commit messages |
 | `require_ticket` | Boolean | `false` | Require ticket reference |
 | `ticket_pattern` | String | - | Regex for ticket format (e.g., `[JIRA-123]`) |

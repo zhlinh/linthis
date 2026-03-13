@@ -256,47 +256,40 @@ fn build_global_hook_script_for_event(
         _ => linthis_cmd.clone(),
     };
 
+    let error_msg = agent_fix_error_msg(hook_event);
     let fix_block = match fix_provider {
         None => String::new(),
         Some(p) => {
-            let prompt = format!(
-                "Staged files have linthis lint errors. \
-                 Run 'linthis -s -c' to inspect them. \
-                 Fix all issues by editing the files directly (do NOT use linthis --fix). \
-                 Verify with 'linthis -s -c' until it passes cleanly."
-            );
+            let prompt = agent_fix_prompt_for_event(hook_event);
             let agent_cmd = agent_fix_headless_cmd(p, &prompt);
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-                 \x20\x20\x20 echo \"[linthis] Lint errors detected. Invoking {provider} to fix...\"\n\
+                 \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\"\n\
                  \x20\x20\x20 {agent}\n\
                  \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
                  \x20\x20\x20 LINTHIS_EXIT=$?\n\
                  \x20 fi\n",
                 provider = p,
                 agent = agent_cmd,
+                error_msg = error_msg,
             )
         }
     };
     let fix_block_direct = match fix_provider {
         None => String::new(),
         Some(p) => {
-            let prompt = format!(
-                "Staged files have linthis lint errors. \
-                 Run 'linthis -s -c' to inspect them. \
-                 Fix all issues by editing the files directly (do NOT use linthis --fix). \
-                 Verify with 'linthis -s -c' until it passes cleanly."
-            );
+            let prompt = agent_fix_prompt_for_event(hook_event);
             let agent_cmd = agent_fix_headless_cmd(p, &prompt);
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-                 \x20\x20\x20 echo \"[linthis] Lint errors detected. Invoking {provider} to fix...\"\n\
+                 \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\"\n\
                  \x20\x20\x20 {agent}\n\
                  \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
                  \x20\x20\x20 LINTHIS_EXIT=$?\n\
                  \x20 fi\n",
                 provider = p,
                 agent = agent_cmd,
+                error_msg = error_msg,
             )
         }
     };
@@ -1439,15 +1432,39 @@ fn resolve_agent_fix_provider(
     }
 }
 
+/// Build the agent fix prompt based on the hook event type.
+fn agent_fix_prompt_for_event(hook_event: &HookEvent) -> String {
+    match hook_event {
+        HookEvent::CommitMsg => format!(
+            "The commit message failed validation (not in Conventional Commits format). \
+             Read the commit message file passed as argument, \
+             rewrite it to follow the format: type(scope)?: description \
+             where type is one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. \
+             Keep the original intent of the message. Write the corrected message back to the same file. \
+             Verify with 'linthis cmsg <file>' until it passes."
+        ),
+        _ => format!(
+            "Staged files have linthis lint errors. \
+             Run 'linthis -s -c' to inspect them. \
+             Fix all issues by editing the files directly (do NOT use linthis --fix). \
+             Verify with 'linthis -s -c' until it passes cleanly."
+        ),
+    }
+}
+
+/// Error message for agent fix echo based on hook event type.
+fn agent_fix_error_msg(hook_event: &HookEvent) -> &'static str {
+    match hook_event {
+        HookEvent::CommitMsg => "Commit message validation failed",
+        _ => "Lint errors detected",
+    }
+}
+
 /// Build the full git hook shell script with agent fix fallback.
-fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixProvider) -> String {
-    let prompt = format!(
-        "Staged files have linthis lint errors. \
-         Run 'linthis -s -c' to inspect them. \
-         Fix all issues by editing the files directly (do NOT use linthis --fix). \
-         Verify with 'linthis -s -c' until it passes cleanly."
-    );
+fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
+    let prompt = agent_fix_prompt_for_event(hook_event);
     let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt);
+    let error_msg = agent_fix_error_msg(hook_event);
     format!(
         "#!/bin/sh\n\
          \n\
@@ -1457,7 +1474,7 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
          LINTHIS_EXIT=$?\n\
          \n\
          if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-         \x20 echo \"[linthis] Lint errors detected. Invoking {provider} to fix...\"\n\
+         \x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\"\n\
          \x20 {agent}\n\
          \x20 # Re-verify after agent fix\n\
          \x20 $LINTHIS_CMD\n\
@@ -1468,6 +1485,7 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
         linthis = linthis_cmd,
         provider = fix_provider,
         agent = agent_cmd,
+        error_msg = error_msg,
     )
 }
 
@@ -1493,7 +1511,7 @@ fn handle_git_with_agent_install(
     let hook_filename = hook_event.hook_filename();
     let hook_path = git_root.join(".git/hooks").join(hook_filename);
     let linthis_cmd = build_hook_command(hook_event, args);
-    let content = build_git_with_agent_hook_script(&linthis_cmd, fix_provider);
+    let content = build_git_with_agent_hook_script(&linthis_cmd, fix_provider, hook_event);
 
     if hook_path.exists() && !force {
         eprintln!(
@@ -1654,6 +1672,23 @@ linthis -s -c
 ```
 
 If issues are found, fix them by editing the code, re-stage, and re-check until clean.
+
+### Commit message format
+
+All commit messages MUST follow Conventional Commits format:
+
+```
+type(scope)?: description
+```
+
+Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+
+Examples:
+- `feat: add user authentication`
+- `fix(api): handle null response`
+- `docs: update README`
+
+Validate with: `linthis cmsg "your message"`
 
 ### Key principle
 
@@ -2546,7 +2581,7 @@ pub fn handle_commit_msg_check(msg_or_file: &str) -> ExitCode {
     }
 
     // Use pattern from config
-    let pattern = &config.hooks.commit_msg_pattern;
+    let pattern = &config.cmsg.commit_msg_pattern;
 
     let regex = match Regex::new(pattern) {
         Ok(r) => r,
@@ -2563,8 +2598,8 @@ pub fn handle_commit_msg_check(msg_or_file: &str) -> ExitCode {
     }
 
     // Check for ticket reference if required
-    if config.hooks.require_ticket {
-        let ticket_pattern = config.hooks.ticket_pattern.as_deref()
+    if config.cmsg.require_ticket {
+        let ticket_pattern = config.cmsg.ticket_pattern.as_deref()
             .unwrap_or(r"\[\w+-\d+\]");
         let ticket_regex = match Regex::new(ticket_pattern) {
             Ok(r) => r,

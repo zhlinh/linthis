@@ -633,7 +633,7 @@ The default format follows [Conventional Commits](https://www.conventionalcommit
 The pattern is configurable via `.linthis/config.toml`:
 
 ```toml
-[hooks]
+[cmsg]
 commit_msg_pattern = "^(feat|fix|docs|...)\\(\\S+\\)?: .{1,72}"
 ```
 
