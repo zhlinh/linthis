@@ -68,6 +68,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # File locking (for cache operations)
 fs2 = "0.4"
 
+# Unix system calls (for background process management)
+libc = "0.2"
+
 # LSP Server
 tower-lsp = "0.20"
 # Only include tokio features actually used (not "full")
