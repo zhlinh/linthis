@@ -130,6 +130,7 @@ pub mod security;
 pub mod license;
 pub mod complexity;
 pub mod ai;
+pub mod review;
 pub mod self_update;
 pub mod templates;
 pub mod tui;
