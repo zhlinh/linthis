@@ -42,7 +42,6 @@ pub struct CppChecker {
     /// Clang-tidy checks to ignore for Objective-C files
     oc_ignored_checks: Vec<String>,
     /// Max ObjC method SLOC threshold. Loaded from config, default 80.
-    #[allow(dead_code)]
     oc_fn_length: u32,
 }
 
@@ -795,7 +794,6 @@ impl CppChecker {
     }
 
     /// Count SLOC in a slice of lines: skip blank lines, line comments, and block comments.
-    #[allow(dead_code)]
     pub(crate) fn count_sloc(lines: &[&str]) -> u32 {
         let mut count = 0u32;
         let mut in_block_comment = false;
@@ -835,7 +833,6 @@ impl CppChecker {
     ///   "- (NSString *)stringForKey:(NSString *)key" → "stringForKey:"
     ///   "+ (instancetype)sharedInstance"         → "sharedInstance"
     ///   "- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {" → "tableView:didSelectRowAtIndexPath:"
-    #[allow(dead_code)]
     pub(crate) fn extract_method_name(signature: &str) -> String {
         // Find closing ")" of return type, then parse what follows
         let after_return = match signature.find(')') {
@@ -898,6 +895,75 @@ impl CppChecker {
             selector
         }
     }
+
+    /// Check ObjC file content for methods exceeding the SLOC threshold.
+    /// Returns a LintIssue for each method whose SLOC exceeds `threshold`.
+    pub(crate) fn check_objc_method_lengths(
+        content: &str,
+        path: &Path,
+        threshold: u32,
+    ) -> Vec<LintIssue> {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut issues = Vec::new();
+
+        // Collect (1-based line number, method name) for each method signature
+        // ObjC method signature starts with "- (" or "+ ("
+        let mut method_starts: Vec<(usize, String)> = Vec::new();
+        for (idx, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("- (") || trimmed.starts_with("+ (") {
+                let name = Self::extract_method_name(trimmed);
+                method_starts.push((idx + 1, name)); // 1-based line number
+            }
+        }
+
+        for (i, (start_line, name)) in method_starts.iter().enumerate() {
+            // Skip the signature line itself; count only body lines
+            let body_start_idx = *start_line; // 0-based index of line after signature
+            let body_end_idx = if i + 1 < method_starts.len() {
+                method_starts[i + 1].0 - 1 // exclusive end (0-based index)
+            } else {
+                lines.len()
+            };
+
+            let body = if body_start_idx < body_end_idx {
+                &lines[body_start_idx..body_end_idx]
+            } else {
+                &lines[0..0]
+            };
+            let sloc = Self::count_sloc(body);
+
+            if sloc > threshold {
+                let message = format!(
+                    "Method '{}' has {} lines of code (limit is {}) [readability/fn_size]",
+                    name, sloc, threshold
+                );
+                let issue = LintIssue::new(
+                    path.to_path_buf(),
+                    *start_line,
+                    message,
+                    Severity::Warning,
+                )
+                .with_code("readability/fn_size".to_string())
+                .with_source("objc-method-length".to_string());
+                issues.push(issue);
+            }
+        }
+
+        issues
+    }
+
+    /// Run native ObjC method length check on a file.
+    fn run_objc_method_length(&self, path: &Path) -> Result<Vec<LintIssue>> {
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::checker(
+                "objc-method-length",
+                path,
+                format!("Failed to read file: {}", e),
+            )
+        })?;
+        Ok(Self::check_objc_method_lengths(&content, path, self.oc_fn_length))
+    }
 }
 
 impl Default for CppChecker {
@@ -942,6 +1008,14 @@ impl Checker for CppChecker {
                     // Log error but return what we have
                     log::warn!("cpplint failed: {}", e);
                 }
+            }
+        }
+
+        // Run native ObjC method length check (no external tool needed)
+        if Self::is_objective_c(path) {
+            match self.run_objc_method_length(path) {
+                Ok(method_issues) => all_issues.extend(method_issues),
+                Err(e) => log::warn!("objc method length check failed: {}", e),
             }
         }
 
@@ -1353,5 +1427,104 @@ mod tests {
             CppChecker::extract_method_name("- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {"),
             "tableView:didSelectRowAtIndexPath:"
         );
+    }
+
+    // ==================== check_objc_method_lengths tests ====================
+
+    fn make_objc_content_with_sloc(method_name: &str, sloc: usize) -> String {
+        let mut lines = vec![format!("- (void){} {{", method_name)];
+        for i in 0..sloc {
+            lines.push(format!("    int var{} = {};", i, i));
+        }
+        lines.push("}".to_string());
+        lines.join("\n")
+    }
+
+    #[test]
+    fn test_check_objc_method_lengths_under_threshold_no_issue() {
+        let content = make_objc_content_with_sloc("shortMethod", 5);
+        let issues = CppChecker::check_objc_method_lengths(
+            &content,
+            std::path::Path::new("test.m"),
+            80,
+        );
+        assert!(issues.is_empty(), "Expected no issues for 5 SLOC, got: {:?}", issues);
+    }
+
+    #[test]
+    fn test_check_objc_method_lengths_over_threshold_reports_issue() {
+        let content = make_objc_content_with_sloc("longMethod", 85);
+        let issues = CppChecker::check_objc_method_lengths(
+            &content,
+            std::path::Path::new("test.m"),
+            80,
+        );
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].line, 1);
+        assert!(issues[0].message.contains("longMethod"), "message: {}", issues[0].message);
+        assert!(issues[0].message.contains("readability/fn_size"), "message: {}", issues[0].message);
+        assert_eq!(issues[0].code.as_deref(), Some("readability/fn_size"));
+        assert_eq!(issues[0].source.as_deref(), Some("objc-method-length"));
+    }
+
+    #[test]
+    fn test_check_objc_method_lengths_blank_and_comments_not_counted() {
+        // 79 SLOC + blank/comment lines → SLOC = 79, no issue
+        let mut lines = vec!["- (void)almostLongMethod {".to_string()];
+        for i in 0..79 {
+            lines.push(format!("    int var{} = {};", i, i));
+            if i % 4 == 0 {
+                lines.push(String::new());
+                lines.push("    // a comment".to_string());
+            }
+        }
+        lines.push("}".to_string());
+        let content = lines.join("\n");
+
+        let issues = CppChecker::check_objc_method_lengths(
+            &content,
+            std::path::Path::new("test.mm"),
+            80,
+        );
+        assert!(issues.is_empty(), "Expected no issues (79 SLOC), got: {:?}", issues);
+    }
+
+    #[test]
+    fn test_check_objc_method_lengths_multiple_methods_each_checked() {
+        // First method: 5 SLOC (ok). Second method: 85 SLOC (over).
+        let mut lines = vec!["- (void)shortMethod {".to_string()];
+        for i in 0..5 {
+            lines.push(format!("    int a{} = {};", i, i));
+        }
+        lines.push("}".to_string());
+
+        let long_method_line = lines.len() + 1; // 1-based
+        lines.push("- (void)longMethod {".to_string());
+        for i in 0..85 {
+            lines.push(format!("    int b{} = {};", i, i));
+        }
+        lines.push("}".to_string());
+
+        let content = lines.join("\n");
+        let issues = CppChecker::check_objc_method_lengths(
+            &content,
+            std::path::Path::new("test.m"),
+            80,
+        );
+        assert_eq!(issues.len(), 1, "Expected 1 issue, got: {:?}", issues);
+        assert!(issues[0].message.contains("longMethod"), "message: {}", issues[0].message);
+        assert_eq!(issues[0].line, long_method_line, "Expected issue at line {}", long_method_line);
+    }
+
+    #[test]
+    fn test_check_objc_method_lengths_custom_threshold() {
+        let content = make_objc_content_with_sloc("mediumMethod", 50);
+        let issues = CppChecker::check_objc_method_lengths(
+            &content,
+            std::path::Path::new("test.mm"),
+            30,
+        );
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].message.contains("mediumMethod"));
     }
 }
