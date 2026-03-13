@@ -444,6 +444,20 @@ fn main() -> ExitCode {
         cli.accept_all = true;
     }
 
+    // Validate flag dependencies (since we removed clap `requires` for --auto-fix compat)
+    if cli.ai && !cli.fix {
+        eprintln!("{}: --ai requires --fix or --auto-fix", "Error".red());
+        return ExitCode::from(2);
+    }
+    if cli.provider.is_some() && !cli.ai && !cli.auto_fix {
+        eprintln!("{}: --provider requires --ai or --auto-fix", "Error".red());
+        return ExitCode::from(2);
+    }
+    if cli.accept_all && !cli.fix {
+        eprintln!("{}: -y/--yes requires --fix or --auto-fix", "Error".red());
+        return ExitCode::from(2);
+    }
+
     // Perform self-update and auto-sync checks (before loading plugins)
     // Load config to get self_auto_update and plugin_auto_sync settings
     {
