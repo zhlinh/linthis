@@ -264,8 +264,11 @@ fn build_global_hook_script_for_event(
             let agent_cmd = agent_fix_headless_cmd(p, &prompt);
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-                 \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\"\n\
+                 \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+                 \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
                  \x20\x20\x20 {agent}\n\
+                 \x20\x20\x20 stop_timer\n\
+                 \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
                  \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
                  \x20\x20\x20 LINTHIS_EXIT=$?\n\
                  \x20 fi\n",
@@ -282,8 +285,11 @@ fn build_global_hook_script_for_event(
             let agent_cmd = agent_fix_headless_cmd(p, &prompt);
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-                 \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\"\n\
+                 \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+                 \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
                  \x20\x20\x20 {agent}\n\
+                 \x20\x20\x20 stop_timer\n\
+                 \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
                  \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
                  \x20\x20\x20 LINTHIS_EXIT=$?\n\
                  \x20 fi\n",
@@ -304,10 +310,16 @@ fn build_global_hook_script_for_event(
         ""
     };
 
+    let timer_block = if fix_provider.is_some() {
+        shell_timer_functions()
+    } else {
+        ""
+    };
+
     format!(
         "#!/bin/sh\n\
          # linthis-hook\n\
-         \n\
+         {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
          \n\
          # Locate the local project hook (git-dir aware)\n\
@@ -340,6 +352,7 @@ fn build_global_hook_script_for_event(
          {review}\
          \x20 exit $LINTHIS_EXIT\n\
          fi\n",
+        timer = timer_block,
         linthis = linthis_cmd_var,
         event = event_name,
         fix_local = fix_block,
@@ -1477,28 +1490,69 @@ fn agent_fix_error_msg(hook_event: &HookEvent) -> &'static str {
     }
 }
 
+/// Shell snippet: a background elapsed-time spinner.
+///
+/// Usage in hook scripts:
+///   start_timer "Fixing with claude"
+///   <long-running command>
+///   stop_timer
+///
+/// Prints: `[linthis] Fixing with claude... (5s)` updating every second,
+/// using \r to overwrite the line.  Falls back gracefully if the terminal
+/// does not support \r (the output just accumulates harmlessly).
+fn shell_timer_functions() -> &'static str {
+    r#"
+_linthis_timer_pid=""
+start_timer() {
+  _linthis_label="$1"
+  (
+    _s=0
+    while true; do
+      printf "\r[linthis] %s (%ds)" "$_linthis_label" "$_s" >&2
+      sleep 1
+      _s=$((_s + 1))
+    done
+  ) &
+  _linthis_timer_pid=$!
+}
+stop_timer() {
+  if [ -n "$_linthis_timer_pid" ]; then
+    kill "$_linthis_timer_pid" 2>/dev/null
+    wait "$_linthis_timer_pid" 2>/dev/null
+    _linthis_timer_pid=""
+    printf "\r\033[K" >&2
+  fi
+}
+"#
+}
+
 /// Build the full git hook shell script with agent fix fallback.
 fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
     let prompt = agent_fix_prompt_for_event(hook_event);
     let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt);
     let error_msg = agent_fix_error_msg(hook_event);
+    let timer_fns = shell_timer_functions();
     format!(
         "#!/bin/sh\n\
-         \n\
+         {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
          \n\
          $LINTHIS_CMD\n\
          LINTHIS_EXIT=$?\n\
          \n\
          if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-         \x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\"\n\
+         \x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+         \x20 start_timer \"Fixing with {provider}\"\n\
          \x20 {agent}\n\
+         \x20 stop_timer\n\
          \x20 # Re-verify after agent fix\n\
+         \x20 echo \"[linthis] Re-verifying...\" >&2\n\
          \x20 $LINTHIS_CMD\n\
          \x20 LINTHIS_EXIT=$?\n\
          fi\n\
          \n\
          exit $LINTHIS_EXIT\n",
+        timer = timer_fns,
         linthis = linthis_cmd,
         provider = fix_provider,
         agent = agent_cmd,
@@ -1605,20 +1659,25 @@ fn handle_precommit_with_agent_install(
         tool_cmd = tool_cmd,
     );
     let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt);
+    let timer_fns = shell_timer_functions();
     let wrapper = format!(
         "#!/bin/sh\n\
-         \n\
+         {timer}\
          {tool_cmd}\n\
          EXIT=$?\n\
          \n\
          if [ $EXIT -ne 0 ]; then\n\
-         \x20 echo \"[linthis] Errors detected. Invoking {provider} to fix...\"\n\
+         \x20 echo \"[linthis] Errors detected. Invoking {provider} to fix...\" >&2\n\
+         \x20 start_timer \"Fixing with {provider}\"\n\
          \x20 {agent}\n\
+         \x20 stop_timer\n\
+         \x20 echo \"[linthis] Re-verifying...\" >&2\n\
          \x20 {tool_cmd}\n\
          \x20 EXIT=$?\n\
          fi\n\
          \n\
          exit $EXIT\n",
+        timer = timer_fns,
         tool_cmd = tool_cmd,
         provider = fix_provider,
         agent = agent_cmd,
