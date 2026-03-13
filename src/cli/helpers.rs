@@ -194,7 +194,7 @@ pub fn print_fix_hint(issues: &[LintIssue]) {
     );
     eprintln!(
         "       {} - {} auto-fix via AI agent",
-        "linthis fix --ai -y".cyan(),
+        "linthis fix --auto".cyan(),
         "(dangerously)".red().bold()
     );
 }

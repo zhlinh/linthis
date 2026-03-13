@@ -336,11 +336,11 @@ linthis --fix --ai --provider claude
 linthis --fix --ai --provider claude-cli
 
 # Auto-accept all AI fixes (for CI/automation)
-linthis --fix --ai -y
-linthis --fix --ai --provider claude-cli -y
+linthis --auto-fix
+linthis --auto-fix --provider claude-cli
 
 # Fix only staged files with AI
-linthis -s --fix --ai --provider claude-cli -y
+linthis -s --auto-fix --provider claude-cli
 
 # Fix specific language
 linthis -l python --fix --ai --provider claude

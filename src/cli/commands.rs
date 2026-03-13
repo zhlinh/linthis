@@ -141,27 +141,33 @@ pub struct Cli {
     #[arg(long, value_delimiter = ',')]
     pub use_plugin: Option<Vec<String>>,
 
+    /// AI auto-fix: check + fix issues automatically (equivalent to --fix --ai -y)
+    ///
+    /// Shorthand for running AI-powered fix mode without confirmation.
+    /// Can specify provider with --provider.
+    #[arg(long)]
+    pub auto_fix: bool,
+
     /// Enter fix mode after check/format to fix issues
     ///
-    /// Can be combined with --ai for AI-powered fixes.
-    /// Useful in git hooks: linthis -c --fix --ai -y
+    /// Can be combined with --ai for AI-powered fixes
     #[arg(long)]
     pub fix: bool,
 
-    /// Use AI for fix suggestions (requires --fix)
-    #[arg(long, requires = "fix")]
+    /// Use AI for fix suggestions (requires --fix or --auto-fix)
+    #[arg(long)]
     pub ai: bool,
 
-    /// AI provider for fix (requires --ai)
+    /// AI provider for fix (requires --ai or --auto-fix)
     ///
     /// Options: claude, claude-cli, codebuddy, codebuddy-cli, openai, local, mock
-    #[arg(long, requires = "ai")]
+    #[arg(long)]
     pub provider: Option<String>,
 
     /// Automatically accept all fix suggestions (requires --fix)
     ///
     /// Warning: This will modify files automatically. Use with caution.
-    #[arg(short = 'y', long = "yes", alias = "accept-all", requires = "fix")]
+    #[arg(short = 'y', long = "yes", alias = "accept-all")]
     pub accept_all: bool,
 
     /// Hook event: enable compact output format for git hooks
@@ -562,9 +568,21 @@ pub enum Commands {
     ///   linthis cmsg "feat: add new feature"
     ///   linthis cmsg "fix(api): handle null response"
     ///   linthis cmsg .git/COMMIT_EDITMSG
+    ///   linthis cmsg .git/COMMIT_EDITMSG --auto-fix   # AI rewrite on failure
     Cmsg {
         /// Path to commit message file, or the commit message string directly.
         msg_or_file: String,
+
+        /// Automatically rewrite invalid commit messages using AI
+        ///
+        /// When the message fails validation, AI rewrites it to conform to
+        /// Conventional Commits format and writes it back (if source is a file).
+        #[arg(long)]
+        auto_fix: bool,
+
+        /// AI provider for auto-fix
+        #[arg(long, requires = "auto_fix")]
+        provider: Option<String>,
     },
     /// Watch files for changes and auto-lint
     ///
@@ -642,6 +660,10 @@ pub enum Commands {
         #[arg(short = 'f', long)]
         format_only: bool,
 
+        /// AI auto-fix: apply all AI suggestions automatically (equivalent to --ai -y)
+        #[arg(long = "auto")]
+        auto_fix: bool,
+
         /// Enable AI-powered fix suggestions
         #[arg(long)]
         ai: bool,
@@ -649,21 +671,21 @@ pub enum Commands {
         /// AI provider: claude (default), claude-cli, codebuddy, codebuddy-cli, openai, local, mock
         ///
         /// Priority: CLI > env var (LINTHIS_AI_PROVIDER) > config file ([ai] section) > default
-        #[arg(long, requires = "ai")]
+        #[arg(long)]
         provider: Option<String>,
 
         /// Model name (defaults to provider's default)
-        #[arg(long, requires = "ai")]
+        #[arg(long)]
         model: Option<String>,
 
         /// Maximum suggestions per issue (default: 3)
-        #[arg(long, default_value = "3", requires = "ai")]
+        #[arg(long, default_value = "3")]
         max_suggestions: usize,
 
         /// Automatically accept all AI suggestions without confirmation
         ///
         /// Warning: This will modify files automatically. Use with caution.
-        #[arg(short = 'y', long = "yes", alias = "accept-all", requires = "ai")]
+        #[arg(short = 'y', long = "yes", alias = "accept-all")]
         accept_all: bool,
 
         /// Number of parallel jobs for AI analysis (default: 4)
@@ -839,7 +861,7 @@ pub enum HookCommands {
         ///
         /// Default: "-c -f" (check + format).
         /// Examples: "-c" (check only), "-f" (format only),
-        /// "-c -f --fix --ai --provider claude -y" (AI auto-fix)
+        /// "-c -f --auto-fix --provider claude" (AI auto-fix)
         #[arg(long, allow_hyphen_values = true)]
         args: Option<String>,
     },

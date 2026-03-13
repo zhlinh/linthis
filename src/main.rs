@@ -97,7 +97,7 @@ fn main() -> ExitCode {
     let mut cmd = Cli::command();
     inject_dynamic_help(&mut cmd);
     let matches = cmd.get_matches();
-    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 
     // Handle plugin subcommands first
     if let Some(Commands::Plugin { action }) = cli.command {
@@ -115,8 +115,8 @@ fn main() -> ExitCode {
     }
 
     // Handle cmsg subcommand (commit message validation)
-    if let Some(Commands::Cmsg { msg_or_file }) = cli.command {
-        return handle_commit_msg_check(&msg_or_file);
+    if let Some(Commands::Cmsg { msg_or_file, auto_fix, provider }) = cli.command {
+        return handle_commit_msg_check(&msg_or_file, auto_fix, provider.as_deref());
     }
 
     // Handle init subcommand
@@ -208,6 +208,7 @@ fn main() -> ExitCode {
         source,
         check,
         format_only,
+        auto_fix,
         ai,
         provider,
         model,
@@ -226,6 +227,12 @@ fn main() -> ExitCode {
         list_backups,
     }) = cli.command
     {
+        // --auto expands to --ai -y
+        let (ai, accept_all) = if auto_fix {
+            (true, true)
+        } else {
+            (ai, accept_all)
+        };
         return handle_fix_command(FixCommandOptions {
             source,
             check,
@@ -428,6 +435,13 @@ fn main() -> ExitCode {
         if cli.paths.is_empty() && !cli.check_only && !cli.format_only {
             return ExitCode::SUCCESS;
         }
+    }
+
+    // Expand --auto-fix to --fix --ai -y
+    if cli.auto_fix {
+        cli.fix = true;
+        cli.ai = true;
+        cli.accept_all = true;
     }
 
     // Perform self-update and auto-sync checks (before loading plugins)

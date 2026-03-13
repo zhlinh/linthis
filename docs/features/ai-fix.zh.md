@@ -58,7 +58,7 @@ linthis -i src/ --fix --ai
 自动接受所有 AI 修复，无需提示：
 
 ```bash
-linthis --fix --ai -y
+linthis --auto-fix
 ```
 
 ⚠️ **警告**：这将自动修改文件。请谨慎使用，并确保有版本控制。
@@ -116,13 +116,13 @@ model = "claude-sonnet-4-20250514"  # 可选：覆盖默认模型
 
 ```bash
 # 在 .git/hooks/pre-commit 或 .prek/pre-commit 中
-linthis -s --fix --ai -y
+linthis -s --auto-fix
 ```
 
 更安全的 CI 用法（使用 Claude CLI）：
 
 ```bash
-linthis -s --fix --ai --provider claude-cli -y
+linthis -s --auto-fix --provider claude-cli
 ```
 
 ## 示例
