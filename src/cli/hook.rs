@@ -295,6 +295,15 @@ fn build_global_hook_script_for_event(
     };
 
     let event_name = hook_event.hook_filename();
+
+    // For pre-push events, add background review trigger
+    let review_block = if matches!(hook_event, HookEvent::PrePush) {
+        "\n# Trigger background AI code review (non-blocking)\n\
+         linthis review --background 2>/dev/null &\n"
+    } else {
+        ""
+    };
+
     format!(
         "#!/bin/sh\n\
          # linthis-hook\n\
@@ -319,6 +328,7 @@ fn build_global_hook_script_for_event(
          {fix_local}\
          \x20\x20\x20 \"$LOCAL_HOOK\" \"$@\"\n\
          \x20\x20\x20 LOCAL_EXIT=$?\n\
+         {review}\
          \x20\x20\x20 [ $LINTHIS_EXIT -ne 0 ] && exit $LINTHIS_EXIT\n\
          \x20\x20\x20 exit $LOCAL_EXIT\n\
          \x20 fi\n\
@@ -327,12 +337,14 @@ fn build_global_hook_script_for_event(
          \x20 $LINTHIS_CMD \"$@\"\n\
          \x20 LINTHIS_EXIT=$?\n\
          {fix_direct}\
+         {review}\
          \x20 exit $LINTHIS_EXIT\n\
          fi\n",
         linthis = linthis_cmd_var,
         event = event_name,
         fix_local = fix_block,
         fix_direct = fix_block_direct,
+        review = review_block,
     )
 }
 
@@ -1283,10 +1295,15 @@ fn build_hook_command(
             format!("linthis -s {} --hook-event=pre-commit", extra)
         }
         HookEvent::PrePush => {
-            // For pre-push: check + format all files
+            // For pre-push: check + format all files, then trigger background review
             // Default "-c -f" = RunMode::Both (check AND format)
             let extra = args.as_deref().unwrap_or("-c -f");
-            format!("linthis {} --hook-event=pre-push", extra)
+            format!(
+                "linthis {} --hook-event=pre-push\n\
+                 # Trigger background AI code review (non-blocking)\n\
+                 linthis review --background 2>/dev/null &",
+                extra
+            )
         }
         HookEvent::CommitMsg => {
             // For commit-msg: validate commit message using the msg file passed as $1
