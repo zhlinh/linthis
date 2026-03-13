@@ -15,6 +15,9 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 - 📦 **Plugin System**: Share and reuse configurations via Git repositories
 - 🎨 **Format Presets**: Support for popular code styles like Google, Airbnb, Standard
 - ⚡ **Parallel Processing**: Leverage multi-core CPU for faster file processing
+- 🤖 **AI Code Review**: `linthis review` analyzes diffs with AI and creates PR/MR automatically
+- 💾 **Format with Backup**: `linthis format` creates backups before formatting, supports `--undo`
+- 🔄 **Auto Re-stage**: When running in staged mode (`-s`), formatted files are automatically re-staged
 
 ## Installation
 
@@ -614,6 +617,7 @@ Validate commit message format directly — without going through a hook.
 | Command | Description |
 | ------- | ----------- |
 | `cmsg <msg-or-file>` | Validate a commit message string or file path |
+| `cmsg <file> --auto-fix` | AI rewrite on failure (writes result back to file) |
 
 ```bash
 # Validate a message string directly
@@ -622,6 +626,10 @@ linthis cmsg "fix(api): handle null response"
 
 # Validate from a file (git hook usage)
 linthis cmsg .git/COMMIT_EDITMSG
+
+# AI rewrite on failure (writes result back to file)
+linthis cmsg .git/COMMIT_EDITMSG --auto-fix
+linthis cmsg .git/COMMIT_EDITMSG --auto-fix --provider claude-cli
 
 # Install the commit-msg hook (calls `linthis cmsg "$1"` automatically)
 linthis hook install --event commit-msg
@@ -635,6 +643,50 @@ The pattern is configurable via `.linthis/config.toml`:
 ```toml
 [cmsg]
 commit_msg_pattern = "^(feat|fix|docs|...)\\(\\S+\\)?: .{1,72}"
+```
+
+### format Subcommand
+
+Format files with automatic backup and undo support.
+
+```bash
+linthis format                        # Format all files (with backup)
+linthis format -s                     # Format staged files
+linthis format -m                     # Format modified files
+linthis format -i src/main.rs         # Format specific file
+linthis format --undo                 # Undo last format (restore from backup)
+linthis format --list-backups         # List available backups
+```
+
+A backup is created before each format operation. Use `--undo` to revert.
+
+> **Note:** When running `linthis -s` (staged mode), formatted files are **automatically re-staged** — no manual `git add` needed.
+
+### review Subcommand
+
+AI-powered code review with PR/MR creation.
+
+```bash
+linthis review                        # Review current branch vs remote
+linthis review --auto-fix             # Review + auto-fix + create PR
+linthis review -r alice -r bob        # Specify reviewers
+linthis review --base main            # Diff against main branch
+linthis review --background           # Run in background (non-blocking)
+linthis review --status               # Check background review status
+linthis review --no-pr                # Generate Markdown report only
+```
+
+Supported platforms: **GitHub** (`gh`), **GitLab** (`glab`).
+
+Configure in `.linthis/config.toml`:
+
+```toml
+[review]
+enabled = true
+provider = "claude-cli"
+
+[review.reviewers]
+default = ["alice", "bob"]
 ```
 
 ## Supported Languages

@@ -312,6 +312,7 @@ max_complexity = 25
 linelength = 120
 cpplint_filter = "-build/c++11,-whitespace/tab"
 clang_tidy_ignored_checks = ["clang-analyzer-osx.cocoa.RetainCount"]
+fn_length = 80
 ```
 
 | 字段 | 类型 | 默认值 | 描述 |
@@ -322,19 +323,27 @@ clang_tidy_ignored_checks = ["clang-analyzer-osx.cocoa.RetainCount"]
 | `linelength` | 整数 | `80` | cpplint 行长度 |
 | `cpplint_filter` | 字符串 | - | Cpplint 过滤规则 |
 | `clang_tidy_ignored_checks` | 数组 | `[]` | 要忽略的 Clang-tidy 检查 |
+| `fn_length` | 整数 | `80` | Objective-C 方法最大 SLOC（非空非注释行数） |
 | `rules` | RulesConfig | - | 语言特定规则覆盖 |
 
 ---
 
 ### `[oc]` / `[objectivec]`
 
-Objective-C 特定选项。与 `[cpp]` 相同的字段。
+Objective-C 特定选项。包含 `[cpp]` 所有字段，另增 `fn_length` 用于方法长度检查。
 
 ```toml
 [oc]
 linelength = 150
 cpplint_filter = "-build/header_guard"
+fn_length = 80  # 方法最大 SLOC（非空非注释行数），默认 80
 ```
+
+| 字段 | 类型 | 默认值 | 描述 |
+|-----|-----|-------|------|
+| `fn_length` | 整数 | `80` | Objective-C 方法最大 SLOC（非空非注释行数） |
+
+其余字段与 `[cpp]` 相同。
 
 ---
 
@@ -410,6 +419,57 @@ filepath_regex = ["generated/.*"]
 [source.third_party_source]
 filepath_regex = ["vendor/.*", "third_party/.*"]
 ```
+
+---
+
+## Review 配置
+
+### `[review]`
+
+配置 AI 代码审查功能。
+
+```toml
+[review]
+enabled = true
+auto_fix = false
+provider = "claude-cli"
+retention_days = 30
+
+[review.reviewers]
+default = ["alice", "bob"]
+```
+
+| 字段 | 类型 | 默认值 | 描述 |
+|-----|-----|-------|------|
+| `enabled` | 布尔值 | `true` | 启用/禁用 review 功能 |
+| `auto_fix` | 布尔值 | `false` | 启用自动修复模式（创建修复分支 + PR/MR） |
+| `provider` | 字符串 | - | review 使用的 AI 提供商 |
+| `retention_days` | 整数 | `30` | review 产物保留天数 |
+
+### `[review.reviewers]`
+
+| 字段 | 类型 | 默认值 | 描述 |
+|-----|-----|-------|------|
+| `default` | 数组 | `[]` | 默认审查人（平台用户名） |
+
+### `[review.platforms.<name>]`
+
+配置自定义 Git 平台以支持 PR/MR 创建。
+
+```toml
+[review.platforms.my-gitlab]
+pr_create = "glab mr create --title '{title}' --description '{body}'"
+pr_list = "glab mr list"
+reviewer_flag = "--reviewer"
+```
+
+| 字段 | 类型 | 必填 | 描述 |
+|-----|-----|-----|------|
+| `pr_create` | 字符串 | 是 | 创建 PR/MR 的命令模板 |
+| `pr_list` | 字符串 | 否 | 列出 PR/MR 的命令模板 |
+| `reviewer_flag` | 字符串 | 否 | 指定审查人的参数名（默认：`--reviewer`） |
+| `install_cmd` | 字符串 | 否 | CLI 工具的安装命令 |
+| `install_hint` | 字符串 | 否 | 工具缺失时显示的安装提示 |
 
 ---
 
