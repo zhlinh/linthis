@@ -252,7 +252,7 @@ impl std::fmt::Display for AgentFixProvider {
     }
 }
 
-/// AI coding agent providers (for rules/settings installation, --type agent)
+/// AI coding agent providers (for skills/settings installation, --type agent)
 #[derive(Clone, Debug, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum AgentProvider {
@@ -805,7 +805,7 @@ pub enum Commands {
 /// Hook subcommands
 #[derive(clap::Subcommand, Debug)]
 pub enum HookCommands {
-    /// Install git hooks or AI agent rules
+    /// Install git hooks or AI agent skills
     ///
     /// Hook types (--type):
     ///
@@ -813,7 +813,7 @@ pub enum HookCommands {
     ///
     ///   {git,prek,pre-commit}-with-agent  Shell hook + AI auto-fix on failure
     ///
-    ///   agent                             AI coding agent rules (Claude, Cursor, etc.)
+    ///   agent                             AI coding agent lint skill (Claude, Cursor, etc.)
     Install {
         /// Hook tool to use [default: git]
         ///
@@ -823,7 +823,7 @@ pub enum HookCommands {
         /// Shell hook + AI auto-fix on failure:
         ///   git-with-agent, prek-with-agent, pre-commit-with-agent
         ///
-        /// AI agent rules installation:
+        /// AI agent skills installation:
         ///   agent
         #[arg(long = "type", value_name = "TYPE")]
         hook_type: Option<HookTool>,
@@ -842,7 +842,7 @@ pub enum HookCommands {
 
         /// Install globally:
         ///
-        /// - For --type agent: installs rules into user home directory (~/.claude/, ~/.cursor/, etc.)
+        /// - For --type agent: installs skills into user home directory (~/.claude/, ~/.cursor/, etc.)
         ///
         /// - For other types: installs hook into ~/.config/git/hooks/ and sets core.hooksPath
         ///   (Strategy B: local hook takes priority; global runs linthis only when local has no linthis)
@@ -851,7 +851,7 @@ pub enum HookCommands {
 
         /// AI provider: claude, codex, gemini, cursor, droid, auggie, codebuddy
         ///
-        /// For --type agent: installs rules/settings files for the provider
+        /// For --type agent: installs skill/settings files for the provider
         ///
         /// For --type *-with-agent: uses the provider's headless CLI to auto-fix
         #[arg(long)]
@@ -884,7 +884,7 @@ pub enum HookCommands {
         yes: bool,
 
         /// Uninstall from global location:
-        /// - For --type agent: removes rules from user home directory
+        /// - For --type agent: removes skills from user home directory
         /// - For other types: removes hook from ~/.config/git/hooks/ and unsets core.hooksPath if empty
         #[arg(short = 'g', long)]
         global: bool,
