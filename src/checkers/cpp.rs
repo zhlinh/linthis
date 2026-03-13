@@ -793,6 +793,111 @@ impl CppChecker {
 
         Some(issue)
     }
+
+    /// Count SLOC in a slice of lines: skip blank lines, line comments, and block comments.
+    #[allow(dead_code)]
+    pub(crate) fn count_sloc(lines: &[&str]) -> u32 {
+        let mut count = 0u32;
+        let mut in_block_comment = false;
+
+        for line in lines {
+            let trimmed = line.trim();
+
+            if in_block_comment {
+                if trimmed.contains("*/") {
+                    in_block_comment = false;
+                }
+                continue;
+            }
+
+            if trimmed.is_empty() || trimmed.starts_with("//") {
+                continue;
+            }
+
+            if trimmed.starts_with("/*") {
+                if trimmed.contains("*/") {
+                    // Single-line block comment: /* ... */
+                    continue;
+                }
+                in_block_comment = true;
+                continue;
+            }
+
+            count += 1;
+        }
+        count
+    }
+
+    /// Extract the ObjC method selector name from a signature line.
+    ///
+    /// Examples:
+    ///   "- (void)viewDidLoad {"                 → "viewDidLoad"
+    ///   "- (NSString *)stringForKey:(NSString *)key" → "stringForKey:"
+    ///   "+ (instancetype)sharedInstance"         → "sharedInstance"
+    ///   "- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {" → "tableView:didSelectRowAtIndexPath:"
+    #[allow(dead_code)]
+    pub(crate) fn extract_method_name(signature: &str) -> String {
+        // Find closing ")" of return type, then parse what follows
+        let after_return = match signature.find(')') {
+            Some(i) => signature[i + 1..].trim(),
+            None => return signature.to_string(),
+        };
+
+        // Walk the remaining text, collecting selector parts
+        let mut selector = String::new();
+        let mut word = String::new();
+        let mut chars = after_return.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                '{' => break,
+                '(' => {
+                    // Skip argument type in parens, e.g. "(UITableView *)"
+                    // The word before '(' was already a selector keyword collected at ':'
+                    word.clear();
+                    let mut depth = 1usize;
+                    for inner in chars.by_ref() {
+                        match inner {
+                            '(' => depth += 1,
+                            ')' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                ':' => {
+                    // Current word is a selector component
+                    let kw = word.trim().to_string();
+                    if !kw.is_empty() {
+                        selector.push_str(&kw);
+                        selector.push(':');
+                    }
+                    word.clear();
+                }
+                c if c.is_ascii_whitespace() => {
+                    // Space between tokens — if we already have a selector component,
+                    // the current word is an argument variable name: discard it.
+                    // If selector is empty and word is non-empty, it might be the method
+                    // name itself (no-arg method). Keep word as-is until '{' or end.
+                    if !selector.is_empty() {
+                        word.clear();
+                    }
+                }
+                c => word.push(c),
+            }
+        }
+
+        // If no colon was found, the word is the whole method name
+        if selector.is_empty() {
+            word.trim().to_string()
+        } else {
+            selector
+        }
+    }
 }
 
 impl Default for CppChecker {
@@ -1176,5 +1281,77 @@ mod tests {
         // Without any config file, oc_fn_length should default to 80
         let checker = CppChecker::new();
         assert_eq!(checker.oc_fn_length, 80);
+    }
+
+    // ==================== count_sloc tests ====================
+
+    #[test]
+    fn test_count_sloc_plain_code() {
+        let lines = vec!["int x = 1;", "int y = 2;", "return x + y;"];
+        assert_eq!(CppChecker::count_sloc(&lines), 3);
+    }
+
+    #[test]
+    fn test_count_sloc_skips_blank_lines() {
+        let lines = vec!["int x = 1;", "", "   ", "return x;"];
+        assert_eq!(CppChecker::count_sloc(&lines), 2);
+    }
+
+    #[test]
+    fn test_count_sloc_skips_line_comments() {
+        let lines = vec!["// comment", "int x = 1;", "// another"];
+        assert_eq!(CppChecker::count_sloc(&lines), 1);
+    }
+
+    #[test]
+    fn test_count_sloc_skips_single_line_block_comment() {
+        let lines = vec!["/* inline comment */", "int x = 1;"];
+        assert_eq!(CppChecker::count_sloc(&lines), 1);
+    }
+
+    #[test]
+    fn test_count_sloc_skips_multiline_block_comment() {
+        let lines = vec!["/*", " * block comment", " */", "int x = 1;"];
+        assert_eq!(CppChecker::count_sloc(&lines), 1);
+    }
+
+    #[test]
+    fn test_count_sloc_trailing_comment_counts_as_code() {
+        let lines = vec!["int x = 1; // set x"];
+        assert_eq!(CppChecker::count_sloc(&lines), 1);
+    }
+
+    // ==================== extract_method_name tests ====================
+
+    #[test]
+    fn test_extract_method_name_simple() {
+        assert_eq!(
+            CppChecker::extract_method_name("- (void)viewDidLoad {"),
+            "viewDidLoad"
+        );
+    }
+
+    #[test]
+    fn test_extract_method_name_with_single_arg() {
+        assert_eq!(
+            CppChecker::extract_method_name("- (NSString *)stringForKey:(NSString *)key"),
+            "stringForKey:"
+        );
+    }
+
+    #[test]
+    fn test_extract_method_name_class_method() {
+        assert_eq!(
+            CppChecker::extract_method_name("+ (instancetype)sharedInstance"),
+            "sharedInstance"
+        );
+    }
+
+    #[test]
+    fn test_extract_method_name_multi_arg() {
+        assert_eq!(
+            CppChecker::extract_method_name("- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {"),
+            "tableView:didSelectRowAtIndexPath:"
+        );
     }
 }
