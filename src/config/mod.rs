@@ -151,6 +151,10 @@ pub struct Config {
     #[serde(default)]
     pub hooks: HooksConfig,
 
+    /// Commit message validation settings
+    #[serde(default)]
+    pub cmsg: CmsgConfig,
+
     /// Custom rules, rule disable, and severity overrides
     #[serde(default)]
     pub rules: RulesConfig,
@@ -229,15 +233,6 @@ pub struct HooksConfig {
     /// Enable parallel execution in hooks (default: true)
     #[serde(default = "default_hook_parallel")]
     pub parallel: bool,
-    /// Commit message validation pattern (conventional commits by default)
-    #[serde(default = "default_commit_msg_pattern")]
-    pub commit_msg_pattern: String,
-    /// Require ticket reference in commit messages (e.g., [JIRA-123])
-    #[serde(default)]
-    pub require_ticket: bool,
-    /// Ticket pattern regex (e.g., r"\[\w+-\d+\]")
-    #[serde(default)]
-    pub ticket_pattern: Option<String>,
     /// Hook output box width (0 = auto-detect terminal width, min 50, max 120)
     #[serde(default)]
     pub output_width: Option<u32>,
@@ -248,10 +243,31 @@ impl Default for HooksConfig {
         Self {
             timeout: default_hook_timeout(),
             parallel: default_hook_parallel(),
+            output_width: None,
+        }
+    }
+}
+
+/// Commit message validation configuration section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CmsgConfig {
+    /// Commit message validation pattern (conventional commits by default)
+    #[serde(default = "default_commit_msg_pattern")]
+    pub commit_msg_pattern: String,
+    /// Require ticket reference in commit messages (e.g., [JIRA-123])
+    #[serde(default)]
+    pub require_ticket: bool,
+    /// Ticket pattern regex (e.g., r"\[\w+-\d+\]")
+    #[serde(default)]
+    pub ticket_pattern: Option<String>,
+}
+
+impl Default for CmsgConfig {
+    fn default() -> Self {
+        Self {
             commit_msg_pattern: default_commit_msg_pattern(),
             require_ticket: false,
             ticket_pattern: None,
-            output_width: None,
         }
     }
 }
@@ -742,6 +758,10 @@ max_complexity = 20
 # [tool_auto_install]
 # enabled = true
 # mode = "prompt"  # auto = install silently; prompt = ask before installing; disabled = never install
+
+# Objective-C specific overrides
+# [oc]
+# fn_length = 80   # Max method SLOC (non-blank, non-comment lines). Default: 80.
 "#
         .to_string()
     }
