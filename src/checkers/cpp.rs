@@ -812,6 +812,10 @@ impl CppChecker {
                 continue;
             }
 
+            if trimmed == "{" || trimmed == "}" {
+                continue;
+            }
+
             if trimmed.starts_with("/*") {
                 if trimmed.contains("*/") {
                     // Single-line block comment: /* ... */
@@ -911,7 +915,10 @@ impl CppChecker {
         let mut method_starts: Vec<(usize, String)> = Vec::new();
         for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            if trimmed.starts_with("- (") || trimmed.starts_with("+ (") {
+            if (trimmed.starts_with("- (") || trimmed.starts_with("+ (")
+                || trimmed.starts_with("-(") || trimmed.starts_with("+("))
+                && !trimmed.ends_with(';')
+            {
                 let name = Self::extract_method_name(trimmed);
                 method_starts.push((idx + 1, name)); // 1-based line number
             }
@@ -1463,8 +1470,22 @@ mod tests {
         assert_eq!(issues[0].line, 1);
         assert!(issues[0].message.contains("longMethod"), "message: {}", issues[0].message);
         assert!(issues[0].message.contains("readability/fn_size"), "message: {}", issues[0].message);
+        assert!(issues[0].message.contains("85 lines of code"),
+            "Expected '85 lines of code' in message: {}", issues[0].message);
         assert_eq!(issues[0].code.as_deref(), Some("readability/fn_size"));
         assert_eq!(issues[0].source.as_deref(), Some("objc-method-length"));
+    }
+
+    #[test]
+    fn test_check_objc_method_lengths_exactly_at_threshold_no_issue() {
+        // 80 SLOC at threshold 80: sloc > threshold is false, no issue
+        let content = make_objc_content_with_sloc("boundaryMethod", 80);
+        let issues = CppChecker::check_objc_method_lengths(
+            &content,
+            std::path::Path::new("test.m"),
+            80,
+        );
+        assert!(issues.is_empty(), "Expected no issue at exactly threshold, got: {:?}", issues);
     }
 
     #[test]
@@ -1526,5 +1547,7 @@ mod tests {
         );
         assert_eq!(issues.len(), 1);
         assert!(issues[0].message.contains("mediumMethod"));
+        assert_eq!(issues[0].code.as_deref(), Some("readability/fn_size"));
+        assert_eq!(issues[0].source.as_deref(), Some("objc-method-length"));
     }
 }
