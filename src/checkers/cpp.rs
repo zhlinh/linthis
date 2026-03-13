@@ -41,6 +41,9 @@ pub struct CppChecker {
     cpp_ignored_checks: Vec<String>,
     /// Clang-tidy checks to ignore for Objective-C files
     oc_ignored_checks: Vec<String>,
+    /// Max ObjC method SLOC threshold. Loaded from config, default 80.
+    #[allow(dead_code)]
+    oc_fn_length: u32,
 }
 
 impl CppChecker {
@@ -77,6 +80,7 @@ impl CppChecker {
             cpplint_oc_config: oc_config,
             cpp_ignored_checks: cpp_ignored,
             oc_ignored_checks: oc_ignored,
+            oc_fn_length: Self::load_oc_fn_length(),
         }
     }
 
@@ -204,6 +208,20 @@ impl CppChecker {
             .unwrap_or(default_oc_ignored);
 
         (cpp_ignored, oc_ignored)
+    }
+
+    /// Load ObjC method length threshold from config.toml.
+    /// Priority: [oc] fn_length in config.toml > default 80.
+    fn load_oc_fn_length() -> u32 {
+        use crate::config::Config;
+        let search_dirs = Self::config_search_dirs();
+        let config_dir = search_dirs.first().cloned().unwrap_or_default();
+        let merged = Config::load_merged(&config_dir);
+        merged
+            .language_overrides
+            .oc
+            .and_then(|c| c.fn_length)
+            .unwrap_or(80)
     }
 
     /// Merge two filter strings, removing duplicates
@@ -1151,5 +1169,12 @@ mod tests {
         };
         let checker = CppChecker::new().with_cpplint_oc_config(config);
         assert_eq!(checker.cpplint_oc_config.linelength, Some(200));
+    }
+
+    #[test]
+    fn test_cpp_checker_default_oc_fn_length() {
+        // Without any config file, oc_fn_length should default to 80
+        let checker = CppChecker::new();
+        assert_eq!(checker.oc_fn_length, 80);
     }
 }
