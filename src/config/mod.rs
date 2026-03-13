@@ -796,7 +796,12 @@ impl Config {
     /// Returns None if the plugin has no linthis.toml or the file can't be parsed.
     fn load_plugin_linthis_toml(source: &crate::plugin::PluginSource) -> Option<Self> {
         use crate::plugin::PluginCache;
-        let cache = PluginCache::new().ok()?;
+        // Allow test override via env var LINTHIS_TEST_PLUGIN_CACHE_DIR
+        let cache = if let Ok(dir) = std::env::var("LINTHIS_TEST_PLUGIN_CACHE_DIR") {
+            PluginCache::with_dir(std::path::PathBuf::from(dir))
+        } else {
+            PluginCache::new().ok()?
+        };
         let url = source.url.as_ref()?;
         let cache_path = cache.url_to_cache_path(url);
         let linthis_toml = cache_path.join("linthis.toml");
@@ -1594,5 +1599,111 @@ mod tests {
         assert_eq!(sources[0].url, Some("https://example.com".to_string()));
         assert_eq!(sources[0].git_ref, Some("main".to_string()));
         assert!(sources[0].enabled);
+    }
+
+    // ==================== fn_length priority chain tests ====================
+
+    /// Helper: create a fake plugin cache dir containing a linthis.toml.
+    /// Returns (TempDir, plugin_url) where the URL maps to a subdirectory of the cache.
+    fn setup_fake_plugin_cache(linthis_toml_content: &str) -> (tempfile::TempDir, String) {
+        let cache_root = tempfile::TempDir::new().unwrap();
+        // url_to_cache_path strips scheme and .git suffix:
+        // "https://example.com/test-plugin.git" → "{cache_root}/example.com/test-plugin"
+        let plugin_dir = cache_root.path().join("example.com").join("test-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("linthis.toml"), linthis_toml_content).unwrap();
+        let url = "https://example.com/test-plugin.git".to_string();
+        (cache_root, url)
+    }
+
+    /// Helper: create a temp project dir with .linthis/config.toml referencing a plugin.
+    fn setup_project_with_plugin(
+        project_toml: &str,
+        plugin_url: &str,
+    ) -> tempfile::TempDir {
+        let project_dir = tempfile::TempDir::new().unwrap();
+        let linthis_dir = project_dir.path().join(".linthis");
+        std::fs::create_dir_all(&linthis_dir).unwrap();
+        let config_content = format!(
+            r#"[plugins]
+sources = [{{ name = "test-plugin", url = "{}" }}]
+{}
+"#,
+            plugin_url, project_toml
+        );
+        std::fs::write(linthis_dir.join("config.toml"), config_content).unwrap();
+        project_dir
+    }
+
+    #[test]
+    fn test_fn_length_plugin_linthis_toml_loaded() {
+        // Plugin linthis.toml sets fn_length=60; default is 80.
+        // After merging, fn_length should be 60 (plugin overrides built-in default).
+        let (cache_root, url) = setup_fake_plugin_cache("[cpp]\nfn_length = 60\n[oc]\nfn_length = 60\n");
+        let project_dir = setup_project_with_plugin("", &url);
+
+        // Override cache dir so load_plugin_linthis_toml finds our fake plugin
+        std::env::set_var("LINTHIS_TEST_PLUGIN_CACHE_DIR", cache_root.path());
+        let merged = Config::load_merged(project_dir.path());
+        std::env::remove_var("LINTHIS_TEST_PLUGIN_CACHE_DIR");
+
+        assert_eq!(merged.language_overrides.cpp.as_ref().and_then(|c| c.fn_length), Some(60));
+        assert_eq!(merged.language_overrides.oc.as_ref().and_then(|c| c.fn_length), Some(60));
+    }
+
+    #[test]
+    fn test_fn_length_project_config_overrides_plugin() {
+        // Plugin sets fn_length=60; project config.toml sets fn_length=40.
+        // Project config must win (highest priority).
+        let (cache_root, url) = setup_fake_plugin_cache("[cpp]\nfn_length = 60\n[oc]\nfn_length = 60\n");
+        let project_dir = setup_project_with_plugin(
+            "\n[cpp]\nfn_length = 40\n[oc]\nfn_length = 40\n",
+            &url,
+        );
+
+        std::env::set_var("LINTHIS_TEST_PLUGIN_CACHE_DIR", cache_root.path());
+        let merged = Config::load_merged(project_dir.path());
+        std::env::remove_var("LINTHIS_TEST_PLUGIN_CACHE_DIR");
+
+        assert_eq!(merged.language_overrides.cpp.as_ref().and_then(|c| c.fn_length), Some(40));
+        assert_eq!(merged.language_overrides.oc.as_ref().and_then(|c| c.fn_length), Some(40));
+    }
+
+    #[test]
+    fn test_fn_length_no_plugin_falls_back_to_none() {
+        // No plugin active, no project config override → fn_length is None (checker uses default 80).
+        let project_dir = tempfile::TempDir::new().unwrap();
+        let merged = Config::load_merged(project_dir.path());
+
+        // No plugin, no config → None (CppChecker::new() will unwrap_or(80))
+        assert!(merged.language_overrides.cpp.as_ref().and_then(|c| c.fn_length).is_none()
+            || merged.language_overrides.cpp.is_none());
+    }
+
+    #[test]
+    fn test_fn_length_project_config_without_plugin() {
+        // Only project config.toml sets fn_length=50; no plugin.
+        let project_dir = tempfile::TempDir::new().unwrap();
+        let linthis_dir = project_dir.path().join(".linthis");
+        std::fs::create_dir_all(&linthis_dir).unwrap();
+        std::fs::write(
+            linthis_dir.join("config.toml"),
+            "[cpp]\nfn_length = 50\n[oc]\nfn_length = 50\n",
+        )
+        .unwrap();
+
+        let merged = Config::load_merged(project_dir.path());
+        assert_eq!(merged.language_overrides.cpp.as_ref().and_then(|c| c.fn_length), Some(50));
+        assert_eq!(merged.language_overrides.oc.as_ref().and_then(|c| c.fn_length), Some(50));
+    }
+
+    #[test]
+    fn test_fn_length_merge_order_plugin_then_project() {
+        // Directly test Config::merge() priority: project config wins over plugin config.
+        let mut plugin_config: Config = toml::from_str("[cpp]\nfn_length = 60\n[oc]\nfn_length = 60\n").unwrap();
+        let project_config: Config = toml::from_str("[cpp]\nfn_length = 30\n[oc]\nfn_length = 30\n").unwrap();
+        plugin_config.merge(project_config);
+        assert_eq!(plugin_config.language_overrides.cpp.as_ref().and_then(|c| c.fn_length), Some(30));
+        assert_eq!(plugin_config.language_overrides.oc.as_ref().and_then(|c| c.fn_length), Some(30));
     }
 }
