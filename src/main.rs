@@ -21,9 +21,10 @@ use cli::{
     collect_paths, handle_cache_command, handle_commit_msg_check, handle_complexity_command,
     handle_config_command, handle_doctor_command, handle_fix_command, handle_hook_command,
     handle_init_command, handle_license_command, handle_plugin_command, handle_report_command,
-    handle_security_command, init_linter_configs, perform_auto_sync, perform_self_update,
-    print_fix_hint, run_benchmark, run_watch, strip_ansi_codes, Cli, Commands,
-    ComplexityCommandOptions, FixCommandOptions, PathCollectionOptions, PathCollectionResult,
+    handle_review_command, handle_security_command, init_linter_configs, perform_auto_sync,
+    perform_self_update, print_fix_hint, run_benchmark, run_watch, strip_ansi_codes, Cli,
+    Commands, ComplexityCommandOptions, FixCommandOptions, PathCollectionOptions,
+    PathCollectionResult, ReviewCommandOptions,
 };
 use linthis::config::resolver::{ConfigResolver, ConfigSource, ResolvedConfig};
 use linthis::lsp::{run_lsp_server_with_config, LspMode};
@@ -245,6 +246,38 @@ fn main() -> ExitCode {
             quiet,
             undo,
             list_backups,
+        });
+    }
+
+    // Handle review subcommand
+    if let Some(Commands::Review {
+        background,
+        auto_fix,
+        reviewers,
+        provider,
+        base,
+        head,
+        no_pr,
+        notify,
+        status,
+        dry_run,
+        clean,
+        output,
+    }) = cli.command
+    {
+        return handle_review_command(ReviewCommandOptions {
+            background,
+            auto_fix,
+            reviewers,
+            provider,
+            base,
+            head,
+            no_pr,
+            notify,
+            status,
+            dry_run,
+            clean,
+            output,
         });
     }
 
