@@ -798,6 +798,50 @@ fn main() -> ExitCode {
     // Run linthis
     match run(&options) {
         Ok(mut result) => {
+            // Auto re-stage formatted files when running in staged mode (-s)
+            if cli.staged && !result.format_results.is_empty() {
+                let formatted_files: Vec<&PathBuf> = result
+                    .format_results
+                    .iter()
+                    .filter(|r| r.changed)
+                    .map(|r| &r.file_path)
+                    .collect();
+                if !formatted_files.is_empty() {
+                    let mut cmd = std::process::Command::new("git");
+                    cmd.arg("add");
+                    for f in &formatted_files {
+                        cmd.arg(f.as_os_str());
+                    }
+                    match cmd.output() {
+                        Ok(output) if output.status.success() => {
+                            if !cli.quiet {
+                                eprintln!(
+                                    "{} Re-staged {} formatted file{}",
+                                    "✓".green(),
+                                    formatted_files.len(),
+                                    if formatted_files.len() == 1 { "" } else { "s" }
+                                );
+                            }
+                        }
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            eprintln!(
+                                "{}: Failed to re-stage formatted files: {}",
+                                "Warning".yellow(),
+                                stderr.trim()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "{}: Failed to run git add: {}",
+                                "Warning".yellow(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+
             // Record target paths for trend analysis scope tracking
             result.target_paths = cli.paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
 
