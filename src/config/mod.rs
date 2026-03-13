@@ -485,6 +485,11 @@ pub struct CppLanguageConfig {
     /// Clang-tidy checks to ignore (e.g., ["clang-analyzer-osx.cocoa.RetainCount"])
     #[serde(default)]
     pub clang_tidy_ignored_checks: Option<Vec<String>>,
+    /// Max method/function SLOC (non-blank, non-comment lines) for method length checks.
+    /// Only applied to Objective-C files; has no effect for C++ files.
+    /// When `None`, the checker uses its built-in default (80).
+    #[serde(default)]
+    pub fn_length: Option<u32>,
     /// Language-specific rules configuration
     #[serde(default)]
     pub rules: Option<RulesConfig>,
@@ -1343,6 +1348,28 @@ mod tests {
         let oc = config.language_overrides.oc.unwrap();
         assert_eq!(oc.linelength, Some(150));
         assert_eq!(oc.cpplint_filter, Some("-build/header_guard".to_string()));
+    }
+
+    #[test]
+    fn test_oc_fn_length_from_toml() {
+        let toml = r#"
+            [oc]
+            fn_length = 100
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        let oc = config.language_overrides.oc.unwrap();
+        assert_eq!(oc.fn_length, Some(100));
+    }
+
+    #[test]
+    fn test_oc_fn_length_default_is_none() {
+        let toml = r#"
+            [oc]
+            linelength = 150
+        "#;
+        let config: Config = toml::from_str(toml).unwrap();
+        let oc = config.language_overrides.oc.unwrap();
+        assert_eq!(oc.fn_length, None);
     }
 
     #[test]
