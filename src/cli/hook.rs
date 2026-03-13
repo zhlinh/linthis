@@ -51,7 +51,7 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             handle_hook_check()
         }
         HookCommands::CommitMsgCheck { msg_or_file } => {
-            handle_commit_msg_check(&msg_or_file)
+            handle_commit_msg_check(&msg_or_file, false, None)
         }
     }
 }
@@ -2567,7 +2567,7 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool) -> ExitCode {
 ///
 ///   linthis hook commit-msg-check .git/COMMIT_EDITMSG
 ///   linthis hook commit-msg-check "feat: add new feature"
-pub fn handle_commit_msg_check(msg_or_file: &str) -> ExitCode {
+pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Option<&str>) -> ExitCode {
     use linthis::config::Config;
     use regex::Regex;
     use std::fs;
@@ -2578,7 +2578,8 @@ pub fn handle_commit_msg_check(msg_or_file: &str) -> ExitCode {
 
     // Accept either a file path or a raw message string
     let path = std::path::Path::new(msg_or_file);
-    let commit_msg = if path.exists() {
+    let is_file = path.exists();
+    let commit_msg = if is_file {
         match fs::read_to_string(path) {
             Ok(content) => content,
             Err(e) => {
@@ -2608,10 +2609,14 @@ pub fn handle_commit_msg_check(msg_or_file: &str) -> ExitCode {
         }
     };
 
+    // Collect validation errors for auto-fix context
+    let mut errors: Vec<String> = Vec::new();
+
     // Check main pattern
     if !regex.is_match(first_line) {
-        print_commit_msg_error(first_line);
-        return ExitCode::from(1);
+        errors.push(format!(
+            "Does not match Conventional Commits format (type(scope)?: description). Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+        ));
     }
 
     // Check for ticket reference if required
@@ -2627,27 +2632,160 @@ pub fn handle_commit_msg_check(msg_or_file: &str) -> ExitCode {
         };
 
         if !ticket_regex.is_match(first_line) {
-            eprintln!("{}", "╭────────────────────────────────────────╮".red());
-            eprintln!("{}", "│ 🔴 Ticket Reference Required          │".red());
-            eprintln!("{}", "├────────────────────────────────────────┤".red());
-            eprintln!("│ Your message:                          │");
-            eprintln!("│   {}", first_line);
-            eprintln!("│                                        │");
-            eprintln!("│ Ticket reference is required.          │");
-            eprintln!("│ Pattern: {}                            │", ticket_pattern);
-            eprintln!("│                                        │");
-            eprintln!("│ Example:                               │");
-            eprintln!("│   feat: [PROJ-123] add feature         │");
-            eprintln!("{}", "├────────────────────────────────────────┤".red());
-            eprintln!("│ To skip this check:                    │");
-            eprintln!("│   git commit --no-verify               │");
-            eprintln!("{}", "╰────────────────────────────────────────╯".red());
-            return ExitCode::from(1);
+            errors.push(format!(
+                "Missing ticket reference (pattern: {}). Example: feat: [PROJ-123] add feature",
+                ticket_pattern
+            ));
         }
     }
 
-    println!("{} Commit message format is valid", "✓".green());
-    ExitCode::SUCCESS
+    if errors.is_empty() {
+        println!("{} Commit message format is valid", "✓".green());
+        return ExitCode::SUCCESS;
+    }
+
+    // Validation failed - try auto-fix if enabled
+    if auto_fix {
+        return handle_cmsg_auto_fix(
+            &commit_msg,
+            &errors,
+            is_file,
+            path,
+            provider,
+            config.ai.provider.as_deref(),
+        );
+    }
+
+    // No auto-fix - print errors normally
+    if errors.iter().any(|e| e.contains("Conventional Commits")) {
+        print_commit_msg_error(first_line);
+    } else {
+        // Ticket reference error
+        let ticket_pattern = config.cmsg.ticket_pattern.as_deref()
+            .unwrap_or(r"\[\w+-\d+\]");
+        eprintln!("{}", "╭────────────────────────────────────────╮".red());
+        eprintln!("{}", "│ 🔴 Ticket Reference Required          │".red());
+        eprintln!("{}", "├────────────────────────────────────────┤".red());
+        eprintln!("│ Your message:                          │");
+        eprintln!("│   {}", first_line);
+        eprintln!("│                                        │");
+        eprintln!("│ Ticket reference is required.          │");
+        eprintln!("│ Pattern: {}                            │", ticket_pattern);
+        eprintln!("│                                        │");
+        eprintln!("│ Example:                               │");
+        eprintln!("│   feat: [PROJ-123] add feature         │");
+        eprintln!("{}", "├────────────────────────────────────────┤".red());
+        eprintln!("│ To skip this check:                    │");
+        eprintln!("│   git commit --no-verify               │");
+        eprintln!("{}", "╰────────────────────────────────────────╯".red());
+    }
+    ExitCode::from(1)
+}
+
+/// Handle AI auto-fix for commit messages
+fn handle_cmsg_auto_fix(
+    original_msg: &str,
+    errors: &[String],
+    is_file: bool,
+    file_path: &std::path::Path,
+    cli_provider: Option<&str>,
+    config_provider: Option<&str>,
+) -> ExitCode {
+    use crate::cli::helpers::resolve_ai_provider;
+    use linthis::ai::{AiProvider, AiProviderConfig, AiProviderKind, AiProviderTrait};
+    use std::fs;
+
+    let provider_name = resolve_ai_provider(cli_provider, config_provider);
+    let kind: AiProviderKind = match provider_name.parse() {
+        Ok(k) => k,
+        Err(_) => {
+            eprintln!("{}: Unknown AI provider: {}", "Error".red(), provider_name);
+            return ExitCode::from(2);
+        }
+    };
+
+    let provider_config = match &kind {
+        AiProviderKind::Claude => AiProviderConfig::claude(),
+        AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
+        AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
+        AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
+        AiProviderKind::OpenAi => AiProviderConfig::openai(),
+        AiProviderKind::CodexCli => AiProviderConfig::codex_cli(),
+        AiProviderKind::Gemini => AiProviderConfig::gemini(),
+        AiProviderKind::GeminiCli => AiProviderConfig::gemini_cli(),
+        AiProviderKind::Local => AiProviderConfig::local(),
+        AiProviderKind::Custom(name) => AiProviderConfig {
+            kind: AiProviderKind::Custom(name.clone()),
+            ..AiProviderConfig::default()
+        },
+        AiProviderKind::Mock => AiProviderConfig::mock(),
+    };
+    let provider = AiProvider::new(provider_config);
+
+    eprintln!(
+        "{} Rewriting commit message with AI (provider: {})...",
+        "→".cyan(),
+        provider_name.cyan()
+    );
+
+    let first_line = original_msg.lines().next().unwrap_or("").trim();
+    let rest_of_msg: String = original_msg.lines().skip(1).collect::<Vec<_>>().join("\n");
+
+    let error_desc = errors.join("; ");
+    let prompt = format!(
+        "Rewrite the following git commit message to conform to the Conventional Commits format.\n\
+         \n\
+         Original message: {}\n\
+         \n\
+         Validation errors: {}\n\
+         \n\
+         Rules:\n\
+         - Format: type(scope)?: description\n\
+         - Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n\
+         - Keep the original intent and meaning\n\
+         - Output ONLY the rewritten first line, nothing else (no quotes, no explanation)",
+        first_line, error_desc
+    );
+
+    match provider.complete(&prompt, Some("You are a git commit message formatter. Output only the corrected commit message first line.")) {
+        Ok(fixed_line) => {
+            let fixed_line = fixed_line.trim().trim_matches('"').trim_matches('\'').trim();
+
+            // Reassemble: fixed first line + rest of original message
+            let fixed_msg = if rest_of_msg.is_empty() {
+                format!("{}\n", fixed_line)
+            } else {
+                format!("{}\n{}", fixed_line, rest_of_msg)
+            };
+
+            if is_file {
+                if let Err(e) = fs::write(file_path, &fixed_msg) {
+                    eprintln!("{}: Failed to write fixed message: {}", "Error".red(), e);
+                    return ExitCode::from(1);
+                }
+                eprintln!(
+                    "{} Commit message rewritten: {} → {}",
+                    "✓".green(),
+                    first_line.dimmed(),
+                    fixed_line.green()
+                );
+            } else {
+                // Can't write back to a string arg, just print the fixed message
+                eprintln!(
+                    "{} Suggested rewrite: {}",
+                    "✓".green(),
+                    fixed_line.green()
+                );
+            }
+
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{}: AI auto-fix failed: {}", "Error".red(), e);
+            print_commit_msg_error(first_line);
+            ExitCode::from(1)
+        }
+    }
 }
 
 /// Print commit message validation error

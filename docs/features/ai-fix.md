@@ -58,7 +58,7 @@ In interactive mode, for each issue you can:
 Automatically accept all AI fixes without prompting:
 
 ```bash
-linthis --fix --ai -y
+linthis --auto-fix
 ```
 
 ⚠️ **Warning**: This will modify files automatically. Use with caution and ensure you have version control.
@@ -116,13 +116,13 @@ Use AI fix in pre-commit hooks to automatically fix issues:
 
 ```bash
 # In .git/hooks/pre-commit or .prek/pre-commit
-linthis -s --fix --ai -y
+linthis -s --auto-fix
 ```
 
 For safer CI usage with Claude CLI:
 
 ```bash
-linthis -s --fix --ai --provider claude-cli -y
+linthis -s --auto-fix --provider claude-cli
 ```
 
 ## Examples

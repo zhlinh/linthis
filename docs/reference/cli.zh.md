@@ -336,11 +336,11 @@ linthis --fix --ai --provider claude
 linthis --fix --ai --provider claude-cli
 
 # 自动接受所有 AI 修复（用于 CI/自动化）
-linthis --fix --ai -y
-linthis --fix --ai --provider claude-cli -y
+linthis --auto-fix
+linthis --auto-fix --provider claude-cli
 
 # 仅修复暂存文件并使用 AI
-linthis -s --fix --ai --provider claude-cli -y
+linthis -s --auto-fix --provider claude-cli
 
 # 修复特定语言
 linthis -l python --fix --ai --provider claude
