@@ -13,11 +13,13 @@
 //! This module contains the command definitions and handlers for the
 //! linthis CLI application.
 
+mod backup;
 mod cache;
 mod commands;
 mod complexity;
 mod doctor;
 mod fix;
+mod format;
 mod helpers;
 pub mod hook;
 mod init;
@@ -31,11 +33,13 @@ mod runner;
 mod security;
 mod watch;
 
+pub use backup::create_backup;
 pub use cache::handle_cache_command;
 pub use commands::{Cli, Commands};
 pub use complexity::{handle_complexity_command, ComplexityCommandOptions};
 pub use doctor::handle_doctor_command;
 pub use fix::{handle_fix_command, FixCommandOptions};
+pub use format::{handle_format_command, FormatCommandOptions};
 pub use helpers::{
     print_fix_hint, resolve_ai_provider, run_benchmark, select_ai_provider_interactive,
     strip_ansi_codes,
