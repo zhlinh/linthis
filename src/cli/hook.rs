@@ -1731,22 +1731,25 @@ const AGENT_SECTION_MARKER_LEGACY: &str = "## Linthis Agent Rules";
 fn agent_lint_rule_body() -> String {
     r#"## Mandatory: Always Run Before Commit
 
-**Before executing any `git commit`, you MUST:**
+**Before executing any `git commit`, you MUST run:**
 
-1. Run `linthis -s` to check staged files
-2. If ANY issues found (errors OR warnings), you MUST fix them
-3. After fixing, re-run `linthis -s` to confirm all issues are resolved
-4. Only proceed with commit after linthis shows 0 issues
+```bash
+FILES=$(git diff --cached --name-only) && linthis -s && echo "$FILES" | xargs git add
+```
 
-## How to Fix Issues
+This single command: captures staged files → runs linthis (auto-fixes formatting) → re-stages the fixed files.
 
-**When linthis finds ANY issues (errors or warnings), you MUST:**
+`linthis -s` auto-fixes formatting issues ("Fixed N issues by formatting" is normal). The `git add` at the end is critical — linthis modifies files on disk but does NOT update the git index.
+
+If linthis still reports remaining issues after auto-format, fix them manually, then re-run the command above.
+
+## How to Fix Remaining Issues
 
 1. Read the lint result file at `.linthis/result/result-*.json`
 2. Read the source files that have issues
-3. Fix the issues by editing the source files directly (DO NOT use `linthis fix --auto`)
-4. After fixing, re-run `linthis -s` to confirm 0 issues
-5. Only then proceed with git commit
+3. Fix the issues by editing the source files directly
+4. Re-run: `FILES=$(git diff --cached --name-only) && linthis -s && echo "$FILES" | xargs git add`
+5. Repeat until linthis shows 0 issues, then proceed with git commit
 
 ## Commit Message Rules
 
@@ -1758,15 +1761,11 @@ fn agent_lint_rule_body() -> String {
 
 | Action | Command |
 |--------|---------|
-| Check staged files | `linthis -s` |
+| Lint + re-stage (use this!) | `FILES=$(git diff --cached --name-only) && linthis -s && echo "$FILES" \| xargs git add` |
 | Check specific files | `linthis -i <file>` |
-| Validate commit msg | `linthis cmsg "message"` |
-
-## Important
-
-- Use `linthis fix --auto` to fix all issues automatically
-- After fix, must re-run `linthis -s` to verify 0 issues
-- Only commit when linthis shows no issues"#
+| Check only (no fix) | `linthis -s -c` |
+| Auto-fix all issues | `linthis fix --auto` |
+| Validate commit msg | `linthis cmsg "message"` |"#
         .to_string()
 }
 
@@ -1783,7 +1782,7 @@ fn agent_content_codex_md() -> String {
 /// Content for Gemini .gemini/instructions.md (dedicated file)
 fn agent_content_gemini_md() -> String {
     format!(
-        "---\nname: linthis-lint\ndescription: Enforce code style checking before commits using linthis\n---\n\n# Linthis Lint Rule\n\n{}\n",
+        "---\nname: linthis-lint\ndescription: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI\n---\n\n# Linthis Lint Rule\n\n{}\n",
         agent_lint_rule_body()
     )
 }
@@ -1792,7 +1791,7 @@ fn agent_content_gemini_md() -> String {
 fn agent_content_cursor_mdc() -> String {
     format!(
         r#"---
-description: Enforce code style checking before commits using linthis
+description: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI
 alwaysApply: true
 ---
 
@@ -1807,7 +1806,7 @@ alwaysApply: true
 /// Content for Droid .droid/rules/linthis.md (dedicated file)
 fn agent_content_droid_md() -> String {
     format!(
-        "---\nname: linthis-lint\ndescription: Enforce code style checking before commits using linthis\n---\n\n# Linthis Lint Rule\n\n{}\n",
+        "---\nname: linthis-lint\ndescription: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI\n---\n\n# Linthis Lint Rule\n\n{}\n",
         agent_lint_rule_body()
     )
 }
@@ -1815,7 +1814,7 @@ fn agent_content_droid_md() -> String {
 /// Content for Auggie .augment/rules/linthis.md (dedicated file)
 fn agent_content_auggie_md() -> String {
     format!(
-        "---\nname: linthis-lint\ndescription: Enforce code style checking before commits using linthis\n---\n\n# Linthis Lint Rule\n\n{}\n",
+        "---\nname: linthis-lint\ndescription: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI\n---\n\n# Linthis Lint Rule\n\n{}\n",
         agent_lint_rule_body()
     )
 }
@@ -1825,39 +1824,11 @@ fn agent_content_codebuddy_md() -> String {
     format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rule_body())
 }
 
-/// Content for CodeBuddy .codebuddy/rules/linthis/RULE.mdc (dedicated rule file)
-fn agent_content_codebuddy_rule_mdc() -> String {
-    let now = {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        // ISO 8601 UTC timestamp
-        let s = secs;
-        let days = s / 86400;
-        let time_of_day = s % 86400;
-        let h = time_of_day / 3600;
-        let m = (time_of_day % 3600) / 60;
-        let sec = time_of_day % 60;
-        // Days since epoch to Y-M-D (simplified)
-        let mut y = 1970i64;
-        let mut remaining = days as i64;
-        loop {
-            let days_in_year = if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 366 } else { 365 };
-            if remaining < days_in_year { break; }
-            remaining -= days_in_year;
-            y += 1;
-        }
-        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-        let month_days: [i64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        let mut mo = 0usize;
-        for (i, &d) in month_days.iter().enumerate() {
-            if remaining < d { mo = i; break; }
-            remaining -= d;
-        }
-        format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z", y, mo + 1, remaining + 1, h, m, sec)
-    };
+/// Content for CodeBuddy .codebuddy/skills/linthis/SKILL.md (dedicated skill file)
+fn agent_content_codebuddy_skill_md() -> String {
     format!(
-        "---\ndescription: Enforce code style checking before commits using linthis\nalwaysApply: requested\nenabled: true\nupdatedAt: {}\nprovider: \n---\n\n# Linthis Lint Rule\n\n{}\n",
-        now, agent_lint_rule_body()
+        "---\nname: linthis-lint\ndescription: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI\n---\n\n# Linthis Lint Skill\n\n{}\n",
+        agent_lint_rule_body()
     )
 }
 
@@ -1927,15 +1898,15 @@ fn agent_stop_hook_settings_path(base: &std::path::Path, provider: &AgentProvide
     }
 }
 
-/// Print extra installed file messages (RULE.mdc, Stop Hook)
+/// Print extra installed file messages (Skill file, Stop Hook)
 fn print_extra_installed(base: &std::path::Path, provider: &AgentProvider) {
-    // CodeBuddy RULE.mdc
+    // CodeBuddy SKILL.md
     if matches!(provider, AgentProvider::Codebuddy) {
-        let rule_path = base.join(".codebuddy/rules/linthis/RULE.mdc");
+        let skill_path = base.join(".codebuddy/skills/linthis/SKILL.md");
         println!(
-            "{} Installed Rule → {}",
+            "{} Installed Skill → {}",
             "✓".green(),
-            rule_path.display()
+            skill_path.display()
         );
     }
     // Stop Hook
@@ -1957,14 +1928,14 @@ fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, 
         path.display()
     );
 
-    // For CodeBuddy, also show RULE.mdc
+    // For CodeBuddy, also show SKILL.md
     if matches!(provider, AgentProvider::Codebuddy) {
-        let rule_path = base.join(".codebuddy/rules/linthis/RULE.mdc");
-        if rule_path.exists() {
+        let skill_file = base.join(".codebuddy/skills/linthis/SKILL.md");
+        if skill_file.exists() {
             println!(
                 "       {} {}",
                 "File:".dimmed(),
-                rule_path.display()
+                skill_file.display()
             );
         }
     }
@@ -2202,9 +2173,9 @@ fn install_agent_provider(base: &std::path::Path, provider: &AgentProvider, glob
         AgentProvider::Codebuddy => {
             // Install CODEBUDDY.md skill (append)
             install_agent_append_skill(&skill_path, &agent_content_codebuddy_md(), "# Project Instructions\n")?;
-            // Install .codebuddy/rules/linthis/RULE.mdc
-            let rule_path = base.join(".codebuddy/rules/linthis/RULE.mdc");
-            install_agent_dedicated_file(&rule_path, &agent_content_codebuddy_rule_mdc())?;
+            // Install .codebuddy/skills/linthis/SKILL.md
+            let skill_file = base.join(".codebuddy/skills/linthis/SKILL.md");
+            install_agent_dedicated_file(&skill_file, &agent_content_codebuddy_skill_md())?;
             // Also install Stop Hook
             if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
                 install_agent_stop_hook(base, &settings_path)?;
@@ -2247,12 +2218,17 @@ fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, gl
             if codebuddy_md.exists() {
                 remove_agent_section_from_file(&codebuddy_md)?;
             }
-            // Remove .codebuddy/rules/linthis/RULE.mdc
-            let rule_mdc = base.join(".codebuddy/rules/linthis/RULE.mdc");
-            if rule_mdc.exists() {
-                remove_agent_dedicated_file(&rule_mdc)?;
+            // Remove .codebuddy/skills/linthis/SKILL.md
+            let skill_file = base.join(".codebuddy/skills/linthis/SKILL.md");
+            if skill_file.exists() {
+                remove_agent_dedicated_file(&skill_file)?;
             }
-            // Also try removing legacy dedicated file (.codebuddy/rules/linthis.md)
+            // Legacy: .codebuddy/rules/linthis/RULE.mdc
+            let legacy_rule_mdc = base.join(".codebuddy/rules/linthis/RULE.mdc");
+            if legacy_rule_mdc.exists() {
+                remove_agent_dedicated_file(&legacy_rule_mdc)?;
+            }
+            // Legacy: .codebuddy/rules/linthis.md
             let legacy_path = base.join(".codebuddy/rules/linthis.md");
             if legacy_path.exists() {
                 remove_agent_dedicated_file(&legacy_path)?;

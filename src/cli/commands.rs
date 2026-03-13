@@ -636,6 +636,60 @@ pub enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Format files and manage format backups
+    ///
+    /// Run formatters on files with automatic backup before changes.
+    /// Supports undo to restore files to their pre-format state.
+    ///
+    /// Example usage:
+    ///   linthis format                       # Format all files
+    ///   linthis format -s                    # Format staged files
+    ///   linthis format -i src/main.rs        # Format specific file
+    ///   linthis format --undo                # Undo last format
+    ///   linthis format --list-backups        # List available backups
+    Format {
+        /// Files or directories to include
+        #[arg(short = 'i', long = "include")]
+        paths: Vec<PathBuf>,
+
+        /// Format only staged files (git cached)
+        #[arg(short = 's', long)]
+        staged: bool,
+
+        /// Format only locally modified files (staged + unstaged)
+        ///
+        /// Covers all files showing `modified:` in `git status` — both staged
+        /// (index) and unstaged (working tree) changes in tracked files.
+        #[arg(short = 'm', long, alias = "uncommitted")]
+        modified: bool,
+
+        /// Exclude patterns (glob patterns)
+        #[arg(short, long)]
+        exclude: Option<Vec<String>>,
+
+        /// Restore files from the last backup (undo previous format)
+        ///
+        /// Backups are automatically created before each format operation.
+        /// Use this to revert changes if the format produced unwanted results.
+        #[arg(long)]
+        undo: bool,
+
+        /// Backup name to restore (use with --undo, defaults to latest)
+        #[arg(default_value = "last")]
+        source: String,
+
+        /// List available backups
+        #[arg(long)]
+        list_backups: bool,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Suppress non-error output
+        #[arg(short, long)]
+        quiet: bool,
+    },
     /// Interactive fix mode for reviewing and fixing lint issues
     ///
     /// Review and fix issues one by one, with optional AI-powered suggestions.

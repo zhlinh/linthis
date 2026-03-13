@@ -19,12 +19,12 @@ use std::process::ExitCode;
 
 use cli::{
     collect_paths, handle_cache_command, handle_commit_msg_check, handle_complexity_command,
-    handle_config_command, handle_doctor_command, handle_fix_command, handle_hook_command,
-    handle_init_command, handle_license_command, handle_plugin_command, handle_report_command,
-    handle_review_command, handle_security_command, init_linter_configs, perform_auto_sync,
-    perform_self_update, print_fix_hint, run_benchmark, run_watch, strip_ansi_codes, Cli,
-    Commands, ComplexityCommandOptions, FixCommandOptions, PathCollectionOptions,
-    PathCollectionResult, ReviewCommandOptions,
+    handle_config_command, handle_doctor_command, handle_fix_command, handle_format_command,
+    handle_hook_command, handle_init_command, handle_license_command, handle_plugin_command,
+    handle_report_command, handle_review_command, handle_security_command, init_linter_configs,
+    perform_auto_sync, perform_self_update, print_fix_hint, run_benchmark, run_watch,
+    strip_ansi_codes, Cli, Commands, ComplexityCommandOptions, FixCommandOptions,
+    FormatCommandOptions, PathCollectionOptions, PathCollectionResult, ReviewCommandOptions,
 };
 use linthis::config::resolver::{ConfigResolver, ConfigSource, ResolvedConfig};
 use linthis::lsp::{run_lsp_server_with_config, LspMode};
@@ -200,6 +200,32 @@ fn main() -> ExitCode {
             no_parallel,
             fail_on_high,
             verbose,
+        });
+    }
+
+    // Handle format subcommand
+    if let Some(Commands::Format {
+        paths,
+        staged,
+        modified,
+        exclude,
+        undo,
+        source,
+        list_backups,
+        verbose,
+        quiet,
+    }) = cli.command
+    {
+        return handle_format_command(FormatCommandOptions {
+            paths,
+            staged,
+            modified,
+            exclude,
+            undo,
+            source,
+            list_backups,
+            verbose,
+            quiet,
         });
     }
 
@@ -762,6 +788,11 @@ fn main() -> ExitCode {
         );
         eprintln!("Mode: {:?}", mode);
         eprintln!("Paths: {:?}", options.paths);
+    }
+
+    // Backup files before formatting (Both or FormatOnly mode)
+    if matches!(mode, RunMode::Both | RunMode::FormatOnly) {
+        cli::create_backup(&options.paths, "format (linthis main command)", cli.quiet);
     }
 
     // Run linthis
