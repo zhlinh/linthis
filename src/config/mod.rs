@@ -162,6 +162,10 @@ pub struct Config {
     /// AI configuration for fix suggestions
     #[serde(default)]
     pub ai: AiConfig,
+
+    /// Code review settings
+    #[serde(default)]
+    pub review: ReviewConfig,
 }
 
 /// Plugin configuration section
@@ -282,6 +286,106 @@ fn default_hook_parallel() -> bool {
 
 fn default_commit_msg_pattern() -> String {
     r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,72}".to_string()
+}
+
+/// Code review configuration section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewConfig {
+    /// Enable review feature
+    #[serde(default = "default_review_enabled")]
+    pub enabled: bool,
+    /// Auto-fix mode (create fix branch + PR/MR)
+    #[serde(default)]
+    pub auto_fix: bool,
+    /// AI provider override for review
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Retention days for review artifacts
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
+    /// Platform configurations
+    #[serde(default)]
+    pub platforms: std::collections::HashMap<String, PlatformConfig>,
+    /// Reviewer configuration
+    #[serde(default)]
+    pub reviewers: ReviewerConfig,
+    /// Notification channels
+    #[serde(default)]
+    pub notifications: Vec<NotificationConfig>,
+}
+
+impl Default for ReviewConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_review_enabled(),
+            auto_fix: false,
+            provider: None,
+            retention_days: default_retention_days(),
+            platforms: std::collections::HashMap::new(),
+            reviewers: ReviewerConfig::default(),
+            notifications: Vec::new(),
+        }
+    }
+}
+
+fn default_review_enabled() -> bool {
+    true
+}
+
+fn default_retention_days() -> u32 {
+    30
+}
+
+/// Platform-specific PR/MR command configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformConfig {
+    /// Command template for creating PR/MR
+    pub pr_create: String,
+    /// Command template for listing PRs/MRs
+    #[serde(default)]
+    pub pr_list: Option<String>,
+    /// Flag name for specifying reviewers
+    #[serde(default = "default_reviewer_flag")]
+    pub reviewer_flag: String,
+}
+
+fn default_reviewer_flag() -> String {
+    "--reviewer".to_string()
+}
+
+/// Reviewer management configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReviewerConfig {
+    /// Default reviewers (platform usernames)
+    #[serde(default)]
+    pub default: Vec<String>,
+}
+
+/// Notification channel configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum NotificationConfig {
+    /// System notification (macOS/Linux/Windows)
+    #[serde(rename = "system")]
+    System,
+    /// Webhook notification (HTTP POST)
+    #[serde(rename = "webhook")]
+    Webhook {
+        url: String,
+        #[serde(default = "default_webhook_method")]
+        method: String,
+        #[serde(default)]
+        headers: std::collections::HashMap<String, String>,
+        #[serde(default)]
+        body_template: Option<String>,
+    },
+    /// Custom command notification
+    #[serde(rename = "custom")]
+    Custom { command: String },
+}
+
+fn default_webhook_method() -> String {
+    "POST".to_string()
 }
 
 /// Tool auto-install configuration
@@ -688,17 +792,62 @@ impl Config {
             .unwrap_or_default()
     }
 
+    /// Load linthis.toml from a plugin's cache directory.
+    /// Returns None if the plugin has no linthis.toml or the file can't be parsed.
+    fn load_plugin_linthis_toml(source: &crate::plugin::PluginSource) -> Option<Self> {
+        use crate::plugin::PluginCache;
+        let cache = PluginCache::new().ok()?;
+        let url = source.url.as_ref()?;
+        let cache_path = cache.url_to_cache_path(url);
+        let linthis_toml = cache_path.join("linthis.toml");
+        if linthis_toml.exists() {
+            Self::load(&linthis_toml).ok()
+        } else {
+            None
+        }
+    }
+
     /// Load and merge configuration from all sources with proper precedence.
-    /// Precedence: CLI > project > user > built-in
+    ///
+    /// Priority chain (lowest to highest):
+    ///   built-in defaults
+    ///     → global plugin linthis.toml  (from plugins in ~/.linthis/config.toml)
+    ///     → project plugin linthis.toml (from plugins in .linthis/config.toml)
+    ///     → ~/.linthis/config.toml      (user config — overrides plugin)
+    ///     → .linthis/config.toml        (project config — highest)
     pub fn load_merged(project_dir: &Path) -> Self {
         let mut config = Self::built_in_defaults();
 
-        // Layer 2: User config
+        // Pre-pass: quick-load plugin sources from user/project configs (before full merge)
+        // This avoids the chicken-and-egg problem: plugins contribute to config,
+        // but we need config to know which plugins are active.
+        let global_plugin_sources = Self::load_user_config()
+            .map(|c| c.get_plugin_sources())
+            .unwrap_or_default();
+        let project_plugin_sources = Self::load_project_config(project_dir)
+            .map(|c| c.get_plugin_sources())
+            .unwrap_or_default();
+
+        // Layer: Global plugin linthis.toml (lowest plugin priority)
+        for source in &global_plugin_sources {
+            if let Some(plugin_config) = Self::load_plugin_linthis_toml(source) {
+                config.merge(plugin_config);
+            }
+        }
+
+        // Layer: Project plugin linthis.toml (higher than global plugin)
+        for source in &project_plugin_sources {
+            if let Some(plugin_config) = Self::load_plugin_linthis_toml(source) {
+                config.merge(plugin_config);
+            }
+        }
+
+        // Layer: User config (~/.linthis/config.toml) — overrides plugin
         if let Some(user_config) = Self::load_user_config() {
             config.merge(user_config);
         }
 
-        // Layer 3: Project config
+        // Layer: Project config (.linthis/config.toml) — highest priority
         if let Some(project_config) = Self::load_project_config(project_dir) {
             config.merge(project_config);
         }
