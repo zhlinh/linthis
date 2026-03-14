@@ -70,7 +70,7 @@ pub mod migrate;
 pub mod resolver;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::rules::RulesConfig;
@@ -228,6 +228,49 @@ fn default_cache_max_age_days() -> u32 {
     7
 }
 
+/// Source specification for a hook or agent plugin component.
+///
+/// Used in TOML as the value of `source = { ... }` inside hook/plugin entries.
+/// Exactly one variant's fields must be present.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum HookSource {
+    // IMPORTANT: variants are ordered most-specific → least-specific so that serde's
+    // "first match wins" logic for untagged enums picks the right variant.
+    // e.g. `{ plugin, file }` must be tried before `{ file }` to avoid `File` stealing it.
+
+    /// File/directory inside a plugin fetched on-demand from a named marketplace.
+    /// `{ marketplace = "corp", plugin = "linthis-official", file = "hooks/agent/plugins/lt/lint" }`
+    Marketplace {
+        marketplace: String,
+        plugin: String,
+        file: String,
+    },
+    /// Clone a git repository and read the given path (file or directory).
+    /// `{ git = "https://github.com/org/repo.git", ref = "v1.0", path = "hooks/git/pre-commit" }`
+    Git {
+        git: String,
+        #[serde(rename = "ref", default)]
+        git_ref: Option<String>,
+        path: String,
+    },
+    /// File/directory inside an already-cached plugin (added via `linthis plugin add`).
+    /// `{ plugin = "linthis-official", file = "hooks/git/pre-commit" }`
+    Plugin { plugin: String, file: String },
+    /// Direct HTTP/HTTPS download (files only, not directories).
+    /// `{ url = "https://example.com/hooks/pre-commit" }`
+    Url { url: String },
+    /// Local filesystem path relative to project root.
+    /// `{ file = "hooks/git/pre-commit" }`
+    File { file: String },
+}
+
+/// A single source-mapped entry (wraps `HookSource`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookSourceEntry {
+    pub source: HookSource,
+}
+
 /// Git hooks configuration section
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HooksConfig {
@@ -240,6 +283,53 @@ pub struct HooksConfig {
     /// Hook output box width (0 = auto-detect terminal width, min 50, max 120)
     #[serde(default)]
     pub output_width: Option<u32>,
+
+    // ── Tier-2 override: marketplace URLs ────────────────────────────────
+    /// Named marketplace git repositories.
+    /// `[hooks.marketplaces]`  key = name, value = git URL.
+    /// The key `"default"` is used when no `marketplace` field is given in a source entry.
+    #[serde(default)]
+    pub marketplaces: HashMap<String, String>,
+
+    // ── Tier-2 override: git hook source mappings ─────────────────────────
+    /// `[hooks.git]`  key = event name ("pre-commit", "commit-msg", "pre-push")
+    #[serde(default)]
+    pub git: HashMap<String, HookSourceEntry>,
+    /// `[hooks.git-with-agent]`
+    #[serde(default, rename = "git-with-agent")]
+    pub git_with_agent: HashMap<String, HookSourceEntry>,
+    /// `[hooks.prek]`
+    #[serde(default)]
+    pub prek: HashMap<String, HookSourceEntry>,
+    /// `[hooks.prek-with-agent]`
+    #[serde(default, rename = "prek-with-agent")]
+    pub prek_with_agent: HashMap<String, HookSourceEntry>,
+    /// `[hooks.pre-commit-tool]`
+    #[serde(default, rename = "pre-commit-tool")]
+    pub pre_commit_tool: HashMap<String, HookSourceEntry>,
+    /// `[hooks.pre-commit-tool-with-agent]`
+    #[serde(default, rename = "pre-commit-tool-with-agent")]
+    pub pre_commit_tool_with_agent: HashMap<String, HookSourceEntry>,
+
+    // ── Tier-2 override: agent plugins ───────────────────────────────────
+    /// `[hooks.agent-plugins]`  key = plugin ID ("lt.lint", "lt.cmsg", "lt.review")
+    /// Source must resolve to a directory containing skill/, command/, memory/ subdirs.
+    #[serde(default, rename = "agent-plugins")]
+    pub agent_plugins: HashMap<String, HookSourceEntry>,
+
+    // ── Tier-2 override: agent event hooks ───────────────────────────────
+    /// `[hooks.agent-hook.stop]`  key = "<provider>.<filename-stem>" ("claude.settings")
+    #[serde(default, rename = "agent-hook")]
+    pub agent_hook: AgentHookConfig,
+}
+
+/// Aggregates per-event agent hook override maps.
+/// Designed to accommodate future events (start, tool-use, etc.) without schema changes.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentHookConfig {
+    /// `[hooks.agent-hook.stop]`  key = "<provider>.<filename-stem>"
+    #[serde(default)]
+    pub stop: HashMap<String, HookSourceEntry>,
 }
 
 impl Default for HooksConfig {
@@ -248,6 +338,15 @@ impl Default for HooksConfig {
             timeout: default_hook_timeout(),
             parallel: default_hook_parallel(),
             output_width: None,
+            marketplaces: HashMap::new(),
+            git: HashMap::new(),
+            git_with_agent: HashMap::new(),
+            prek: HashMap::new(),
+            prek_with_agent: HashMap::new(),
+            pre_commit_tool: HashMap::new(),
+            pre_commit_tool_with_agent: HashMap::new(),
+            agent_plugins: HashMap::new(),
+            agent_hook: AgentHookConfig::default(),
         }
     }
 }
@@ -778,6 +877,38 @@ impl Config {
 
         // Merge rules configuration
         self.rules.merge(other.rules);
+
+        // Merge hooks configuration (other's entries override self's on conflict)
+        if !other.hooks.marketplaces.is_empty() {
+            self.hooks.marketplaces.extend(other.hooks.marketplaces);
+        }
+        if !other.hooks.git.is_empty() {
+            self.hooks.git.extend(other.hooks.git);
+        }
+        if !other.hooks.git_with_agent.is_empty() {
+            self.hooks.git_with_agent.extend(other.hooks.git_with_agent);
+        }
+        if !other.hooks.prek.is_empty() {
+            self.hooks.prek.extend(other.hooks.prek);
+        }
+        if !other.hooks.prek_with_agent.is_empty() {
+            self.hooks.prek_with_agent.extend(other.hooks.prek_with_agent);
+        }
+        if !other.hooks.pre_commit_tool.is_empty() {
+            self.hooks.pre_commit_tool.extend(other.hooks.pre_commit_tool);
+        }
+        if !other.hooks.pre_commit_tool_with_agent.is_empty() {
+            self.hooks.pre_commit_tool_with_agent.extend(other.hooks.pre_commit_tool_with_agent);
+        }
+        if !other.hooks.agent_plugins.is_empty() {
+            self.hooks.agent_plugins.extend(other.hooks.agent_plugins);
+        }
+        if !other.hooks.agent_hook.stop.is_empty() {
+            self.hooks.agent_hook.stop.extend(other.hooks.agent_hook.stop);
+        }
+        if other.hooks.timeout != default_hook_timeout() {
+            self.hooks.timeout = other.hooks.timeout;
+        }
     }
 
     /// Get plugin sources from config, converting to PluginSource type
