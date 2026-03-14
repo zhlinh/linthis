@@ -182,7 +182,7 @@ pub struct Cli {
 }
 
 /// Hook management tools
-#[derive(Clone, Debug, clap::ValueEnum)]
+#[derive(Clone, Debug, PartialEq, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum HookTool {
     /// Traditional git hook
@@ -287,7 +287,7 @@ impl std::fmt::Display for AgentProvider {
 }
 
 /// Git hook event types
-#[derive(Clone, Debug, Default, clap::ValueEnum)]
+#[derive(Clone, Debug, Default, PartialEq, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum HookEvent {
     /// Pre-commit hook (runs before commit is created)
@@ -869,22 +869,25 @@ pub enum HookCommands {
     ///
     ///   agent                             AI coding agent lint skill (Claude, Cursor, etc.)
     Install {
-        /// Hook tool to use [default: git]
+        /// Hook tool(s) to use — comma-separated or repeated
+        /// (e.g. --type git,agent or --type git --type agent)
         ///
-        /// Shell hooks:
-        ///   git, prek, pre-commit
+        /// Shell hooks:          git, prek, pre-commit
+        /// Shell hook + AI fix:  git-with-agent, prek-with-agent, pre-commit-with-agent
+        /// AI agent skills:      agent
         ///
-        /// Shell hook + AI auto-fix on failure:
-        ///   git-with-agent, prek-with-agent, pre-commit-with-agent
-        ///
-        /// AI agent skills installation:
-        ///   agent
-        #[arg(long = "type", value_name = "TYPE")]
-        hook_type: Option<HookTool>,
+        /// If both x and x-with-agent are given, x-with-agent wins.
+        /// If omitted, an interactive menu is shown (or git when -y is set).
+        #[arg(long = "type", value_name = "TYPE", value_delimiter = ',', num_args = 0..)]
+        hook_types: Vec<HookTool>,
 
-        /// Git hook event type (pre-commit, pre-push, commit-msg)
-        #[arg(long = "event", value_name = "EVENT", default_value = "pre-commit")]
-        hook_event: HookEvent,
+        /// Git hook event(s) — comma-separated or repeated
+        /// (e.g. --event pre-commit,pre-push)
+        ///
+        /// If omitted, an interactive menu is shown (or pre-commit when -y is set,
+        /// or all three events when --type agent is the only type with -y).
+        #[arg(long = "event", value_name = "EVENT", value_delimiter = ',', num_args = 0..)]
+        hook_events: Vec<HookEvent>,
 
         /// Force overwrite existing hook
         #[arg(long)]
@@ -921,13 +924,15 @@ pub enum HookCommands {
     },
     /// Uninstall git hook
     Uninstall {
-        /// Hook tool to uninstall [default: git]
-        #[arg(long = "type", value_name = "TYPE")]
-        hook_type: Option<HookTool>,
+        /// Hook tool(s) to uninstall — comma-separated or repeated
+        /// (e.g. --type git,agent or --type git --type agent)
+        #[arg(long = "type", value_name = "TYPE", value_delimiter = ',', num_args = 0..)]
+        hook_types: Vec<HookTool>,
 
-        /// Git hook event type to uninstall (pre-commit, pre-push, commit-msg)
-        #[arg(long = "event", value_name = "EVENT")]
-        hook_event: Option<HookEvent>,
+        /// Git hook event(s) to uninstall — comma-separated or repeated
+        /// (e.g. --event pre-commit,pre-push)
+        #[arg(long = "event", value_name = "EVENT", value_delimiter = ',', num_args = 0..)]
+        hook_events: Vec<HookEvent>,
 
         /// Uninstall all hooks
         #[arg(long)]

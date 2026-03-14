@@ -118,6 +118,11 @@ pub mod benchmark;
 pub mod cache;
 pub mod checkers;
 pub mod config;
+/// Thin re-export of CLI command types for use in tests and downstream crates.
+pub mod cli {
+    #[path = "commands.rs"]
+    pub mod commands;
+}
 pub mod fixers;
 pub mod formatters;
 pub mod interactive;

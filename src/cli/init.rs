@@ -261,8 +261,8 @@ pub fn handle_init_command(
             // Install hook for project
             println!();
             let exit_code = handle_hook_command(HookCommands::Install {
-                hook_type: None,           // Use default hook type (Git)
-                hook_event: HookEvent::PreCommit, // Default to pre-commit hook
+                hook_types: vec![],        // Use default hook type (Git)
+                hook_events: vec![HookEvent::PreCommit], // Default to pre-commit hook
                 force,                     // Use force flag from init
                 yes: true,                 // Non-interactive mode
                 global: false,             // Project-level install
