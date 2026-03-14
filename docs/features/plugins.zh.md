@@ -6,22 +6,65 @@
 
 linthis 插件是一个包含以下内容的 Git 仓库：
 - `linthis-plugin.toml` 清单文件
-- 一个或多个配置文件（TOML、YAML 或 JSON）
+- 一个或多个语言配置文件（TOML、YAML 或 JSON）
+- 可选的 `linthis-config.toml`，用于捆绑 hook 覆盖配置
 - 可选的自定义规则和预设
 
-插件允许您在项目或团队之间共享 lint 配置。
+插件允许您在项目或团队之间共享 lint 配置**以及 git/agent hook 设置**。
 
 ## 插件结构
 
 ```
 my-linthis-plugin/
-├── linthis-plugin.toml      # 必需：插件清单
-├── config.toml              # 主配置
-├── rules/                   # 可选：额外规则配置
+├── linthis-plugin.toml           # 必需：插件清单
+├── linthis-config.toml           # 可选：Hook 来源覆盖（plugin add 时自动合并）
+├── config.toml                   # 主 lint 配置
+├── hooks/                        # 可选：自定义 hook 文件
+│   ├── git/
+│   │   └── pre-commit            # 自定义 pre-commit 脚本
+│   └── agent/
+│       ├── plugins/
+│       │   └── lt/
+│       │       └── lint/         # Agent 插件包（skill/command/memory）
+│       └── hook/
+│           └── stop/
+│               └── claude/
+│                   └── settings.json  # 自定义 Claude Stop Hook
+├── rules/                        # 可选：额外规则配置
 │   ├── strict.toml
 │   └── relaxed.toml
-└── README.md                # 可选：文档
+└── README.md                     # 可选：文档
 ```
+
+## 通过 `linthis-config.toml` 捆绑 Hook 配置
+
+插件可以在插件根目录包含一个 `linthis-config.toml`，与 lint 配置一起发布。该文件使用 `plugin = "self"` 声明指向插件自身的 `[hooks.*]` 来源覆盖。
+
+当用户运行 `linthis plugin add <alias> <url>` 时，linthis 自动：
+
+1. 将所有 `plugin = "self"` 替换为 `plugin = "<alias>"`（用户选择的别名）
+2. 将 `[hooks.*]` 条目以非覆盖方式合并到用户的 `.linthis/config.toml` 中
+
+之后运行 `linthis hook install` 将自动使用插件的定制 hook 脚本和 agent 包——无需手动配置。
+
+### `linthis-config.toml` 示例
+
+```toml
+# 插件内置。引用使用 plugin = "self"。
+
+[hooks.git]
+pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
+
+[hooks.agent-plugins]
+"lt.lint"   = { source = { plugin = "self", file = "hooks/agent/plugins/lt/lint" } }
+"lt.cmsg"   = { source = { plugin = "self", file = "hooks/agent/plugins/lt/cmsg" } }
+"lt.review" = { source = { plugin = "self", file = "hooks/agent/plugins/lt/review" } }
+
+[hooks.agent-hook.stop]
+"claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }
+```
+
+用户运行 `linthis plugin add myteam <url>` 后，`plugin = "self"` 变为 `plugin = "myteam"`，所有条目合并到用户的 `.linthis/config.toml` 中。
 
 ## 插件清单
 

@@ -6,22 +6,65 @@ This guide explains how to create and distribute linthis plugins.
 
 A linthis plugin is a Git repository containing:
 - A `linthis-plugin.toml` manifest file
-- One or more configuration files (TOML, YAML, or JSON)
+- One or more language configuration files (TOML, YAML, or JSON)
+- An optional `linthis-config.toml` that bundles hook overrides
 - Optional custom rules and presets
 
-Plugins allow you to share lint configurations across projects or teams.
+Plugins allow you to share lint configurations **and git/agent hook setups** across projects or teams.
 
 ## Plugin Structure
 
 ```
 my-linthis-plugin/
-├── linthis-plugin.toml      # Required: Plugin manifest
-├── config.toml              # Main configuration
-├── rules/                   # Optional: Additional rule configs
+├── linthis-plugin.toml           # Required: Plugin manifest
+├── linthis-config.toml           # Optional: Hook source overrides (auto-merged on plugin add)
+├── config.toml                   # Main lint configuration
+├── hooks/                        # Optional: Custom hook files
+│   ├── git/
+│   │   └── pre-commit            # Custom pre-commit script
+│   └── agent/
+│       ├── plugins/
+│       │   └── lt/
+│       │       └── lint/         # Agent plugin bundle (skill/command/memory)
+│       └── hook/
+│           └── stop/
+│               └── claude/
+│                   └── settings.json  # Custom Claude stop hook
+├── rules/                        # Optional: Additional rule configs
 │   ├── strict.toml
 │   └── relaxed.toml
-└── README.md                # Optional: Documentation
+└── README.md                     # Optional: Documentation
 ```
+
+## Hook Bundling via `linthis-config.toml`
+
+A plugin can ship a `linthis-config.toml` alongside its lint configs. This file declares `[hooks.*]` source overrides that point back into the plugin itself using `plugin = "self"`.
+
+When a user runs `linthis plugin add <alias> <url>`, linthis automatically:
+
+1. Replaces every `plugin = "self"` reference with `plugin = "<alias>"` (the user's chosen alias)
+2. Non-overwritingly merges `[hooks.*]` entries into the user's `.linthis/config.toml`
+
+After this, running `linthis hook install` will pick up the plugin's custom hook scripts and agent bundles automatically — no manual configuration needed.
+
+### Example `linthis-config.toml`
+
+```toml
+# Bundled inside the plugin. References use plugin = "self".
+
+[hooks.git]
+pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
+
+[hooks.agent-plugins]
+"lt.lint"   = { source = { plugin = "self", file = "hooks/agent/plugins/lt/lint" } }
+"lt.cmsg"   = { source = { plugin = "self", file = "hooks/agent/plugins/lt/cmsg" } }
+"lt.review" = { source = { plugin = "self", file = "hooks/agent/plugins/lt/review" } }
+
+[hooks.agent-hook.stop]
+"claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }
+```
+
+After `linthis plugin add myteam <url>`, `plugin = "self"` becomes `plugin = "myteam"` and all entries are merged into the user's `.linthis/config.toml`.
 
 ## Plugin Manifest
 

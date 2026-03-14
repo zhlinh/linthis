@@ -240,24 +240,130 @@ cache_max_age_days = 7
 
 ### `[hooks]`
 
-配置 git hook 行为。
+配置 git hook 行为和来源覆盖。
 
 ```toml
 [hooks]
 timeout = 60
 parallel = true
-commit_msg_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\(.+\\))?: .{1,72}"
-require_ticket = false
-ticket_pattern = "\\[\\w+-\\d+\\]"
+output_width = 0   # 0 = 自动检测终端宽度
 ```
 
 | 字段 | 类型 | 默认值 | 描述 |
 |-----|-----|-------|------|
 | `timeout` | 整数 | `60` | Hook 超时秒数 |
 | `parallel` | 布尔值 | `true` | 启用并行执行 |
-| `commit_msg_pattern` | 字符串 | 约定式提交 | 有效提交消息的正则表达式 |
-| `require_ticket` | 布尔值 | `false` | 要求工单引用 |
-| `ticket_pattern` | 字符串 | - | 工单格式的正则表达式（如 `[JIRA-123]`） |
+| `output_width` | 整数 | `0` | 输出框宽度（0=自动，最小 50，最大 120） |
+
+---
+
+### 三层 Hook 解析机制
+
+`linthis hook install` 生成或解析 hook 时，按三层优先级（由高到低）执行：
+
+| 层级 | 描述 |
+|------|------|
+| **第 1 层** | 固定路径自动发现——项目根目录的 `hooks/<type>/<event>`（git hook）或 `hooks/agent/plugins/<id>/`（agent 插件） |
+| **第 2 层** | TOML 来源映射——`.linthis/config.toml` 中的 `[hooks.git]`、`[hooks.agent-plugins]`、`[hooks.agent-hook.stop]` 条目 |
+| **第 3 层** | 内置生成器——默认的内置生成脚本或规则内容（兜底） |
+
+第 1 层无需配置，只需在约定路径放置文件即可自动生效。第 2 层通过 TOML 实现细粒度来源覆盖。第 3 层始终作为兜底。
+
+---
+
+### `HookSource` — 来源规格
+
+所有 `[hooks.*]` 覆盖条目均使用 `source = { ... }` 字段，支持以下五种变体：
+
+```toml
+# 变体 1 — File：相对于项目根目录的本地路径
+source = { file = "hooks/git/pre-commit" }
+
+# 变体 2 — Plugin：已安装插件缓存中的路径
+source = { plugin = "my-plugin", file = "hooks/git/pre-commit" }
+
+# 变体 3 — Marketplace：来自命名市场仓库的插件文件
+source = { marketplace = "corp", plugin = "linthis-official", file = "hooks/agent/plugins/lt/lint" }
+
+# 变体 4 — Url：直接 HTTP/HTTPS 下载（仅文件，不支持目录）
+source = { url = "https://example.com/hooks/pre-commit" }
+
+# 变体 5 — Git：克隆 git 仓库并使用指定路径
+source = { git = "https://github.com/org/repo.git", ref = "v1.0", path = "hooks/git/pre-commit" }
+```
+
+| 变体 | 必填字段 | 可选字段 | 说明 |
+|------|---------|---------|------|
+| `File` | `file` | — | 相对于项目根目录的路径 |
+| `Plugin` | `plugin`、`file` | — | 插件须通过 `linthis plugin add` 添加 |
+| `Marketplace` | `marketplace`、`plugin`、`file` | — | 市场 URL 在 `[hooks.marketplaces]` 中定义 |
+| `Url` | `url` | — | 仅支持文件，不支持目录 |
+| `Git` | `git`、`path` | `ref` | 首次使用时克隆，本地缓存 |
+
+---
+
+### `[hooks.marketplaces]`
+
+`HookSource::Marketplace` 使用的命名市场仓库。键 `"default"` 在未指定 `marketplace` 字段时使用。
+
+```toml
+[hooks.marketplaces]
+default = "https://github.com/linthis-group/marketplace.git"
+corp    = "https://github.com/mycompany/linthis-marketplace.git"
+```
+
+---
+
+### `[hooks.git]`
+
+覆盖 git hook 脚本（第 2 层）。键为事件名称。
+
+```toml
+[hooks.git]
+pre-commit = { source = { plugin = "my-plugin", file = "hooks/git/pre-commit" } }
+pre-push   = { source = { file = "hooks/git/pre-push" } }
+commit-msg = { source = { url = "https://example.com/hooks/commit-msg" } }
+```
+
+其他 hook 类型也有对应的覆盖节：
+- `[hooks.git-with-agent]` — 带 AI 修复兜底的 git hook
+- `[hooks.prek]` — prek hook 脚本
+- `[hooks.prek-with-agent]` — 带 AI 修复兜底的 prek hook
+- `[hooks.pre-commit-tool]` — pre-commit 框架配置
+- `[hooks.pre-commit-tool-with-agent]` — 带 AI 修复兜底的 pre-commit
+
+---
+
+### `[hooks.agent-plugins]`
+
+覆盖 agent 插件包（第 2 层）。每个条目指向包含 `skill/<provider>/`、`command/<provider>/` 和 `memory/<provider>/` 子目录的目录。键为插件 ID。
+
+```toml
+[hooks.agent-plugins]
+"lt.lint"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/lint" } }
+"lt.cmsg"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/cmsg" } }
+"lt.review" = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/review" } }
+```
+
+解析后的目录须包含以下一个或多个子目录：
+
+```
+<plugin-dir>/
+├── skill/<provider>/          — 技能指令文件（如 claude/lint.md）
+├── command/<provider>/        — 斜杠命令定义文件（可选）
+└── memory/<provider>/         — 注入 CLAUDE.md 等文件的记忆段落（可选）
+```
+
+---
+
+### `[hooks.agent-hook.stop]`
+
+覆盖 agent Stop Hook 设置文件（第 2 层）。键格式为 `<provider>.<filename-stem>`。
+
+```toml
+[hooks.agent-hook.stop]
+"claude.settings" = { source = { plugin = "my-plugin", file = "hooks/agent/hook/stop/claude/settings.json" } }
+```
 
 ---
 

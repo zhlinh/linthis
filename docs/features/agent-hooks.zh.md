@@ -177,6 +177,57 @@ AGENTS.md
 
 这确保 AI 助手生成符合代码规范的代码，具有正确的上下文感知能力，而非依赖自动修复工具。
 
+## 三层 Agent Hook 解析机制
+
+`linthis hook install --type agent` 运行时，按以下三层优先级（由高到低）解析各 agent 插件包和 Stop Hook：
+
+| 层级 | 来源 | 使用方式 |
+|------|------|---------|
+| **第 1 层** | 固定路径自动发现 | 在项目根目录的 `hooks/agent/plugins/<id>/` 或 `hooks/agent/hook/stop/<provider>/` 放置文件 |
+| **第 2 层** | TOML 来源映射 | 在 `.linthis/config.toml` 中设置 `[hooks.agent-plugins]` / `[hooks.agent-hook.stop]` 条目 |
+| **第 3 层** | 内置生成器 | 默认——linthis 内置生成的规则内容 |
+
+### Agent 插件包目录结构
+
+Agent 插件包是包含以下目录布局的文件夹，各子目录均为可选：
+
+```
+<bundle-dir>/
+├── skill/<provider>/          — 技能指令文件（如 claude/lint.md）
+├── command/<provider>/        — 斜杠命令定义文件（可选）
+└── memory/<provider>/         — 注入 CLAUDE.md 等文件的记忆段落（可选）
+```
+
+Claude Code 示例：
+```
+hooks/agent/plugins/lt/lint/
+├── skill/claude/lint.md       — Claude 遵循的 lint 指令
+├── command/claude/lt-lint.md  — 定义 /lt-lint 斜杠命令
+└── memory/claude/lint.md      — 添加到 ~/.claude/projects/.../MEMORY.md 的记忆段落
+```
+
+### 第 2 层：Agent Hook 的 TOML 来源映射
+
+在 `.linthis/config.toml` 中覆盖 agent 插件包和 Stop Hook：
+
+```toml
+[hooks.agent-plugins]
+"lt.lint"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/lint" } }
+"lt.cmsg"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/cmsg" } }
+"lt.review" = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/review" } }
+
+[hooks.agent-hook.stop]
+"claude.settings" = { source = { plugin = "my-plugin", file = "hooks/agent/hook/stop/claude/settings.json" } }
+```
+
+git hook 可用的五种 `HookSource` 变体同样适用于此处（参见[配置参考](../reference/configuration.md#hooksource--source-specification)）。
+
+### 插件捆绑 Agent Hook
+
+插件可以在插件根目录的 `linthis-config.toml` 中捆绑 agent hook 覆盖配置。当用户运行 `linthis plugin add <alias> <url>` 时，这些条目会自动合并到用户的 `.linthis/config.toml` 中。之后运行 `linthis hook install --type agent --provider claude` 将自动使用插件的定制技能/命令/记忆包和 Stop Hook 设置。
+
+---
+
 ## Git Hook 与 AI 自动修复（--type *-with-agent）
 
 这些是 **git hook 类型**（与 `--type agent` 不同），在 git commit 时 linthis 检查失败后自动调用 AI CLI 工具进行修复，然后重新运行 linthis 验证结果。
