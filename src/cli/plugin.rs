@@ -469,7 +469,7 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             ExitCode::SUCCESS
         }
 
-        PluginCommands::Sync { global } => {
+        PluginCommands::Sync { global, plugin: alias } => {
             use linthis::plugin::{fetcher::PluginFetcher, PluginConfigManager, PluginSource};
 
             let manager = if global {
@@ -492,12 +492,34 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
 
             let config_type = if global { "global" } else { "project" };
 
-            let plugins = match manager.list_plugins() {
+            let all_plugins = match manager.list_plugins() {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("{}: Failed to read config: {}", "Error".red(), e);
                     return ExitCode::from(1);
                 }
+            };
+
+            // Filter by alias when provided, otherwise use all plugins
+            let plugins: Vec<_> = if let Some(ref target) = alias {
+                let filtered: Vec<_> = all_plugins
+                    .into_iter()
+                    .filter(|(name, _, _)| name == target)
+                    .collect();
+                if filtered.is_empty() {
+                    eprintln!(
+                        "{}: Plugin '{}' not found in {} config.",
+                        "Error".red(),
+                        target,
+                        config_type
+                    );
+                    eprintln!("Config: {}", manager.config_path().display());
+                    eprintln!("Use 'linthis plugin list' to see available plugins.");
+                    return ExitCode::from(1);
+                }
+                filtered
+            } else {
+                all_plugins
             };
 
             if plugins.is_empty() {
