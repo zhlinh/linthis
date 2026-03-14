@@ -18,6 +18,7 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 - 🤖 **AI Code Review**: `linthis review` analyzes diffs with AI and creates PR/MR automatically
 - 💾 **Format with Backup**: `linthis format` creates backups before formatting, supports `--undo`
 - 🔄 **Auto Re-stage**: When running in staged mode (`-s`), formatted files are automatically re-staged
+- 🔌 **Plugin Hook Bundling**: Plugins can ship custom git and agent hook scripts — auto-installed when the plugin is added
 
 ## Installation
 
@@ -974,6 +975,24 @@ mkdir -p python
 cp /path/to/.flake8 python/
 cp /path/to/pyproject.toml python/
 ```
+
+### 3b. (Optional) Bundle Hook Overrides
+
+Create `linthis-config.toml` in the plugin root to ship custom git/agent hooks. Use `plugin = "self"` — it is replaced with the user's alias when they add the plugin.
+
+```toml
+# linthis-config.toml — bundled hook overrides
+[hooks.git]
+pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
+
+[hooks.agent-plugins]
+"lt.lint" = { source = { plugin = "self", file = "hooks/agent/plugins/lt/lint" } }
+
+[hooks.agent-hook.stop]
+"claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }
+```
+
+Place the referenced files in the plugin repo. When users run `linthis plugin add company <url>`, these entries are automatically merged into their `.linthis/config.toml`.
 
 ### 4. Publish to Git
 

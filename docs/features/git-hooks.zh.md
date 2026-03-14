@@ -193,6 +193,69 @@ fi
 
 ---
 
+## 三层 Hook 解析机制
+
+`linthis hook install` 运行时，按以下三层优先级（由高到低）解析 hook 脚本：
+
+| 层级 | 来源 | 使用方式 |
+|------|------|---------|
+| **第 1 层** | 固定路径自动发现 | 在项目根目录的 `hooks/git/<event>` 放置脚本 |
+| **第 2 层** | TOML 来源映射 | 在 `.linthis/config.toml` 中设置 `[hooks.git]` 条目 |
+| **第 3 层** | 内置生成器 | 默认——内置生成的脚本 |
+
+### 第 1 层：固定路径自动发现
+
+在项目根目录的约定路径创建可执行文件：
+
+```
+hooks/git/pre-commit
+hooks/git/pre-push
+hooks/git/commit-msg
+```
+
+若该文件存在，linthis 直接使用，无需生成脚本，无需额外配置。
+
+### 第 2 层：TOML 来源映射
+
+在 `.linthis/config.toml` 中通过 `source` 条目覆盖 hook 来源。插件通过 `linthis plugin add` 添加时通常会自动注入这些条目。
+
+```toml
+[hooks.git]
+pre-commit = { source = { plugin = "my-plugin", file = "hooks/git/pre-commit" } }
+```
+
+支持五种来源变体：
+
+```toml
+# 本地文件（相对于项目根目录）
+pre-commit = { source = { file = "hooks/git/pre-commit" } }
+
+# 已安装插件中的文件
+pre-commit = { source = { plugin = "my-plugin", file = "hooks/git/pre-commit" } }
+
+# 来自命名市场的插件文件
+pre-commit = { source = { marketplace = "corp", plugin = "linthis-official", file = "hooks/git/pre-commit" } }
+
+# 直接 URL 下载
+pre-commit = { source = { url = "https://example.com/hooks/pre-commit" } }
+
+# 克隆 git 仓库
+pre-commit = { source = { git = "https://github.com/org/hooks.git", ref = "main", path = "pre-commit" } }
+```
+
+同样的覆盖结构适用于所有 hook 类型（`[hooks.git-with-agent]`、`[hooks.prek]`、`[hooks.prek-with-agent]` 等）。
+
+### 插件捆绑 Hook
+
+插件可以在插件根目录的 `linthis-config.toml` 中捆绑 hook 覆盖配置。当用户运行 `linthis plugin add <alias> <url>` 时，linthis 自动：
+
+1. 将 `plugin = "self"` 替换为 `plugin = "<alias>"`（用户指定的别名）
+2. 将 `[hooks.*]` 条目以非覆盖方式合并到用户的 `.linthis/config.toml` 中
+
+这意味着添加团队插件即可让所有成员自动获得团队定制的 pre-commit 脚本。
+
+---
+
 ## *-with-agent Hook 类型
 
 `git-with-agent`、`prek-with-agent` 和 `pre-commit-with-agent` 类型添加了 AI agent 修复兜底机制。当 `linthis` 以非零状态码退出（lint 失败）时，hook 会以无头模式调用指定的 agent CLI 尝试自动修复，然后重新运行 `linthis` 验证结果。
