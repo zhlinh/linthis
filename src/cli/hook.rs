@@ -1309,6 +1309,65 @@ pub fn find_git_root() -> Option<PathBuf> {
 }
 
 /// Create hook configuration file based on the selected tool and event
+/// Resolve hook script content from Tier-1 (fixed path) or Tier-2 (TOML config),
+/// returning `Ok(Some(content))` if an override is found, `Ok(None)` to fall through
+/// to the built-in generator, or `Err(ExitCode)` for a hard resolution error.
+fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> Result<Option<String>, ExitCode> {
+    use linthis::config::Config;
+    use linthis::hooks::resolver;
+
+    let tool_type_dir = match tool {
+        HookTool::Git => "git",
+        HookTool::GitWithAgent => "git-with-agent",
+        HookTool::Prek => "prek",
+        HookTool::PrekWithAgent => "prek-with-agent",
+        HookTool::PreCommit => "pre-commit-tool",
+        HookTool::PreCommitWithAgent => "pre-commit-tool-with-agent",
+        HookTool::Agent => return Ok(None), // agent handled separately
+    };
+
+    let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    // Tier 1: fixed-path auto-discovery
+    if let Some(fixed) = resolver::fixed_git_hook_path(&project_root, tool_type_dir, hook_event.hook_filename()) {
+        match std::fs::read_to_string(fixed.as_path()) {
+            Ok(content) => return Ok(Some(content)),
+            Err(e) => {
+                eprintln!("{}: Failed to read fixed-path override '{}': {}", "Error".red(), fixed.display(), e);
+                return Err(ExitCode::from(2));
+            }
+        }
+    }
+
+    // Tier 2: TOML source mapping
+    let config = Config::load_merged(&project_root);
+    let hooks = &config.hooks;
+    let event_key = hook_event.hook_filename(); // "pre-commit", "commit-msg", "pre-push"
+
+    let entry = match tool {
+        HookTool::Git => hooks.git.get(event_key),
+        HookTool::GitWithAgent => hooks.git_with_agent.get(event_key),
+        HookTool::Prek => hooks.prek.get(event_key),
+        HookTool::PrekWithAgent => hooks.prek_with_agent.get(event_key),
+        HookTool::PreCommit => hooks.pre_commit_tool.get(event_key),
+        HookTool::PreCommitWithAgent => hooks.pre_commit_tool_with_agent.get(event_key),
+        HookTool::Agent => return Ok(None),
+    };
+
+    if let Some(entry) = entry {
+        match resolver::resolve_to_string(&entry.source, &project_root, &hooks.marketplaces) {
+            Ok(content) => return Ok(Some(content)),
+            Err(e) => {
+                eprintln!("{}: Failed to resolve hook override for '{}/{}': {}", "Error".red(), tool_type_dir, event_key, e);
+                return Err(ExitCode::from(2));
+            }
+        }
+    }
+
+    // Tier 3: no override — caller uses built-in generator
+    Ok(None)
+}
+
 fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args: &Option<String>) -> Result<(), ExitCode> {
     use std::fs;
     #[cfg(unix)]
@@ -1333,6 +1392,21 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                 );
                 return Ok(());
             }
+
+            // ── Tier-1/2 override check ──────────────────────────────────────
+            if let Some(override_content) = resolve_hook_override(tool, hook_event)? {
+                match std::fs::write(&config_path, override_content) {
+                    Ok(_) => {
+                        println!("{} Created {} [override]", "✓".green(), config_path.display());
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("{}: Failed to write '{}': {}", "Error".red(), config_path.display(), e);
+                        return Err(ExitCode::from(2));
+                    }
+                }
+            }
+            // ── End override check — fall through to built-in generator ──────
 
             // Build hook command based on options and event type
             let hook_cmd = build_hook_command(hook_event, args);
@@ -1442,6 +1516,42 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                     return Err(ExitCode::from(2));
                 }
             }
+
+            // ── Tier-1/2 override check ──────────────────────────────────────
+            // If a fixed-path file or TOML source entry exists, use its content
+            // as the complete hook script.  On resolution error, abort (no fallback).
+            if let Some(override_content) = resolve_hook_override(tool, hook_event)? {
+                let content = if hook_path.exists() && !force {
+                    // Append override content to existing hook
+                    let mut existing = fs::read_to_string(&hook_path).unwrap_or_default();
+                    if !existing.ends_with('\n') { existing.push('\n'); }
+                    existing.push_str("\n# linthis-hook (override)\n");
+                    existing.push_str(&override_content);
+                    existing
+                } else {
+                    override_content
+                };
+                match fs::write(&hook_path, &content) {
+                    Ok(_) => {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            if let Ok(meta) = fs::metadata(&hook_path) {
+                                let mut perms = meta.permissions();
+                                perms.set_mode(0o755);
+                                let _ = fs::set_permissions(&hook_path, perms);
+                            }
+                        }
+                        println!("{} Created {} [project, override]", "✓".green(), hook_path.display());
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("{}: Failed to write hook '{}': {}", "Error".red(), hook_path.display(), e);
+                        return Err(ExitCode::from(2));
+                    }
+                }
+            }
+            // ── End override check — fall through to built-in generator ──────
 
             // Build hook command based on options and event type
             let linthis_hook_line = build_hook_command(hook_event, args);
@@ -2133,8 +2243,7 @@ Create `.linthis/review/` directory if it doesn't exist.
 }
 
 /// Generate the Stop hook JSON content for .claude/settings.json
-fn agent_stop_hook_json() -> String {
-    r#"{
+const AGENT_STOP_HOOK_JSON: &str = r#"{
   "hooks": {
     "Stop": [
       {
@@ -2147,8 +2256,10 @@ fn agent_stop_hook_json() -> String {
       }
     ]
   }
-}"#
-    .to_string()
+}"#;
+
+fn agent_stop_hook_json_ref() -> &'static str {
+    AGENT_STOP_HOOK_JSON
 }
 
 /// Get the skill file path for a given agent provider and hook event.
@@ -2362,6 +2473,144 @@ fn install_agent_dedicated_file(path: &std::path::Path, content: &str) -> Result
     Ok(())
 }
 
+/// Map an event to its built-in agent plugin ID.
+fn agent_plugin_id(event: &HookEvent) -> &'static str {
+    match event {
+        HookEvent::PreCommit => "lt.lint",
+        HookEvent::CommitMsg => "lt.cmsg",
+        HookEvent::PrePush   => "lt.review",
+    }
+}
+
+/// Target directory for agent slash commands per provider.
+fn agent_command_dir(base: &std::path::Path, provider: &AgentProvider) -> Option<std::path::PathBuf> {
+    match provider {
+        AgentProvider::Claude    => Some(base.join(".claude/commands/linthis")),
+        AgentProvider::Codebuddy => Some(base.join(".codebuddy/commands/linthis")),
+        AgentProvider::Gemini    => Some(base.join(".gemini/commands")),
+        AgentProvider::Cursor    => Some(base.join(".cursor/commands")),
+        AgentProvider::Droid     => Some(base.join(".droid/commands")),
+        AgentProvider::Auggie    => Some(base.join(".augment/commands")),
+        AgentProvider::Codex     => None, // Codex uses section-based AGENTS.md; no command dir
+    }
+}
+
+/// Resolve and install agent plugin components (skill, command, memory) from a plugin directory.
+///
+/// `plugin_dir` must contain `skill/<provider>/`, `command/<provider>/`, `memory/<provider>/`
+/// subdirectories.  Each is optional; missing subdirs are silently skipped.
+///
+/// Returns `Ok(())` if at least the skill component was installed, or if none existed (silently
+/// skips absent components).  Returns `Err` on I/O failure.
+fn install_agent_plugin_from_dir(
+    plugin_dir: &std::path::Path,
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    event: &HookEvent,
+) -> Result<(), String> {
+    use std::fs;
+
+    let provider_name = format!("{:?}", provider).to_lowercase();
+    let skill_path = agent_skill_path(base, provider, false, event);
+
+    // ── skill ───────────────────────────────────────────────────────────
+    let skill_src_dir = plugin_dir.join("skill").join(&provider_name);
+    if skill_src_dir.is_dir() {
+        // Pick the first file in the directory (there should be exactly one)
+        if let Ok(mut entries) = fs::read_dir(&skill_src_dir) {
+            if let Some(Ok(entry)) = entries.next() {
+                let content = fs::read_to_string(entry.path())
+                    .map_err(|e| format!("Failed to read skill file '{}': {}", entry.path().display(), e))?;
+                match provider {
+                    AgentProvider::Codex => {
+                        let section_marker = agent_event_section_marker(event);
+                        install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
+                    }
+                    _ => install_agent_dedicated_file(&skill_path, &content)?,
+                }
+            }
+        }
+    }
+
+    // ── command ─────────────────────────────────────────────────────────
+    let cmd_src_dir = plugin_dir.join("command").join(&provider_name);
+    if cmd_src_dir.is_dir() {
+        if let Some(cmd_dir) = agent_command_dir(base, provider) {
+            if let Ok(mut entries) = fs::read_dir(&cmd_src_dir) {
+                if let Some(Ok(entry)) = entries.next() {
+                    let filename = entry.file_name();
+                    let target = cmd_dir.join(&filename);
+                    let content = fs::read_to_string(entry.path())
+                        .map_err(|e| format!("Failed to read command file '{}': {}", entry.path().display(), e))?;
+                    install_agent_dedicated_file(&target, &content)?;
+                }
+            }
+        }
+    }
+
+    // ── memory ──────────────────────────────────────────────────────────
+    let mem_src_dir = plugin_dir.join("memory").join(&provider_name);
+    if mem_src_dir.is_dir() {
+        // Inject memory content into provider's root instruction file
+        let memory_target = match provider {
+            AgentProvider::Claude    => Some(base.join("CLAUDE.md")),
+            AgentProvider::Codebuddy => Some(base.join("CODEBUDDY.md")),
+            AgentProvider::Gemini    => Some(base.join(".gemini/GEMINI.md")),
+            AgentProvider::Cursor    => Some(base.join(".cursor/CURSOR.md")),
+            AgentProvider::Droid     => Some(base.join(".droid/DROID.md")),
+            AgentProvider::Auggie    => Some(base.join(".augment/AUGMENT.md")),
+            AgentProvider::Codex     => None, // Codex memory goes into AGENTS.md; skip for now
+        };
+        if let Some(mem_target) = memory_target {
+            if let Ok(mut entries) = fs::read_dir(&mem_src_dir) {
+                if let Some(Ok(entry)) = entries.next() {
+                    let content = fs::read_to_string(entry.path())
+                        .map_err(|e| format!("Failed to read memory file '{}': {}", entry.path().display(), e))?;
+                    let plugin_id = agent_plugin_id(event);
+                    let section_marker = &format!("linthis-memory-{}", plugin_id.replace('.', "-"));
+                    install_agent_append_section(&mem_target, &content, section_marker, "")?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Tier-1/2 override check for an agent plugin (skill + command + memory bundle).
+///
+/// Returns `Ok(true)` if an override was found and installed, `Ok(false)` to fall through
+/// to the built-in generator, or `Err` on a hard resolution failure.
+fn resolve_and_install_agent_plugin_override(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    event: &HookEvent,
+) -> Result<bool, String> {
+    use linthis::config::Config;
+    use linthis::hooks::resolver;
+
+    let plugin_id = agent_plugin_id(event);
+    let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    // Tier 1: fixed-path plugin directory
+    if let Some(plugin_dir) = resolver::fixed_agent_plugin_dir(&project_root, plugin_id) {
+        install_agent_plugin_from_dir(&plugin_dir, base, provider, event)?;
+        return Ok(true);
+    }
+
+    // Tier 2: TOML agent-plugins entry
+    let config = Config::load_merged(&project_root);
+    if let Some(entry) = config.hooks.agent_plugins.get(plugin_id) {
+        let resolved = resolver::resolve_to_dir(&entry.source, &project_root, &config.hooks.marketplaces)
+            .map_err(|e| format!("Failed to resolve agent plugin '{}': {}", plugin_id, e))?;
+        install_agent_plugin_from_dir(resolved.path(), base, provider, event)?;
+        return Ok(true);
+    }
+
+    // Tier 3: no override — fall through to built-in generator
+    Ok(false)
+}
+
 /// Install a single agent skill for a given provider and event.
 fn install_agent_skill(
     base: &std::path::Path,
@@ -2369,6 +2618,26 @@ fn install_agent_skill(
     global: bool,
     event: &HookEvent,
 ) -> Result<(), String> {
+    // ── Tier-1/2 override check ──────────────────────────────────────────
+    // Agent plugins bundle skill + command + memory; check before built-in generation.
+    // Global install skips overrides (project-local fixed paths don't apply globally).
+    if !global {
+        match resolve_and_install_agent_plugin_override(base, provider, event) {
+            Ok(true) => {
+                // Override installed skill/command/memory; still install stop hook for pre-commit.
+                if matches!(event, HookEvent::PreCommit) {
+                    if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+                        install_agent_stop_hook(base, provider, &settings_path)?;
+                    }
+                }
+                return Ok(());
+            }
+            Ok(false) => {}            // fall through to built-in
+            Err(e) => return Err(e),   // hard error; abort
+        }
+    }
+    // ── End override check ───────────────────────────────────────────────
+
     let skill_path = agent_skill_path(base, provider, global, event);
     let content = agent_event_content_for_provider(provider, event);
 
@@ -2384,7 +2653,7 @@ fn install_agent_skill(
             // Stop hook: install if pre-commit event
             if matches!(event, HookEvent::PreCommit) {
                 if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
-                    install_agent_stop_hook(base, &settings_path)?;
+                    install_agent_stop_hook(base, provider, &settings_path)?;
                 }
             }
         }
@@ -2615,10 +2884,13 @@ fn remove_agent_section_from_file(path: &std::path::Path) -> Result<(), String> 
 
 /// Install the Stop Hook into a settings JSON file (e.g. .claude/settings.json, .codebuddy/settings.json)
 fn install_agent_stop_hook(
-    _git_root: &std::path::Path,
+    git_root: &std::path::Path,
+    provider: &AgentProvider,
     settings_path: &std::path::Path,
 ) -> Result<(), String> {
     use std::fs;
+    use linthis::config::Config;
+    use linthis::hooks::resolver;
 
     if let Some(parent) = settings_path.parent() {
         if !parent.exists() {
@@ -2627,6 +2899,30 @@ fn install_agent_stop_hook(
         }
     }
 
+    // ── Resolve override JSON content (Tier 1 or 2), or use built-in ──────
+    let project_root = git_root.to_path_buf();
+    let provider_dir = format!("{:?}", provider).to_lowercase();
+
+    // Tier 1: fixed-path file
+    let override_json_str: Option<String> =
+        if let Some(fixed) = resolver::fixed_agent_hook_path(&project_root, "stop", &provider_dir, "settings.json") {
+            Some(fs::read_to_string(fixed.as_path())
+                .map_err(|e| format!("Failed to read fixed-path stop hook '{}': {}", fixed.display(), e))?)
+        } else {
+            // Tier 2: TOML entry
+            let config = Config::load_merged(&project_root);
+            let toml_key = format!("{}.settings", provider_dir);
+            if let Some(entry) = config.hooks.agent_hook.stop.get(&toml_key) {
+                Some(resolver::resolve_to_string(&entry.source, &project_root, &config.hooks.marketplaces)
+                    .map_err(|e| format!("Failed to resolve stop hook for '{}': {}", toml_key, e))?)
+            } else {
+                None // Tier 3: use built-in
+            }
+        };
+
+    let override_json = override_json_str.as_deref().unwrap_or_else(|| agent_stop_hook_json_ref());
+
+    // ── Shallow-merge override JSON into existing settings file ───────────
     if settings_path.exists() {
         let existing = fs::read_to_string(settings_path)
             .map_err(|e| format!("Failed to read {}: {}", settings_path.display(), e))?;
@@ -2634,21 +2930,14 @@ fn install_agent_stop_hook(
         let mut json: serde_json::Value = serde_json::from_str(&existing)
             .map_err(|e| format!("Failed to parse {}: {}", settings_path.display(), e))?;
 
-        let stop_hook_json: serde_json::Value = serde_json::from_str(&agent_stop_hook_json())
-            .map_err(|e| format!("Failed to parse stop hook template: {}", e))?;
+        let override_val: serde_json::Value = serde_json::from_str(override_json)
+            .map_err(|e| format!("Failed to parse stop hook JSON: {}", e))?;
 
-        let hooks = json
-            .as_object_mut()
-            .ok_or("settings.json root is not an object")?
-            .entry("hooks")
-            .or_insert_with(|| serde_json::json!({}));
-
-        let hooks_obj = hooks
-            .as_object_mut()
-            .ok_or("hooks field is not an object")?;
-
-        if let Some(stop_hooks) = stop_hook_json.get("hooks").and_then(|h| h.get("Stop")) {
-            hooks_obj.insert("Stop".to_string(), stop_hooks.clone());
+        // Shallow merge: each top-level key from the override replaces the existing key entirely.
+        if let (Some(root), Some(override_obj)) = (json.as_object_mut(), override_val.as_object()) {
+            for (k, v) in override_obj {
+                root.insert(k.clone(), v.clone());
+            }
         }
 
         let output = serde_json::to_string_pretty(&json)
@@ -2656,7 +2945,7 @@ fn install_agent_stop_hook(
         fs::write(settings_path, output + "\n")
             .map_err(|e| format!("Failed to write {}: {}", settings_path.display(), e))?;
     } else {
-        fs::write(settings_path, agent_stop_hook_json() + "\n")
+        fs::write(settings_path, override_json.to_string() + "\n")
             .map_err(|e| format!("Failed to write {}: {}", settings_path.display(), e))?;
     }
 

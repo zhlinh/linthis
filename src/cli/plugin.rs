@@ -89,6 +89,108 @@ pub fn sync_plugins(plugins: &[(String, String, Option<String>)]) -> Result<(), 
     }
 }
 
+/// After `plugin add`, fetch the plugin and merge its bundled `linthis-config.toml`
+/// into the project's `.linthis/config.toml`, replacing every `plugin = "self"` with
+/// the user-specified alias.
+///
+/// If the plugin has no `linthis-config.toml`, this is a silent no-op.
+fn merge_plugin_linthis_config(
+    alias: &str,
+    url: &str,
+    git_ref: Option<&str>,
+    global: bool,
+) -> Result<(), String> {
+    use linthis::plugin::{fetcher::PluginFetcher, PluginCache, PluginSource};
+    use toml_edit::{DocumentMut, Item, Table};
+
+    // Fetch (or reuse cached) plugin to get its files.
+    let cache = PluginCache::new().map_err(|e| e.to_string())?;
+    let mut source = PluginSource::new(url);
+    source.name = alias.to_string();
+    if let Some(r) = git_ref {
+        source = source.with_ref(r);
+    }
+    let fetcher = PluginFetcher::new();
+    let cached = fetcher.fetch(&source, &cache, false).map_err(|e| e.to_string())?;
+
+    // Look for linthis-config.toml in the plugin root.
+    let plugin_config_path = cached.cache_path.join("linthis-config.toml");
+    if !plugin_config_path.exists() {
+        return Ok(()); // No bundled config — silently skip
+    }
+
+    let raw = std::fs::read_to_string(&plugin_config_path)
+        .map_err(|e| format!("Failed to read plugin linthis-config.toml: {}", e))?;
+
+    // Replace `plugin = "self"` with `plugin = "<alias>"`.
+    let resolved = raw.replace("\"self\"", &format!("\"{}\"", alias));
+
+    // Parse the resolved TOML.
+    let plugin_doc: DocumentMut = resolved
+        .parse()
+        .map_err(|e| format!("Failed to parse plugin linthis-config.toml: {}", e))?;
+
+    // Load (or create) the target user config.
+    let target_manager = if global {
+        linthis::plugin::PluginConfigManager::global()
+    } else {
+        linthis::plugin::PluginConfigManager::project()
+    }
+    .map_err(|e| e.to_string())?;
+
+    let config_path = target_manager.config_path().clone();
+    let existing_raw = if config_path.exists() {
+        std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read {}: {}", config_path.display(), e))?
+    } else {
+        String::new()
+    };
+
+    let mut user_doc: DocumentMut = existing_raw
+        .parse()
+        .map_err(|e| format!("Failed to parse {}: {}", config_path.display(), e))?;
+
+    // Ensure [hooks] table exists in user doc.
+    if !user_doc.contains_key("hooks") {
+        user_doc["hooks"] = Item::Table(Table::new());
+    }
+
+    // Merge top-level keys from plugin doc's [hooks] into user doc's [hooks].
+    // Only add keys that don't already exist in the user's config (non-overwriting merge).
+    let mut merged_count = 0usize;
+    if let Some(plugin_hooks) = plugin_doc.get("hooks").and_then(|h| h.as_table()) {
+        if let Some(user_hooks) = user_doc["hooks"].as_table_mut() {
+            for (key, value) in plugin_hooks.iter() {
+                if !user_hooks.contains_key(key) {
+                    user_hooks.insert(key, value.clone());
+                    merged_count += 1;
+                }
+            }
+        }
+    }
+
+    if merged_count == 0 {
+        return Ok(()); // Nothing new to add
+    }
+
+    // Write the updated user config.
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+    std::fs::write(&config_path, user_doc.to_string())
+        .map_err(|e| format!("Failed to write {}: {}", config_path.display(), e))?;
+
+    println!(
+        "{} Merged hook config from '{}' into {}",
+        "✓".green(),
+        alias,
+        config_path.display()
+    );
+
+    Ok(())
+}
+
 /// Handle plugin subcommands
 pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
     use linthis::plugin::{
@@ -608,12 +710,19 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                     println!();
                     println!("  Alias: {}", alias);
                     println!("  URL:   {}", url);
-                    if let Some(ref_) = git_ref {
+                    if let Some(ref ref_) = git_ref {
                         println!("  Ref:   {}", ref_);
                     }
                     println!("  Config: {}", manager.config_path().display());
                     println!();
                     println!("Plugin will be automatically loaded when running linthis.");
+
+                    // Try to merge linthis-config.toml from the plugin package.
+                    // Fetch the plugin first so we can read its bundled config.
+                    if let Err(e) = merge_plugin_linthis_config(&alias, &url, git_ref.as_deref(), global) {
+                        eprintln!("{}: {}", "Warning".yellow(), e);
+                        // Non-fatal: warn but still report success
+                    }
 
                     ExitCode::SUCCESS
                 }

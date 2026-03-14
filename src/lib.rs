@@ -115,6 +115,7 @@
 //! - Tool availability errors (missing linters)
 
 pub mod benchmark;
+pub mod hooks;
 pub mod cache;
 pub mod checkers;
 pub mod config;

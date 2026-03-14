@@ -86,13 +86,13 @@ crossterm = "0.28"
 
 # Desktop notifications (optional)
 notify-rust = { version = "4.10", optional = true }
+tempfile = "3"
 
 [features]
 default = []
 notifications = ["dep:notify-rust"]
 
 [dev-dependencies]
-tempfile = "3"
 
 [[bin]]
 name = "linthis"

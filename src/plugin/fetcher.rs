@@ -171,7 +171,7 @@ impl PluginFetcher {
     }
 
     /// Clone a plugin repository with shallow clone
-    fn clone_plugin(&self, url: &str, target_path: &Path, git_ref: Option<&str>) -> Result<()> {
+    pub fn clone_plugin(&self, url: &str, target_path: &Path, git_ref: Option<&str>) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = target_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -218,7 +218,7 @@ impl PluginFetcher {
     }
 
     /// Update an existing cached plugin
-    fn update_plugin(&self, url: &str, cache_path: &Path, git_ref: Option<&str>) -> Result<()> {
+    pub fn update_plugin(&self, url: &str, cache_path: &Path, git_ref: Option<&str>) -> Result<()> {
         // Fetch latest changes
         let mut cmd = Command::new("git");
         cmd.current_dir(cache_path)
