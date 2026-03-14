@@ -19,6 +19,148 @@ use std::process::ExitCode;
 
 use super::commands::{AgentFixProvider, AgentProvider, HookCommands, HookEvent, HookTool};
 
+/// Deduplicate hook types: remove exact dups; for base/with-agent pairs, keep with-agent.
+fn deduplicate_hook_types(types: Vec<HookTool>) -> Vec<HookTool> {
+    let mut result: Vec<HookTool> = Vec::new();
+    for t in types {
+        // Skip exact duplicates
+        if result.iter().any(|r| std::mem::discriminant(r) == std::mem::discriminant(&t)) {
+            continue;
+        }
+        // If the with-agent variant of this type is already present, skip the base
+        let base_already_upgraded = match &t {
+            HookTool::Git => result.iter().any(|r| matches!(r, HookTool::GitWithAgent)),
+            HookTool::Prek => result.iter().any(|r| matches!(r, HookTool::PrekWithAgent)),
+            HookTool::PreCommit => result.iter().any(|r| matches!(r, HookTool::PreCommitWithAgent)),
+            _ => false,
+        };
+        if base_already_upgraded {
+            continue;
+        }
+        // If we're adding a with-agent, remove the base if already present
+        match &t {
+            HookTool::GitWithAgent => result.retain(|r| !matches!(r, HookTool::Git)),
+            HookTool::PrekWithAgent => result.retain(|r| !matches!(r, HookTool::Prek)),
+            HookTool::PreCommitWithAgent => result.retain(|r| !matches!(r, HookTool::PreCommit)),
+            _ => {}
+        }
+        result.push(t);
+    }
+    result
+}
+
+/// Deduplicate hook events: remove exact duplicates (preserve order).
+fn deduplicate_hook_events(events: Vec<HookEvent>) -> Vec<HookEvent> {
+    let mut seen = std::collections::HashSet::new();
+    events
+        .into_iter()
+        .filter(|e| seen.insert(std::mem::discriminant(e)))
+        .collect()
+}
+
+/// Apply -y/--yes fallback when types/events vecs are empty.
+/// ONLY call this when the --yes flag is set; when -y is absent, empty vecs
+/// should trigger the interactive prompt instead.
+/// Returns (types, events) with fallbacks applied.
+fn apply_yes_fallback(
+    types: Vec<HookTool>,
+    events: Vec<HookEvent>,
+) -> (Vec<HookTool>, Vec<HookEvent>) {
+    let resolved_types = if types.is_empty() {
+        vec![HookTool::Git]
+    } else {
+        types
+    };
+    let resolved_events = if events.is_empty() {
+        let agent_only =
+            resolved_types.len() == 1 && matches!(resolved_types[0], HookTool::Agent);
+        if agent_only {
+            vec![HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush]
+        } else {
+            vec![HookEvent::PreCommit]
+        }
+    } else {
+        events
+    };
+    (resolved_types, resolved_events)
+}
+
+/// Interactive menu for selecting hook types. Returns selected types (never empty unless cancelled).
+fn prompt_hook_types() -> Option<Vec<HookTool>> {
+    use std::io::{self, Write};
+    // Use bare function pointers (fn() -> HookTool) — const-safe, no dyn trait needed.
+    // Non-capturing closures over fieldless enum variants coerce to fn() pointers.
+    const TYPES: &[(&str, fn() -> HookTool)] = &[
+        ("git", || HookTool::Git),
+        ("git-with-agent", || HookTool::GitWithAgent),
+        ("prek", || HookTool::Prek),
+        ("prek-with-agent", || HookTool::PrekWithAgent),
+        ("pre-commit", || HookTool::PreCommit),
+        ("pre-commit-with-agent", || HookTool::PreCommitWithAgent),
+        ("agent", || HookTool::Agent),
+    ];
+    println!("\nSelect hook type(s) [comma-separated, e.g. 1,2]:");
+    for (i, (name, _)) in TYPES.iter().enumerate() {
+        println!("  {}. {}", i + 1, name);
+    }
+    println!("  {}. Cancel", TYPES.len() + 1);
+    print!("\n> ");
+    io::stdout().flush().ok();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).ok();
+    let input = input.trim();
+    if input.is_empty() || input == (TYPES.len() + 1).to_string() {
+        return None;
+    }
+    let selected: Vec<HookTool> = input
+        .split(',')
+        .filter_map(|s| s.trim().parse::<usize>().ok())
+        .filter(|&n| n >= 1 && n <= TYPES.len())
+        .map(|n| (TYPES[n - 1].1)())
+        .collect();
+    if selected.is_empty() {
+        None
+    } else {
+        Some(selected)
+    }
+}
+
+/// Interactive menu for selecting hook events. Returns selected events (never empty unless cancelled).
+fn prompt_hook_events() -> Option<Vec<HookEvent>> {
+    use std::io::{self, Write};
+    // Use bare function pointers for const-safety (matches prompt_hook_types pattern).
+    // Non-capturing closures over fieldless enum variants coerce to fn() pointers.
+    const EVENTS: &[(&str, fn() -> HookEvent)] = &[
+        ("pre-commit", || HookEvent::PreCommit),
+        ("commit-msg", || HookEvent::CommitMsg),
+        ("pre-push", || HookEvent::PrePush),
+    ];
+    println!("\nSelect event(s) [comma-separated, e.g. 1,2]:");
+    for (i, (name, _)) in EVENTS.iter().enumerate() {
+        println!("  {}. {}", i + 1, name);
+    }
+    println!("  {}. Cancel", EVENTS.len() + 1);
+    print!("\n> ");
+    io::stdout().flush().ok();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).ok();
+    let input = input.trim();
+    if input.is_empty() || input == (EVENTS.len() + 1).to_string() {
+        return None;
+    }
+    let selected: Vec<HookEvent> = input
+        .split(',')
+        .filter_map(|s| s.trim().parse::<usize>().ok())
+        .filter(|&n| n >= 1 && n <= EVENTS.len())
+        .map(|n| (EVENTS[n - 1].1)())
+        .collect();
+    if selected.is_empty() {
+        None
+    } else {
+        Some(selected)
+    }
+}
+
 /// Helper module for getting home directory (cross-platform, no external crate)
 mod dirs {
     use std::path::PathBuf;
@@ -34,15 +176,58 @@ mod dirs {
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
-        HookCommands::Install { hook_type, hook_event, force, yes, global, provider, args } => {
-            handle_hook_install(hook_type, hook_event, force, yes, global, provider, args)
+        HookCommands::Install { hook_types, hook_events, force, yes, global, provider, args } => {
+            // Resolve types and events (dedup + interactive prompt or -y fallback)
+            let (hook_types, hook_events) = if yes {
+                apply_yes_fallback(
+                    deduplicate_hook_types(hook_types),
+                    deduplicate_hook_events(hook_events),
+                )
+            } else {
+                let types = deduplicate_hook_types(hook_types);
+                let types = if types.is_empty() {
+                    match prompt_hook_types() {
+                        Some(t) => t,
+                        None => { println!("Installation cancelled"); return ExitCode::SUCCESS; }
+                    }
+                } else { types };
+                let events = deduplicate_hook_events(hook_events);
+                let events = if events.is_empty() {
+                    match prompt_hook_events() {
+                        Some(e) => e,
+                        None => { println!("Installation cancelled"); return ExitCode::SUCCESS; }
+                    }
+                } else { events };
+                (types, events)
+            };
+            handle_hook_install(hook_types, hook_events, force, yes, global, provider, args)
         }
-        HookCommands::Uninstall { hook_type, hook_event, all, yes, global } => {
-            // Agent type has its own uninstall flow
-            if matches!(hook_type, Some(HookTool::Agent)) {
-                return handle_agent_hook_uninstall(yes, global);
-            }
-            handle_hook_uninstall(hook_event, all, yes, global)
+        HookCommands::Uninstall { hook_types, hook_events, all, yes, global } => {
+            // --all: handler ignores vecs (uninstalls everything).
+            // -y: skip prompt, use whatever was explicitly specified (no default fallback for uninstall).
+            let (types, events) = if all || yes {
+                (
+                    deduplicate_hook_types(hook_types),
+                    deduplicate_hook_events(hook_events),
+                )
+            } else {
+                let types = deduplicate_hook_types(hook_types);
+                let types = if types.is_empty() {
+                    match prompt_hook_types() {
+                        Some(t) => t,
+                        None => { println!("Uninstall cancelled"); return ExitCode::SUCCESS; }
+                    }
+                } else { types };
+                let events = deduplicate_hook_events(hook_events);
+                let events = if events.is_empty() {
+                    match prompt_hook_events() {
+                        Some(e) => e,
+                        None => { println!("Uninstall cancelled"); return ExitCode::SUCCESS; }
+                    }
+                } else { events };
+                (types, events)
+            };
+            handle_hook_uninstall(types, events, all, yes, global)
         }
         HookCommands::Status => {
             handle_hook_status()
@@ -56,8 +241,38 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     }
 }
 
-/// Install git hook (pre-commit, pre-push, or commit-msg)
+/// Install git hooks for all combinations of types × events (cartesian product).
 fn handle_hook_install(
+    hook_types: Vec<HookTool>,
+    hook_events: Vec<HookEvent>,
+    force: bool,
+    yes: bool,
+    global: bool,
+    provider: Option<String>,
+    args: Option<String>,
+) -> ExitCode {
+    let mut overall = ExitCode::SUCCESS;
+    for hook_type in &hook_types {
+        for hook_event in &hook_events {
+            let code = handle_hook_install_single(
+                Some(hook_type.clone()),
+                hook_event.clone(),
+                force,
+                yes,
+                global,
+                provider.clone(),
+                args.clone(),
+            );
+            if code != ExitCode::SUCCESS {
+                overall = code;
+            }
+        }
+    }
+    overall
+}
+
+/// Install git hook (pre-commit, pre-push, or commit-msg) for a single type × event pair.
+fn handle_hook_install_single(
     hook_type: Option<HookTool>,
     hook_event: HookEvent,
     force: bool,
@@ -106,7 +321,7 @@ fn handle_hook_install(
         if provider.is_some() && agent_provider.is_none() {
             return ExitCode::from(1);
         }
-        return handle_agent_hook_install(agent_provider, force, yes, global);
+        return handle_agent_hook_install(agent_provider, &[hook_event.clone()], force, yes, global);
     }
 
     // Global non-agent hook: install into ~/.config/git/hooks
@@ -703,16 +918,26 @@ fn handle_hook_status() -> ExitCode {
         let installed = agent_is_installed(&git_root, p, false);
         if installed {
             any_agent_installed = true;
-            let path = agent_skill_path(&git_root, p, false);
-            println!("{} {} ({})", "✓".green(), p, path.display());
-            // Show extra info for Claude/CodeBuddy (Stop Hook)
+            println!("{} {}", "✓".green(), p);
+            let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
+            for event in &events {
+                let path = agent_skill_path(&git_root, p, false, event);
+                if path.exists() {
+                    let event_name = match event {
+                        HookEvent::PreCommit => "pre-commit",
+                        HookEvent::CommitMsg => "commit-msg",
+                        HookEvent::PrePush => "pre-push",
+                    };
+                    println!("  {} {} ({})", "✓".green().dimmed(), path.display(), event_name);
+                }
+            }
             if let Some(settings_path) = agent_stop_hook_settings_path(&git_root, p) {
                 let has_stop_hook = settings_path.exists()
                     && std::fs::read_to_string(&settings_path)
                         .map(|c| c.contains("linthis"))
                         .unwrap_or(false);
                 if has_stop_hook {
-                    println!("  {} Stop Hook ({})", "✓".green(), settings_path.display());
+                    println!("  {} Stop Hook ({})", "✓".green().dimmed(), settings_path.display());
                 }
             }
         } else {
@@ -740,9 +965,17 @@ fn handle_hook_status() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Uninstall git hook (specific event or all)
-fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool, global: bool) -> ExitCode {
+/// Uninstall git hooks for the given types × events combinations.
+fn handle_hook_uninstall(
+    hook_types: Vec<HookTool>,
+    hook_events: Vec<HookEvent>,
+    all: bool,
+    yes: bool,
+    global: bool,
+) -> ExitCode {
     if global {
+        // For global uninstall, use the first event (or None for all)
+        let hook_event = if all { None } else { hook_events.into_iter().next() };
         return handle_global_hook_uninstall(hook_event, all, yes);
     }
 
@@ -757,10 +990,10 @@ fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool, gl
 
     if all {
         // Uninstall all hooks (including agent hooks)
-        let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
+        let all_hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
         let mut any_uninstalled = false;
 
-        for event in &hook_events {
+        for event in &all_hook_events {
             let result = uninstall_single_hook(&git_root, event, yes);
             if result == ExitCode::SUCCESS {
                 any_uninstalled = true;
@@ -768,7 +1001,7 @@ fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool, gl
         }
 
         // Also uninstall agent hooks
-        let agent_result = handle_agent_hook_uninstall(yes, false);
+        let agent_result = handle_agent_hook_uninstall(yes, false, &all_hook_events);
         if agent_result == ExitCode::SUCCESS {
             any_uninstalled = true;
         }
@@ -780,9 +1013,27 @@ fn handle_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool, gl
         return ExitCode::SUCCESS;
     }
 
-    // Uninstall specific hook (default to pre-commit)
-    let event = hook_event.unwrap_or(HookEvent::PreCommit);
-    uninstall_single_hook(&git_root, &event, yes)
+    // If Agent type is in the list, uninstall agent hooks
+    let has_agent = hook_types.iter().any(|t| matches!(t, HookTool::Agent));
+    if has_agent {
+        return handle_agent_hook_uninstall(yes, global, &hook_events);
+    }
+
+    // Uninstall specific hooks: iterate over events (defensive fallback to PreCommit if empty)
+    let events = if hook_events.is_empty() {
+        vec![HookEvent::PreCommit]
+    } else {
+        hook_events
+    };
+
+    let mut overall = ExitCode::SUCCESS;
+    for event in &events {
+        let result = uninstall_single_hook(&git_root, event, yes);
+        if result != ExitCode::SUCCESS {
+            overall = result;
+        }
+    }
+    overall
 }
 
 /// Uninstall a single hook
@@ -1736,107 +1987,149 @@ const AGENT_SECTION_MARKER: &str = "## Linthis Lint Rule";
 /// Legacy section marker for backward compatibility (uninstall/detection)
 const AGENT_SECTION_MARKER_LEGACY: &str = "## Linthis Agent Rules";
 
-/// Shared lint rule body (provider-agnostic)
-fn agent_lint_rule_body() -> String {
-    r#"## Mandatory: Always Run Before Commit
 
-**Before executing any `git commit`, you MUST run:**
+/// Generic skill body for a given event (used by all providers).
+fn agent_event_content_generic(event: &HookEvent) -> String {
+    match event {
+        HookEvent::PreCommit => agent_lint_body(),
+        HookEvent::CommitMsg => agent_cmsg_body(),
+        HookEvent::PrePush => agent_review_body(),
+    }
+}
+
+fn agent_lint_body() -> String {
+    r#"## Mandatory: Run Linthis Before Commit
+
+**After editing any code file in this session:**
 
 ```bash
-linthis -s
+linthis -i <file1> -i <file2> -c
 ```
 
-`linthis -s` checks staged files, auto-fixes formatting issues, and **automatically re-stages** the formatted files. No manual `git add` needed.
+**Before any `git commit`:**
 
-If linthis reports remaining issues after auto-format, fix them manually, then re-run `linthis -s`.
+```bash
+linthis -s -c
+```
 
-## How to Fix Remaining Issues
+`linthis -s -c` checks all staged files for lint issues.
 
-1. Read the lint result file at `.linthis/result/result-*.json`
-2. Read the source files that have issues
-3. Fix the issues by editing the source files directly
-4. Re-run: `git add <fixed-files> && linthis -s`
-5. Repeat until linthis shows 0 issues, then proceed with git commit
+## How to Fix Issues
 
-## Commit Message Rules
-
-- Format: `type(scope)?: description`
-- Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-- Use: `linthis cmsg "your message"` to validate
+1. Read the lint result at `.linthis/result/result-*.json`
+2. Edit the source files directly to fix the issues
+3. Re-run `linthis -s -c` until it shows 0 issues
+4. Then proceed with git commit
 
 ## Key Commands
 
 | Action | Command |
 |--------|---------|
-| Lint staged files (use this!) | `linthis -s` |
-| Lint + format specific files | `linthis -i <file>` |
-| Format only (no lint) | `linthis -s -f` |
-| Undo last format | `linthis format --undo` |
-| Validate commit msg | `linthis cmsg "message"` |"#
+| Lint staged files | `linthis -s -c` |
+| Lint specific files | `linthis -i <file> -c` |
+| Format only | `linthis -s -f` |
+
+**Never use `linthis --fix` or `linthis fix` — always fix issues manually.**"#
         .to_string()
 }
 
-/// Content for CLAUDE.md (append section)
-fn agent_content_claude_md() -> String {
-    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rule_body())
+fn agent_cmsg_body() -> String {
+    r#"## Mandatory: Validate Commit Message Format
+
+Before executing any `git commit`, validate the commit message:
+
+```bash
+linthis cmsg "your commit message here"
+```
+
+## Commit Message Format
+
+```
+type(scope)?: description
+```
+
+**Valid types:** feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+
+**Examples:**
+- `feat(auth): add OAuth2 login`
+- `fix: resolve null pointer in parser`
+- `docs: update README with new CLI flags`
+
+If `linthis cmsg` reports an error, fix the message before committing."#
+        .to_string()
 }
 
-/// Content for Codex AGENTS.md (append section)
-fn agent_content_codex_md() -> String {
-    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rule_body())
-}
+fn agent_review_body() -> String {
+    r#"## Mandatory: Code Review Before Push
 
-/// Content for Gemini .gemini/instructions.md (dedicated file)
-fn agent_content_gemini_md() -> String {
-    format!(
-        "---\nname: linthis-lint\ndescription: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI\n---\n\n# Linthis Lint Rule\n\n{}\n",
-        agent_lint_rule_body()
-    )
-}
+Before executing any `git push`, perform a structured code review.
 
-/// Content for Cursor .cursor/rules/linthis.mdc (dedicated file with YAML frontmatter)
-fn agent_content_cursor_mdc() -> String {
-    format!(
-        r#"---
-description: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI
-alwaysApply: true
----
+### Step 1 — Gather diff
 
-# Linthis Lint Rule
+```bash
+BASE_SHA=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD~1)
+HEAD_SHA=$(git rev-parse HEAD)
+git diff "$BASE_SHA".."$HEAD_SHA" --stat
+git diff "$BASE_SHA".."$HEAD_SHA" --name-status
+git diff "$BASE_SHA".."$HEAD_SHA"
+```
 
-{}
-"#,
-        agent_lint_rule_body()
-    )
-}
+### Step 2 — Print diff stats
 
-/// Content for Droid .droid/rules/linthis.md (dedicated file)
-fn agent_content_droid_md() -> String {
-    format!(
-        "---\nname: linthis-lint\ndescription: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI\n---\n\n# Linthis Lint Rule\n\n{}\n",
-        agent_lint_rule_body()
-    )
-}
+```
+📊 Diff Stats
+  Base:  <BASE_SHA>
+  Head:  <HEAD_SHA>
+  Files: N changed, +X insertions, -Y deletions
 
-/// Content for Auggie .augment/rules/linthis.md (dedicated file)
-fn agent_content_auggie_md() -> String {
-    format!(
-        "---\nname: linthis-lint\ndescription: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI\n---\n\n# Linthis Lint Rule\n\n{}\n",
-        agent_lint_rule_body()
-    )
-}
+📁 Changed Files
+  ✅ M  src/foo.rs
+  ⚠️ A  src/bar.rs   (new file — review carefully)
+  ⏭️ D  src/old.rs   (deleted)
+```
 
-/// Content for CodeBuddy CODEBUDDY.md (append section)
-fn agent_content_codebuddy_md() -> String {
-    format!("\n{}\n\n{}\n", AGENT_SECTION_MARKER, agent_lint_rule_body())
-}
+### Step 3 — Review by category
 
-/// Content for CodeBuddy .codebuddy/skills/linthis/SKILL.md (dedicated skill file)
-fn agent_content_codebuddy_skill_md() -> String {
-    format!(
-        "---\nname: linthis-lint\ndescription: You MUST use this before any git commit — enforces code style and commit message conventions via linthis CLI\n---\n\n# Linthis Lint Skill\n\n{}\n",
-        agent_lint_rule_body()
-    )
+| Category | Examples |
+|---|---|
+| **Critical** | Security vulnerabilities, data loss risk, broken API, logic errors |
+| **Important** | Missing error handling, untested edge cases, performance issues |
+| **Minor** | Style inconsistencies, redundant code, missing comments |
+
+### Step 4 — Write structured review
+
+Output to terminal AND write to `.linthis/review/review-<YYYYMMDD-HHMMSS>.md`:
+
+```markdown
+# Code Review — <HEAD_SHA>
+Date: <timestamp>
+Base: <BASE_SHA> → Head: <HEAD_SHA>
+Files: N changed, +X -Y
+
+## Summary
+<1-3 sentence overall assessment>
+
+## Critical Issues
+- [ ] <file>:<line> — <description>
+
+## Important Issues
+- [ ] <file>:<line> — <description>
+
+## Minor Issues
+- [ ] <file>:<line> — <description>
+
+## Assessment
+BLOCK / PROCEED WITH FIXES / APPROVED
+```
+
+Create `.linthis/review/` directory if it doesn't exist.
+
+### Step 5 — Gate the push
+
+- **Critical issues** → output `❌ Push blocked — fix Critical issues first`; do not proceed
+- **Important issues only** → output `⚠️ Push with caution`; ask user to confirm
+- **Minor or none** → output `✅ Review passed`; proceed"#
+        .to_string()
 }
 
 /// Generate the Stop hook JSON content for .claude/settings.json
@@ -1858,37 +2151,49 @@ fn agent_stop_hook_json() -> String {
     .to_string()
 }
 
-/// Get the skill file path for a given agent provider.
+/// Get the skill file path for a given agent provider and hook event.
 ///
 /// When `global` is true, `base` is the user home directory; otherwise it is
-/// the project git root.  Claude's project-level file is `CLAUDE.md` at the
-/// repo root, while the user-level file lives in `~/.claude/CLAUDE.md`.
-fn agent_skill_path(base: &std::path::Path, provider: &AgentProvider, global: bool) -> PathBuf {
+/// the project git root.  Each event maps to a distinct file so that agents
+/// receive focused instructions per hook type.
+fn agent_skill_path(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    global: bool,
+    event: &HookEvent,
+) -> PathBuf {
+    let event_name = match event {
+        HookEvent::PreCommit => "lint",
+        HookEvent::CommitMsg => "cmsg",
+        HookEvent::PrePush   => "review",
+    };
     match provider {
         AgentProvider::Claude => {
-            if global {
-                base.join(".claude/CLAUDE.md")
-            } else {
-                base.join("CLAUDE.md")
-            }
+            // Skills subdirectory: .claude/skills/linthis/{lint,cmsg,review}.md
+            // global uses same .claude path (resolved relative to user home by caller)
+            base.join(".claude/skills/linthis").join(format!("{}.md", event_name))
         }
         AgentProvider::Codex => {
-            if global {
-                base.join(".codex/AGENTS.md")
-            } else {
-                base.join("AGENTS.md")
-            }
+            // Section-based: AGENTS.md (path doesn't change per event; event handled by section content)
+            if global { base.join(".codex/AGENTS.md") } else { base.join("AGENTS.md") }
         }
-        AgentProvider::Gemini   => base.join(".gemini/instructions.md"),
-        AgentProvider::Cursor   => base.join(".cursor/rules/linthis.mdc"),
-        AgentProvider::Droid    => base.join(".droid/rules/linthis.md"),
-        AgentProvider::Auggie   => base.join(".augment/rules/linthis.md"),
+        AgentProvider::Gemini => {
+            // Flat directory: .gemini/linthis-{lint,cmsg,review}.md
+            base.join(".gemini").join(format!("linthis-{}.md", event_name))
+        }
+        AgentProvider::Cursor => {
+            // Rules directory: .cursor/rules/linthis-{lint,cmsg,review}.mdc
+            base.join(".cursor/rules").join(format!("linthis-{}.mdc", event_name))
+        }
+        AgentProvider::Droid => {
+            base.join(".droid/rules").join(format!("linthis-{}.md", event_name))
+        }
+        AgentProvider::Auggie => {
+            base.join(".augment/rules").join(format!("linthis-{}.md", event_name))
+        }
         AgentProvider::Codebuddy => {
-            if global {
-                base.join(".codebuddy/CODEBUDDY.md")
-            } else {
-                base.join("CODEBUDDY.md")
-            }
+            // Skills subdirectory: .codebuddy/skills/linthis/{lint,cmsg,review}.md
+            base.join(".codebuddy/skills/linthis").join(format!("{}.md", event_name))
         }
     }
 }
@@ -1928,83 +2233,52 @@ fn print_extra_installed(base: &std::path::Path, provider: &AgentProvider) {
 
 /// Print info about an already-installed agent provider (file path + content)
 fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, global: bool) {
-    let path = agent_skill_path(base, provider, global);
-    println!(
-        "       {} {}",
-        "File:".dimmed(),
-        path.display()
-    );
-
-    // For CodeBuddy, also show SKILL.md
-    if matches!(provider, AgentProvider::Codebuddy) {
-        let skill_file = base.join(".codebuddy/skills/linthis/SKILL.md");
-        if skill_file.exists() {
-            println!(
-                "       {} {}",
-                "File:".dimmed(),
-                skill_file.display()
-            );
+    let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
+    for event in &events {
+        let path = agent_skill_path(base, provider, global, event);
+        if path.exists() {
+            let event_name = match event {
+                HookEvent::PreCommit => "pre-commit",
+                HookEvent::CommitMsg => "commit-msg",
+                HookEvent::PrePush => "pre-push",
+            };
+            println!("       {} {} ({})", "File:".dimmed(), path.display(), event_name);
         }
     }
-
-    // For Claude/CodeBuddy, also show settings file (Stop Hook)
     if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
         if settings_path.exists() {
-            println!(
-                "       {} {}",
-                "File:".dimmed(),
-                settings_path.display()
-            );
-        }
-    }
-
-    // Show the installed linthis content section
-    if let Ok(content) = std::fs::read_to_string(&path) {
-        match provider {
-            // Append-style: extract the linthis section
-            AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Codebuddy => {
-                let start = content.find(AGENT_SECTION_MARKER)
-                    .or_else(|| content.find(AGENT_SECTION_MARKER_LEGACY));
-                if let Some(start) = start {
-                    let section = &content[start..];
-                    println!("       {}:", "Content".dimmed());
-                    for line in section.lines() {
-                        println!("       {}", line.dimmed());
-                    }
-                }
-            }
-            // Dedicated file: show full content
-            _ => {
-                println!("       {}:", "Content".dimmed());
-                for line in content.lines() {
-                    println!("       {}", line.dimmed());
-                }
-            }
+            println!("       {} {}", "File:".dimmed(), settings_path.display());
         }
     }
 }
 
 /// Check if agent integration is installed for a given provider
 fn agent_is_installed(base: &std::path::Path, provider: &AgentProvider, global: bool) -> bool {
-    let path = agent_skill_path(base, provider, global);
+    let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
     match provider {
+        // Section-based: check for any event section marker in AGENTS.md
+        AgentProvider::Codex => {
+            let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit);
+            path.exists()
+                && std::fs::read_to_string(&path)
+                    .map(|c| {
+                        c.contains(AGENT_SECTION_MARKER)
+                            || c.contains("## Linthis Commit Message Rule")
+                            || c.contains("## Linthis Review Rule")
+                            || c.contains(AGENT_SECTION_MARKER_LEGACY)
+                    })
+                    .unwrap_or(false)
+        }
         // Append-style: check for section marker in file (current or legacy)
-        AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Codebuddy => {
+        AgentProvider::Claude | AgentProvider::Codebuddy => {
+            let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit);
             path.exists()
                 && std::fs::read_to_string(&path)
                     .map(|c| c.contains(AGENT_SECTION_MARKER) || c.contains(AGENT_SECTION_MARKER_LEGACY))
                     .unwrap_or(false)
         }
-        // Dedicated file: check if file exists and contains linthis
-        AgentProvider::Gemini
-        | AgentProvider::Cursor
-        | AgentProvider::Droid
-        | AgentProvider::Auggie => {
-            path.exists()
-                && std::fs::read_to_string(&path)
-                    .map(|c| c.contains("linthis") || c.contains("Linthis"))
-                    .unwrap_or(false)
-        }
+        // File-based: check if any per-event file exists
+        _ => events.iter().any(|e| agent_skill_path(base, provider, global, e).exists()),
     }
 }
 
@@ -2088,166 +2362,188 @@ fn install_agent_dedicated_file(path: &std::path::Path, content: &str) -> Result
     Ok(())
 }
 
-/// Install skill by appending a section to an existing file (Claude CLAUDE.md, Codex AGENTS.md)
-fn install_agent_append_skill(
-    path: &std::path::Path,
-    content: &str,
-    default_header: &str,
+/// Install a single agent skill for a given provider and event.
+fn install_agent_skill(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    global: bool,
+    event: &HookEvent,
 ) -> Result<(), String> {
-    use std::fs;
+    let skill_path = agent_skill_path(base, provider, global, event);
+    let content = agent_event_content_for_provider(provider, event);
 
-    if path.exists() {
-        let existing = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-
-        // Find existing section (current or legacy marker)
-        let found = existing.find(AGENT_SECTION_MARKER)
-            .map(|s| (s, AGENT_SECTION_MARKER.len()))
-            .or_else(|| existing.find(AGENT_SECTION_MARKER_LEGACY)
-                .map(|s| (s, AGENT_SECTION_MARKER_LEGACY.len())));
-
-        let new_content = if let Some((start, marker_len)) = found {
-            // Replace existing section
-            let after_marker = &existing[start + marker_len..];
-            let section_end = after_marker
-                .find("\n## ")
-                .map(|pos| start + marker_len + pos)
-                .unwrap_or(existing.len());
-
-            let mut result = existing[..start].trim_end().to_string();
-            result.push_str(content);
-            let remaining = existing[section_end..].trim_start();
-            if !remaining.is_empty() {
-                result.push_str(remaining);
-                if !result.ends_with('\n') {
-                    result.push('\n');
+    match provider {
+        AgentProvider::Codex => {
+            // Section-based: append/update section keyed by event
+            let section_marker = agent_event_section_marker(event);
+            install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
+        }
+        AgentProvider::Claude | AgentProvider::Codebuddy => {
+            // Skills subdirectory: write dedicated file
+            install_agent_dedicated_file(&skill_path, &content)?;
+            // Stop hook: install if pre-commit event
+            if matches!(event, HookEvent::PreCommit) {
+                if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+                    install_agent_stop_hook(base, &settings_path)?;
                 }
             }
-            result
-        } else {
-            let mut result = existing.trim_end().to_string();
-            result.push_str(content);
-            result
-        };
-
-        fs::write(path, new_content)
-            .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-    } else {
-        // Create new file with header
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
-            }
         }
-        let new_content = format!("{}{}", default_header, content);
-        fs::write(path, new_content)
-            .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+        _ => {
+            install_agent_dedicated_file(&skill_path, &content)?;
+        }
     }
-
     Ok(())
 }
 
-/// Install agent integration for a specific provider
-fn install_agent_provider(base: &std::path::Path, provider: &AgentProvider, global: bool) -> Result<(), String> {
-    let skill_path = agent_skill_path(base, provider, global);
+/// Uninstall a single agent skill for a given provider and event.
+fn uninstall_agent_skill(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    global: bool,
+    event: &HookEvent,
+) -> Result<(), String> {
+    let skill_path = agent_skill_path(base, provider, global, event);
 
     match provider {
-        AgentProvider::Claude => {
-            // Install CLAUDE.md skill (append)
-            install_agent_append_skill(&skill_path, &agent_content_claude_md(), "# Project Instructions\n")?;
-            // Also install Stop Hook
-            if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
-                install_agent_stop_hook(base, &settings_path)?;
+        AgentProvider::Codex => {
+            if skill_path.exists() {
+                let section_marker = agent_event_section_marker(event);
+                remove_agent_section_by_marker(&skill_path, section_marker)?;
             }
         }
-        AgentProvider::Codex => {
-            // Install AGENTS.md skill (append)
-            install_agent_append_skill(&skill_path, &agent_content_codex_md(), "# Agent Instructions\n")?;
+        AgentProvider::Claude | AgentProvider::Codebuddy => {
+            if skill_path.exists() {
+                remove_agent_dedicated_file(&skill_path)?;
+            }
+            // Stop hook: remove if pre-commit event uninstalled
+            if matches!(event, HookEvent::PreCommit) {
+                if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+                    if settings_path.exists() {
+                        remove_agent_stop_hook(&settings_path)?;
+                    }
+                }
+            }
         }
-        AgentProvider::Gemini => {
-            install_agent_dedicated_file(&skill_path, &agent_content_gemini_md())?;
+        _ => {
+            if skill_path.exists() {
+                remove_agent_dedicated_file(&skill_path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Format skill content for a provider + event, wrapping in provider-specific frontmatter.
+fn agent_event_content_for_provider(provider: &AgentProvider, event: &HookEvent) -> String {
+    let body = agent_event_content_generic(event);
+    let (name, desc) = agent_event_skill_metadata(event);
+    match provider {
+        AgentProvider::Codex => body, // section body only; marker handled separately
+        AgentProvider::Claude | AgentProvider::Codebuddy => {
+            // Plain markdown skill file
+            format!("# {}\n\n{}\n", name, body)
+        }
+        AgentProvider::Gemini | AgentProvider::Droid | AgentProvider::Auggie => {
+            format!("---\nname: {}\ndescription: {}\n---\n\n# {}\n\n{}\n", name, desc, name, body)
         }
         AgentProvider::Cursor => {
-            install_agent_dedicated_file(&skill_path, &agent_content_cursor_mdc())?;
-        }
-        AgentProvider::Droid => {
-            install_agent_dedicated_file(&skill_path, &agent_content_droid_md())?;
-        }
-        AgentProvider::Auggie => {
-            install_agent_dedicated_file(&skill_path, &agent_content_auggie_md())?;
-        }
-        AgentProvider::Codebuddy => {
-            // Install CODEBUDDY.md skill (append)
-            install_agent_append_skill(&skill_path, &agent_content_codebuddy_md(), "# Project Instructions\n")?;
-            // Install .codebuddy/skills/linthis/SKILL.md
-            let skill_file = base.join(".codebuddy/skills/linthis/SKILL.md");
-            install_agent_dedicated_file(&skill_file, &agent_content_codebuddy_skill_md())?;
-            // Also install Stop Hook
-            if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
-                install_agent_stop_hook(base, &settings_path)?;
-            }
+            format!("---\ndescription: {}\nalwaysApply: true\n---\n\n# {}\n\n{}\n", desc, name, body)
         }
     }
+}
 
+fn agent_event_skill_metadata(event: &HookEvent) -> (&'static str, &'static str) {
+    match event {
+        HookEvent::PreCommit => (
+            "linthis-lint",
+            "MUST use before any git commit — enforces code style via linthis CLI",
+        ),
+        HookEvent::CommitMsg => (
+            "linthis-cmsg",
+            "MUST use before any git commit — validates commit message format via linthis cmsg",
+        ),
+        HookEvent::PrePush => (
+            "linthis-review",
+            "MUST use before any git push — performs structured code review via git diff",
+        ),
+    }
+}
+
+fn agent_event_section_marker(event: &HookEvent) -> &'static str {
+    match event {
+        HookEvent::PreCommit => "## Linthis Lint Rule",
+        HookEvent::CommitMsg => "## Linthis Commit Message Rule",
+        HookEvent::PrePush   => "## Linthis Review Rule",
+    }
+}
+
+/// Append or replace a section (identified by marker) in a file.
+fn install_agent_append_section(
+    path: &std::path::Path,
+    content: &str,
+    section_marker: &str,
+    file_header: &str,
+) -> Result<(), String> {
+    use std::fs;
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("create dir: {}", e))?;
+        }
+    }
+    let section = format!("\n{}\n\n{}\n", section_marker, content);
+    if path.exists() {
+        let existing = fs::read_to_string(path)
+            .map_err(|e| format!("read {}: {}", path.display(), e))?;
+        if existing.contains(section_marker) {
+            // Replace existing section
+            let start = existing.find(section_marker).unwrap();
+            // Find next ## heading after this section, or end of file
+            let after = &existing[start + section_marker.len()..];
+            let end = after.find("\n## ")
+                .map(|i| start + section_marker.len() + i)
+                .unwrap_or(existing.len());
+            let updated = format!("{}{}{}", &existing[..start], &section[1..], &existing[end..]);
+            fs::write(path, updated).map_err(|e| format!("write {}: {}", path.display(), e))?;
+        } else {
+            // Append
+            let mut f = std::fs::OpenOptions::new().append(true).open(path)
+                .map_err(|e| format!("open {}: {}", path.display(), e))?;
+            use std::io::Write;
+            f.write_all(section.as_bytes())
+                .map_err(|e| format!("write {}: {}", path.display(), e))?;
+        }
+    } else {
+        fs::write(path, format!("{}{}", file_header, section))
+            .map_err(|e| format!("write {}: {}", path.display(), e))?;
+    }
     Ok(())
 }
 
-/// Uninstall agent integration for a specific provider
-fn uninstall_agent_provider(base: &std::path::Path, provider: &AgentProvider, global: bool) -> Result<(), String> {
-    match provider {
-        AgentProvider::Claude => {
-            let rules_md = agent_skill_path(base, provider, global);
-            if rules_md.exists() {
-                remove_agent_section_from_file(&rules_md)?;
-            }
-            if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
-                if settings_path.exists() {
-                    remove_agent_stop_hook(&settings_path)?;
-                }
-            }
-        }
-        AgentProvider::Codex => {
-            let agents_md = agent_skill_path(base, provider, global);
-            if agents_md.exists() {
-                remove_agent_section_from_file(&agents_md)?;
-            }
-        }
-        AgentProvider::Gemini
-        | AgentProvider::Cursor
-        | AgentProvider::Droid
-        | AgentProvider::Auggie => {
-            let path = agent_skill_path(base, provider, global);
-            remove_agent_dedicated_file(&path)?;
-        }
-        AgentProvider::Codebuddy => {
-            let codebuddy_md = agent_skill_path(base, provider, global);
-            if codebuddy_md.exists() {
-                remove_agent_section_from_file(&codebuddy_md)?;
-            }
-            // Remove .codebuddy/skills/linthis/SKILL.md
-            let skill_file = base.join(".codebuddy/skills/linthis/SKILL.md");
-            if skill_file.exists() {
-                remove_agent_dedicated_file(&skill_file)?;
-            }
-            // Legacy: .codebuddy/rules/linthis/RULE.mdc
-            let legacy_rule_mdc = base.join(".codebuddy/rules/linthis/RULE.mdc");
-            if legacy_rule_mdc.exists() {
-                remove_agent_dedicated_file(&legacy_rule_mdc)?;
-            }
-            // Legacy: .codebuddy/rules/linthis.md
-            let legacy_path = base.join(".codebuddy/rules/linthis.md");
-            if legacy_path.exists() {
-                remove_agent_dedicated_file(&legacy_path)?;
-            }
-            if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
-                if settings_path.exists() {
-                    remove_agent_stop_hook(&settings_path)?;
-                }
-            }
-        }
+/// Remove a specific section (by marker) from a file.
+fn remove_agent_section_by_marker(path: &std::path::Path, marker: &str) -> Result<(), String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    if !content.contains(marker) {
+        return Ok(());
     }
-
+    let start = content.find(marker).unwrap();
+    let after = &content[start + marker.len()..];
+    let end = after.find("\n## ")
+        .map(|i| start + marker.len() + i)
+        .unwrap_or(content.len());
+    // Also trim leading newline before section marker
+    let trim_start = if start > 0 && content.as_bytes()[start - 1] == b'\n' {
+        start - 1
+    } else {
+        start
+    };
+    let updated = format!("{}{}", &content[..trim_start], &content[end..]);
+    if updated.trim().is_empty() {
+        std::fs::remove_file(path).map_err(|e| format!("remove {}: {}", path.display(), e))?;
+    } else {
+        std::fs::write(path, updated).map_err(|e| format!("write {}: {}", path.display(), e))?;
+    }
     Ok(())
 }
 
@@ -2406,8 +2702,66 @@ fn remove_agent_stop_hook(settings_path: &std::path::Path) -> Result<(), String>
 /// (`~/.claude/CLAUDE.md`, `~/.cursor/rules/linthis.mdc`, etc.) without
 /// requiring a git repository.  When false, skills are installed in the
 /// project git root (project-level).
+fn warn_legacy_if_present(base: &std::path::Path, provider: &AgentProvider) {
+    match provider {
+        AgentProvider::Claude => {
+            let legacy = base.join("CLAUDE.md");
+            if legacy.exists()
+                && std::fs::read_to_string(&legacy)
+                    .map(|c| c.contains("## Linthis"))
+                    .unwrap_or(false)
+            {
+                println!(
+                    "{}: Legacy linthis section detected in {} — you may remove it manually.",
+                    "Notice".cyan(),
+                    legacy.display()
+                );
+            }
+        }
+        AgentProvider::Codebuddy => {
+            let legacy_md = base.join("CODEBUDDY.md");
+            let legacy_skill = base.join(".codebuddy/skills/linthis/SKILL.md");
+            if (legacy_md.exists()
+                && std::fs::read_to_string(&legacy_md)
+                    .map(|c| c.contains("## Linthis"))
+                    .unwrap_or(false))
+                || legacy_skill.exists()
+            {
+                println!(
+                    "{}: Legacy linthis files detected (CODEBUDDY.md section / SKILL.md) — you may remove them manually.",
+                    "Notice".cyan()
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn uninstall_agent_legacy(base: &std::path::Path, provider: &AgentProvider) {
+    match provider {
+        AgentProvider::Claude => {
+            let legacy = base.join("CLAUDE.md");
+            if legacy.exists() {
+                let _ = remove_agent_section_from_file(&legacy);
+            }
+        }
+        AgentProvider::Codebuddy => {
+            let legacy_md = base.join("CODEBUDDY.md");
+            if legacy_md.exists() {
+                let _ = remove_agent_section_from_file(&legacy_md);
+            }
+            let legacy_skill = base.join(".codebuddy/skills/linthis/SKILL.md");
+            if legacy_skill.exists() {
+                let _ = remove_agent_dedicated_file(&legacy_skill);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn handle_agent_hook_install(
     provider: Option<AgentProvider>,
+    events: &[HookEvent],
     force: bool,
     yes: bool,
     global: bool,
@@ -2453,18 +2807,21 @@ fn handle_agent_hook_install(
             return ExitCode::SUCCESS;
         }
 
-        match install_agent_provider(&base, p, global) {
-            Ok(_) => {
-                let path = agent_skill_path(&base, p, global);
-                println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                print_extra_installed(&base, p);
-                return ExitCode::SUCCESS;
-            }
-            Err(e) => {
-                eprintln!("{}: Failed to install {}: {}", "Error".red(), p, e);
-                return ExitCode::from(2);
+        warn_legacy_if_present(&base, p);
+        for event in events {
+            match install_agent_skill(&base, p, global, event) {
+                Ok(_) => {
+                    let path = agent_skill_path(&base, p, global, event);
+                    println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
+                }
+                Err(e) => {
+                    eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
+                    return ExitCode::from(2);
+                }
             }
         }
+        print_extra_installed(&base, p);
+        return ExitCode::SUCCESS;
     }
 
     // Auto-detect and install all if -y
@@ -2483,16 +2840,23 @@ fn handle_agent_hook_install(
                 print_agent_installed_info(&base, p, global);
                 continue;
             }
-            match install_agent_provider(&base, p, global) {
-                Ok(_) => {
-                    let path = agent_skill_path(&base, p, global);
-                    println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                    print_extra_installed(&base, p);
-                    any_installed = true;
+            warn_legacy_if_present(&base, p);
+            let mut provider_ok = true;
+            for event in events {
+                match install_agent_skill(&base, p, global, event) {
+                    Ok(_) => {
+                        let path = agent_skill_path(&base, p, global, event);
+                        println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
+                    }
+                    Err(e) => {
+                        eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
+                        provider_ok = false;
+                    }
                 }
-                Err(e) => {
-                    eprintln!("{}: Failed to install {}: {}", "Error".red(), p, e);
-                }
+            }
+            if provider_ok {
+                print_extra_installed(&base, p);
+                any_installed = true;
             }
         }
 
@@ -2603,16 +2967,23 @@ fn handle_agent_hook_install(
             print_agent_installed_info(&base, p, global);
             continue;
         }
-        match install_agent_provider(&base, p, global) {
-            Ok(_) => {
-                let path = agent_skill_path(&base, p, global);
-                println!("{} Installed {} → {}", "✓".green(), p, path.display());
-                print_extra_installed(&base, p);
-                any_installed = true;
+        warn_legacy_if_present(&base, p);
+        let mut provider_ok = true;
+        for event in events {
+            match install_agent_skill(&base, p, global, event) {
+                Ok(_) => {
+                    let path = agent_skill_path(&base, p, global, event);
+                    println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
+                }
+                Err(e) => {
+                    eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
+                    provider_ok = false;
+                }
             }
-            Err(e) => {
-                eprintln!("{}: Failed to install {}: {}", "Error".red(), p, e);
-            }
+        }
+        if provider_ok {
+            print_extra_installed(&base, p);
+            any_installed = true;
         }
     }
 
@@ -2628,7 +2999,7 @@ fn handle_agent_hook_install(
 ///
 /// When `global` is true, removes skills from the user home directory;
 /// otherwise removes from the project git root.
-fn handle_agent_hook_uninstall(yes: bool, global: bool) -> ExitCode {
+fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) -> ExitCode {
     use std::io::{self, Write};
 
     let base = if global {
@@ -2661,7 +3032,7 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool) -> ExitCode {
     if !yes {
         println!("{}", "Agent Integration:".bold());
         for p in &installed {
-            let path = agent_skill_path(&base, p, global);
+            let path = agent_skill_path(&base, p, global, &HookEvent::PreCommit);
             println!("  {} {} ({})", "✓".green(), p, path.display());
         }
         println!();
@@ -2678,14 +3049,22 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool) -> ExitCode {
 
     let mut any_removed = false;
     for p in &installed {
-        match uninstall_agent_provider(&base, p, global) {
-            Ok(_) => {
-                println!("{} Removed {} integration", "✓".green(), p);
-                any_removed = true;
+        let mut provider_ok = true;
+        for event in events {
+            let event_name = event.hook_filename();
+            match uninstall_agent_skill(&base, p, global, event) {
+                Ok(_) => {
+                    println!("{} Uninstalled {} ({}) skill", "✓".green(), p, event_name);
+                }
+                Err(e) => {
+                    eprintln!("{}: Failed to uninstall {} ({}): {}", "Error".red(), p, event_name, e);
+                    provider_ok = false;
+                }
             }
-            Err(e) => {
-                eprintln!("{}: Failed to remove {}: {}", "Error".red(), p, e);
-            }
+        }
+        if provider_ok {
+            uninstall_agent_legacy(&base, p);
+            any_removed = true;
         }
     }
 
@@ -2949,4 +3328,154 @@ fn print_commit_msg_error(first_line: &str) {
     eprintln!("│ To skip this check:                    │");
     eprintln!("│   git commit --no-verify               │");
     eprintln!("{}", "╰────────────────────────────────────────╯".red());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::commands::{HookEvent, HookTool};
+
+    #[test]
+    fn test_dedup_base_and_with_agent() {
+        let input = vec![HookTool::Git, HookTool::GitWithAgent];
+        let result = deduplicate_hook_types(input);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], HookTool::GitWithAgent));
+    }
+
+    #[test]
+    fn test_dedup_exact_duplicate() {
+        let input = vec![HookTool::Git, HookTool::Git];
+        let result = deduplicate_hook_types(input);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], HookTool::Git));
+    }
+
+    #[test]
+    fn test_dedup_agent_and_git_with_agent_coexist() {
+        let input = vec![HookTool::Agent, HookTool::GitWithAgent];
+        let result = deduplicate_hook_types(input);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_dedup_prek_pair() {
+        let input = vec![HookTool::Prek, HookTool::PrekWithAgent, HookTool::Agent];
+        let result = deduplicate_hook_types(input);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|t| matches!(t, HookTool::PrekWithAgent)));
+        assert!(result.iter().any(|t| matches!(t, HookTool::Agent)));
+    }
+
+    #[test]
+    fn test_dedup_events_removes_exact_dups() {
+        let input = vec![HookEvent::PreCommit, HookEvent::PreCommit, HookEvent::PrePush];
+        let result = deduplicate_hook_events(input);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_fallback_empty_types_and_events() {
+        let (types, events) = apply_yes_fallback(vec![], vec![]);
+        assert_eq!(types, vec![HookTool::Git]);
+        assert_eq!(events, vec![HookEvent::PreCommit]);
+    }
+
+    #[test]
+    fn test_fallback_agent_only_yes() {
+        let types = vec![HookTool::Agent];
+        let events: Vec<HookEvent> = vec![];
+        let (_, resolved_events) = apply_yes_fallback(types, events);
+        assert_eq!(resolved_events.len(), 3); // all three events
+    }
+
+    #[test]
+    fn test_fallback_mixed_yes() {
+        // Mixed types: apply_yes_fallback passes types through unchanged; events → [pre-commit]
+        // Note: dedup (git+agent coexist) is handled by deduplicate_hook_types separately
+        let types = vec![HookTool::Git, HookTool::Agent];
+        let events: Vec<HookEvent> = vec![];
+        let (resolved_types, resolved_events) = apply_yes_fallback(types, events);
+        assert!(resolved_types.iter().any(|t| matches!(t, HookTool::Git)));
+        assert!(resolved_types.iter().any(|t| matches!(t, HookTool::Agent)));
+        assert_eq!(resolved_types.len(), 2);
+        assert_eq!(resolved_events, vec![HookEvent::PreCommit]);
+    }
+
+    #[test]
+    fn test_fallback_types_provided_events_empty() {
+        // When types are explicit but events are empty, fallback to [pre-commit]
+        let types = vec![HookTool::Git];
+        let events: Vec<HookEvent> = vec![];
+        let (resolved_types, resolved_events) = apply_yes_fallback(types, events);
+        assert_eq!(resolved_types, vec![HookTool::Git]);
+        assert_eq!(resolved_events, vec![HookEvent::PreCommit]);
+    }
+
+    #[test]
+    fn test_lint_content_contains_linthis_s() {
+        let content = agent_event_content_generic(&HookEvent::PreCommit);
+        assert!(content.contains("linthis -s"));
+    }
+
+    #[test]
+    fn test_cmsg_content_contains_linthis_cmsg() {
+        let content = agent_event_content_generic(&HookEvent::CommitMsg);
+        assert!(content.contains("linthis cmsg"));
+        assert!(content.contains("feat"));
+    }
+
+    #[test]
+    fn test_review_content_contains_git_diff() {
+        let content = agent_event_content_generic(&HookEvent::PrePush);
+        assert!(content.contains("git diff"));
+        assert!(content.contains("Critical"));
+        assert!(content.contains(".linthis/review/"));
+    }
+
+    #[test]
+    fn test_skill_path_claude_per_event() {
+        use std::path::PathBuf;
+        let base = PathBuf::from("/repo");
+        let lint_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PreCommit);
+        assert_eq!(lint_path, PathBuf::from("/repo/.claude/skills/linthis/lint.md"));
+
+        let cmsg_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::CommitMsg);
+        assert_eq!(cmsg_path, PathBuf::from("/repo/.claude/skills/linthis/cmsg.md"));
+
+        let review_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PrePush);
+        assert_eq!(review_path, PathBuf::from("/repo/.claude/skills/linthis/review.md"));
+    }
+
+    #[test]
+    fn test_skill_path_claude_global() {
+        use std::path::PathBuf;
+        let base = PathBuf::from("/home/user");
+        let p = agent_skill_path(&base, &AgentProvider::Claude, true, &HookEvent::PreCommit);
+        assert_eq!(p, PathBuf::from("/home/user/.claude/skills/linthis/lint.md"));
+    }
+
+    #[test]
+    fn test_skill_path_cursor_per_event() {
+        use std::path::PathBuf;
+        let base = PathBuf::from("/repo");
+        let p = agent_skill_path(&base, &AgentProvider::Cursor, false, &HookEvent::PrePush);
+        assert_eq!(p, PathBuf::from("/repo/.cursor/rules/linthis-review.mdc"));
+    }
+
+    #[test]
+    fn test_skill_path_gemini_per_event() {
+        use std::path::PathBuf;
+        let base = PathBuf::from("/repo");
+        let p = agent_skill_path(&base, &AgentProvider::Gemini, false, &HookEvent::CommitMsg);
+        assert_eq!(p, PathBuf::from("/repo/.gemini/linthis-cmsg.md"));
+    }
+
+    #[test]
+    fn test_skill_path_codebuddy_per_event() {
+        use std::path::PathBuf;
+        let base = PathBuf::from("/repo");
+        let p = agent_skill_path(&base, &AgentProvider::Codebuddy, false, &HookEvent::PreCommit);
+        assert_eq!(p, PathBuf::from("/repo/.codebuddy/skills/linthis/lint.md"));
+    }
 }

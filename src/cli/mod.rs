@@ -15,7 +15,7 @@
 
 mod backup;
 mod cache;
-mod commands;
+pub mod commands;
 mod complexity;
 mod doctor;
 mod fix;
