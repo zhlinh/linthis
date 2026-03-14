@@ -1008,6 +1008,9 @@ pub enum PluginCommands {
         /// Sync global plugins (~/.linthis/config.toml)
         #[arg(short, long)]
         global: bool,
+        /// Plugin alias to sync (syncs all if omitted)
+        #[arg(value_name = "ALIAS")]
+        plugin: Option<String>,
     },
     /// Validate a plugin manifest
     Validate {
