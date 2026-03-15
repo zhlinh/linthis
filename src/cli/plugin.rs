@@ -659,10 +659,15 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             }
 
             if fail_count > 0 {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
+                return ExitCode::from(1);
             }
+
+            // Re-sync agent hook components so skill files reflect updated plugin content
+            println!();
+            println!("{} Syncing agent hooks...", "→".cyan());
+            crate::cli::hook::handle_hook_sync_after_plugin_sync();
+
+            ExitCode::SUCCESS
         }
 
         PluginCommands::Validate { path } => {
