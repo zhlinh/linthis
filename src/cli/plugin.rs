@@ -665,7 +665,7 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             // Re-sync agent hook components so skill files reflect updated plugin content
             println!();
             println!("{} Syncing agent hooks...", "→".cyan());
-            crate::cli::hook::handle_hook_sync_after_plugin_sync();
+            crate::cli::hook::handle_hook_sync_after_plugin_sync(global);
 
             ExitCode::SUCCESS
         }

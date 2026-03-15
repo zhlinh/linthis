@@ -616,13 +616,41 @@ fn build_global_hook_script_for_event(
     // "$1" from the command string so it is not embedded inside the variable
     // assignment (which would break with paths containing spaces).  We instead
     // call `$LINTHIS_CMD "$@"` at every invocation site so the argument is
-    // forwarded correctly.  For pre-commit / pre-push, "$@" expands to nothing,
-    // so the change is a no-op for those events.
+    // forwarded correctly.  For pre-commit the hook receives no args so "$@"
+    // is empty (a no-op).
     let linthis_cmd_var = match hook_event {
         HookEvent::CommitMsg => linthis_cmd
             .trim_end_matches(" \"$1\"")
             .to_string(),
         _ => linthis_cmd.clone(),
+    };
+
+    // For pre-push: git passes <remote-name> <remote-url> as positional args,
+    // NOT file paths.  linthis uses `-i <file>` for file inputs and has no
+    // positional-arg support, so we must compute the pushed files from git diff
+    // and build `-i` flags.  The original remote args are saved for delegating
+    // to any local hook (which expects them).
+    //
+    // For other events (pre-commit receives nothing, commit-msg receives $1 =
+    // message file via "$@") the existing "$@" passthrough is correct.
+    let (pre_push_preamble, local_hook_orig_args) = if matches!(hook_event, HookEvent::PrePush) {
+        let preamble = "# For pre-push: save remote args, compute pushed files as -i flags\n\
+             _REMOTE_NAME=\"$1\"\n\
+             _REMOTE_URL=\"$2\"\n\
+             _BASE=$(git rev-parse '@{u}' 2>/dev/null || \\\n\
+             \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
+             _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
+             set --\n\
+             if [ -n \"$_PUSHED_FILES\" ]; then\n\
+             \x20 while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
+             $_PUSHED_FILES\n\
+             _EOF_\n\
+             fi\n\
+             \n"
+            .to_string();
+        (preamble, "\"$_REMOTE_NAME\" \"$_REMOTE_URL\"")
+    } else {
+        (String::new(), "\"$@\"")
     };
 
     let error_msg = agent_fix_error_msg(hook_event);
@@ -707,7 +735,7 @@ fn build_global_hook_script_for_event(
          # linthis-hook\n\
          {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
-         \n\
+         {pre_push_preamble}\
          # Locate the local project hook (git-dir aware)\n\
          GIT_DIR=\"$(git rev-parse --git-dir 2>/dev/null)\"\n\
          LOCAL_HOOK=\"\"\n\
@@ -718,13 +746,13 @@ fn build_global_hook_script_for_event(
          if [ -f \"$LOCAL_HOOK\" ] && [ -x \"$LOCAL_HOOK\" ]; then\n\
          \x20 if grep -qE '^[^#]*linthis' \"$LOCAL_HOOK\" 2>/dev/null; then\n\
          \x20\x20\x20 # Local hook already calls linthis — delegate entirely\n\
-         \x20\x20\x20 exec \"$LOCAL_HOOK\" \"$@\"\n\
+         \x20\x20\x20 exec \"$LOCAL_HOOK\" {local_hook_orig_args}\n\
          \x20 else\n\
          \x20\x20\x20 # Local hook exists but has no linthis — run linthis first, then delegate\n\
          \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
          \x20\x20\x20 LINTHIS_EXIT=$?\n\
          {fix_local}\
-         \x20\x20\x20 \"$LOCAL_HOOK\" \"$@\"\n\
+         \x20\x20\x20 \"$LOCAL_HOOK\" {local_hook_orig_args}\n\
          \x20\x20\x20 LOCAL_EXIT=$?\n\
          {review}\
          \x20\x20\x20 [ $LINTHIS_EXIT -ne 0 ] && exit $LINTHIS_EXIT\n\
@@ -740,7 +768,9 @@ fn build_global_hook_script_for_event(
          fi\n",
         timer = timer_block,
         linthis = linthis_cmd_var,
+        pre_push_preamble = pre_push_preamble,
         event = event_name,
+        local_hook_orig_args = local_hook_orig_args,
         fix_local = fix_block,
         fix_direct = fix_block_direct,
         review = review_block,
@@ -2211,7 +2241,7 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
         git diff $BASE_SHA..HEAD --stat; git diff $BASE_SHA..HEAD --name-status; git diff $BASE_SHA..HEAD. \
         (2) Review for Critical (security, data loss, broken API, logic errors), \
         Important (missing error handling, performance), and Minor issues. \
-        (3) Write the review to .linthis/review/review-$(date +%Y%m%d-%H%M%S).md \
+        (3) Write the review to .linthis/review/result/review-$(date +%Y%m%d-%H%M%S).md \
         (create the directory if needed). \
         (4) If Critical issues found: print '❌ Push blocked — fix Critical issues first' and exit 1. \
         If Important issues only: print '⚠️ Push with caution'. \
@@ -2245,6 +2275,12 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
          {agent}\n\
          REVIEW_EXIT=$?\n\
          stop_timer\n\
+         \n\
+         # Show path to saved review report if one was written\n\
+         REVIEW_REPORT=$(ls -t .linthis/review/result/review-*.md 2>/dev/null | head -1)\n\
+         if [ -n \"$REVIEW_REPORT\" ]; then\n\
+         \x20 echo \"[linthis] Review saved: $REVIEW_REPORT\" >&2\n\
+         fi\n\
          \n\
          exit $REVIEW_EXIT\n",
         timer = timer_fns,
@@ -2660,7 +2696,7 @@ git diff "$BASE_SHA".."$HEAD_SHA"
 
 ### Step 4 — Write structured review
 
-Output to terminal AND write to `.linthis/review/review-<YYYYMMDD-HHMMSS>.md`:
+Output to terminal AND write to `.linthis/review/result/review-<YYYYMMDD-HHMMSS>.md`:
 
 ```markdown
 # Code Review — <HEAD_SHA>
@@ -2684,7 +2720,7 @@ Files: N changed, +X -Y
 BLOCK / PROCEED WITH FIXES / APPROVED
 ```
 
-Create `.linthis/review/` directory if it doesn't exist.
+Create `.linthis/review/result/` directory if it doesn't exist.
 
 ### Step 5 — Gate the push
 
@@ -3024,10 +3060,14 @@ fn install_agent_plugin_from_dir(
 ///
 /// Returns `Ok(true)` if an override was found and installed, `Ok(false)` to fall through
 /// to the built-in generator, or `Err` on a hard resolution failure.
+///
+/// When `global` is true, tier-1 (project-local fixed paths) is skipped but tier-2
+/// (TOML agent-plugins config) still applies so globally installed plugins are synced.
 fn resolve_and_install_agent_plugin_override(
     base: &std::path::Path,
     provider: &AgentProvider,
     event: &HookEvent,
+    global: bool,
 ) -> Result<bool, String> {
     use linthis::config::Config;
     use linthis::hooks::resolver;
@@ -3035,13 +3075,15 @@ fn resolve_and_install_agent_plugin_override(
     let plugin_id = agent_plugin_id(event);
     let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-    // Tier 1: fixed-path plugin directory
-    if let Some(plugin_dir) = resolver::fixed_agent_plugin_dir(&project_root, plugin_id) {
-        install_agent_plugin_from_dir(&plugin_dir, base, provider, event)?;
-        return Ok(true);
+    // Tier 1: fixed-path plugin directory (project-local only, skip for global installs)
+    if !global {
+        if let Some(plugin_dir) = resolver::fixed_agent_plugin_dir(&project_root, plugin_id) {
+            install_agent_plugin_from_dir(&plugin_dir, base, provider, event)?;
+            return Ok(true);
+        }
     }
 
-    // Tier 2: TOML agent-plugins entry
+    // Tier 2: TOML agent-plugins entry (applies to both local and global installs)
     let config = Config::load_merged(&project_root);
     if let Some(entry) = config.hooks.agent_plugins.get(plugin_id) {
         let resolved = resolver::resolve_to_dir(&entry.source, &project_root, &config.hooks.marketplaces)
@@ -3063,21 +3105,20 @@ fn install_agent_skill(
 ) -> Result<(), String> {
     // ── Tier-1/2 override check ──────────────────────────────────────────
     // Agent plugins bundle skill + command + memory; check before built-in generation.
-    // Global install skips overrides (project-local fixed paths don't apply globally).
-    if !global {
-        match resolve_and_install_agent_plugin_override(base, provider, event) {
-            Ok(true) => {
-                // Override installed skill/command/memory; still install stop hook for pre-commit.
-                if matches!(event, HookEvent::PreCommit) {
-                    if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
-                        install_agent_stop_hook(base, provider, &settings_path)?;
-                    }
+    // Tier-1 (project-local fixed paths) is skipped for global installs; tier-2
+    // (TOML agent-plugins config) applies to both local and global installs.
+    match resolve_and_install_agent_plugin_override(base, provider, event, global) {
+        Ok(true) => {
+            // Override installed skill/command/memory; still install stop hook for pre-commit.
+            if matches!(event, HookEvent::PreCommit) {
+                if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+                    install_agent_stop_hook(base, provider, &settings_path)?;
                 }
-                return Ok(());
             }
-            Ok(false) => {}            // fall through to built-in
-            Err(e) => return Err(e),   // hard error; abort
+            return Ok(());
         }
+        Ok(false) => {}            // fall through to built-in
+        Err(e) => return Err(e),   // hard error; abort
     }
     // ── End override check ───────────────────────────────────────────────
 
@@ -4118,7 +4159,26 @@ fn handle_hook_run(
                 // Re-entrant: we were delegated to from a parent hook invocation.
                 // Run linthis directly without further local-hook delegation.
                 let linthis_cmd = build_hook_command(event, &None);
-                format!("#!/bin/sh\n{linthis_cmd} \"$@\"\n")
+                if matches!(event, HookEvent::PrePush) {
+                    // For pre-push, $@ = remote name/url (NOT file paths).
+                    // Compute the pushed files from git diff and pass with -i.
+                    format!(
+                        "#!/bin/sh\n\
+                         _BASE=$(git rev-parse '@{{u}}' 2>/dev/null || \\\n\
+                         \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
+                         _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
+                         if [ -n \"$_PUSHED_FILES\" ]; then\n\
+                         \x20 set --\n\
+                         \x20 while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
+                         $_PUSHED_FILES\n\
+                         _EOF_\n\
+                         \x20 {linthis} \"$@\"\n\
+                         fi\n",
+                        linthis = linthis_cmd
+                    )
+                } else {
+                    format!("#!/bin/sh\n{linthis_cmd} \"$@\"\n")
+                }
             } else {
                 // First invocation: full script that handles local-hook delegation.
                 build_global_hook_script_for_event(event, &None, None)
@@ -4536,11 +4596,13 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
 }
 
 /// Called automatically after `linthis plugin sync` to refresh agent skill
-/// files for all locally installed agent hooks.
+/// files for installed agent hooks.
 ///
+/// Mirrors the `--global` flag from the `plugin sync` command so that
+/// `plugin sync -g` re-syncs global hooks and `plugin sync` re-syncs local hooks.
 /// Uses non-interactive defaults (equivalent to `linthis hook sync -y`).
-pub fn handle_hook_sync_after_plugin_sync() {
-    let code = handle_hook_sync(false, true);
+pub fn handle_hook_sync_after_plugin_sync(global: bool) {
+    let code = handle_hook_sync(global, true);
     if code != 0 {
         eprintln!("{}: Agent hook sync encountered errors (exit {})", "Warning".yellow(), code);
     }
