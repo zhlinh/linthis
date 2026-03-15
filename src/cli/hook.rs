@@ -2229,11 +2229,14 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
          \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
          _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
          \n\
-         # Run lint check on pushed files only (informational, non-blocking)\n\
+         # Run lint check on pushed files only (skip if no file changes, e.g. empty commits)\n\
+         # Build -i <file> args for each pushed file (linthis uses -i, not positional paths)\n\
          if [ -n \"$_PUSHED_FILES\" ]; then\n\
-         \x20 echo \"$_PUSHED_FILES\" | xargs {linthis}\n\
-         else\n\
-         \x20 {linthis}\n\
+         \x20 set --\n\
+         \x20 while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
+         $_PUSHED_FILES\n\
+         _EOF_\n\
+         \x20 {linthis} \"$@\"\n\
          fi\n\
          \n\
          # Always invoke agent code review before push\n\
