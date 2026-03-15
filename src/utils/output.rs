@@ -424,6 +424,85 @@ pub fn format_result_hook(result: &RunResult, hook_type: Option<&str>) -> String
     format_result_hook_with_width(result, hook_type, None)
 }
 
+/// Build a footer showing the global and local git hook file paths.
+pub fn format_hook_paths_footer_pub(hook_type: Option<&str>) -> String {
+    format_hook_paths_footer(hook_type)
+}
+
+/// Extract `--type <value>` from a thin-wrapper hook script, if present.
+fn extract_hook_script_type(path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    // thin wrapper format: exec linthis hook run --event <e> --type <t> [...]
+    content
+        .split("--type ")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .map(|s| s.to_string())
+}
+
+fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
+    let hook_filename = match hook_type {
+        Some("pre-push") => "pre-push",
+        Some("commit-msg") => "commit-msg",
+        _ => "pre-commit",
+    };
+
+    let mut lines = Vec::new();
+
+    // Global: check core.hooksPath
+    if let Some(p) = Command::new("git")
+        .args(["config", "--global", "core.hooksPath"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if s.is_empty() { return None; }
+                let p = std::path::PathBuf::from(s).join(hook_filename);
+                if p.exists() { Some(p) } else { None }
+            } else {
+                None
+            }
+        })
+    {
+        let type_suffix = extract_hook_script_type(&p)
+            .map(|t| format!(" (--type {})", t))
+            .unwrap_or_default();
+        lines.push(format!("  Global: {}{}", p.display(), type_suffix).dimmed().to_string());
+    }
+
+    // Local: check .git/hooks/{event}
+    if let Some(p) = Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                let git_dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if git_dir.is_empty() { return None; }
+                let p = std::path::PathBuf::from(git_dir).join("hooks").join(hook_filename);
+                if p.exists() { Some(p) } else { None }
+            } else {
+                None
+            }
+        })
+    {
+        let type_suffix = extract_hook_script_type(&p)
+            .map(|t| format!(" (--type {})", t))
+            .unwrap_or_default();
+        lines.push(format!("  Local:  {}{}", p.display(), type_suffix).dimmed().to_string());
+    }
+
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("\n{}", lines.join("\n"))
+}
+
 /// Format the entire run result for git hook output with configurable width.
 ///
 /// # Arguments
@@ -436,9 +515,9 @@ pub fn format_result_hook_with_width(
     config_width: Option<u32>,
 ) -> String {
     let hook_name = match hook_type {
-        Some("pre-push") => "Pre-push",
-        Some("commit-msg") => "Commit-msg",
-        _ => "Pre-commit",
+        Some("pre-push") => "📤 [Pre-push]",
+        Some("commit-msg") => "📝 [Commit-msg]",
+        _ => "🔍 [Pre-commit]",
     };
     let skip_command = match hook_type {
         Some("pre-push") => "git push --no-verify",
@@ -483,13 +562,19 @@ pub fn format_result_hook_with_width(
         let mut output = String::new();
         output.push_str(&format!("{}\n", top_border.green()));
         let header = format!("{} Linthis {} Hook Passed", "✓", hook_name);
-        output.push_str(&format!("{}\n", pad_line(&header, 0).green()));
+        output.push_str(&format!("{}\n", pad_line(&header, 1).green()));
         output.push_str(&format!("{}\n", mid_border.green()));
-        output.push_str(&format!("{}\n", pad_line("All checks passed!", 0).green()));
+        let checks_msg = if hook_type == Some("pre-push") {
+            "All reviews finish"
+        } else {
+            "All checks passed!"
+        };
+        output.push_str(&format!("{}\n", pad_line(checks_msg, 0).green()));
         output.push_str(&format!("{}\n", pad_line("", 0)));
         output.push_str(&format!("{}\n", pad_line(&format!("Files checked:   {:>3}", result.total_files), 0)));
         output.push_str(&format!("{}\n", pad_line(&format!("Files formatted: {:>3}", result.files_formatted), 0)));
         output.push_str(&format!("{}", bot_border.green()));
+        output.push_str(&format_hook_paths_footer(hook_type));
         return output;
     }
 
@@ -498,7 +583,7 @@ pub fn format_result_hook_with_width(
     // Header
     output.push_str(&format!("{}\n", top_border.red()));
     let header = format!("X Linthis {} Hook Failed", hook_name);
-    output.push_str(&format!("{}\n", pad_line(&header, 0).red()));
+    output.push_str(&format!("{}\n", pad_line(&header, 1).red()));
     output.push_str(&format!("{}\n", mid_border.red()));
 
     // Summary line
@@ -581,6 +666,7 @@ pub fn format_result_hook_with_width(
     output.push_str(&format!("{}\n", pad_line("To skip this check:", 0)));
     output.push_str(&format!("{}\n", pad_line(&format!("  {}", skip_command), 0)));
     output.push_str(&format!("{}", bot_border.red()));
+    output.push_str(&format_hook_paths_footer(hook_type));
 
     output
 }

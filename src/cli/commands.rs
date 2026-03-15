@@ -216,6 +216,19 @@ impl HookTool {
     pub fn has_agent_fix(&self) -> bool {
         matches!(self, HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent)
     }
+
+    /// Get the CLI string representation (kebab-case, matches clap ValueEnum)
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HookTool::Git => "git",
+            HookTool::GitWithAgent => "git-with-agent",
+            HookTool::Agent => "agent",
+            HookTool::Prek => "prek",
+            HookTool::PrekWithAgent => "prek-with-agent",
+            HookTool::PreCommit => "pre-commit",
+            HookTool::PreCommitWithAgent => "pre-commit-with-agent",
+        }
+    }
 }
 
 /// AI agent CLI providers for automatic fix on hook failure (--type *-with-agent)
@@ -236,6 +249,21 @@ pub enum AgentFixProvider {
     Auggie,
     /// CodeBuddy CLI (codebuddy -p "prompt")
     Codebuddy,
+}
+
+impl AgentFixProvider {
+    /// Get the CLI string representation (matches clap ValueEnum, parseable by resolve_agent_fix_provider)
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgentFixProvider::Claude    => "claude",
+            AgentFixProvider::Codex     => "codex",
+            AgentFixProvider::Gemini    => "gemini",
+            AgentFixProvider::Cursor    => "cursor",
+            AgentFixProvider::Droid     => "droid",
+            AgentFixProvider::Auggie    => "auggie",
+            AgentFixProvider::Codebuddy => "codebuddy",
+        }
+    }
 }
 
 impl std::fmt::Display for AgentFixProvider {
@@ -307,6 +335,11 @@ impl HookEvent {
             HookEvent::PrePush => "pre-push",
             HookEvent::CommitMsg => "commit-msg",
         }
+    }
+
+    /// Get the CLI string representation (kebab-case, matches clap ValueEnum)
+    pub fn as_str(&self) -> &'static str {
+        self.hook_filename()
     }
 
     /// Get human-readable description
@@ -934,9 +967,19 @@ pub enum HookCommands {
         #[arg(long = "event", value_name = "EVENT", value_delimiter = ',', num_args = 0..)]
         hook_events: Vec<HookEvent>,
 
-        /// Uninstall all hooks
-        #[arg(long)]
+        /// Uninstall all hooks (all types × all events)
+        #[arg(long, conflicts_with_all = ["all_types", "all_events"])]
         all: bool,
+
+        /// Uninstall all hook types for the specified --event(s).
+        /// Requires at least one --event. Equivalent to specifying every --type.
+        #[arg(long, conflicts_with = "all", requires = "hook_events")]
+        all_types: bool,
+
+        /// Uninstall all hook events for the specified --type(s).
+        /// Requires at least one --type. Equivalent to specifying every --event.
+        #[arg(long, conflicts_with = "all", requires = "hook_types")]
+        all_events: bool,
 
         /// Non-interactive mode
         #[arg(short = 'y', long)]
@@ -959,6 +1002,43 @@ pub enum HookCommands {
     CommitMsgCheck {
         /// Path to commit message file, or the commit message string directly.
         msg_or_file: String,
+    },
+    /// Execute hook logic at runtime (used internally by thin wrapper scripts)
+    ///
+    /// This command is invoked by the thin wrapper scripts installed in .git/hooks/.
+    /// It generates and executes the full hook script dynamically from the current
+    /// linthis binary, so hook logic is always up-to-date after binary upgrades.
+    #[command(hide = true)]
+    Run {
+        /// Git hook event
+        #[arg(long)]
+        event: HookEvent,
+        /// Hook tool type
+        #[arg(long = "type", value_name = "TYPE")]
+        hook_type: HookTool,
+        /// AI provider (for *-with-agent types)
+        #[arg(long)]
+        provider: Option<String>,
+        /// Run against global hooks
+        #[arg(short = 'g', long)]
+        global: bool,
+        /// Passthrough arguments from the hook invocation (e.g. commit message file path)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        hook_args: Vec<String>,
+    },
+    /// Re-sync installed hooks (thin wrapper scripts + agent skill components)
+    ///
+    /// Re-generates hook scripts and refreshes agent skills (CLAUDE.md, skill files, etc.)
+    /// from the current linthis binary. Useful after upgrading linthis or plugins.
+    ///
+    /// Reads installed hook parameters from ~/.linthis/installed-hooks.toml.
+    Sync {
+        /// Re-sync global hooks instead of local project hooks
+        #[arg(short = 'g', long)]
+        global: bool,
+        /// Non-interactive (skip confirmation prompts)
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 }
 

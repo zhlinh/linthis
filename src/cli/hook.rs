@@ -14,10 +14,105 @@
 //! git pre-commit hooks for linthis integration.
 
 use colored::Colorize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use super::commands::{AgentFixProvider, AgentProvider, HookCommands, HookEvent, HookTool};
+
+// =============================================================================
+// Installed hooks metadata (persisted to ~/.linthis/installed-hooks.toml)
+// =============================================================================
+
+/// Record of a single installed hook (stored in installed-hooks.toml).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct InstalledHook {
+    /// "local" or "global"
+    scope: String,
+    /// Absolute path to git repo root (empty for global scope)
+    project: String,
+    /// Hook event name (e.g. "pre-commit", "commit-msg")
+    event: String,
+    /// Hook tool name (e.g. "git", "git-with-agent")
+    hook_type: String,
+    /// AI provider name (empty string if none)
+    provider: String,
+}
+
+/// Top-level structure of ~/.linthis/installed-hooks.toml.
+#[derive(Serialize, Deserialize, Default, Debug)]
+struct InstalledHooksFile {
+    #[serde(default)]
+    hooks: Vec<InstalledHook>,
+}
+
+/// Returns the path to the installed-hooks.toml file.
+fn installed_hooks_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".linthis").join("installed-hooks.toml"))
+}
+
+/// Load the installed-hooks.toml file (returns empty struct if missing or unreadable).
+fn load_installed_hooks() -> InstalledHooksFile {
+    let path = match installed_hooks_path() {
+        Some(p) => p,
+        None => return InstalledHooksFile::default(),
+    };
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return InstalledHooksFile::default(),
+    };
+    toml::from_str(&raw).unwrap_or_default()
+}
+
+/// Upsert a hook entry in ~/.linthis/installed-hooks.toml.
+///
+/// Deduplicates by (scope, project, event, hook_type): if an entry with the
+/// same key already exists its provider field is updated; otherwise a new
+/// entry is appended.
+fn save_installed_hook(
+    scope: &str,
+    project: &str,
+    event: &HookEvent,
+    hook_type: &HookTool,
+    provider: Option<&str>,
+) {
+    let path = match installed_hooks_path() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let mut file = load_installed_hooks();
+    let event_str = event.as_str().to_string();
+    let hook_type_str = hook_type.as_str().to_string();
+    let provider_str = provider.unwrap_or("").to_string();
+
+    // Upsert: update existing entry or append
+    let existing = file.hooks.iter_mut().find(|h| {
+        h.scope == scope
+            && h.project == project
+            && h.event == event_str
+            && h.hook_type == hook_type_str
+    });
+    if let Some(entry) = existing {
+        entry.provider = provider_str;
+    } else {
+        file.hooks.push(InstalledHook {
+            scope: scope.to_string(),
+            project: project.to_string(),
+            event: event_str,
+            hook_type: hook_type_str,
+            provider: provider_str,
+        });
+    }
+
+    // Write back
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(raw) = toml::to_string_pretty(&file) {
+        let _ = std::fs::write(&path, raw);
+    }
+}
 
 /// Deduplicate hook types: remove exact dups; for base/with-agent pairs, keep with-agent.
 fn deduplicate_hook_types(types: Vec<HookTool>) -> Vec<HookTool> {
@@ -202,10 +297,10 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             };
             handle_hook_install(hook_types, hook_events, force, yes, global, provider, args)
         }
-        HookCommands::Uninstall { hook_types, hook_events, all, yes, global } => {
-            // --all: handler ignores vecs (uninstalls everything).
+        HookCommands::Uninstall { hook_types, hook_events, all, all_types, all_events, yes, global } => {
+            // --all / --all-types / --all-events: skip interactive prompts.
             // -y: skip prompt, use whatever was explicitly specified (no default fallback for uninstall).
-            let (types, events) = if all || yes {
+            let (types, events) = if all || all_types || all_events || yes {
                 (
                     deduplicate_hook_types(hook_types),
                     deduplicate_hook_events(hook_events),
@@ -227,7 +322,7 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
                 } else { events };
                 (types, events)
             };
-            handle_hook_uninstall(types, events, all, yes, global)
+            handle_hook_uninstall(types, events, all, all_types, all_events, yes, global)
         }
         HookCommands::Status => {
             handle_hook_status()
@@ -237,6 +332,14 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
         }
         HookCommands::CommitMsgCheck { msg_or_file } => {
             handle_commit_msg_check(&msg_or_file, false, None)
+        }
+        HookCommands::Run { event, hook_type, provider, global, hook_args } => {
+            let code = handle_hook_run(&event, &hook_type, provider.as_deref(), global, &hook_args);
+            ExitCode::from(code as u8)
+        }
+        HookCommands::Sync { global, yes } => {
+            let code = handle_hook_sync(global, yes);
+            ExitCode::from(code as u8)
         }
     }
 }
@@ -252,6 +355,20 @@ fn handle_hook_install(
     args: Option<String>,
 ) -> ExitCode {
     let mut overall = ExitCode::SUCCESS;
+
+    // If any selected type needs an agent-fix provider, resolve it once upfront
+    // so the interactive prompt is shown only once regardless of how many events
+    // are being installed.
+    let preresolved_fix_provider: Option<AgentFixProvider> =
+        if hook_types.iter().any(|t| t.has_agent_fix()) {
+            match resolve_agent_fix_provider(provider.as_deref(), yes) {
+                Ok(p)  => Some(p),
+                Err(e) => return e,
+            }
+        } else {
+            None
+        };
+
     for hook_type in &hook_types {
         for hook_event in &hook_events {
             let code = handle_hook_install_single(
@@ -261,6 +378,7 @@ fn handle_hook_install(
                 yes,
                 global,
                 provider.clone(),
+                preresolved_fix_provider.clone(),
                 args.clone(),
             );
             if code != ExitCode::SUCCESS {
@@ -279,19 +397,24 @@ fn handle_hook_install_single(
     yes: bool,
     global: bool,
     provider: Option<String>,
+    preresolved_fix_provider: Option<AgentFixProvider>,
     args: Option<String>,
 ) -> ExitCode {
     use std::io::{self, Write};
 
     // *-with-agent types: install base hook + agent fix fallback
     if hook_type.as_ref().map(|t| t.has_agent_fix()).unwrap_or(false) {
-        let fix_provider = match resolve_agent_fix_provider(provider.as_deref(), yes) {
-            Ok(p)  => p,
-            Err(e) => return e,
+        let fix_provider = if let Some(p) = preresolved_fix_provider {
+            p
+        } else {
+            match resolve_agent_fix_provider(provider.as_deref(), yes) {
+                Ok(p)  => p,
+                Err(e) => return e,
+            }
         };
         let base = hook_type.as_ref().unwrap().base_tool().clone();
         return match &base {
-            HookTool::Git => handle_git_with_agent_install(&hook_event, force, &fix_provider, &args),
+            HookTool::Git => handle_git_with_agent_install(&hook_event, force, global, yes, &fix_provider, &args),
             HookTool::Prek | HookTool::PreCommit => {
                 handle_precommit_with_agent_install(&base, &hook_event, force, &fix_provider, &args)
             }
@@ -343,7 +466,9 @@ fn handle_hook_install_single(
     let hook_path = git_root.join(".git/hooks").join(hook_filename);
 
     // Check for existing hook
-    if hook_path.exists() && !force {
+    let is_empty_hook = hook_path.exists()
+        && std::fs::read_to_string(&hook_path).map(|s| s.trim().is_empty()).unwrap_or(false);
+    if hook_path.exists() && !force && !is_empty_hook {
         println!("{}: {} already exists", "Warning".yellow(), hook_path.display());
 
         // Read and analyze existing hook
@@ -450,6 +575,35 @@ fn global_hooks_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".config/git/hooks"))
 }
 
+/// Build a thin wrapper script that delegates to `linthis hook run` at runtime.
+///
+/// The wrapper is 3 lines:
+/// ```sh
+/// #!/bin/sh
+/// exec linthis hook run --event <event> --type <type> [--provider <p>] [--global] "$@"
+/// ```
+/// This means hook logic always comes from the installed linthis binary,
+/// so upgrading linthis automatically updates hook behaviour without reinstallation.
+fn build_thin_wrapper_script(
+    event: &HookEvent,
+    hook_type: &HookTool,
+    provider: Option<&str>,
+    global: bool,
+) -> String {
+    let provider_arg = provider
+        .filter(|p| !p.is_empty())
+        .map(|p| format!(" --provider {p}"))
+        .unwrap_or_default();
+    let global_arg = if global { " --global" } else { "" };
+    format!(
+        "#!/bin/sh\nexec linthis hook run --event {} --type {}{}{} \"$@\"\n",
+        event.as_str(),
+        hook_type.as_str(),
+        provider_arg,
+        global_arg,
+    )
+}
+
 /// Build the global hook script with the hook event name substituted.
 fn build_global_hook_script_for_event(
     hook_event: &HookEvent,
@@ -472,11 +626,20 @@ fn build_global_hook_script_for_event(
     };
 
     let error_msg = agent_fix_error_msg(hook_event);
+    let new_msg_print = if matches!(hook_event, HookEvent::CommitMsg) {
+        agent_fix_show_fixed_cmsg("   ")
+    } else {
+        String::new()
+    };
     let fix_block = match fix_provider {
         None => String::new(),
         Some(p) => {
-            let prompt = agent_fix_prompt_for_event(hook_event);
-            let agent_cmd = agent_fix_headless_cmd(p, &prompt);
+            let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
+                agent_fix_headless_cmd_commit_msg(p)
+            } else {
+                let prompt = agent_fix_prompt_for_event(hook_event);
+                agent_fix_headless_cmd(p, &prompt)
+            };
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
                  \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
@@ -486,18 +649,24 @@ fn build_global_hook_script_for_event(
                  \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
                  \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
                  \x20\x20\x20 LINTHIS_EXIT=$?\n\
+                 {new_msg_print}\
                  \x20 fi\n",
                 provider = p,
                 agent = agent_cmd,
                 error_msg = error_msg,
+                new_msg_print = new_msg_print,
             )
         }
     };
     let fix_block_direct = match fix_provider {
         None => String::new(),
         Some(p) => {
-            let prompt = agent_fix_prompt_for_event(hook_event);
-            let agent_cmd = agent_fix_headless_cmd(p, &prompt);
+            let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
+                agent_fix_headless_cmd_commit_msg(p)
+            } else {
+                let prompt = agent_fix_prompt_for_event(hook_event);
+                agent_fix_headless_cmd(p, &prompt)
+            };
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
                  \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
@@ -507,10 +676,12 @@ fn build_global_hook_script_for_event(
                  \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
                  \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
                  \x20\x20\x20 LINTHIS_EXIT=$?\n\
+                 {new_msg_print}\
                  \x20 fi\n",
                 provider = p,
                 agent = agent_cmd,
                 error_msg = error_msg,
+                new_msg_print = new_msg_print,
             )
         }
     };
@@ -638,7 +809,9 @@ fn handle_global_hook_install(
     // Check if already exists
     if hook_path.exists() && !force {
         if let Ok(existing) = fs::read_to_string(&hook_path) {
-            if existing.contains("# linthis-hook") {
+            if existing.trim().is_empty() {
+                // Empty file — treat as not installed, fall through to overwrite
+            } else if existing.contains("# linthis-hook") || existing.contains("linthis hook run") {
                 println!(
                     "{}: Global {} hook already installed at {}",
                     "Info".cyan(),
@@ -646,14 +819,15 @@ fn handle_global_hook_install(
                     hook_path.display()
                 );
                 return ExitCode::SUCCESS;
+            } else {
+                eprintln!(
+                    "{}: {} already exists (not by linthis). Use --force to overwrite.",
+                    "Warning".yellow(),
+                    hook_path.display()
+                );
+                return ExitCode::from(1);
             }
         }
-        eprintln!(
-            "{}: {} already exists (not by linthis). Use --force to overwrite.",
-            "Warning".yellow(),
-            hook_path.display()
-        );
-        return ExitCode::from(1);
     }
 
     // Create directory
@@ -662,8 +836,13 @@ fn handle_global_hook_install(
         return ExitCode::from(2);
     }
 
-    // Generate script
-    let content = build_global_hook_script_for_event(hook_event, args, fix_provider.as_ref());
+    // Determine the effective hook_type for the thin wrapper
+    let effective_hook_type = hook_type.clone().unwrap_or(HookTool::Git);
+    let provider_str = fix_provider.as_ref().map(|p| p.as_str());
+
+    // Generate thin wrapper script (full logic runs from binary at hook execution time)
+    let content = build_thin_wrapper_script(hook_event, &effective_hook_type, provider_str, true);
+    let _ = args; // args are embedded in binary logic at run time, not in the thin wrapper
 
     // Write hook file
     match fs::write(&hook_path, &content) {
@@ -694,6 +873,7 @@ fn handle_global_hook_install(
         Ok(status) if status.success() => {
             println!("{} Installed global {} hook → {}", "✓".green(), hook_filename, hook_path.display());
             println!("{} Set {} = {}", "✓".green(), "core.hooksPath".cyan(), hooks_dir_str);
+            println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
             println!();
             println!("  {}", "How it works (Strategy B — local takes priority):".dimmed());
             println!("  {} If local hook has linthis → global delegates entirely", "·".dimmed());
@@ -709,6 +889,9 @@ fn handle_global_hook_install(
             );
         }
     }
+
+    // Persist metadata for `linthis hook sync`
+    save_installed_hook("global", "", hook_event, &effective_hook_type, provider_str);
 
     ExitCode::SUCCESS
 }
@@ -966,17 +1149,54 @@ fn handle_hook_status() -> ExitCode {
 }
 
 /// Uninstall git hooks for the given types × events combinations.
+///
+/// Flag semantics:
+/// - `--all`        : uninstall every type × every event (both git files and agent hooks)
+/// - `--all-types`  : uninstall every type for the specified `--event`(s)
+/// - `--all-events` : uninstall every event for the specified `--type`(s)
 fn handle_hook_uninstall(
     hook_types: Vec<HookTool>,
     hook_events: Vec<HookEvent>,
     all: bool,
+    all_types: bool,
+    all_events: bool,
     yes: bool,
     global: bool,
 ) -> ExitCode {
+    const ALL_EVENTS: [HookEvent; 3] = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
+
+    // Resolve effective events: --all / --all-events expand to all three events.
+    let effective_events: Vec<HookEvent> = if all || all_events {
+        ALL_EVENTS.to_vec()
+    } else {
+        hook_events.clone()
+    };
+
+    // Resolve whether agent hooks should be included:
+    // --all / --all-types always include agent; otherwise only if Agent is in the type list.
+    let include_agent = all || all_types || hook_types.iter().any(|t| matches!(t, HookTool::Agent));
+
+    // Resolve whether git hook files should be touched:
+    // --all / --all-types always include git hooks; otherwise only if a non-agent type is listed.
+    let include_git = all || all_types || hook_types.iter().any(|t| !matches!(t, HookTool::Agent));
+
     if global {
-        // For global uninstall, use the first event (or None for all)
-        let hook_event = if all { None } else { hook_events.into_iter().next() };
-        return handle_global_hook_uninstall(hook_event, all, yes);
+        let mut result = ExitCode::SUCCESS;
+        if include_git {
+            // When all events are needed, delegate to handle_global_hook_uninstall with all=true
+            // (it iterates all three events internally). Otherwise iterate effective_events explicitly.
+            if all || all_events {
+                result = handle_global_hook_uninstall(None, true, yes);
+            } else {
+                for event in &effective_events {
+                    result = handle_global_hook_uninstall(Some(event.clone()), false, yes);
+                }
+            }
+        }
+        if include_agent {
+            handle_agent_hook_uninstall(yes, true, &effective_events);
+        }
+        return result;
     }
 
     // Find git root
@@ -988,52 +1208,29 @@ fn handle_hook_uninstall(
         }
     };
 
-    if all {
-        // Uninstall all hooks (including agent hooks)
-        let all_hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
-        let mut any_uninstalled = false;
+    let mut any_uninstalled = false;
 
-        for event in &all_hook_events {
+    if include_git {
+        for event in &effective_events {
             let result = uninstall_single_hook(&git_root, event, yes);
             if result == ExitCode::SUCCESS {
                 any_uninstalled = true;
             }
         }
+    }
 
-        // Also uninstall agent hooks
-        let agent_result = handle_agent_hook_uninstall(yes, false, &all_hook_events);
+    if include_agent {
+        let agent_result = handle_agent_hook_uninstall(yes, false, &effective_events);
         if agent_result == ExitCode::SUCCESS {
             any_uninstalled = true;
         }
-
-        if !any_uninstalled {
-            println!("{}: No hooks with linthis found", "Info".cyan());
-        }
-
-        return ExitCode::SUCCESS;
     }
 
-    // If Agent type is in the list, uninstall agent hooks
-    let has_agent = hook_types.iter().any(|t| matches!(t, HookTool::Agent));
-    if has_agent {
-        return handle_agent_hook_uninstall(yes, global, &hook_events);
+    if !any_uninstalled {
+        println!("{}: No hooks with linthis found", "Info".cyan());
     }
 
-    // Uninstall specific hooks: iterate over events (defensive fallback to PreCommit if empty)
-    let events = if hook_events.is_empty() {
-        vec![HookEvent::PreCommit]
-    } else {
-        hook_events
-    };
-
-    let mut overall = ExitCode::SUCCESS;
-    for event in &events {
-        let result = uninstall_single_hook(&git_root, event, yes);
-        if result != ExitCode::SUCCESS {
-            overall = result;
-        }
-    }
-    overall
+    ExitCode::SUCCESS
 }
 
 /// Uninstall a single hook
@@ -1308,6 +1505,88 @@ pub fn find_git_root() -> Option<PathBuf> {
     }
 }
 
+/// Format a `HookSource` as a TOML inline-table string, e.g. `{ plugin = "lt", file = "..." }`.
+fn format_hook_source(source: &linthis::config::HookSource) -> String {
+    use linthis::config::HookSource;
+    match source {
+        HookSource::Plugin { plugin, file } => {
+            format!("{{ plugin = \"{}\", file = \"{}\" }}", plugin, file)
+        }
+        HookSource::File { file } => {
+            format!("{{ file = \"{}\" }}", file)
+        }
+        HookSource::Url { url } => {
+            format!("{{ url = \"{}\" }}", url)
+        }
+        HookSource::Git { git, git_ref, path } => {
+            if let Some(r) = git_ref {
+                format!("{{ git = \"{}\", ref = \"{}\", path = \"{}\" }}", git, r, path)
+            } else {
+                format!("{{ git = \"{}\", path = \"{}\" }}", git, path)
+            }
+        }
+        HookSource::Marketplace { marketplace, plugin, file } => {
+            format!(
+                "{{ marketplace = \"{}\", plugin = \"{}\", file = \"{}\" }}",
+                marketplace, plugin, file
+            )
+        }
+    }
+}
+
+/// Describe where the hook behavior comes from (Tier 1/2/3) as a human-readable string.
+///
+/// - Tier 1 (fixed path): `"hooks/git-with-agent/pre-push (fixed path)"`
+/// - Tier 2 (TOML entry): `"[hooks.git-with-agent]\npre-push = { source = { ... } }"`
+/// - Tier 3 (built-in):   `"built-in → linthis -c --hook-event=pre-push"`
+fn describe_hook_source(tool: &HookTool, hook_event: &HookEvent) -> String {
+    use linthis::config::Config;
+    use linthis::hooks::resolver;
+
+    let tool_type_dir = match tool {
+        HookTool::Git => "git",
+        HookTool::GitWithAgent => "git-with-agent",
+        HookTool::Prek => "prek",
+        HookTool::PrekWithAgent => "prek-with-agent",
+        HookTool::PreCommit => "pre-commit-tool",
+        HookTool::PreCommitWithAgent => "pre-commit-tool-with-agent",
+        HookTool::Agent => return "built-in (agent)".to_string(),
+    };
+
+    let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    // Tier 1: fixed-path auto-discovery
+    if resolver::fixed_git_hook_path(&project_root, tool_type_dir, hook_event.hook_filename()).is_some() {
+        return format!("hooks/{}/{} (fixed path)", tool_type_dir, hook_event.hook_filename());
+    }
+
+    // Tier 2: TOML source mapping
+    let config = Config::load_merged(&project_root);
+    let hooks = &config.hooks;
+    let event_key = hook_event.hook_filename();
+
+    let entry = match tool {
+        HookTool::Git => hooks.git.get(event_key),
+        HookTool::GitWithAgent => hooks.git_with_agent.get(event_key),
+        HookTool::Prek => hooks.prek.get(event_key),
+        HookTool::PrekWithAgent => hooks.prek_with_agent.get(event_key),
+        HookTool::PreCommit => hooks.pre_commit_tool.get(event_key),
+        HookTool::PreCommitWithAgent => hooks.pre_commit_tool_with_agent.get(event_key),
+        HookTool::Agent => unreachable!(),
+    };
+
+    if let Some(entry) = entry {
+        // e.g. "git-with-agent" → "[hooks.git-with-agent]"
+        let section = format!("[hooks.{}]", tool_type_dir);
+        let source_str = format_hook_source(&entry.source);
+        return format!("{}\n{} = {{ source = {} }}", section, event_key, source_str);
+    }
+
+    // Tier 3: built-in
+    let cmd = build_hook_command(hook_event, &None);
+    format!("built-in → {}", cmd)
+}
+
 /// Create hook configuration file based on the selected tool and event
 /// Resolve hook script content from Tier-1 (fixed path) or Tier-2 (TOML config),
 /// returning `Ok(Some(content))` if an override is found, `Ok(None)` to fall through
@@ -1553,7 +1832,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
             }
             // ── End override check — fall through to built-in generator ──────
 
-            // Build hook command based on options and event type
+            // Build hook command based on options and event type (used for append detection)
             let linthis_hook_line = build_hook_command(hook_event, args);
 
             // Check if hook file already exists
@@ -1571,8 +1850,10 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                     }
                 };
 
-                // Check if linthis is already in the hook
-                if existing_content.contains(&linthis_hook_line) {
+                // Check if linthis is already in the hook (direct command or thin wrapper)
+                if existing_content.contains(&linthis_hook_line)
+                    || existing_content.contains("linthis hook run")
+                {
                     println!(
                         "{}: linthis hook already exists in {}",
                         "Info".cyan(),
@@ -1581,7 +1862,8 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                     return Ok(());
                 }
 
-                // Append linthis to the existing hook
+                // Append linthis to the existing hook (keep appended line, not thin wrapper,
+                // to avoid overwriting unrelated existing hook logic)
                 let mut new_content = existing_content.clone();
                 if !new_content.ends_with('\n') {
                     new_content.push('\n');
@@ -1611,10 +1893,10 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                     }
                 }
             } else {
-                // Create new hook file (include # linthis-hook marker for global hook detection)
-                let content = format!("#!/bin/sh\n# linthis-hook\n{}\n", linthis_hook_line);
+                // Create new hook file as thin wrapper (hook logic auto-updates with linthis)
+                let content = build_thin_wrapper_script(hook_event, &HookTool::Git, None, false);
 
-                match fs::write(&hook_path, content) {
+                match fs::write(&hook_path, &content) {
                     Ok(_) => {
                         // Make the hook executable
                         #[cfg(unix)]
@@ -1633,12 +1915,16 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                         }
 
                         println!("{} Created {} [project]", "✓".green(), hook_path.display());
+                        println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
                         #[cfg(not(unix))]
                         {
                             println!("\nNext steps:");
                             println!("  Make sure the hook is executable:");
                             println!("    {}", format!("chmod +x .git/hooks/{}", hook_filename).cyan());
                         }
+                        // Persist metadata for `linthis hook sync`
+                        let project = git_root.to_str().unwrap_or("").to_string();
+                        save_installed_hook("local", &project, hook_event, &HookTool::Git, None);
                         Ok(())
                     }
                     Err(e) => {
@@ -1669,15 +1955,10 @@ fn build_hook_command(
             format!("linthis -s {} --hook-event=pre-commit", extra)
         }
         HookEvent::PrePush => {
-            // For pre-push: check + format all files, then trigger background review
-            // Default "-c -f" = RunMode::Both (check AND format)
-            let extra = args.as_deref().unwrap_or("-c -f");
-            format!(
-                "linthis {} --hook-event=pre-push\n\
-                 # Trigger background AI code review (non-blocking)\n\
-                 linthis review --background 2>/dev/null &",
-                extra
-            )
+            // For pre-push: check only (formatting should happen at pre-commit stage)
+            // Default "-c" = RunMode::CheckOnly
+            let extra = args.as_deref().unwrap_or("-c");
+            format!("linthis {} --hook-event=pre-push", extra)
         }
         HookEvent::CommitMsg => {
             // For commit-msg: validate commit message using the msg file passed as $1
@@ -1824,23 +2105,53 @@ fn resolve_agent_fix_provider(
 }
 
 /// Build the agent fix prompt based on the hook event type.
-fn agent_fix_prompt_for_event(hook_event: &HookEvent) -> String {
-    match hook_event {
-        HookEvent::CommitMsg => format!(
-            "The commit message failed validation (not in Conventional Commits format). \
-             Read the commit message file passed as argument, \
-             rewrite it to follow the format: type(scope)?: description \
-             where type is one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert. \
-             Keep the original intent of the message. Write the corrected message back to the same file. \
-             Verify with 'linthis cmsg <file>' until it passes."
-        ),
-        _ => format!(
-            "Staged files have linthis lint errors. \
-             Run 'linthis -s -c' to inspect them. \
-             Fix all issues by editing the files directly (do NOT use linthis --fix). \
-             Verify with 'linthis -s -c' until it passes cleanly."
-        ),
-    }
+/// Note: CommitMsg uses agent_fix_headless_cmd_commit_msg() instead (needs $1 expansion).
+fn agent_fix_prompt_for_event(_hook_event: &HookEvent) -> String {
+    "Staged files have linthis lint errors. \
+     Run 'linthis -s -c' to inspect them. \
+     Fix all issues by editing the files directly (do NOT use linthis --fix). \
+     Verify with 'linthis -s -c' until it passes cleanly."
+        .to_string()
+}
+
+/// Shell snippet printed after a successful agent commit-msg fix.
+/// Shows the fixed message in green so it's visible in the terminal.
+/// `indent` is the per-line prefix (spaces) matching the surrounding if-block depth.
+fn agent_fix_show_fixed_cmsg(indent: &str) -> String {
+    format!(
+        "{i}if [ $LINTHIS_EXIT -eq 0 ] && [ -n \"$_MSG_FILE\" ]; then\n\
+         {i}  printf '\\033[0;32m[linthis] ✓ New message: %s\\033[0m\\n' \"$(cat \"$_MSG_FILE\")\" >&2\n\
+         {i}fi\n",
+        i = indent,
+    )
+}
+
+/// Build the agent command for commit-msg hook: captures $1 in _MSG_FILE then invokes agent.
+/// Uses double-quoted prompt string so $_MSG_FILE expands at shell runtime.
+fn agent_fix_headless_cmd_commit_msg(provider: &AgentFixProvider) -> String {
+    let prompt = "Commit message validation failed (not in Conventional Commits format). \
+        Fix the commit message file at $_MSG_FILE: \
+        (1) run 'git diff --cached --stat' to understand what actually changed, \
+        (2) run 'git log -n 5 --oneline' to check recent commit style AND the language used \
+        (Chinese or English) — match that language for the description, \
+        (3) choose the correct type (feat/fix/refactor/perf/docs/style/test/build/ci/chore/revert) \
+        based on the diff, \
+        (4) rewrite to: type(scope)?: description — lowercase type, ≤72 chars, no trailing period. \
+        Overwrite $_MSG_FILE directly without asking. \
+        Verify with 'linthis cmsg $_MSG_FILE' until it passes.";
+    // Escape backslashes and double quotes for use in double-quoted shell string
+    let escaped = prompt.replace('\\', "\\\\").replace('"', "\\\"");
+    let bin_cmd = match provider {
+        AgentFixProvider::Claude    => format!("claude -p --dangerously-skip-permissions \"{}\"", escaped),
+        AgentFixProvider::Codex     => format!("codex exec --ask-for-approval never \"{}\"", escaped),
+        AgentFixProvider::Gemini    => format!("gemini -p --approval-mode=auto_edit \"{}\"", escaped),
+        AgentFixProvider::Cursor    => format!("cursor-agent chat --force \"{}\"", escaped),
+        AgentFixProvider::Droid     => format!("droid exec --auto high \"{}\"", escaped),
+        AgentFixProvider::Auggie    => format!("auggie --print \"{}\"", escaped),
+        AgentFixProvider::Codebuddy => format!("codebuddy -p --dangerously-skip-permissions \"{}\"", escaped),
+    };
+    // Prepend variable capture so $_MSG_FILE is available in the double-quoted prompt
+    format!("_MSG_FILE=\"$1\"; {}", bin_cmd)
 }
 
 /// Error message for agent fix echo based on hook event type.
@@ -1858,19 +2169,20 @@ fn agent_fix_error_msg(hook_event: &HookEvent) -> &'static str {
 ///   <long-running command>
 ///   stop_timer
 ///
-/// Prints: `[linthis] Fixing with claude... (5s)` updating every second,
-/// using \r to overwrite the line.  Falls back gracefully if the terminal
-/// does not support \r (the output just accumulates harmlessly).
+/// Prints: `[linthis] Fixing with claude (5s)` updating every second.
+/// The cursor stays on the blank line below the timer so it does not
+/// visually merge with the timer text.  stop_timer clears the timer line.
 fn shell_timer_functions() -> &'static str {
     r#"
 _linthis_timer_pid=""
 start_timer() {
   _linthis_label="$1"
+  printf "[linthis] %s (0s)\n" "$_linthis_label" >&2
   (
-    _s=0
+    _s=1
     while true; do
-      printf "\r[linthis] %s (%ds)" "$_linthis_label" "$_s" >&2
       sleep 1
+      printf "\033[1A\r[linthis] %s (%ds)\033[K\n" "$_linthis_label" "$_s" >&2
       _s=$((_s + 1))
     done
   ) &
@@ -1881,18 +2193,84 @@ stop_timer() {
     kill "$_linthis_timer_pid" 2>/dev/null
     wait "$_linthis_timer_pid" 2>/dev/null
     _linthis_timer_pid=""
-    printf "\r\033[K" >&2
+    printf "\033[1A\r\033[K" >&2
   fi
 }
 "#
 }
 
+/// Build the pre-push hook script that ALWAYS triggers an agent code review.
+///
+/// Unlike pre-commit (agent only called on failure), pre-push always invokes
+/// the agent to perform a structured review of the diff before pushing.
+/// The agent's exit code gates the push: non-zero = block, zero = allow.
+fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFixProvider) -> String {
+    let review_prompt = "Perform a structured pre-push code review using the lt.review skill. \
+        Steps: \
+        (1) Run: BASE_SHA=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD~1); \
+        git diff $BASE_SHA..HEAD --stat; git diff $BASE_SHA..HEAD --name-status; git diff $BASE_SHA..HEAD. \
+        (2) Review for Critical (security, data loss, broken API, logic errors), \
+        Important (missing error handling, performance), and Minor issues. \
+        (3) Write the review to .linthis/review/review-$(date +%Y%m%d-%H%M%S).md \
+        (create the directory if needed). \
+        (4) If Critical issues found: print '❌ Push blocked — fix Critical issues first' and exit 1. \
+        If Important issues only: print '⚠️ Push with caution'. \
+        If Minor or none: print '✅ Review passed'. \
+        Exit 0 unless Critical issues were found.";
+    let agent_cmd = agent_fix_headless_cmd(fix_provider, review_prompt);
+    let timer_fns = shell_timer_functions();
+    format!(
+        "#!/bin/sh\n\
+         {timer}\
+         \n\
+         # Compute files changed in commits being pushed vs upstream (or HEAD~1 as fallback)\n\
+         _BASE=$(git rev-parse '@{{u}}' 2>/dev/null || \\\n\
+         \x20       git merge-base HEAD origin/main 2>/dev/null || \\\n\
+         \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
+         _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
+         \n\
+         # Run lint check on pushed files only (informational, non-blocking)\n\
+         if [ -n \"$_PUSHED_FILES\" ]; then\n\
+         \x20 echo \"$_PUSHED_FILES\" | xargs {linthis}\n\
+         else\n\
+         \x20 {linthis}\n\
+         fi\n\
+         \n\
+         # Always invoke agent code review before push\n\
+         echo \"[linthis] Invoking {provider} code review...\" >&2\n\
+         start_timer \"Reviewing with {provider}\"\n\
+         {agent}\n\
+         REVIEW_EXIT=$?\n\
+         stop_timer\n\
+         \n\
+         exit $REVIEW_EXIT\n",
+        timer = timer_fns,
+        linthis = linthis_cmd,
+        provider = fix_provider,
+        agent = agent_cmd,
+    )
+}
+
 /// Build the full git hook shell script with agent fix fallback.
 fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
-    let prompt = agent_fix_prompt_for_event(hook_event);
-    let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt);
+    // Pre-push uses a dedicated review flow (always triggers agent, not only on failure)
+    if matches!(hook_event, HookEvent::PrePush) {
+        return build_git_with_agent_prepush_script(linthis_cmd, fix_provider);
+    }
+
+    let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
+        agent_fix_headless_cmd_commit_msg(fix_provider)
+    } else {
+        let prompt = agent_fix_prompt_for_event(hook_event);
+        agent_fix_headless_cmd(fix_provider, &prompt)
+    };
     let error_msg = agent_fix_error_msg(hook_event);
     let timer_fns = shell_timer_functions();
+    let new_msg_print = if matches!(hook_event, HookEvent::CommitMsg) {
+        agent_fix_show_fixed_cmsg("  ")
+    } else {
+        String::new()
+    };
     format!(
         "#!/bin/sh\n\
          {timer}\
@@ -1919,6 +2297,7 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
          \x20 echo \"[linthis] Re-verifying...\" >&2\n\
          \x20 $LINTHIS_CMD\n\
          \x20 LINTHIS_EXIT=$?\n\
+         {new_msg_print}\
          fi\n\
          \n\
          exit $LINTHIS_EXIT\n",
@@ -1927,6 +2306,7 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
         provider = fix_provider,
         agent = agent_cmd,
         error_msg = error_msg,
+        new_msg_print = new_msg_print,
     )
 }
 
@@ -1934,27 +2314,81 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
 fn handle_git_with_agent_install(
     hook_event: &HookEvent,
     force: bool,
+    global: bool,
+    yes: bool,
     fix_provider: &AgentFixProvider,
     args: &Option<String>,
 ) -> ExitCode {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-
-    let git_root = match find_git_root() {
-        Some(root) => root,
-        None => {
-            eprintln!("{}: Not in a git repository", "Error".red());
-            return ExitCode::from(1);
-        }
-    };
+    use std::io::{self, Write};
 
     let hook_filename = hook_event.hook_filename();
-    let hook_path = git_root.join(".git/hooks").join(hook_filename);
-    let linthis_cmd = build_hook_command(hook_event, args);
-    let content = build_git_with_agent_hook_script(&linthis_cmd, fix_provider, hook_event);
+    let _ = args; // args are embedded in binary logic at run time, not in the thin wrapper
+
+    let (hook_path, scope, project) = if global {
+        let hooks_dir = match global_hooks_dir() {
+            Some(d) => d,
+            None => {
+                eprintln!("{}: Could not determine global hooks directory", "Error".red());
+                return ExitCode::from(1);
+            }
+        };
+        (hooks_dir.join(hook_filename), "global", String::new())
+    } else {
+        let git_root = match find_git_root() {
+            Some(root) => root,
+            None => {
+                eprintln!("{}: Not in a git repository", "Error".red());
+                return ExitCode::from(1);
+            }
+        };
+        let project_str = git_root.to_str().unwrap_or("").to_string();
+        (git_root.join(".git/hooks").join(hook_filename), "local", project_str)
+    };
+
+    // Confirm with user for global installs unless --yes was passed.
+    // Global installs also set core.hooksPath so warn the user.
+    if global && !yes {
+        println!(
+            "This will install a global {} hook at {}",
+            hook_filename.cyan(),
+            hook_path.display()
+        );
+        println!(
+            "and set {} in your global git config.",
+            "core.hooksPath".cyan()
+        );
+        print!("Continue? [y/N]: ");
+        io::stdout().flush().ok();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).ok();
+        if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+            println!("Installation cancelled");
+            return ExitCode::SUCCESS;
+        }
+    }
+
+    let content = build_thin_wrapper_script(
+        hook_event,
+        &HookTool::GitWithAgent,
+        Some(fix_provider.as_str()),
+        global,
+    );
 
     if hook_path.exists() && !force {
+        if let Ok(existing) = fs::read_to_string(&hook_path) {
+            if existing.contains("# linthis-hook") || existing.contains("linthis hook run") {
+                println!(
+                    "{}: {} hook already installed at {}",
+                    "Info".cyan(),
+                    hook_filename,
+                    hook_path.display()
+                );
+                return ExitCode::SUCCESS;
+            }
+        }
         eprintln!(
             "{}: {} already exists. Use --force to overwrite.",
             "Warning".yellow(),
@@ -1982,6 +2416,21 @@ fn handle_git_with_agent_install(
             }
             println!("{} Created {} (git-with-agent, {})", "✓".green(), hook_path.display(), fix_provider);
             println!("  {} On lint failure: {}", "→".dimmed(), agent_fix_bin(fix_provider).cyan());
+            println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
+
+            // For global installs, also set core.hooksPath
+            if global {
+                if let Some(hooks_dir) = global_hooks_dir() {
+                    let hooks_dir_str = hooks_dir.to_string_lossy().to_string();
+                    let _ = std::process::Command::new("git")
+                        .args(["config", "--global", "core.hooksPath", &hooks_dir_str])
+                        .status();
+                    println!("{} Set {} = {}", "✓".green(), "core.hooksPath".cyan(), hooks_dir_str);
+                }
+            }
+
+            // Persist metadata for `linthis hook sync`
+            save_installed_hook(scope, &project, hook_event, &HookTool::GitWithAgent, Some(fix_provider.as_str()));
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -2280,9 +2729,9 @@ fn agent_skill_path(
     };
     match provider {
         AgentProvider::Claude => {
-            // Skills subdirectory: .claude/skills/linthis/{lint,cmsg,review}.md
+            // Skills subdirectory: .claude/skills/lt-{event}/SKILL.md
             // global uses same .claude path (resolved relative to user home by caller)
-            base.join(".claude/skills/linthis").join(format!("{}.md", event_name))
+            base.join(".claude/skills").join(format!("lt-{}", event_name)).join("SKILL.md")
         }
         AgentProvider::Codex => {
             // Section-based: AGENTS.md (path doesn't change per event; event handled by section content)
@@ -2303,8 +2752,8 @@ fn agent_skill_path(
             base.join(".augment/rules").join(format!("linthis-{}.md", event_name))
         }
         AgentProvider::Codebuddy => {
-            // Skills subdirectory: .codebuddy/skills/linthis/{lint,cmsg,review}.md
-            base.join(".codebuddy/skills/linthis").join(format!("{}.md", event_name))
+            // Skills subdirectory: .codebuddy/skills/lt-{event}/SKILL.md
+            base.join(".codebuddy/skills").join(format!("lt-{}", event_name)).join("SKILL.md")
         }
     }
 }
@@ -2321,17 +2770,8 @@ fn agent_stop_hook_settings_path(base: &std::path::Path, provider: &AgentProvide
     }
 }
 
-/// Print extra installed file messages (Skill file, Stop Hook)
+/// Print extra installed file messages (Stop Hook)
 fn print_extra_installed(base: &std::path::Path, provider: &AgentProvider) {
-    // CodeBuddy SKILL.md
-    if matches!(provider, AgentProvider::Codebuddy) {
-        let skill_path = base.join(".codebuddy/skills/linthis/SKILL.md");
-        println!(
-            "{} Installed Skill → {}",
-            "✓".green(),
-            skill_path.display()
-        );
-    }
     // Stop Hook
     if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
         println!(
@@ -2709,8 +3149,8 @@ fn agent_event_content_for_provider(provider: &AgentProvider, event: &HookEvent)
     match provider {
         AgentProvider::Codex => body, // section body only; marker handled separately
         AgentProvider::Claude | AgentProvider::Codebuddy => {
-            // Plain markdown skill file
-            format!("# {}\n\n{}\n", name, body)
+            // Skills file with frontmatter (required for skill discovery)
+            format!("---\nname: {}\ndescription: {}\n---\n\n# {}\n\n{}\n", name, desc, name, body)
         }
         AgentProvider::Gemini | AgentProvider::Droid | AgentProvider::Auggie => {
             format!("---\nname: {}\ndescription: {}\n---\n\n# {}\n\n{}\n", name, desc, name, body)
@@ -3446,7 +3886,17 @@ pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Opti
     }
 
     if errors.is_empty() {
-        println!("{} Commit message format is valid", "✓".green());
+        // Box width matches the failure box (42 chars total, 40 inner dashes)
+        println!("{}", "╭────────────────────────────────────────╮".green());
+        println!("{}", "│ ✓ Linthis 📝 [Commit-msg] Hook Passed  │".green());
+        println!("{}", "├────────────────────────────────────────┤".green());
+        println!("{}", "│ Commit message is valid                │".green());
+        println!("{}", "╰────────────────────────────────────────╯".green());
+        // Print hook file paths (Global / Local) same as pre-commit success output
+        let paths = linthis::utils::output::format_hook_paths_footer_pub(Some("commit-msg"));
+        if !paths.is_empty() {
+            println!("{}", paths);
+        }
         return ExitCode::SUCCESS;
     }
 
@@ -3597,8 +4047,10 @@ fn handle_cmsg_auto_fix(
 /// Print commit message validation error
 fn print_commit_msg_error(first_line: &str) {
     eprintln!("{}", "╭────────────────────────────────────────╮".red());
-    eprintln!("{}", "│ 🔴 Commit Message Validation Failed   │".red());
+    eprintln!("{}", "│ X Linthis 📝 [Commit-msg] Hook Failed  │".red());
     eprintln!("{}", "├────────────────────────────────────────┤".red());
+    eprintln!("{}", "│ Validation Failed!                     │".red());
+    eprintln!("│                                        │");
     eprintln!("│ Your message:                          │");
     eprintln!("│   {}", first_line);
     eprintln!("│                                        │");
@@ -3617,6 +4069,478 @@ fn print_commit_msg_error(first_line: &str) {
     eprintln!("│ To skip this check:                    │");
     eprintln!("│   git commit --no-verify               │");
     eprintln!("{}", "╰────────────────────────────────────────╯".red());
+    // Show hook file paths (with type suffix extracted from thin wrapper)
+    let paths = linthis::utils::output::format_hook_paths_footer_pub(Some("commit-msg"));
+    if !paths.is_empty() {
+        eprintln!("{}", paths);
+    }
+}
+
+// =============================================================================
+// `linthis hook run` — execute full hook logic at runtime from thin wrapper
+// =============================================================================
+
+/// Execute hook logic at runtime, called by thin wrapper scripts in .git/hooks/.
+///
+/// Builds the full hook script content from the current binary and runs it via
+/// `sh -c`, forwarding any passthrough arguments from the original git hook
+/// invocation (e.g. the commit message file path for commit-msg hooks).
+/// Environment variable injected by `handle_hook_run` to detect re-entrant hook calls.
+///
+/// When the global hook script delegates to a local thin wrapper via
+/// `exec "$LOCAL_HOOK"`, the local wrapper inherits this variable through the
+/// exec chain.  A second `handle_hook_run` invocation that finds this variable
+/// already set knows it is inside a delegation and skips local-hook checking,
+/// preventing infinite recursion when both hooks are thin wrappers.
+///
+/// Each linthis process sets LINTHIS_HOOK_RUNNING_<pid>=1 so concurrent commits
+/// (each with their own PID) don't interfere with each other's re-entrancy detection.
+const LINTHIS_HOOK_RUNNING_PREFIX: &str = "LINTHIS_HOOK_RUNNING_";
+
+fn handle_hook_run(
+    event: &HookEvent,
+    hook_type: &HookTool,
+    provider: Option<&str>,
+    _global: bool,
+    hook_args: &[String],
+) -> i32 {
+    // Detect re-entrant calls: the parent hook execution sets LINTHIS_HOOK_RUNNING_<pid>=1
+    // before exec-ing the child hook.  If any such var is present, skip local delegation.
+    let already_running = std::env::vars()
+        .any(|(k, _)| k.starts_with(LINTHIS_HOOK_RUNNING_PREFIX));
+
+    let script = match hook_type {
+        HookTool::Git => {
+            if already_running {
+                // Re-entrant: we were delegated to from a parent hook invocation.
+                // Run linthis directly without further local-hook delegation.
+                let linthis_cmd = build_hook_command(event, &None);
+                format!("#!/bin/sh\n{linthis_cmd} \"$@\"\n")
+            } else {
+                // First invocation: full script that handles local-hook delegation.
+                build_global_hook_script_for_event(event, &None, None)
+            }
+        }
+        HookTool::GitWithAgent => {
+            let fix_provider = match provider
+                .and_then(|p| match p.to_lowercase().as_str() {
+                    "claude"    => Some(AgentFixProvider::Claude),
+                    "codex"     => Some(AgentFixProvider::Codex),
+                    "gemini"    => Some(AgentFixProvider::Gemini),
+                    "cursor"    => Some(AgentFixProvider::Cursor),
+                    "droid"     => Some(AgentFixProvider::Droid),
+                    "auggie" | "aug" | "augment" => Some(AgentFixProvider::Auggie),
+                    "codebuddy" => Some(AgentFixProvider::Codebuddy),
+                    _ => None,
+                })
+                .or(Some(AgentFixProvider::Claude))
+            {
+                Some(p) => p,
+                None => {
+                    eprintln!("{}: hook run: unknown provider '{}'", "Error".red(), provider.unwrap_or(""));
+                    return 1;
+                }
+            };
+            let linthis_cmd = build_hook_command(event, &None);
+            build_git_with_agent_hook_script(&linthis_cmd, &fix_provider, event)
+        }
+        _ => {
+            eprintln!("{}: hook run: unsupported hook type '{}' (supported: git, git-with-agent)", "Error".red(), hook_type.as_str());
+            return 1;
+        }
+    };
+
+    // Show where this hook's behavior is configured from (Tier 1/2/3)
+    {
+        let description = describe_hook_source(hook_type, event);
+        eprintln!("{}", format!("📄 Config: {}", description).dimmed());
+    }
+
+    // Inject LINTHIS_HOOK_RUNNING_<pid>=1 so delegated child hooks can detect re-entry.
+    // Using PID as part of the variable NAME (not value) ensures concurrent commit
+    // operations don't interfere: each process has its own uniquely-named env var.
+    let pid = std::process::id().to_string();
+    let env_key = format!("{}{}", LINTHIS_HOOK_RUNNING_PREFIX, pid);
+
+    // Execute the generated script, passing through git hook arguments
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&script)
+        .arg("--") // placeholder for $0 (script name)
+        .args(hook_args)
+        .env(&env_key, "1")
+        .status();
+
+    match status {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("{}: hook run: failed to execute script: {}", "Error".red(), e);
+            1
+        }
+    }
+}
+
+// =============================================================================
+// `linthis hook sync` — re-sync installed hooks from persisted metadata
+// =============================================================================
+
+/// Scan `hook_dir` for old-format linthis hook scripts, migrate each to a thin
+/// wrapper, save metadata, and return the number of hooks migrated.
+///
+/// A file is considered a linthis hook if its content contains the marker
+/// `# linthis-hook` or already calls `linthis hook run`.
+fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, project: &str) -> usize {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    // Map filename → HookEvent
+    let event_map: &[(&str, HookEvent)] = &[
+        ("pre-commit", HookEvent::PreCommit),
+        ("pre-push", HookEvent::PrePush),
+        ("commit-msg", HookEvent::CommitMsg),
+    ];
+
+    let mut migrated = 0_usize;
+
+    let entries = match fs::read_dir(hook_dir) {
+        Ok(e) => e,
+        Err(_) => return 0,
+    };
+
+    for entry in entries.flatten() {
+        let filename = entry.file_name();
+        let name = match filename.to_str() {
+            Some(n) => n,
+            None => continue,
+        };
+
+        // Only consider known git hook filenames
+        let event_opt = event_map.iter().find(|(n, _)| *n == name);
+        let event = match event_opt {
+            Some((_, e)) => e,
+            None => continue,
+        };
+
+        let path = entry.path();
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Skip if not a linthis-managed hook (old format or thin wrapper)
+        let is_old_format = content.contains("# linthis-hook");
+        let is_thin_wrapper = content.contains("linthis hook run");
+        if !is_old_format && !is_thin_wrapper {
+            continue;
+        }
+
+        // If already a thin wrapper, just record metadata if missing
+        if is_thin_wrapper {
+            // Parse provider from existing thin wrapper: --provider <p>
+            let provider_opt = content
+                .split("--provider ")
+                .nth(1)
+                .and_then(|s| s.split_whitespace().next())
+                .map(|s| s.trim_end_matches('"').to_string());
+            let hook_type = if content.contains("--type git-with-agent") {
+                HookTool::GitWithAgent
+            } else if content.contains("--type agent") {
+                HookTool::Agent
+            } else if content.contains("--type prek-with-agent") {
+                HookTool::PrekWithAgent
+            } else if content.contains("--type pre-commit-with-agent") {
+                HookTool::PreCommitWithAgent
+            } else if content.contains("--type prek") {
+                HookTool::Prek
+            } else if content.contains("--type pre-commit") {
+                HookTool::PreCommit
+            } else {
+                HookTool::Git
+            };
+            let scope = if global { "global" } else { "local" };
+            save_installed_hook(scope, project, event, &hook_type, provider_opt.as_deref());
+            println!("  {} recorded thin wrapper {} {} ({})", "✓".green(), name, hook_type.as_str(), scope);
+            migrated += 1;
+            continue;
+        }
+
+        // Old-format hook — detect hook_type from content heuristics
+        // Presence of "start_timer" or agent-specific patterns → git-with-agent
+        let has_agent = content.contains("start_timer")
+            || content.contains("AGENT_PROVIDER")
+            || content.contains("claude")
+            || content.contains("codebuddy")
+            || content.contains("codex");
+        let hook_type = if has_agent {
+            HookTool::GitWithAgent
+        } else {
+            HookTool::Git
+        };
+
+        // Try to detect provider from old script content
+        let provider_opt: Option<&str> = if content.contains("codebuddy") {
+            Some("codebuddy")
+        } else if content.contains("codex") {
+            Some("codex")
+        } else if content.contains("gemini") {
+            Some("gemini")
+        } else if content.contains("cursor") {
+            Some("cursor")
+        } else if content.contains("claude") {
+            Some("claude")
+        } else {
+            None
+        };
+
+        // Build thin wrapper and overwrite the hook file
+        let thin = build_thin_wrapper_script(event, &hook_type, provider_opt, global);
+        match fs::write(&path, &thin) {
+            Ok(_) => {
+                #[cfg(unix)]
+                {
+                    if let Ok(meta) = fs::metadata(&path) {
+                        let mut perms = meta.permissions();
+                        perms.set_mode(0o755);
+                        let _ = fs::set_permissions(&path, perms);
+                    }
+                }
+                let scope = if global { "global" } else { "local" };
+                save_installed_hook(scope, project, event, &hook_type, provider_opt);
+                println!(
+                    "  {} migrated {} → thin wrapper {} ({})",
+                    "✓".green(),
+                    name,
+                    hook_type.as_str(),
+                    scope
+                );
+                eprintln!(
+                    "  {} Hook type inferred from old script content (heuristic). \
+                     If incorrect, re-install with the right type:\n  \
+                     linthis hook install{} --event {} --type <type> --force",
+                    "⚠".yellow(),
+                    if global { " -g" } else { "" },
+                    event.as_str(),
+                );
+                migrated += 1;
+            }
+            Err(e) => {
+                eprintln!("  {} Failed to migrate {}: {}", "✗".red(), name, e);
+            }
+        }
+    }
+
+    migrated
+}
+
+/// Re-sync installed hooks for local project or global scope.
+///
+/// Reads `~/.linthis/installed-hooks.toml` and re-generates thin wrapper
+/// scripts and agent skill components for each recorded hook installation.
+pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    let hooks_file = load_installed_hooks();
+    let target_scope = if global { "global" } else { "local" };
+
+    // Determine project root for local scope
+    let project_root: PathBuf = if !global {
+        match find_git_root() {
+            Some(r) => r,
+            None => {
+                eprintln!("{}: Not in a git repository", "Error".red());
+                return 1;
+            }
+        }
+    } else {
+        PathBuf::new()
+    };
+
+    let filtered: Vec<&InstalledHook> = hooks_file
+        .hooks
+        .iter()
+        .filter(|h| h.scope == target_scope)
+        .filter(|h| {
+            if global {
+                true
+            } else {
+                h.project.is_empty()
+                    || h.project == project_root.to_str().unwrap_or("")
+            }
+        })
+        .collect();
+
+    if filtered.is_empty() {
+        // No metadata recorded — try auto-detecting existing linthis hooks on disk
+        // (hooks installed before the thin-wrapper / metadata feature was added).
+        let hook_dir = if global {
+            match global_hooks_dir() {
+                Some(d) => d,
+                None => {
+                    eprintln!("{}: Could not determine global hooks directory", "Error".red());
+                    return 1;
+                }
+            }
+        } else {
+            project_root.join(".git/hooks")
+        };
+
+        let detected = detect_and_migrate_existing_hooks(
+            &hook_dir,
+            global,
+            if global { "" } else { project_root.to_str().unwrap_or("") },
+        );
+
+        if detected == 0 {
+            if global {
+                println!("No global linthis hooks found to sync.");
+                println!("  Run {} to install global hooks", "linthis hook install -g".cyan());
+            } else {
+                println!("No local linthis hooks found for this project.");
+                println!("  Run {} to install and record hooks", "linthis hook install".cyan());
+            }
+        }
+        return 0;
+    }
+
+    println!("{} Syncing {} hook(s)...", "→".cyan(), filtered.len());
+
+    let mut errors = 0_u32;
+
+    for hook in &filtered {
+        // Parse event and hook_type back from stored strings
+        let event = match hook.event.as_str() {
+            "pre-commit" => HookEvent::PreCommit,
+            "pre-push"   => HookEvent::PrePush,
+            "commit-msg" => HookEvent::CommitMsg,
+            other => {
+                eprintln!("  {} Unknown event '{}', skipping", "✗".red(), other);
+                errors += 1;
+                continue;
+            }
+        };
+        let hook_type = match hook.hook_type.as_str() {
+            "git"                  => HookTool::Git,
+            "git-with-agent"       => HookTool::GitWithAgent,
+            "agent"                => HookTool::Agent,
+            "prek"                 => HookTool::Prek,
+            "prek-with-agent"      => HookTool::PrekWithAgent,
+            "pre-commit"           => HookTool::PreCommit,
+            "pre-commit-with-agent"=> HookTool::PreCommitWithAgent,
+            other => {
+                eprintln!("  {} Unknown hook type '{}', skipping", "✗".red(), other);
+                errors += 1;
+                continue;
+            }
+        };
+        let provider_opt: Option<&str> = if hook.provider.is_empty() {
+            None
+        } else {
+            Some(&hook.provider)
+        };
+
+        // 1. Re-generate thin wrapper git hook script
+        let hook_dir = if global {
+            match global_hooks_dir() {
+                Some(d) => d,
+                None => {
+                    eprintln!("  {} Could not determine global hooks directory", "✗".red());
+                    errors += 1;
+                    continue;
+                }
+            }
+        } else {
+            project_root.join(".git/hooks")
+        };
+
+        // Only re-write thin wrapper for types that have one
+        if !matches!(hook_type, HookTool::Agent | HookTool::Prek | HookTool::PreCommit) {
+            let hook_file = hook_dir.join(event.hook_filename());
+            let thin_script = build_thin_wrapper_script(&event, &hook_type, provider_opt, global);
+            if let Some(parent) = hook_file.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            match fs::write(&hook_file, &thin_script) {
+                Ok(_) => {
+                    #[cfg(unix)]
+                    {
+                        if let Ok(meta) = fs::metadata(&hook_file) {
+                            let mut perms = meta.permissions();
+                            perms.set_mode(0o755);
+                            let _ = fs::set_permissions(&hook_file, perms);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  {} Failed to write {}: {}", "✗".red(), hook_file.display(), e);
+                    errors += 1;
+                    continue;
+                }
+            }
+        }
+
+        // 2. Re-sync agent components (skill, command, memory, stop hook)
+        if matches!(
+            hook_type,
+            HookTool::GitWithAgent
+                | HookTool::Agent
+                | HookTool::PrekWithAgent
+                | HookTool::PreCommitWithAgent
+        ) {
+            if let Some(p_str) = provider_opt {
+                let agent_provider = match p_str.to_lowercase().as_str() {
+                    "claude"    => Some(AgentProvider::Claude),
+                    "codex"     => Some(AgentProvider::Codex),
+                    "gemini"    => Some(AgentProvider::Gemini),
+                    "cursor"    => Some(AgentProvider::Cursor),
+                    "droid"     => Some(AgentProvider::Droid),
+                    "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
+                    "codebuddy" => Some(AgentProvider::Codebuddy),
+                    _ => None,
+                };
+                if let Some(provider) = agent_provider {
+                    let base = if global {
+                        dirs::home_dir().unwrap_or_default()
+                    } else {
+                        project_root.clone()
+                    };
+                    if let Err(e) = install_agent_skill(&base, &provider, global, &event) {
+                        eprintln!("  {} agent sync error: {}", "✗".red(), e);
+                        errors += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        println!(
+            "  {} synced {} {} ({})",
+            "✓".green(),
+            hook.event,
+            hook.hook_type,
+            target_scope
+        );
+    }
+
+    if errors > 0 {
+        eprintln!("{} {} error(s) during sync", "⚠".yellow(), errors);
+        1
+    } else {
+        println!("{} Hook sync complete", "✓".green());
+        0
+    }
+}
+
+/// Called automatically after `linthis plugin sync` to refresh agent skill
+/// files for all locally installed agent hooks.
+///
+/// Uses non-interactive defaults (equivalent to `linthis hook sync -y`).
+pub fn handle_hook_sync_after_plugin_sync() {
+    let code = handle_hook_sync(false, true);
+    if code != 0 {
+        eprintln!("{}: Agent hook sync encountered errors (exit {})", "Warning".yellow(), code);
+    }
 }
 
 #[cfg(test)]
@@ -3727,13 +4651,13 @@ mod tests {
         use std::path::PathBuf;
         let base = PathBuf::from("/repo");
         let lint_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PreCommit);
-        assert_eq!(lint_path, PathBuf::from("/repo/.claude/skills/linthis/lint.md"));
+        assert_eq!(lint_path, PathBuf::from("/repo/.claude/skills/lt-lint/SKILL.md"));
 
         let cmsg_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::CommitMsg);
-        assert_eq!(cmsg_path, PathBuf::from("/repo/.claude/skills/linthis/cmsg.md"));
+        assert_eq!(cmsg_path, PathBuf::from("/repo/.claude/skills/lt-cmsg/SKILL.md"));
 
         let review_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PrePush);
-        assert_eq!(review_path, PathBuf::from("/repo/.claude/skills/linthis/review.md"));
+        assert_eq!(review_path, PathBuf::from("/repo/.claude/skills/lt-review/SKILL.md"));
     }
 
     #[test]
@@ -3741,7 +4665,7 @@ mod tests {
         use std::path::PathBuf;
         let base = PathBuf::from("/home/user");
         let p = agent_skill_path(&base, &AgentProvider::Claude, true, &HookEvent::PreCommit);
-        assert_eq!(p, PathBuf::from("/home/user/.claude/skills/linthis/lint.md"));
+        assert_eq!(p, PathBuf::from("/home/user/.claude/skills/lt-lint/SKILL.md"));
     }
 
     #[test]
@@ -3765,6 +4689,6 @@ mod tests {
         use std::path::PathBuf;
         let base = PathBuf::from("/repo");
         let p = agent_skill_path(&base, &AgentProvider::Codebuddy, false, &HookEvent::PreCommit);
-        assert_eq!(p, PathBuf::from("/repo/.codebuddy/skills/linthis/lint.md"));
+        assert_eq!(p, PathBuf::from("/repo/.codebuddy/skills/lt-lint/SKILL.md"));
     }
 }

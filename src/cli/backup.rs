@@ -80,14 +80,20 @@ pub fn create_backup(files: &[PathBuf], description: &str, quiet: bool) -> Optio
             }
         }
 
-        // Copy file
-        if file.exists() {
-            if let Err(e) = fs::copy(file, &backup_file_path) {
-                eprintln!("{}: Failed to backup {}: {}", "Warning".yellow(), file.display(), e);
-                continue;
-            }
-            backed_up_files.push(rel_path.to_string_lossy().to_string());
+        // Skip directories and .linthis paths
+        if !file.is_file() {
+            continue;
         }
+        if rel_path.components().any(|c| c.as_os_str() == ".linthis") {
+            continue;
+        }
+
+        // Copy file
+        if let Err(e) = fs::copy(file, &backup_file_path) {
+            eprintln!("{}: Failed to backup {}: {}", "Warning".yellow(), file.display(), e);
+            continue;
+        }
+        backed_up_files.push(rel_path.to_string_lossy().to_string());
     }
 
     if backed_up_files.is_empty() {

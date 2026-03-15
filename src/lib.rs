@@ -1158,6 +1158,7 @@ fn warn_missing_tool(tool_type: &str, lang: Language, is_checker: bool) {
             &hint,
         ));
 
+        eprintln!();
         eprintln!(
             "\x1b[33mWarning\x1b[0m: No {} {} available for {} files",
             lang.name(),

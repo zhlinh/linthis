@@ -510,7 +510,7 @@ fn default_tool_auto_install_enabled() -> bool {
 }
 
 fn default_tool_auto_install_mode() -> String {
-    "prompt".to_string()
+    "auto".to_string()
 }
 
 impl Default for ToolAutoInstallConfig {
@@ -997,6 +997,66 @@ impl Config {
         config
     }
 
+    /// Return the ordered list of config file paths that are actually loaded
+    /// by [`load_merged`], from lowest to highest priority.
+    ///
+    /// Only paths that exist on disk are included.  Built-in defaults have no
+    /// file path and are therefore not listed.
+    pub fn get_active_config_paths(project_dir: &Path) -> Vec<std::path::PathBuf> {
+        use crate::plugin::PluginCache;
+        let mut paths = Vec::new();
+
+        let global_plugin_sources = Self::load_user_config()
+            .map(|c| c.get_plugin_sources())
+            .unwrap_or_default();
+        let project_plugin_sources = Self::load_project_config(project_dir)
+            .map(|c| c.get_plugin_sources())
+            .unwrap_or_default();
+
+        let cache_opt = if let Ok(dir) = std::env::var("LINTHIS_TEST_PLUGIN_CACHE_DIR") {
+            Some(PluginCache::with_dir(std::path::PathBuf::from(dir)))
+        } else {
+            PluginCache::new().ok()
+        };
+
+        let mut seen = std::collections::HashSet::new();
+        let mut push_unique = |paths: &mut Vec<_>, p: std::path::PathBuf| {
+            if seen.insert(p.clone()) {
+                paths.push(p);
+            }
+        };
+
+        for source in global_plugin_sources.iter().chain(project_plugin_sources.iter()) {
+            if let (Some(cache), Some(url)) = (cache_opt.as_ref(), source.url.as_ref()) {
+                let p = cache.url_to_cache_path(url).join("linthis.toml");
+                if p.exists() {
+                    push_unique(&mut paths, p);
+                }
+            }
+        }
+
+        if let Some(home) = dirs::home_dir() {
+            let p = home.join(".linthis").join("config.toml");
+            if p.exists() {
+                push_unique(&mut paths, p);
+            }
+        }
+
+        let mut current = project_dir.to_path_buf();
+        loop {
+            let p = current.join(".linthis").join("config.toml");
+            if p.exists() {
+                push_unique(&mut paths, p);
+                break;
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+
+        paths
+    }
+
     /// Generate a default configuration file content
     pub fn generate_default_toml() -> String {
         r#"# Linthis Configuration
@@ -1048,7 +1108,7 @@ max_complexity = 20
 # Tool auto-install configuration
 # [tool_auto_install]
 # enabled = true
-# mode = "prompt"  # auto = install silently; prompt = ask before installing; disabled = never install
+# mode = "auto"    # auto = install silently (default); prompt = ask before installing; disabled = never install
 
 # Objective-C specific overrides
 # [oc]
