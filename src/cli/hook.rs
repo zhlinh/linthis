@@ -2195,6 +2195,45 @@ fn agent_fix_error_msg(hook_event: &HookEvent) -> &'static str {
     }
 }
 
+/// Shell function to print a colored review summary box.
+///
+/// Usage: _print_review_box "passed"|"blocked" "message"
+///
+/// Emits a colored Unicode box to stderr similar to the linthis Rust output:
+///   ╭────────────────────────────────────────────────╮
+///   │ ✓ Linthis 🔍 [Pre-push] Review Passed         │
+///   ├────────────────────────────────────────────────┤
+///   │ No critical issues found                       │
+///   ╰────────────────────────────────────────────────╯
+fn shell_review_box_fn() -> &'static str {
+    // Raw string: \033 is literal backslash-0-3-3 (ANSI ESC via printf)
+    // Box width = 52 (50 inner dashes + 2 border chars)
+    // Inner content width = 48 (box_width - 4 for "│ " + " │")
+    // Header visual widths (🔍 emoji = 2 columns):
+    //   "✓ Linthis 🔍 [Pre-push] Review Passed"  = 36 chars, visual 37 → pad 11
+    //   "✗ Linthis 🔍 [Pre-push] Review Blocked" = 37 chars, visual 38 → pad 10
+    r#"
+_print_review_box() {
+  if [ "$1" = "passed" ]; then
+    _RH="✓ Linthis 🔍 [Pre-push] Review Passed"
+    _RC="\033[32m"
+    _RHP="           "
+  else
+    _RH="✗ Linthis 🔍 [Pre-push] Review Blocked"
+    _RC="\033[31m"
+    _RHP="          "
+  fi
+  _RN="\033[0m"
+  _RM=$(printf "%-48s" "$2")
+  printf "${_RC}╭──────────────────────────────────────────────────╮${_RN}\n" >&2
+  printf "${_RC}│ ${_RH}${_RHP}│${_RN}\n" >&2
+  printf "${_RC}├──────────────────────────────────────────────────┤${_RN}\n" >&2
+  printf "${_RC}│ ${_RM} │${_RN}\n" >&2
+  printf "${_RC}╰──────────────────────────────────────────────────╯${_RN}\n" >&2
+}
+"#
+}
+
 /// Shell snippet: a background elapsed-time spinner.
 ///
 /// Usage in hook scripts:
@@ -2252,9 +2291,11 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
         Exit 0 unless Critical issues were found.";
     let agent_cmd = agent_fix_headless_cmd(fix_provider, review_prompt);
     let timer_fns = shell_timer_functions();
+    let review_box = shell_review_box_fn();
     format!(
         "#!/bin/sh\n\
          {timer}\
+         {review_box}\
          \n\
          # Compute files changed in commits being pushed vs upstream (or HEAD~1 as fallback)\n\
          _BASE=$(git rev-parse '@{{u}}' 2>/dev/null || \\\n\
@@ -2279,20 +2320,24 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
          REVIEW_EXIT=$?\n\
          stop_timer\n\
          \n\
-         # Show path to saved review report if one was written\n\
+         # Find the latest review report and check for critical issues\n\
          REVIEW_REPORT=$(ls -t .linthis/review/result/review-*.md 2>/dev/null | head -1)\n\
          if [ -n \"$REVIEW_REPORT\" ]; then\n\
-         \x20 echo \"[linthis] Review saved: $REVIEW_REPORT\" >&2\n\
-         \x20 # Check for actual critical issues in the report (agent exit code is unreliable)\n\
+         \x20 # Check for actual critical issues (agent exit code is unreliable)\n\
          \x20 _CRITICAL=$(awk '/^## Critical Issues/{{found=1;next}} found && /^## /{{found=0}} found && /^- \\[/{{print}}' \"$REVIEW_REPORT\")\n\
          \x20 if [ -n \"$_CRITICAL\" ]; then\n\
-         \x20\x20\x20 echo \"❌ Push blocked — Critical issues found. Fix them before pushing.\" >&2\n\
+         \x20\x20\x20 _print_review_box \"blocked\" \"Critical issues found — fix before pushing\"\n\
+         \x20\x20\x20 echo \"[linthis] Review saved: $REVIEW_REPORT\" >&2\n\
          \x20\x20\x20 exit 1\n\
+         \x20 else\n\
+         \x20\x20\x20 _print_review_box \"passed\" \"No critical issues found\"\n\
+         \x20\x20\x20 echo \"[linthis] Review saved: $REVIEW_REPORT\" >&2\n\
          \x20 fi\n\
          fi\n\
          \n\
          exit $REVIEW_EXIT\n",
         timer = timer_fns,
+        review_box = review_box,
         linthis = linthis_cmd,
         provider = fix_provider,
         agent = agent_cmd,
