@@ -47,6 +47,7 @@ Thumbs.db
 .claude/
 
 site/
+doc/
 
 # Worktrees
 .worktrees/
