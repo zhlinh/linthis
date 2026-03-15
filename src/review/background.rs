@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Directory for review artifacts relative to project root.
-const REVIEW_DIR: &str = ".linthis/review";
+const REVIEW_DIR: &str = ".linthis/review/result";
 
 /// Get the review artifacts directory, creating it if needed.
 pub fn review_dir() -> Result<PathBuf, String> {

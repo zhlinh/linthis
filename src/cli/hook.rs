@@ -86,15 +86,18 @@ fn save_installed_hook(
     let hook_type_str = hook_type.as_str().to_string();
     let provider_str = provider.unwrap_or("").to_string();
 
-    // Upsert: update existing entry or append
+    // Upsert: update existing entry or append.
+    // Provider is part of the key so that e.g. claude and codebuddy installs
+    // for the same event both get recorded and both get skill-synced.
     let existing = file.hooks.iter_mut().find(|h| {
         h.scope == scope
             && h.project == project
             && h.event == event_str
             && h.hook_type == hook_type_str
+            && h.provider == provider_str
     });
-    if let Some(entry) = existing {
-        entry.provider = provider_str;
+    if existing.is_some() {
+        // Entry already recorded exactly — nothing to update.
     } else {
         file.hooks.push(InstalledHook {
             scope: scope.to_string(),
@@ -2280,6 +2283,12 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
          REVIEW_REPORT=$(ls -t .linthis/review/result/review-*.md 2>/dev/null | head -1)\n\
          if [ -n \"$REVIEW_REPORT\" ]; then\n\
          \x20 echo \"[linthis] Review saved: $REVIEW_REPORT\" >&2\n\
+         \x20 # Check for actual critical issues in the report (agent exit code is unreliable)\n\
+         \x20 _CRITICAL=$(awk '/^## Critical Issues/{{found=1;next}} found && /^## /{{found=0}} found && /^- \\[/{{print}}' \"$REVIEW_REPORT\")\n\
+         \x20 if [ -n \"$_CRITICAL\" ]; then\n\
+         \x20\x20\x20 echo \"❌ Push blocked — Critical issues found. Fix them before pushing.\" >&2\n\
+         \x20\x20\x20 exit 1\n\
+         \x20 fi\n\
          fi\n\
          \n\
          exit $REVIEW_EXIT\n",
@@ -4585,6 +4594,47 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
             target_scope
         );
     }
+
+    // ── Disk-scan pass: refresh skills for providers not in the TOML ────────────
+    // Covers backward-compat: if the user previously installed codebuddy skills
+    // then reinstalled with claude (overwriting the TOML entry), the skill files
+    // on disk still exist but no TOML entry records them.  Refresh any we find.
+    let base_for_scan = if global {
+        dirs::home_dir().unwrap_or_default()
+    } else {
+        project_root.clone()
+    };
+    let all_scan_providers = [
+        AgentProvider::Claude,
+        AgentProvider::Codebuddy,
+        AgentProvider::Gemini,
+        AgentProvider::Cursor,
+        AgentProvider::Droid,
+        AgentProvider::Auggie,
+    ];
+    let all_scan_events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
+    for scan_event in &all_scan_events {
+        for scan_provider in &all_scan_providers {
+            let skill_path = agent_skill_path(&base_for_scan, scan_provider, global, scan_event);
+            if !skill_path.exists() {
+                continue;
+            }
+            // Already handled above (registered in TOML)? skip to avoid double output.
+            let already_registered = filtered.iter().any(|h| {
+                h.event == scan_event.as_str()
+                    && matches!(h.hook_type.as_str(), "git-with-agent" | "agent" | "prek-with-agent" | "pre-commit-with-agent")
+                    && h.provider.to_lowercase() == format!("{:?}", scan_provider).to_lowercase()
+            });
+            if already_registered {
+                continue;
+            }
+            // Unregistered but exists on disk — refresh silently
+            if let Err(e) = install_agent_skill(&base_for_scan, scan_provider, global, scan_event) {
+                eprintln!("  {} skill refresh error ({:?}/{}): {}", "⚠".yellow(), scan_provider, scan_event.as_str(), e);
+            }
+        }
+    }
+    // ── End disk-scan pass ──────────────────────────────────────────────────────
 
     if errors > 0 {
         eprintln!("{} {} error(s) during sync", "⚠".yellow(), errors);

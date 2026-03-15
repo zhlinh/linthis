@@ -209,6 +209,9 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
     };
     eprintln!("{} Report saved: {}", "✓".green(), report_path);
 
+    // Print full report content
+    println!("{}", report_content);
+
     // Print summary
     println!("{}", review_result.summary);
 
