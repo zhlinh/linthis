@@ -4308,6 +4308,7 @@ fn handle_hook_run(
 /// `# linthis-hook` or already calls `linthis hook run`.
 fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, project: &str) -> usize {
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     // Map filename → HookEvent
