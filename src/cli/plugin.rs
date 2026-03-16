@@ -409,6 +409,9 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                 Ok(plugins) => {
                     if plugins.is_empty() {
                         println!("No {} plugins configured.", config_type);
+                        if !global {
+                            println!("  Use {} to view global plugins.", "linthis plugin list -g".cyan());
+                        }
                         println!("\nConfig: {}", manager.config_path().display());
                         return ExitCode::SUCCESS;
                     }
@@ -664,7 +667,7 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
 
             // Re-sync agent hook components so skill files reflect updated plugin content
             println!();
-            println!("{} Syncing agent hooks...", "→".cyan());
+            println!("{} Syncing agent and git hooks...", "→".cyan());
             crate::cli::hook::handle_hook_sync_after_plugin_sync(global);
 
             ExitCode::SUCCESS
@@ -873,6 +876,9 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                     eprintln!("{}: Plugin '{}' not found in {} config", "Error".red(), a, config_type);
                 } else {
                     println!("No plugins configured in {} config.", config_type);
+                }
+                if !global {
+                    eprintln!("  Use {} to apply global plugins.", "linthis plugin apply -g".cyan());
                 }
                 return ExitCode::from(1);
             }

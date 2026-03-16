@@ -35,8 +35,12 @@ struct InstalledHook {
     event: String,
     /// Hook tool name (e.g. "git", "git-with-agent")
     hook_type: String,
-    /// AI provider name (empty string if none)
+    /// AI provider name for the fix fallback (empty string if none)
     provider: String,
+    /// All agent providers that have skills installed for this hook.
+    /// Used by `hook sync` to know which providers to refresh.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    skill_providers: Vec<String>,
 }
 
 /// Top-level structure of ~/.linthis/installed-hooks.toml.
@@ -76,6 +80,18 @@ fn save_installed_hook(
     hook_type: &HookTool,
     provider: Option<&str>,
 ) {
+    save_installed_hook_inner(scope, project, event, hook_type, provider, &[]);
+}
+
+/// Save hook metadata with optional skill_providers list.
+fn save_installed_hook_inner(
+    scope: &str,
+    project: &str,
+    event: &HookEvent,
+    hook_type: &HookTool,
+    provider: Option<&str>,
+    skill_providers: &[&str],
+) {
     let path = match installed_hooks_path() {
         Some(p) => p,
         None => return,
@@ -86,18 +102,18 @@ fn save_installed_hook(
     let hook_type_str = hook_type.as_str().to_string();
     let provider_str = provider.unwrap_or("").to_string();
 
-    // Upsert: update existing entry or append.
-    // Provider is part of the key so that e.g. claude and codebuddy installs
-    // for the same event both get recorded and both get skill-synced.
+    // Upsert by (scope, project, event, hook_type).
     let existing = file.hooks.iter_mut().find(|h| {
         h.scope == scope
             && h.project == project
             && h.event == event_str
             && h.hook_type == hook_type_str
-            && h.provider == provider_str
     });
-    if existing.is_some() {
-        // Entry already recorded exactly — nothing to update.
+    if let Some(entry) = existing {
+        entry.provider = provider_str;
+        if !skill_providers.is_empty() {
+            entry.skill_providers = skill_providers.iter().map(|s| s.to_string()).collect();
+        }
     } else {
         file.hooks.push(InstalledHook {
             scope: scope.to_string(),
@@ -105,10 +121,113 @@ fn save_installed_hook(
             event: event_str,
             hook_type: hook_type_str,
             provider: provider_str,
+            skill_providers: skill_providers.iter().map(|s| s.to_string()).collect(),
         });
     }
 
     // Write back
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(raw) = toml::to_string_pretty(&file) {
+        let _ = std::fs::write(&path, raw);
+    }
+}
+
+/// Add a skill provider to an existing hook entry without changing the fix provider.
+fn add_skill_provider_to_hook(
+    scope: &str,
+    project: &str,
+    event: &HookEvent,
+    skill_provider: &str,
+) {
+    let path = match installed_hooks_path() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let mut file = load_installed_hooks();
+    let event_str = event.as_str();
+
+    // Only match the "agent" entry — skill_providers belong on the agent record,
+    // not on git-with-agent or other hook type records.
+    let existing = file.hooks.iter_mut().find(|h| {
+        h.scope == scope && h.project == project && h.event == event_str && h.hook_type == "agent"
+    });
+    if let Some(entry) = existing {
+        let sp = skill_provider.to_string();
+        if !entry.skill_providers.contains(&sp) {
+            entry.skill_providers.push(sp);
+        }
+    } else {
+        // Create a new "agent" entry for skill tracking
+        file.hooks.push(InstalledHook {
+            scope: scope.to_string(),
+            project: project.to_string(),
+            event: event_str.to_string(),
+            hook_type: "agent".to_string(),
+            provider: String::new(),
+            skill_providers: vec![skill_provider.to_string()],
+        });
+    }
+
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(raw) = toml::to_string_pretty(&file) {
+        let _ = std::fs::write(&path, raw);
+    }
+}
+
+/// Remove a hook entry from ~/.linthis/installed-hooks.toml.
+///
+/// Matches by (scope, project, event). Removes the first matching entry.
+fn remove_installed_hook(scope: &str, project: &str, event: &HookEvent) {
+    let path = match installed_hooks_path() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let mut file = load_installed_hooks();
+    let event_str = event.as_str();
+
+    file.hooks.retain(|h| {
+        !(h.scope == scope && h.project == project && h.event == event_str)
+    });
+
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(raw) = toml::to_string_pretty(&file) {
+        let _ = std::fs::write(&path, raw);
+    }
+}
+
+/// Remove a specific skill provider from a hook entry.
+///
+/// If the skill_providers list becomes empty, the entry is kept (the hook itself
+/// may still be installed — only the skill provider list is trimmed).
+fn remove_skill_provider_from_hook(
+    scope: &str,
+    project: &str,
+    event: &HookEvent,
+    skill_provider: &str,
+) {
+    let path = match installed_hooks_path() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let mut file = load_installed_hooks();
+    let event_str = event.as_str();
+
+    let existing = file.hooks.iter_mut().find(|h| {
+        h.scope == scope && h.project == project && h.event == event_str && h.hook_type == "agent"
+    });
+    if let Some(entry) = existing {
+        entry.skill_providers.retain(|sp| sp != skill_provider);
+    }
+
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -980,6 +1099,7 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
         match fs::remove_file(&hook_path) {
             Ok(_) => {
                 println!("{} Removed global {} hook", "✓".green(), event.hook_filename());
+                remove_installed_hook("global", "", event);
                 any_removed = true;
             }
             Err(e) => {
@@ -1382,6 +1502,10 @@ fn uninstall_single_hook(git_root: &std::path::Path, hook_event: &HookEvent, yes
             println!("{} Deleted {} hook", "✓".green(), hook_event.hook_filename());
         }
     }
+
+    // Remove the TOML record for this hook
+    let project_str = git_root.to_str().unwrap_or("").to_string();
+    remove_installed_hook("local", &project_str, hook_event);
 
     ExitCode::SUCCESS
 }
@@ -2313,7 +2437,13 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
          \x20 {linthis} \"$@\"\n\
          fi\n\
          \n\
-         # Always invoke agent code review before push\n\
+         # Skip agent review if no file changes (empty push / tag-only push)\n\
+         if [ -z \"$_PUSHED_FILES\" ]; then\n\
+         \x20 echo \"[linthis] No files changed — skipping code review\" >&2\n\
+         \x20 exit 0\n\
+         fi\n\
+         \n\
+         # Invoke agent code review before push\n\
          echo \"[linthis] Invoking {provider} code review...\" >&2\n\
          start_timer \"Reviewing with {provider}\"\n\
          {agent}\n\
@@ -2369,6 +2499,11 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
          {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
          _STAGED_FILES=$(git diff --cached --name-only)\n\
+         \n\
+         # Skip entirely if no staged files (empty commit)\n\
+         if [ -z \"$_STAGED_FILES\" ]; then\n\
+         \x20 exit 0\n\
+         fi\n\
          \n\
          $LINTHIS_CMD\n\
          LINTHIS_EXIT=$?\n\
@@ -3146,6 +3281,39 @@ fn resolve_and_install_agent_plugin_override(
         return Ok(true);
     }
 
+    // Tier 2.5: Scan cached plugin directories for agent plugin overrides.
+    // This covers global installs where plugin sources are configured but
+    // [hooks.agent-plugins] is not explicitly set in the TOML.
+    {
+        use linthis::plugin::{PluginCache, PluginConfigManager};
+
+        let managers: Vec<_> = if global {
+            [PluginConfigManager::global()].into_iter().filter_map(|r| r.ok()).collect()
+        } else {
+            [PluginConfigManager::project()].into_iter().filter_map(|r| r.ok()).collect()
+        };
+
+        if let Ok(cache) = PluginCache::new() {
+            for mgr in &managers {
+                if let Ok(plugins) = mgr.list_plugins() {
+                    for (_name, url, _ref) in &plugins {
+                        let cache_path = cache.url_to_cache_path(url);
+                        let ns_id = plugin_id.replacen('.', "/", 1); // "lt.lint" → "lt/lint"
+                        let agent_dir = cache_path
+                            .join("hooks")
+                            .join("agent")
+                            .join("plugins")
+                            .join(&ns_id);
+                        if agent_dir.is_dir() {
+                            install_agent_plugin_from_dir(&agent_dir, base, provider, event)?;
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Tier 3: no override — fall through to built-in generator
     Ok(false)
 }
@@ -3616,6 +3784,13 @@ fn handle_agent_hook_install(
         }
     };
 
+    let scope = if global { "global" } else { "local" };
+    let project_str = if global {
+        String::new()
+    } else {
+        base.to_str().unwrap_or("").to_string()
+    };
+
     println!("{}", "🤖 AI Coding Agent Integration".bold());
     if global {
         println!("  {} Installing user-level skills in {}", "→".dimmed(), base.display());
@@ -3636,11 +3811,13 @@ fn handle_agent_hook_install(
         }
 
         warn_legacy_if_present(&base, p);
+        let provider_name = format!("{}", p).to_lowercase();
         for event in events {
             match install_agent_skill(&base, p, global, event) {
                 Ok(_) => {
                     let path = agent_skill_path(&base, p, global, event);
                     println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
+                    add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
                 }
                 Err(e) => {
                     eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
@@ -3669,12 +3846,14 @@ fn handle_agent_hook_install(
                 continue;
             }
             warn_legacy_if_present(&base, p);
+            let provider_name = format!("{}", p).to_lowercase();
             let mut provider_ok = true;
             for event in events {
                 match install_agent_skill(&base, p, global, event) {
                     Ok(_) => {
                         let path = agent_skill_path(&base, p, global, event);
                         println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
+                        add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
                     }
                     Err(e) => {
                         eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
@@ -3796,12 +3975,14 @@ fn handle_agent_hook_install(
             continue;
         }
         warn_legacy_if_present(&base, p);
+        let provider_name = format!("{}", p).to_lowercase();
         let mut provider_ok = true;
         for event in events {
             match install_agent_skill(&base, p, global, event) {
                 Ok(_) => {
                     let path = agent_skill_path(&base, p, global, event);
                     println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
+                    add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
                 }
                 Err(e) => {
                     eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
@@ -3875,14 +4056,24 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) ->
         }
     }
 
+    let scope = if global { "global" } else { "local" };
+    let project_str = if global {
+        String::new()
+    } else {
+        base.to_str().unwrap_or("").to_string()
+    };
+
     let mut any_removed = false;
     for p in &installed {
         let mut provider_ok = true;
+        let provider_name = format!("{}", p).to_lowercase();
         for event in events {
             let event_name = event.hook_filename();
             match uninstall_agent_skill(&base, p, global, event) {
                 Ok(_) => {
                     println!("{} Uninstalled {} ({}) skill", "✓".green(), p, event_name);
+                    // Remove this provider from the skill_providers list in TOML
+                    remove_skill_provider_from_hook(scope, &project_str, event, &provider_name);
                 }
                 Err(e) => {
                     eprintln!("{}: Failed to uninstall {} ({}): {}", "Error".red(), p, event_name, e);
@@ -4518,16 +4709,43 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
             } else {
                 println!("No local linthis hooks found for this project.");
                 println!("  Run {} to install and record hooks", "linthis hook install".cyan());
+                println!("  Use {} to sync global hooks.", "linthis hook sync -g".cyan());
             }
         }
         return 0;
+    }
+
+    // Group entries by hook_type for structured output
+    let type_order = ["agent", "git-with-agent", "prek-with-agent", "pre-commit-with-agent", "git", "prek", "pre-commit"];
+    let mut grouped: Vec<(&str, Vec<&&InstalledHook>)> = Vec::new();
+    for ht in &type_order {
+        let group: Vec<&&InstalledHook> = filtered.iter().filter(|h| h.hook_type == *ht).collect();
+        if !group.is_empty() {
+            grouped.push((ht, group));
+        }
+    }
+    // Catch any hook_types not in type_order
+    for hook in &filtered {
+        if !type_order.contains(&hook.hook_type.as_str()) {
+            let existing = grouped.iter().any(|(ht, _)| *ht == hook.hook_type.as_str());
+            if !existing {
+                let group: Vec<&&InstalledHook> = filtered.iter().filter(|h| h.hook_type == hook.hook_type).collect();
+                grouped.push((hook.hook_type.as_str(), group));
+            }
+        }
     }
 
     println!("{} Syncing {} hook(s)...", "→".cyan(), filtered.len());
 
     let mut errors = 0_u32;
 
-    for hook in &filtered {
+    let mut hook_index = 0_usize;
+
+    for (group_type, group_hooks) in &grouped {
+    println!();
+    println!("{} Type: {} ({} hook{})", "→".cyan(), group_type.cyan(), group_hooks.len(), if group_hooks.len() == 1 { "" } else { "s" });
+
+    for hook in group_hooks {
         // Parse event and hook_type back from stored strings
         let event = match hook.event.as_str() {
             "pre-commit" => HookEvent::PreCommit,
@@ -4599,16 +4817,40 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
             }
         }
 
-        // 2. Re-sync agent components (skill, command, memory, stop hook)
-        if matches!(
-            hook_type,
-            HookTool::GitWithAgent
-                | HookTool::Agent
-                | HookTool::PrekWithAgent
-                | HookTool::PreCommitWithAgent
-        ) {
-            if let Some(p_str) = provider_opt {
-                let agent_provider = match p_str.to_lowercase().as_str() {
+        // Print summary line FIRST (总), then details (分)
+        hook_index += 1;
+        let mut details = Vec::new();
+        details.push(target_scope.to_string());
+        if let Some(fp) = provider_opt {
+            if !fp.is_empty() {
+                details.push(format!("fix: {}", fp));
+            }
+        }
+        if !hook.skill_providers.is_empty() {
+            details.push(format!("skills: {}", hook.skill_providers.join(",")));
+        }
+        println!(
+            "  {}. {} synced {} {} ({})",
+            hook_index,
+            "✓".green(),
+            hook.event,
+            hook.hook_type,
+            details.join(", ")
+        );
+
+        // 2. Re-sync agent skills (only for "agent" type entries).
+        //    git-with-agent / prek-with-agent entries only sync thin wrappers;
+        //    their agent skills are tracked via separate "agent" TOML entries.
+        if matches!(hook_type, HookTool::Agent) {
+            let base = if global {
+                dirs::home_dir().unwrap_or_default()
+            } else {
+                project_root.clone()
+            };
+
+            // Build target list from TOML skill_providers
+            let mut skill_targets: Vec<AgentProvider> = hook.skill_providers.iter().filter_map(|name| {
+                match name.to_lowercase().as_str() {
                     "claude"    => Some(AgentProvider::Claude),
                     "codex"     => Some(AgentProvider::Codex),
                     "gemini"    => Some(AgentProvider::Gemini),
@@ -4617,30 +4859,49 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
                     "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
                     "codebuddy" => Some(AgentProvider::Codebuddy),
                     _ => None,
-                };
-                if let Some(provider) = agent_provider {
-                    let base = if global {
-                        dirs::home_dir().unwrap_or_default()
-                    } else {
-                        project_root.clone()
-                    };
-                    if let Err(e) = install_agent_skill(&base, &provider, global, &event) {
-                        eprintln!("  {} agent sync error: {}", "✗".red(), e);
-                        errors += 1;
-                        continue;
+                }
+            }).collect();
+
+            // Backward compatibility: if no skill_providers recorded, fall back to fix provider
+            if skill_targets.is_empty() {
+                if let Some(fb) = provider_opt.and_then(|p| match p.to_lowercase().as_str() {
+                    "claude"    => Some(AgentProvider::Claude),
+                    "codex"     => Some(AgentProvider::Codex),
+                    "gemini"    => Some(AgentProvider::Gemini),
+                    "cursor"    => Some(AgentProvider::Cursor),
+                    "droid"     => Some(AgentProvider::Droid),
+                    "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
+                    "codebuddy" => Some(AgentProvider::Codebuddy),
+                    _ => None,
+                }) {
+                    skill_targets.push(fb);
+                }
+            }
+
+            for provider in &skill_targets {
+                let skill_path = agent_skill_path(&base, provider, global, &event);
+                if let Err(e) = install_agent_skill(&base, provider, global, &event) {
+                    eprintln!("     {} agent sync error ({}): {}", "✗".red(), provider, e);
+                    errors += 1;
+                    continue;
+                }
+                println!("     {} {} skill → {}", "↳".dimmed(), provider, skill_path.display());
+                if let Some(cmd_dir) = agent_command_dir(&base, provider) {
+                    if cmd_dir.exists() {
+                        println!("     {} {} command → {}", "↳".dimmed(), provider, cmd_dir.display());
+                    }
+                }
+                if matches!(event, HookEvent::PreCommit) {
+                    if let Some(settings_path) = agent_stop_hook_settings_path(&base, provider) {
+                        if settings_path.exists() {
+                            println!("     {} {} stop hook → {}", "↳".dimmed(), provider, settings_path.display());
+                        }
                     }
                 }
             }
         }
-
-        println!(
-            "  {} synced {} {} ({})",
-            "✓".green(),
-            hook.event,
-            hook.hook_type,
-            target_scope
-        );
-    }
+    } // end for hook in group_hooks
+    } // end for (group_type, group_hooks) in &grouped
 
     // ── Disk-scan pass: refresh skills for providers not in the TOML ────────────
     // Covers backward-compat: if the user previously installed codebuddy skills
@@ -4666,11 +4927,12 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
             if !skill_path.exists() {
                 continue;
             }
-            // Already handled above (registered in TOML)? skip to avoid double output.
+            // Already handled above (registered in TOML skill_providers)? skip to avoid double output.
+            let provider_name_lower = format!("{}", scan_provider).to_lowercase();
             let already_registered = filtered.iter().any(|h| {
                 h.event == scan_event.as_str()
                     && matches!(h.hook_type.as_str(), "git-with-agent" | "agent" | "prek-with-agent" | "pre-commit-with-agent")
-                    && h.provider.to_lowercase() == format!("{:?}", scan_provider).to_lowercase()
+                    && h.skill_providers.iter().any(|sp| sp.to_lowercase() == provider_name_lower)
             });
             if already_registered {
                 continue;
