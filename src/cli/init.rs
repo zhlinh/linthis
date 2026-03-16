@@ -301,7 +301,7 @@ pub fn init_linter_configs() -> ExitCode {
         "Generating default linter/formatter configs...".cyan()
     );
 
-    for (filename, content) in configs {
+    for (filename, content) in &configs {
         let path = Path::new(filename);
         if path.exists() {
             println!("  {} {} (already exists)", "⊘".yellow(), filename);
@@ -315,6 +315,26 @@ pub fn init_linter_configs() -> ExitCode {
                 Err(e) => {
                     eprintln!("  {} {} ({})", "✗".red(), filename, e);
                 }
+            }
+        }
+    }
+
+    // Ensure .linthis/ is in .gitignore (working directory for review results, caches, etc.)
+    let gitignore_path = Path::new(".gitignore");
+    let existing_gitignore = fs::read_to_string(gitignore_path).unwrap_or_default();
+    if !existing_gitignore.lines().any(|line| line.trim() == ".linthis/" || line.trim() == ".linthis") {
+        let mut content = existing_gitignore;
+        if !content.is_empty() && !content.ends_with('\n') {
+            content.push('\n');
+        }
+        content.push_str("\n# Linthis working directory\n.linthis/\n");
+        match fs::write(gitignore_path, &content) {
+            Ok(_) => {
+                println!("  {} Added .linthis/ to .gitignore", "✓".green());
+            }
+            Err(e) => {
+                eprintln!("  {} Failed to update .gitignore: {}", "✗".red(), e);
+                eprintln!("  Please add '.linthis/' to .gitignore manually");
             }
         }
     }
