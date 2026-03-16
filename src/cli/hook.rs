@@ -2785,28 +2785,24 @@ fn agent_event_content_generic(event: &HookEvent) -> String {
 }
 
 fn agent_lint_body() -> String {
-    r#"## Mandatory: Run Linthis Before Commit
+    r#"## Goal
 
-**After editing any code file in this session:**
+Catch and fix code quality issues before they enter the repository. Running lint at pre-commit ensures every committed file meets project coding standards, preventing style debt from accumulating over time.
 
-```bash
-linthis -i <file1> -i <file2> -c
-```
+## When to Skip
 
-**Before any `git commit`:**
+If no code files were modified in this session, approve immediately.
 
-```bash
-linthis -s -c
-```
+## Steps
 
-`linthis -s -c` checks all staged files for lint issues.
-
-## How to Fix Issues
-
-1. Read the lint result at `.linthis/result/result-*.json`
-2. Edit the source files directly to fix the issues
-3. Re-run `linthis -s -c` until it shows 0 issues
-4. Then proceed with git commit
+1. Identify modified code files in this session (files written or edited via Write/Edit tools, or via Bash)
+2. Run `linthis -i <file1> -i <file2> -c` on all modified files — use separate `-i` flags for each file
+3. Before any `git commit`, also run `linthis -s -c` to check all staged files
+4. Read the lint output carefully — each issue includes file path, line number, and rule name
+5. If issues are found, fix them by editing the code directly
+   - Do **NOT** use `linthis --fix` or `linthis fix` — fixing manually ensures you understand the issue and don't introduce regressions from blind automated transforms
+6. Re-run `linthis -i <files> -c` to confirm all issues are resolved
+7. Only approve the commit once lint passes with zero errors
 
 ## Key Commands
 
@@ -2816,40 +2812,95 @@ linthis -s -c
 | Lint specific files | `linthis -i <file> -c` |
 | Format only | `linthis -s -f` |
 
-**Never use `linthis --fix` or `linthis fix` — always fix issues manually.**"#
+## Example
+
+```
+$ linthis -i src/handler.go -c
+
+src/handler.go:15:1: exported function HandleRequest should have comment (golint)
+src/handler.go:23:4: error return value not checked (errcheck)
+
+2 issues found
+```
+
+Fix line 15 by adding a doc comment, and line 23 by handling the error return value. Then re-run to confirm zero errors."#
         .to_string()
 }
 
 fn agent_cmsg_body() -> String {
-    r#"## Mandatory: Validate Commit Message Format
+    r#"## Goal
 
-Before executing any `git commit`, validate the commit message:
+Ensure every commit message follows Conventional Commits format and accurately reflects the actual code changes. A well-structured commit history makes code review, changelog generation, and git bisect much easier.
 
-```bash
-linthis cmsg "your commit message here"
+## When to Skip
+
+If the commit message already complies with all rules below, approve immediately with `✅ Commit message OK`.
+
+## Steps
+
+1. Read the commit message from `.git/COMMIT_EDITMSG`
+2. Run `git diff --cached --stat` to understand what files actually changed — the type prefix must match the actual diff, not just what the developer wrote
+3. Run `git log -n 5 --oneline` to check the recent commit style **and language** (Chinese or English) — match that language for the description part, because consistency in the git log improves readability
+4. Validate with: `linthis cmsg "your commit message here"`
+5. Evaluate the message against these rules:
+   - **Type prefix**: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
+   - **Scope** (optional): `feat(module): description`
+   - **Subject line**: ≤72 characters, imperative mood, starts with lowercase after the colon
+   - **No trailing period** on subject line
+   - **Body** (if present): wrapped at 80 characters, explains *why* not *what*
+6. If the message is acceptable, output `✅ Commit message OK` and approve
+7. If improvements are needed, choose the correct `type` based on the staged diff, then **automatically rewrite** `.git/COMMIT_EDITMSG` — do NOT ask for confirmation
+
+## Type Selection Guide
+
+Select the type by examining the staged diff, not by guessing from the message:
+
+| Type | When to use |
+|------|-------------|
+| **feat** | New feature or functionality |
+| **fix** | Bug fix |
+| **refactor** | Code restructured, no behavior change |
+| **docs** | Documentation only |
+| **style** | Formatting, whitespace, lint fixes |
+| **test** | Adding or updating tests |
+| **build** | Build scripts, deps, CI config |
+| **chore** | Maintenance, tooling |
+
+## Examples
+
+**Good:**
+```
+feat: add user authentication module
+fix(parser): handle nil pointer when input is empty
+docs: update README with setup instructions
+refactor(core): extract common utility functions
 ```
 
-## Commit Message Format
-
+**Bad → Fixed:**
 ```
-type(scope)?: description
-```
+# Bad: wrong type (diff shows bug fix)
+feat: fix login crash on empty password
+# Fixed:
+fix(auth): handle empty password input gracefully
 
-**Valid types:** feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-
-**Examples:**
-- `feat(auth): add OAuth2 login`
-- `fix: resolve null pointer in parser`
-- `docs: update README with new CLI flags`
-
-If `linthis cmsg` reports an error, fix the message before committing."#
+# Bad: vague, no type
+update code
+# Fixed (based on diff):
+refactor(utils): extract shared validation logic
+```"#
         .to_string()
 }
 
 fn agent_review_body() -> String {
-    r#"## Mandatory: Code Review Before Push
+    r#"## Goal
 
-Before executing any `git push`, perform a structured code review.
+Catch issues that lint can't — logic errors, security vulnerabilities, architectural problems, and missing test coverage. This is the last automated quality gate before code reaches the remote, so focus on issues that would be costly to fix after pushing.
+
+## When to Skip
+
+If there are no outgoing commits (local is up-to-date with remote), approve immediately.
+
+## Steps
 
 ### Step 1 — Gather diff
 
@@ -2877,11 +2928,13 @@ git diff "$BASE_SHA".."$HEAD_SHA"
 
 ### Step 3 — Review by category
 
-| Category | Examples |
-|---|---|
-| **Critical** | Security vulnerabilities, data loss risk, broken API, logic errors |
-| **Important** | Missing error handling, untested edge cases, performance issues |
-| **Minor** | Style inconsistencies, redundant code, missing comments |
+| Category | What to look for | Severity |
+|---|---|---|
+| **Critical** | Security vulnerabilities (injection, hardcoded secrets), data loss risk, logic errors, broken API | Blocking |
+| **Important** | Missing error handling, untested edge cases, performance issues, missing test coverage | Should fix |
+| **Minor** | Style inconsistencies, redundant code, missing comments | Optional |
+
+Focus on the diff, not the whole file — only review what changed. Explain **why** something is a problem and suggest concrete fixes.
 
 ### Step 4 — Write structured review
 
@@ -2915,7 +2968,13 @@ Create `.linthis/review/result/` directory if it doesn't exist.
 
 - **Critical issues** → output `❌ Push blocked — fix Critical issues first`; do not proceed
 - **Important issues only** → output `⚠️ Push with caution`; ask user to confirm
-- **Minor or none** → output `✅ Review passed`; proceed"#
+- **Minor or none** → output `✅ Review passed`; proceed
+
+## Review Principles
+
+- **Don't nitpick style** — that's what the lint skill handles. Focus on logic, security, and architecture
+- **Explain why** — "SQL injection lets attackers execute arbitrary queries" is more actionable than just "SQL injection found"
+- **Suggest concrete fixes** — show corrected code when possible, not just "fix this""#
         .to_string()
 }
 
@@ -3432,15 +3491,15 @@ fn agent_event_skill_metadata(event: &HookEvent) -> (&'static str, &'static str)
     match event {
         HookEvent::PreCommit => (
             "lt-lint",
-            "MUST use before any git commit — enforces code style via linthis CLI",
+            "对暂存/修改的代码文件运行 linthis 代码检查，提交前修复所有问题。使用 `linthis -i <file> -c` 按项目编码规范检查，必须手动编辑修复（不能用 linthis --fix）。由 pre-commit hook 触发。Run linthis lint checks on staged/modified code files and fix all issues before committing. Uses `linthis -i <file> -c`. Issues must be fixed by editing code directly. Triggered by pre-commit hook.",
         ),
         HookEvent::CommitMsg => (
             "lt-cmsg",
-            "MUST use before any git commit — validates commit message format via linthis cmsg",
+            "验证并自动修复 git 提交信息，使其符合 Conventional Commits 规范。分析暂存区 diff 选择正确的 type 前缀（feat/fix/refactor 等），检查标题格式，自动改写不合规的提交信息。由 commit-msg hook 触发。Validate and auto-fix git commit messages to comply with Conventional Commits. Analyzes staged diff to select correct type prefix, checks format, auto-rewrites malformed messages. Triggered by commit-msg hook.",
         ),
         HookEvent::PrePush => (
             "lt-review",
-            "MUST use before any git push — performs structured code review via git diff",
+            "推送前审查待推送的提交，检查代码质量、安全性和正确性问题。检查完整 diff 发现逻辑错误、安全漏洞（注入、硬编码密钥）、代码质量问题及测试覆盖缺失。由 pre-push hook 触发。Review outgoing commits for quality, security, and correctness before pushing. Catches logic errors, security vulnerabilities, code quality issues. Triggered by pre-push hook.",
         ),
     }
 }
