@@ -1869,8 +1869,16 @@ sources = [{{ name = "test-plugin", url = "{}" }}]
     #[test]
     fn test_fn_length_no_plugin_falls_back_to_none() {
         // No plugin active, no project config override → fn_length is None (checker uses default 80).
+        //
+        // Isolate from real plugin cache: point LINTHIS_TEST_PLUGIN_CACHE_DIR to
+        // an empty temp dir so globally-installed plugins don't leak into the test.
+        let empty_cache = tempfile::TempDir::new().unwrap();
+        std::env::set_var("LINTHIS_TEST_PLUGIN_CACHE_DIR", empty_cache.path());
+
         let project_dir = tempfile::TempDir::new().unwrap();
         let merged = Config::load_merged(project_dir.path());
+
+        std::env::remove_var("LINTHIS_TEST_PLUGIN_CACHE_DIR");
 
         // No plugin, no config → None (CppChecker::new() will unwrap_or(80))
         assert!(merged.language_overrides.cpp.as_ref().and_then(|c| c.fn_length).is_none()
