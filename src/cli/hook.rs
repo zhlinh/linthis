@@ -2325,7 +2325,7 @@ fn agent_fix_error_msg(hook_event: &HookEvent) -> &'static str {
 ///
 /// Emits a colored Unicode box to stderr similar to the linthis Rust output:
 ///   ╭────────────────────────────────────────────────╮
-///   │ ✓ Linthis 🔍 [Pre-push] Review Passed         │
+///   │ ✓ Linthis 📤 [Pre-push] Review Passed         │
 ///   ├────────────────────────────────────────────────┤
 ///   │ No critical issues found                       │
 ///   ╰────────────────────────────────────────────────╯
@@ -2333,17 +2333,17 @@ fn shell_review_box_fn() -> &'static str {
     // Raw string: \033 is literal backslash-0-3-3 (ANSI ESC via printf)
     // Box width = 52 (50 inner dashes + 2 border chars)
     // Inner content width = 48 (box_width - 4 for "│ " + " │")
-    // Header visual widths (🔍 emoji = 2 columns):
-    //   "✓ Linthis 🔍 [Pre-push] Review Passed"  = 36 chars, visual 37 → pad 11
-    //   "✗ Linthis 🔍 [Pre-push] Review Blocked" = 37 chars, visual 38 → pad 10
+    // Header visual widths (📤 emoji = 2 columns):
+    //   "✓ Linthis 📤 [Pre-push] Review Passed"  = 36 chars, visual 37 → pad 11
+    //   "✗ Linthis 📤 [Pre-push] Review Blocked" = 37 chars, visual 38 → pad 10
     r#"
 _print_review_box() {
   if [ "$1" = "passed" ]; then
-    _RH="✓ Linthis 🔍 [Pre-push] Review Passed"
+    _RH="✓ Linthis 📤 [Pre-push] Review Passed"
     _RC="\033[32m"
     _RHP="           "
   else
-    _RH="✗ Linthis 🔍 [Pre-push] Review Blocked"
+    _RH="✗ Linthis 📤 [Pre-push] Review Blocked"
     _RC="\033[31m"
     _RHP="          "
   fi
