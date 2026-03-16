@@ -3260,17 +3260,18 @@ fn agent_event_content_for_provider(provider: &AgentProvider, event: &HookEvent)
 }
 
 fn agent_event_skill_metadata(event: &HookEvent) -> (&'static str, &'static str) {
+    // Name must match the directory name under .claude/skills/ (lt-{event})
     match event {
         HookEvent::PreCommit => (
-            "linthis-lint",
+            "lt-lint",
             "MUST use before any git commit — enforces code style via linthis CLI",
         ),
         HookEvent::CommitMsg => (
-            "linthis-cmsg",
+            "lt-cmsg",
             "MUST use before any git commit — validates commit message format via linthis cmsg",
         ),
         HookEvent::PrePush => (
-            "linthis-review",
+            "lt-review",
             "MUST use before any git push — performs structured code review via git diff",
         ),
     }
