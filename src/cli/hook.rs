@@ -2353,6 +2353,11 @@ _print_review_box() {
   printf "${_RC}│ ${_RH}${_RHP}│${_RN}\n" >&2
   printf "${_RC}├──────────────────────────────────────────────────┤${_RN}\n" >&2
   printf "${_RC}│ ${_RM} │${_RN}\n" >&2
+  if [ "$1" != "passed" ]; then
+    printf "${_RC}├──────────────────────────────────────────────────┤${_RN}\n" >&2
+    printf "${_RC}│ To skip this check:                              │${_RN}\n" >&2
+    printf "${_RC}│   git push --no-verify                           │${_RN}\n" >&2
+  fi
   printf "${_RC}╰──────────────────────────────────────────────────╯${_RN}\n" >&2
 }
 "#
