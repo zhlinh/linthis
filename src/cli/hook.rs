@@ -3200,13 +3200,41 @@ fn install_agent_dedicated_file(path: &std::path::Path, content: &str) -> Result
     Ok(())
 }
 
-/// Map an event to its built-in agent plugin ID.
-fn agent_plugin_id(event: &HookEvent) -> &'static str {
-    match event {
-        HookEvent::PreCommit => "lt.lint",
-        HookEvent::CommitMsg => "lt.cmsg",
-        HookEvent::PrePush   => "lt.review",
+/// Recursively copy a directory tree from `src` to `dst`.
+///
+/// Creates `dst` if it does not exist.  Overwrites existing files.
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    use std::fs;
+
+    if !dst.exists() {
+        fs::create_dir_all(dst)
+            .map_err(|e| format!("Failed to create directory {}: {}", dst.display(), e))?;
     }
+
+    for entry in fs::read_dir(src)
+        .map_err(|e| format!("Failed to read directory {}: {}", src.display(), e))?
+    {
+        let entry = entry.map_err(|e| format!("Failed to read dir entry: {}", e))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("Failed to copy {} → {}: {}", src_path.display(), dst_path.display(), e))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Map an event to its built-in agent plugin ID.
+///
+/// All events share a single plugin `"lt"` — the event determines which
+/// skill *within* that plugin is used, not which plugin is resolved.
+fn agent_plugin_id(_event: &HookEvent) -> &'static str {
+    "lt"
 }
 
 /// Target directory for agent slash commands per provider.
@@ -3222,13 +3250,15 @@ fn agent_command_dir(base: &std::path::Path, provider: &AgentProvider) -> Option
     }
 }
 
-/// Resolve and install agent plugin components (skill, command, memory) from a plugin directory.
+/// Resolve and install agent plugin components (skill, command, memory, hooks) from a plugin directory.
 ///
-/// `plugin_dir` must contain `skill/<provider>/`, `command/<provider>/`, `memory/<provider>/`
-/// subdirectories.  Each is optional; missing subdirs are silently skipped.
+/// New layout — `plugin_dir` must contain:
+/// - `skills/<skill_name>/SKILL.md`  (skill_name from `agent_event_skill_metadata`)
+/// - `commands/`                      (optional; all files copied)
+/// - `memories/TOPLEVEL.md`           (optional; injected into provider root instruction file)
+/// - `hooks/hooks.json`               (optional; stop hook settings merged into provider settings)
 ///
-/// Returns `Ok(())` if at least the skill component was installed, or if none existed (silently
-/// skips absent components).  Returns `Err` on I/O failure.
+/// Each is optional; missing subdirs are silently skipped.
 fn install_agent_plugin_from_dir(
     plugin_dir: &std::path::Path,
     base: &std::path::Path,
@@ -3237,48 +3267,57 @@ fn install_agent_plugin_from_dir(
 ) -> Result<(), String> {
     use std::fs;
 
-    let provider_name = format!("{:?}", provider).to_lowercase();
     let skill_path = agent_skill_path(base, provider, false, event);
+    let (skill_name, _) = agent_event_skill_metadata(event);
 
     // ── skill ───────────────────────────────────────────────────────────
-    let skill_src_dir = plugin_dir.join("skill").join(&provider_name);
-    if skill_src_dir.is_dir() {
-        // Pick the first file in the directory (there should be exactly one)
-        if let Ok(mut entries) = fs::read_dir(&skill_src_dir) {
-            if let Some(Ok(entry)) = entries.next() {
-                let content = fs::read_to_string(entry.path())
-                    .map_err(|e| format!("Failed to read skill file '{}': {}", entry.path().display(), e))?;
-                match provider {
-                    AgentProvider::Codex => {
-                        let section_marker = agent_event_section_marker(event);
-                        install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
-                    }
-                    _ => install_agent_dedicated_file(&skill_path, &content)?,
-                }
+    let skill_src_dir = plugin_dir.join("skills").join(skill_name);
+    let skill_src = skill_src_dir.join("SKILL.md");
+    if skill_src.is_file() {
+        match provider {
+            AgentProvider::Codex => {
+                // Section-based: only read SKILL.md content
+                let content = fs::read_to_string(&skill_src)
+                    .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
+                let section_marker = agent_event_section_marker(event);
+                install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
+            }
+            AgentProvider::Claude | AgentProvider::Codebuddy => {
+                // Skills subdirectory providers: copy the entire skill dir
+                // (SKILL.md + scripts/, references/, etc.)
+                let target_dir = skill_path.parent().unwrap();
+                copy_dir_recursive(&skill_src_dir, target_dir)?;
+            }
+            _ => {
+                // Single-file providers: only copy SKILL.md content
+                let content = fs::read_to_string(&skill_src)
+                    .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
+                install_agent_dedicated_file(&skill_path, &content)?;
             }
         }
     }
 
     // ── command ─────────────────────────────────────────────────────────
-    let cmd_src_dir = plugin_dir.join("command").join(&provider_name);
+    let cmd_src_dir = plugin_dir.join("commands");
     if cmd_src_dir.is_dir() {
         if let Some(cmd_dir) = agent_command_dir(base, provider) {
-            if let Ok(mut entries) = fs::read_dir(&cmd_src_dir) {
-                if let Some(Ok(entry)) = entries.next() {
-                    let filename = entry.file_name();
-                    let target = cmd_dir.join(&filename);
-                    let content = fs::read_to_string(entry.path())
-                        .map_err(|e| format!("Failed to read command file '{}': {}", entry.path().display(), e))?;
-                    install_agent_dedicated_file(&target, &content)?;
+            if let Ok(entries) = fs::read_dir(&cmd_src_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().is_file() {
+                        let filename = entry.file_name();
+                        let target = cmd_dir.join(&filename);
+                        let content = fs::read_to_string(entry.path())
+                            .map_err(|e| format!("Failed to read command file '{}': {}", entry.path().display(), e))?;
+                        install_agent_dedicated_file(&target, &content)?;
+                    }
                 }
             }
         }
     }
 
     // ── memory ──────────────────────────────────────────────────────────
-    let mem_src_dir = plugin_dir.join("memory").join(&provider_name);
-    if mem_src_dir.is_dir() {
-        // Inject memory content into provider's root instruction file
+    let mem_src = plugin_dir.join("memories").join("TOPLEVEL.md");
+    if mem_src.is_file() {
         let memory_target = match provider {
             AgentProvider::Claude    => Some(base.join("CLAUDE.md")),
             AgentProvider::Codebuddy => Some(base.join("CODEBUDDY.md")),
@@ -3289,15 +3328,21 @@ fn install_agent_plugin_from_dir(
             AgentProvider::Codex     => None, // Codex memory goes into AGENTS.md; skip for now
         };
         if let Some(mem_target) = memory_target {
-            if let Ok(mut entries) = fs::read_dir(&mem_src_dir) {
-                if let Some(Ok(entry)) = entries.next() {
-                    let content = fs::read_to_string(entry.path())
-                        .map_err(|e| format!("Failed to read memory file '{}': {}", entry.path().display(), e))?;
-                    let plugin_id = agent_plugin_id(event);
-                    let section_marker = &format!("linthis-memory-{}", plugin_id.replace('.', "-"));
-                    install_agent_append_section(&mem_target, &content, section_marker, "")?;
-                }
-            }
+            let content = fs::read_to_string(&mem_src)
+                .map_err(|e| format!("Failed to read memory file '{}': {}", mem_src.display(), e))?;
+            let plugin_id = agent_plugin_id(event);
+            let section_marker = &format!("linthis-memory-{}", plugin_id);
+            install_agent_append_section(&mem_target, &content, section_marker, "")?;
+        }
+    }
+
+    // ── stop hook (from plugin's hooks/hooks.json) ──────────────────────
+    let hooks_json_src = plugin_dir.join("hooks").join("hooks.json");
+    if hooks_json_src.is_file() {
+        if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+            let override_json = fs::read_to_string(&hooks_json_src)
+                .map_err(|e| format!("Failed to read hooks.json '{}': {}", hooks_json_src.display(), e))?;
+            install_agent_stop_hook_from_json(base, &settings_path, &override_json)?;
         }
     }
 
@@ -3321,11 +3366,14 @@ fn resolve_and_install_agent_plugin_override(
     use linthis::hooks::resolver;
 
     let plugin_id = agent_plugin_id(event);
+    let provider_name = format!("{:?}", provider).to_lowercase();
     let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     // Tier 1: fixed-path plugin directory (project-local only, skip for global installs)
+    //   1a: hooks/agent/plugins/<provider>/<plugin>/  (provider override)
+    //   1b: hooks/agent/plugins/<plugin>/              (default fallback)
     if !global {
-        if let Some(plugin_dir) = resolver::fixed_agent_plugin_dir(&project_root, plugin_id) {
+        if let Some(plugin_dir) = resolver::fixed_agent_plugin_dir(&project_root, &provider_name, plugin_id) {
             install_agent_plugin_from_dir(&plugin_dir, base, provider, event)?;
             return Ok(true);
         }
@@ -3357,14 +3405,25 @@ fn resolve_and_install_agent_plugin_override(
                 if let Ok(plugins) = mgr.list_plugins() {
                     for (_name, url, _ref) in &plugins {
                         let cache_path = cache.url_to_cache_path(url);
-                        let ns_id = plugin_id.replacen('.', "/", 1); // "lt.lint" → "lt/lint"
-                        let agent_dir = cache_path
+                        // Try provider-specific override first, then _default fallback
+                        let provider_dir = cache_path
                             .join("hooks")
                             .join("agent")
                             .join("plugins")
-                            .join(&ns_id);
-                        if agent_dir.is_dir() {
-                            install_agent_plugin_from_dir(&agent_dir, base, provider, event)?;
+                            .join(&provider_name)
+                            .join(plugin_id);
+                        if provider_dir.is_dir() {
+                            install_agent_plugin_from_dir(&provider_dir, base, provider, event)?;
+                            return Ok(true);
+                        }
+                        let default_dir = cache_path
+                            .join("hooks")
+                            .join("agent")
+                            .join("plugins")
+                            .join("_default")
+                            .join(plugin_id);
+                        if default_dir.is_dir() {
+                            install_agent_plugin_from_dir(&default_dir, base, provider, event)?;
                             return Ok(true);
                         }
                     }
@@ -3390,12 +3449,8 @@ fn install_agent_skill(
     // (TOML agent-plugins config) applies to both local and global installs.
     match resolve_and_install_agent_plugin_override(base, provider, event, global) {
         Ok(true) => {
-            // Override installed skill/command/memory; still install stop hook for pre-commit.
-            if matches!(event, HookEvent::PreCommit) {
-                if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
-                    install_agent_stop_hook(base, provider, &settings_path)?;
-                }
-            }
+            // Override installed skill/command/memory/hooks; stop hook is handled
+            // inside install_agent_plugin_from_dir if hooks/hooks.json exists.
             return Ok(());
         }
         Ok(false) => {}            // fall through to built-in
@@ -3648,15 +3703,15 @@ fn remove_agent_section_from_file(path: &std::path::Path) -> Result<(), String> 
     Ok(())
 }
 
-/// Install the Stop Hook into a settings JSON file (e.g. .claude/settings.json, .codebuddy/settings.json)
-fn install_agent_stop_hook(
-    git_root: &std::path::Path,
-    provider: &AgentProvider,
+/// Shallow-merge a stop hook JSON string into a settings file.
+///
+/// Shared logic for both override-from-plugin and built-in stop hook installation.
+fn install_agent_stop_hook_from_json(
+    _git_root: &std::path::Path,
     settings_path: &std::path::Path,
+    override_json: &str,
 ) -> Result<(), String> {
     use std::fs;
-    use linthis::config::Config;
-    use linthis::hooks::resolver;
 
     if let Some(parent) = settings_path.parent() {
         if !parent.exists() {
@@ -3664,29 +3719,6 @@ fn install_agent_stop_hook(
                 .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
         }
     }
-
-    // ── Resolve override JSON content (Tier 1 or 2), or use built-in ──────
-    let project_root = git_root.to_path_buf();
-    let provider_dir = format!("{:?}", provider).to_lowercase();
-
-    // Tier 1: fixed-path file
-    let override_json_str: Option<String> =
-        if let Some(fixed) = resolver::fixed_agent_hook_path(&project_root, "stop", &provider_dir, "settings.json") {
-            Some(fs::read_to_string(fixed.as_path())
-                .map_err(|e| format!("Failed to read fixed-path stop hook '{}': {}", fixed.display(), e))?)
-        } else {
-            // Tier 2: TOML entry
-            let config = Config::load_merged(&project_root);
-            let toml_key = format!("{}.settings", provider_dir);
-            if let Some(entry) = config.hooks.agent_hook.stop.get(&toml_key) {
-                Some(resolver::resolve_to_string(&entry.source, &project_root, &config.hooks.marketplaces)
-                    .map_err(|e| format!("Failed to resolve stop hook for '{}': {}", toml_key, e))?)
-            } else {
-                None // Tier 3: use built-in
-            }
-        };
-
-    let override_json = override_json_str.as_deref().unwrap_or_else(|| agent_stop_hook_json_ref());
 
     // ── Shallow-merge override JSON into existing settings file ───────────
     if settings_path.exists() {
@@ -3716,6 +3748,37 @@ fn install_agent_stop_hook(
     }
 
     Ok(())
+}
+
+/// Install the Stop Hook into a settings JSON file using TOML config or built-in fallback.
+///
+/// Called from the built-in Tier-3 code path (when no plugin override provided hooks.json).
+/// Plugin overrides install stop hooks directly via `install_agent_plugin_from_dir`.
+fn install_agent_stop_hook(
+    git_root: &std::path::Path,
+    provider: &AgentProvider,
+    settings_path: &std::path::Path,
+) -> Result<(), String> {
+    use linthis::config::Config;
+    use linthis::hooks::resolver;
+
+    let project_root = git_root.to_path_buf();
+    let provider_dir = format!("{:?}", provider).to_lowercase();
+
+    // Tier 2: TOML entry
+    let override_json_str: Option<String> = {
+        let config = Config::load_merged(&project_root);
+        let toml_key = format!("{}.settings", provider_dir);
+        if let Some(entry) = config.hooks.agent_hook.stop.get(&toml_key) {
+            Some(resolver::resolve_to_string(&entry.source, &project_root, &config.hooks.marketplaces)
+                .map_err(|e| format!("Failed to resolve stop hook for '{}': {}", toml_key, e))?)
+        } else {
+            None // Tier 3: use built-in
+        }
+    };
+
+    let override_json = override_json_str.as_deref().unwrap_or_else(|| agent_stop_hook_json_ref());
+    install_agent_stop_hook_from_json(git_root, settings_path, override_json)
 }
 
 /// Remove the Stop Hook from .claude/settings.json
@@ -5173,5 +5236,199 @@ mod tests {
         let base = PathBuf::from("/repo");
         let p = agent_skill_path(&base, &AgentProvider::Codebuddy, false, &HookEvent::PreCommit);
         assert_eq!(p, PathBuf::from("/repo/.codebuddy/skills/lt-lint/SKILL.md"));
+    }
+
+    // ==================== New directory structure tests ====================
+
+    #[test]
+    fn test_agent_plugin_id_unified() {
+        // All events share a single plugin ID "lt"
+        assert_eq!(agent_plugin_id(&HookEvent::PreCommit), "lt");
+        assert_eq!(agent_plugin_id(&HookEvent::CommitMsg), "lt");
+        assert_eq!(agent_plugin_id(&HookEvent::PrePush), "lt");
+    }
+
+    #[test]
+    fn test_fixed_agent_plugin_dir_default_fallback() {
+        use linthis::hooks::resolver;
+
+        let root = tempfile::TempDir::new().unwrap();
+        let default_dir = root.path()
+            .join("hooks/agent/plugins/_default/lt");
+        std::fs::create_dir_all(&default_dir).unwrap();
+
+        // _default/lt/ exists → should be found
+        let result = resolver::fixed_agent_plugin_dir(root.path(), "claude", "lt");
+        assert_eq!(result, Some(default_dir));
+    }
+
+    #[test]
+    fn test_fixed_agent_plugin_dir_provider_override() {
+        use linthis::hooks::resolver;
+
+        let root = tempfile::TempDir::new().unwrap();
+        let default_dir = root.path()
+            .join("hooks/agent/plugins/_default/lt");
+        let claude_dir = root.path()
+            .join("hooks/agent/plugins/claude/lt");
+        std::fs::create_dir_all(&default_dir).unwrap();
+        std::fs::create_dir_all(&claude_dir).unwrap();
+
+        // Both exist → provider-specific wins
+        let result = resolver::fixed_agent_plugin_dir(root.path(), "claude", "lt");
+        assert_eq!(result, Some(claude_dir));
+
+        // Different provider → falls back to _default
+        let result2 = resolver::fixed_agent_plugin_dir(root.path(), "codebuddy", "lt");
+        assert_eq!(result2, Some(default_dir));
+    }
+
+    #[test]
+    fn test_fixed_agent_plugin_dir_not_found() {
+        use linthis::hooks::resolver;
+
+        let root = tempfile::TempDir::new().unwrap();
+        // No directories created
+        let result = resolver::fixed_agent_plugin_dir(root.path(), "claude", "lt");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_install_agent_plugin_from_dir_skill_and_command() {
+        // Build a plugin dir with the new flat structure and verify install
+        let plugin_root = tempfile::TempDir::new().unwrap();
+        let pd = plugin_root.path();
+
+        // Create skills/lt-lint/SKILL.md
+        let skill_dir = pd.join("skills/lt-lint");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "---\nname: lt-lint\n---\n# Test Skill\n").unwrap();
+
+        // Create commands/lt-lint.md
+        let cmd_dir = pd.join("commands");
+        std::fs::create_dir_all(&cmd_dir).unwrap();
+        std::fs::write(cmd_dir.join("lt-lint.md"), "# /lt-lint\nRun lint.\n").unwrap();
+
+        // Create memories/TOPLEVEL.md
+        let mem_dir = pd.join("memories");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        std::fs::write(mem_dir.join("TOPLEVEL.md"), "## Linthis Memory\nRemember this.\n").unwrap();
+
+        // Install into a temp base for Claude
+        let base = tempfile::TempDir::new().unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit).unwrap();
+
+        // Verify skill was installed
+        let skill_target = base.path().join(".claude/skills/lt-lint/SKILL.md");
+        assert!(skill_target.exists(), "SKILL.md should be installed");
+        let content = std::fs::read_to_string(&skill_target).unwrap();
+        assert!(content.contains("lt-lint"), "Skill content should be preserved");
+
+        // Verify command was installed
+        let cmd_target = base.path().join(".claude/commands/linthis/lt-lint.md");
+        assert!(cmd_target.exists(), "Command file should be installed");
+
+        // Verify memory was injected into CLAUDE.md
+        let claude_md = base.path().join("CLAUDE.md");
+        assert!(claude_md.exists(), "CLAUDE.md should be created");
+        let mem_content = std::fs::read_to_string(&claude_md).unwrap();
+        assert!(mem_content.contains("linthis-memory-lt"), "Memory section marker should exist");
+        assert!(mem_content.contains("Linthis Memory"), "Memory content should be injected");
+    }
+
+    #[test]
+    fn test_install_agent_plugin_from_dir_with_subdirs() {
+        // Verify that skill subdirectories (scripts/, references/) are copied
+        let plugin_root = tempfile::TempDir::new().unwrap();
+        let pd = plugin_root.path();
+
+        // Create skills/lt-lint/ with SKILL.md + scripts/ + references/
+        let skill_dir = pd.join("skills/lt-lint");
+        std::fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+        std::fs::create_dir_all(skill_dir.join("references")).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "---\nname: lt-lint\n---\n# Skill\n").unwrap();
+        std::fs::write(skill_dir.join("scripts/check.sh"), "#!/bin/bash\necho ok\n").unwrap();
+        std::fs::write(skill_dir.join("references/rules.md"), "# Rules\n").unwrap();
+
+        // Install for Claude (supports skill subdirectories)
+        let base = tempfile::TempDir::new().unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit).unwrap();
+
+        let target_dir = base.path().join(".claude/skills/lt-lint");
+        assert!(target_dir.join("SKILL.md").exists(), "SKILL.md should exist");
+        assert!(target_dir.join("scripts/check.sh").exists(), "scripts/check.sh should be copied");
+        assert!(target_dir.join("references/rules.md").exists(), "references/rules.md should be copied");
+
+        // Verify content
+        let script = std::fs::read_to_string(target_dir.join("scripts/check.sh")).unwrap();
+        assert!(script.contains("echo ok"));
+    }
+
+    #[test]
+    fn test_install_agent_plugin_from_dir_single_file_provider() {
+        // For providers like Gemini that use single files, only SKILL.md content is used
+        let plugin_root = tempfile::TempDir::new().unwrap();
+        let pd = plugin_root.path();
+
+        let skill_dir = pd.join("skills/lt-lint");
+        std::fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Gemini Skill Content\n").unwrap();
+        std::fs::write(skill_dir.join("scripts/check.sh"), "#!/bin/bash\n").unwrap();
+
+        let base = tempfile::TempDir::new().unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Gemini, &HookEvent::PreCommit).unwrap();
+
+        // Gemini: single file at .gemini/linthis-lint.md
+        let target = base.path().join(".gemini/linthis-lint.md");
+        assert!(target.exists(), "Gemini skill file should exist");
+        let content = std::fs::read_to_string(&target).unwrap();
+        assert!(content.contains("Gemini Skill Content"));
+
+        // scripts/ should NOT be copied for single-file providers
+        assert!(!base.path().join(".gemini/scripts").exists());
+    }
+
+    #[test]
+    fn test_install_agent_plugin_from_dir_hooks_json() {
+        // Verify hooks.json is installed as stop hook
+        let plugin_root = tempfile::TempDir::new().unwrap();
+        let pd = plugin_root.path();
+
+        // Minimal skill
+        let skill_dir = pd.join("skills/lt-lint");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "---\nname: lt-lint\n---\n# Skill\n").unwrap();
+
+        // hooks/hooks.json
+        let hooks_dir = pd.join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        std::fs::write(hooks_dir.join("hooks.json"), r#"{"hooks":{"Stop":[{"hooks":[{"type":"prompt","prompt":"test stop hook"}]}]}}"#).unwrap();
+
+        let base = tempfile::TempDir::new().unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit).unwrap();
+
+        // Verify .claude/settings.json was created with stop hook
+        let settings = base.path().join(".claude/settings.json");
+        assert!(settings.exists(), "settings.json should be created");
+        let content = std::fs::read_to_string(&settings).unwrap();
+        assert!(content.contains("Stop"), "Should contain Stop hook key");
+        assert!(content.contains("test stop hook"), "Should contain hook prompt");
+    }
+
+    #[test]
+    fn test_copy_dir_recursive() {
+        let src = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(src.path().join("a/b")).unwrap();
+        std::fs::write(src.path().join("top.txt"), "top").unwrap();
+        std::fs::write(src.path().join("a/mid.txt"), "mid").unwrap();
+        std::fs::write(src.path().join("a/b/deep.txt"), "deep").unwrap();
+
+        let dst = tempfile::TempDir::new().unwrap();
+        let target = dst.path().join("out");
+        copy_dir_recursive(src.path(), &target).unwrap();
+
+        assert_eq!(std::fs::read_to_string(target.join("top.txt")).unwrap(), "top");
+        assert_eq!(std::fs::read_to_string(target.join("a/mid.txt")).unwrap(), "mid");
+        assert_eq!(std::fs::read_to_string(target.join("a/b/deep.txt")).unwrap(), "deep");
     }
 }

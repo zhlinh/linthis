@@ -308,40 +308,33 @@ pub fn fixed_git_hook_path(
 
 /// Tier-1: Check whether a fixed-path agent plugin directory exists.
 ///
-/// Returns the plugin root directory (`hooks/agent/plugins/<ns>/<id>/`) if it
-/// exists, or `None` to fall through to Tier 2/3.
+/// Two-tier lookup with provider override:
+/// 1. `hooks/agent/plugins/<provider>/<plugin>/` — provider-specific override
+/// 2. `hooks/agent/plugins/_default/<plugin>/`   — default fallback
 ///
-/// `plugin_id` is a dot-namespaced identifier (e.g., `"lt.lint"`).
-/// The id is split on the first `.` to derive `<ns>/<id>` (e.g., `lt/lint`).
-pub fn fixed_agent_plugin_dir(project_root: &Path, plugin_id: &str) -> Option<PathBuf> {
-    let ns_id = plugin_id.replacen('.', "/", 1); // "lt.lint" → "lt/lint"
-    let path = project_root
+/// Returns the first directory that exists, or `None` to fall through to Tier 2/3.
+pub fn fixed_agent_plugin_dir(
+    project_root: &Path,
+    provider_name: &str,
+    plugin_id: &str,
+) -> Option<PathBuf> {
+    // Tier 1a: provider-specific override
+    let provider_path = project_root
         .join("hooks")
         .join("agent")
         .join("plugins")
-        .join(&ns_id);
-    if path.is_dir() { Some(path) } else { None }
-}
-
-/// Tier-1: Check whether a fixed-path agent hook file exists.
-///
-/// Returns the override file path if it exists, or `None`.
-///
-/// `event` is the event name (e.g., `"stop"`).
-/// `provider_dir` is the provider directory name (e.g., `"claude"`).
-/// `filename` is the settings file name (e.g., `"settings.json"`).
-pub fn fixed_agent_hook_path(
-    project_root: &Path,
-    event: &str,
-    provider_dir: &str,
-    filename: &str,
-) -> Option<PathBuf> {
-    let path = project_root
+        .join(provider_name)
+        .join(plugin_id);
+    if provider_path.is_dir() {
+        return Some(provider_path);
+    }
+    // Tier 1b: _default fallback
+    let default_path = project_root
         .join("hooks")
         .join("agent")
-        .join("hook")
-        .join(event)
-        .join(provider_dir)
-        .join(filename);
-    if path.is_file() { Some(path) } else { None }
+        .join("plugins")
+        .join("_default")
+        .join(plugin_id);
+    if default_path.is_dir() { Some(default_path) } else { None }
 }
+
