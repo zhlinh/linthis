@@ -2373,13 +2373,29 @@ fn shell_timer_functions() -> &'static str {
 _linthis_timer_pid=""
 start_timer() {
   _linthis_label="$1"
-  printf "[linthis] %s (0s)\n" "$_linthis_label" >&2
+  printf "[linthis] ⠋ %s (0s)\n" "$_linthis_label" >&2
   (
-    _s=1
+    _i=0
+    _s=0
     while true; do
-      sleep 1
-      printf "\033[1A\r[linthis] %s (%ds)\033[K\n" "$_linthis_label" "$_s" >&2
-      _s=$((_s + 1))
+      sleep 0.1
+      _i=$((_i + 1))
+      case $((_i % 10)) in
+        0) _spin="⠋" ;;
+        1) _spin="⠙" ;;
+        2) _spin="⠹" ;;
+        3) _spin="⠸" ;;
+        4) _spin="⠼" ;;
+        5) _spin="⠴" ;;
+        6) _spin="⠦" ;;
+        7) _spin="⠧" ;;
+        8) _spin="⠇" ;;
+        9) _spin="⠏" ;;
+      esac
+      if [ $((_i % 10)) -eq 0 ]; then
+        _s=$((_s + 1))
+      fi
+      printf "\033[1A\r[linthis] %s %s (%ds)\033[K\n" "$_spin" "$_linthis_label" "$_s" >&2
     done
   ) &
   _linthis_timer_pid=$!
@@ -2389,7 +2405,7 @@ stop_timer() {
     kill "$_linthis_timer_pid" 2>/dev/null
     wait "$_linthis_timer_pid" 2>/dev/null
     _linthis_timer_pid=""
-    printf "\033[1A\r\033[K" >&2
+    printf "\r\033[K" >&2
   fi
 }
 "#
