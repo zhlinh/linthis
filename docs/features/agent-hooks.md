@@ -8,15 +8,23 @@ When installed, the agent will run `linthis` checks after modifying code and fix
 
 ## Supported Agents
 
-| Agent | Rules File | Detection | Strategy |
-|-------|-----------|-----------|----------|
-| Claude Code | `CLAUDE.md` + `.claude/settings.json` | `.claude/` dir | Append section + Stop Hook |
-| Codex | `AGENTS.md` | `AGENTS.md` or `.codex/` | Append section |
-| Gemini | `.gemini/instructions.md` | `.gemini/` dir | Dedicated file |
-| Cursor | `.cursor/rules/linthis.mdc` | `.cursor/` dir | Dedicated file |
-| Droid | `.droid/rules/linthis.md` | `.droid/` dir | Dedicated file |
-| Auggie | `.augment/rules/linthis.md` | `.augment/` dir | Dedicated file |
-| CodeBuddy | `.codebuddy/rules/linthis.md` + `.codebuddy/settings.json` | `.codebuddy/` dir | Dedicated file + Stop Hook |
+| Agent | Rules Files | Detection | Strategy |
+|-------|------------|-----------|----------|
+| Claude Code | `.claude/skills/lt-lint/SKILL.md`, `.claude/skills/lt-cmsg/SKILL.md`, `.claude/skills/lt-review/SKILL.md` + `.claude/settings.json` | `.claude/` dir | Per-event skills + Stop Hook |
+| Codex | `AGENTS.md` | `AGENTS.md` or `.codex/` | Per-event sections |
+| Gemini | `.gemini/linthis-lint.md`, `.gemini/linthis-cmsg.md`, `.gemini/linthis-review.md` | `.gemini/` dir | Per-event files |
+| Cursor | `.cursor/rules/linthis-lint.mdc`, `.cursor/rules/linthis-cmsg.mdc`, `.cursor/rules/linthis-review.mdc` | `.cursor/` dir | Per-event files |
+| Droid | `.droid/rules/linthis-lint.md`, `.droid/rules/linthis-cmsg.md`, `.droid/rules/linthis-review.md` | `.droid/` dir | Per-event files |
+| Auggie | `.augment/rules/linthis-lint.md`, `.augment/rules/linthis-cmsg.md`, `.augment/rules/linthis-review.md` | `.augment/` dir | Per-event files |
+| CodeBuddy | `.codebuddy/skills/lt-lint/SKILL.md`, `.codebuddy/skills/lt-cmsg/SKILL.md`, `.codebuddy/skills/lt-review/SKILL.md` + `.codebuddy/settings.json` | `.codebuddy/` dir | Per-event skills + Stop Hook |
+
+Each provider receives three per-event files corresponding to the hook events:
+
+| Hook Event | Skill Name | Purpose |
+|------------|-----------|---------|
+| `pre-commit` | `lt-lint` | Run linthis checks on staged files |
+| `commit-msg` | `lt-cmsg` | Validate commit message format |
+| `pre-push` | `lt-review` | Review outgoing commits |
 
 ## Quick Start
 
@@ -98,73 +106,87 @@ When `--global` is set, rules are written to user-level locations instead of the
 
 | Agent | Project-level | Global (`--global`) |
 |-------|--------------|---------------------|
-| Claude Code | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| Claude Code | `.claude/skills/lt-{lint,cmsg,review}/SKILL.md` + `.claude/settings.json` | `~/.claude/skills/lt-{lint,cmsg,review}/SKILL.md` + `~/.claude/settings.json` |
 | Codex | `AGENTS.md` | `~/.codex/AGENTS.md` |
-| Gemini | `.gemini/instructions.md` | `~/.gemini/instructions.md` |
-| Cursor | `.cursor/rules/linthis.mdc` | `~/.cursor/rules/linthis.mdc` |
-| Droid | `.droid/rules/linthis.md` | `~/.droid/rules/linthis.md` |
-| Auggie | `.augment/rules/linthis.md` | `~/.augment/rules/linthis.md` |
-| CodeBuddy | `.codebuddy/rules/linthis.md` | `~/.codebuddy/rules/linthis.md` |
+| Gemini | `.gemini/linthis-{lint,cmsg,review}.md` | `~/.gemini/linthis-{lint,cmsg,review}.md` |
+| Cursor | `.cursor/rules/linthis-{lint,cmsg,review}.mdc` | `~/.cursor/rules/linthis-{lint,cmsg,review}.mdc` |
+| Droid | `.droid/rules/linthis-{lint,cmsg,review}.md` | `~/.droid/rules/linthis-{lint,cmsg,review}.md` |
+| Auggie | `.augment/rules/linthis-{lint,cmsg,review}.md` | `~/.augment/rules/linthis-{lint,cmsg,review}.md` |
+| CodeBuddy | `.codebuddy/skills/lt-{lint,cmsg,review}/SKILL.md` + `.codebuddy/settings.json` | `~/.codebuddy/skills/lt-{lint,cmsg,review}/SKILL.md` + `~/.codebuddy/settings.json` |
 
 ## What Gets Installed
 
 ### Claude Code
 
-Two files are created:
+Three skill files and a Stop Hook are created:
 
-1. **`CLAUDE.md`** — A `## Linthis Agent Rules` section is appended (or the file is created if it doesn't exist)
-2. **`.claude/settings.json`** — A Stop Hook that triggers linthis checks before the agent finishes
+1. **`.claude/skills/lt-lint/SKILL.md`** — Skill for pre-commit linting (run linthis checks on staged files)
+2. **`.claude/skills/lt-cmsg/SKILL.md`** — Skill for commit-msg validation (validate commit message format)
+3. **`.claude/skills/lt-review/SKILL.md`** — Skill for pre-push review (review outgoing commits)
+4. **`.claude/settings.json`** — A Stop Hook that triggers linthis checks before the agent finishes
+
+Slash commands are also installed under `.claude/commands/linthis/`.
 
 ### Codex
 
-A `## Linthis Agent Rules` section is appended to:
+Three per-event sections are appended to:
 
 ```
 AGENTS.md
 ```
 
-If the file doesn't exist, it is created with a default header.
+Each section covers one hook event (pre-commit, commit-msg, pre-push). If the file doesn't exist, it is created with a default header.
 
 ### Gemini
 
-A dedicated rules file:
+Three dedicated per-event rules files:
 
 ```
-.gemini/instructions.md
+.gemini/linthis-lint.md
+.gemini/linthis-cmsg.md
+.gemini/linthis-review.md
 ```
 
 ### Cursor
 
-A dedicated rules file with YAML frontmatter:
+Three dedicated per-event rules files with YAML frontmatter:
 
 ```
-.cursor/rules/linthis.mdc
+.cursor/rules/linthis-lint.mdc
+.cursor/rules/linthis-cmsg.mdc
+.cursor/rules/linthis-review.mdc
 ```
 
 The `alwaysApply: true` frontmatter ensures the rules are active for all conversations.
 
 ### Droid
 
-A dedicated rules file:
+Three dedicated per-event rules files:
 
 ```
-.droid/rules/linthis.md
+.droid/rules/linthis-lint.md
+.droid/rules/linthis-cmsg.md
+.droid/rules/linthis-review.md
 ```
 
 ### Auggie
 
-A dedicated rules file:
+Three dedicated per-event rules files:
 
 ```
-.augment/rules/linthis.md
+.augment/rules/linthis-lint.md
+.augment/rules/linthis-cmsg.md
+.augment/rules/linthis-review.md
 ```
 
 ### CodeBuddy
 
-Two files are created:
+Three skill files and a Stop Hook are created:
 
-1. **`.codebuddy/rules/linthis.md`** — A dedicated rules file
-2. **`.codebuddy/settings.json`** — A Stop Hook that triggers linthis checks before the agent finishes
+1. **`.codebuddy/skills/lt-lint/SKILL.md`** — Skill for pre-commit linting
+2. **`.codebuddy/skills/lt-cmsg/SKILL.md`** — Skill for commit-msg validation
+3. **`.codebuddy/skills/lt-review/SKILL.md`** — Skill for pre-push review
+4. **`.codebuddy/settings.json`** — A Stop Hook that triggers linthis checks before the agent finishes
 
 ## How It Works
 
@@ -193,17 +215,19 @@ An agent plugin bundle is a directory with the following layout. Any sub-directo
 
 ```
 <bundle-dir>/
-├── skill/<provider>/          — skill instruction file (e.g., claude/lint.md)
-├── command/<provider>/        — slash command definition file (optional)
-└── memory/<provider>/         — memory section injected into CLAUDE.md etc. (optional)
+├── skills/<skill_name>/SKILL.md    — skill instruction (e.g. skills/lt-lint/SKILL.md)
+├── commands/                        — slash command files (optional)
+├── memories/TOPLEVEL.md             — memory section injected into CLAUDE.md etc. (optional)
+└── hooks/hooks.json                 — stop hook settings (optional)
 ```
 
 Example for Claude Code:
 ```
 hooks/agent/plugins/lt/lint/
-├── skill/claude/lint.md       — instructions Claude follows for linting
-├── command/claude/lt-lint.md  — defines a /lt-lint slash command
-└── memory/claude/lint.md      — memory section added to ~/.claude/projects/.../MEMORY.md
+├── skills/lt-lint/SKILL.md    — instructions Claude follows for linting
+├── commands/lt-lint.md        — defines a /lt-lint slash command
+├── memories/TOPLEVEL.md       — memory section added to CLAUDE.md
+└── hooks/hooks.json           — stop hook settings
 ```
 
 ### Tier 2: TOML Source Mapping for Agent Hooks
@@ -225,6 +249,21 @@ The same five `HookSource` variants available for git hooks also apply here (see
 ### Plugin-Bundled Agent Hooks
 
 Plugins can bundle their agent hook overrides inside a `linthis-config.toml` at the plugin root. When a user runs `linthis plugin add <alias> <url>`, linthis automatically merges these entries into the user's `.linthis/config.toml`. The next `linthis hook install --type agent --provider claude` will then use the plugin's custom skill/command/memory bundle and stop hook settings.
+
+### Configurable Skill Directory Names
+
+Teams that already have existing skills with different names can map linthis hook events to custom skill directory names via `.linthis/config.toml`:
+
+```toml
+[hooks.agent-skill-names]
+pre-commit = "my-team-lint"     # default: "lt-lint"
+commit-msg = "my-team-cmsg"     # default: "lt-cmsg"
+pre-push = "my-team-review"     # default: "lt-review"
+```
+
+The values are the directory names used under `.claude/skills/`, `.codebuddy/skills/`, and also the base names for flat-file providers (Gemini: `{name}.md`, Cursor: `{name}.mdc`, etc.).
+
+Without this config, the defaults `lt-lint`, `lt-cmsg`, and `lt-review` are used (backward compatible).
 
 ---
 
@@ -290,7 +329,7 @@ exit $LINTHIS_EXIT
 | Hook type | Agent rules file | Git hook (pre-commit) |
 | Trigger | AI agent finishes a task | `git commit` |
 | `--provider` values | `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy` | `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy` |
-| What it installs | Rules file (+ Stop Hook for claude/codebuddy) | Shell script in `.git/hooks/` |
+| What it installs | Per-event skill/rule files (+ Stop Hook for claude/codebuddy) | Shell script in `.git/hooks/` |
 
 ## Check Status
 
@@ -345,11 +384,27 @@ linthis hook uninstall --type agent --global -y
 ```
 
 The uninstall command removes:
-- Linthis sections from `CLAUDE.md` and `AGENTS.md` (append-style files)
-- Dedicated rule files (`.cursor/rules/linthis.mdc`, `.gemini/instructions.md`, etc.)
+- Linthis sections from `AGENTS.md` (append-style files)
+- Per-event skill files (`.claude/skills/lt-*/SKILL.md`, `.codebuddy/skills/lt-*/SKILL.md`)
+- Per-event rule files (`.cursor/rules/linthis-*.mdc`, `.gemini/linthis-*.md`, `.droid/rules/linthis-*.md`, `.augment/rules/linthis-*.md`)
 - Claude Code Stop Hook (`.claude/settings.json`)
 - CodeBuddy Stop Hook (`.codebuddy/settings.json`)
+- Slash commands (`.claude/commands/linthis/`)
 - Empty directories created by linthis
+
+## Hook Sync
+
+Re-sync all installed hooks and agent skills to ensure they're up to date:
+
+```bash
+# Sync local project hooks
+linthis hook sync
+
+# Sync global hooks
+linthis hook sync -g
+```
+
+This regenerates thin wrapper scripts and refreshes agent skill files for all recorded installations.
 
 ## FAQ
 
@@ -395,7 +450,7 @@ There are three distinct approaches:
 | Approach | Command | How it works |
 |----------|---------|-------------|
 | Agent rules (project) | `linthis hook install --type agent --provider claude` | Installs rules into the agent's config file so the AI enforces linting during coding sessions |
-| Agent rules (global) | `linthis hook install --type agent --provider claude --global` | Same as above, but installed to `~/.claude/CLAUDE.md` — applies to all projects |
+| Agent rules (global) | `linthis hook install --type agent --provider claude --global` | Same as above, but installed to `~/.claude/skills/` — applies to all projects |
 | Git hook with agent fallback | `linthis hook install --type git-with-agent --provider claude` | Installs a git pre-commit hook; if linthis fails, the AI CLI is invoked to fix issues before re-checking |
 
 The `--provider` flag accepts the same set of values for both types (`claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy`), but the implementation differs:

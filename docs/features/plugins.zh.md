@@ -24,8 +24,15 @@ my-linthis-plugin/
 │   │   └── pre-commit            # 自定义 pre-commit 脚本
 │   └── agent/
 │       ├── plugins/
-│       │   └── lt/
-│       │       └── lint/         # Agent 插件包（skill/command/memory）
+│       │   ├── _default/                     # 默认回退（所有 provider）
+│       │   │   └── lt/                       # 插件包
+│       │   │       ├── skills/lt-lint/SKILL.md
+│       │   │       ├── commands/
+│       │   │       ├── memories/TOPLEVEL.md
+│       │   │       └── hooks/hooks.json
+│       │   └── claude/                       # Provider 特定覆盖（可选）
+│       │       └── lt/
+│       │           └── skills/lt-lint/SKILL.md
 │       └── hook/
 │           └── stop/
 │               └── claude/
@@ -56,9 +63,7 @@ my-linthis-plugin/
 pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
 
 [hooks.agent-plugins]
-"lt.lint"   = { source = { plugin = "self", file = "hooks/agent/plugins/lt/lint" } }
-"lt.cmsg"   = { source = { plugin = "self", file = "hooks/agent/plugins/lt/cmsg" } }
-"lt.review" = { source = { plugin = "self", file = "hooks/agent/plugins/lt/review" } }
+"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/lt" } }
 
 [hooks.agent-hook.stop]
 "claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }

@@ -336,7 +336,7 @@ commit-msg = { source = { url = "https://example.com/hooks/commit-msg" } }
 
 ### `[hooks.agent-plugins]`
 
-覆盖 agent 插件包（第 2 层）。每个条目指向包含 `skill/<provider>/`、`command/<provider>/` 和 `memory/<provider>/` 子目录的目录。键为插件 ID。
+覆盖 agent 插件包（第 2 层）。每个条目指向包含技能、命令、记忆和 hook 子目录的目录。键为插件 ID。
 
 ```toml
 [hooks.agent-plugins]
@@ -349,9 +349,10 @@ commit-msg = { source = { url = "https://example.com/hooks/commit-msg" } }
 
 ```
 <plugin-dir>/
-├── skill/<provider>/          — 技能指令文件（如 claude/lint.md）
-├── command/<provider>/        — 斜杠命令定义文件（可选）
-└── memory/<provider>/         — 注入 CLAUDE.md 等文件的记忆段落（可选）
+├── skills/<skill_name>/SKILL.md    — 技能指令文件（如 skills/lt-lint/SKILL.md）
+├── commands/                        — 斜杠命令文件（可选）
+├── memories/TOPLEVEL.md             — 注入 CLAUDE.md 等文件的记忆段落（可选）
+└── hooks/hooks.json                 — stop hook 设置（可选）
 ```
 
 ---
@@ -364,6 +365,31 @@ commit-msg = { source = { url = "https://example.com/hooks/commit-msg" } }
 [hooks.agent-hook.stop]
 "claude.settings" = { source = { plugin = "my-plugin", file = "hooks/agent/hook/stop/claude/settings.json" } }
 ```
+
+---
+
+### `[hooks.agent-skill-names]`
+
+配置每个 hook 事件的自定义技能目录名。允许已有自定义技能目录的团队将 linthis 事件映射到其自定义名称，而非使用默认值。
+
+```toml
+[hooks.agent-skill-names]
+pre-commit = "my-team-lint"     # 默认值: "lt-lint"
+commit-msg = "my-team-cmsg"     # 默认值: "lt-cmsg"
+pre-push = "my-team-review"     # 默认值: "lt-review"
+```
+
+值的用途：
+- **目录名** 位于 `.claude/skills/` 和 `.codebuddy/skills/` 下（如 `.claude/skills/my-team-lint/SKILL.md`）
+- **基础文件名** 用于平铺文件提供商（Gemini: `my-team-lint.md`、Cursor: `my-team-lint.mdc` 等）
+
+| 字段 | 类型 | 默认值 | 描述 |
+|-----|-----|-------|------|
+| `pre-commit` | 字符串 | `"lt-lint"` | pre-commit（lint）事件的技能名称 |
+| `commit-msg` | 字符串 | `"lt-cmsg"` | commit-msg 事件的技能名称 |
+| `pre-push` | 字符串 | `"lt-review"` | pre-push（review）事件的技能名称 |
+
+未配置时使用默认值（向后兼容）。
 
 ---
 
@@ -652,6 +678,20 @@ skip_large_files = true
 timeout = 120
 require_ticket = true
 ticket_pattern = "\\[PROJ-\\d+\\]"
+
+# Hook 来源覆盖（第 2 层）
+[hooks.git]
+pre-commit = { source = { plugin = "company", file = "hooks/git/pre-commit" } }
+
+[hooks.agent-plugins]
+"lt.lint" = { source = { plugin = "company", file = "hooks/agent/plugins/lt/lint" } }
+
+[hooks.agent-hook.stop]
+"claude.settings" = { source = { plugin = "company", file = "hooks/agent/hook/stop/claude/settings.json" } }
+
+# 自定义技能目录名（可选）
+[hooks.agent-skill-names]
+pre-commit = "custom-lint"
 
 # 语言特定覆盖
 [rust]

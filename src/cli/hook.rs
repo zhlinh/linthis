@@ -1249,15 +1249,17 @@ fn handle_hook_status() -> ExitCode {
 
     // Check agent integration status (project-level only for status display)
     println!("\n{}", "Agent Integration".bold());
+    let status_skill_names_cfg = linthis::config::Config::load_merged(&git_root).hooks.agent_skill_names;
+    let status_skill_names = Some(&status_skill_names_cfg);
     let mut any_agent_installed = false;
     for p in ALL_AGENT_PROVIDERS {
-        let installed = agent_is_installed(&git_root, p, false);
+        let installed = agent_is_installed(&git_root, p, false, status_skill_names);
         if installed {
             any_agent_installed = true;
             println!("{} {}", "✓".green(), p);
             let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
             for event in &events {
-                let path = agent_skill_path(&git_root, p, false, event);
+                let path = agent_skill_path(&git_root, p, false, event, status_skill_names);
                 if path.exists() {
                     let event_name = match event {
                         HookEvent::PreCommit => "pre-commit",
@@ -3035,39 +3037,48 @@ fn agent_skill_path(
     provider: &AgentProvider,
     global: bool,
     event: &HookEvent,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> PathBuf {
     let event_name = match event {
         HookEvent::PreCommit => "lint",
         HookEvent::CommitMsg => "cmsg",
         HookEvent::PrePush   => "review",
     };
+    // Check for a configured skill name override for this event
+    let custom_name: Option<&str> = skill_names.and_then(|sn| match event {
+        HookEvent::PreCommit => sn.pre_commit.as_deref(),
+        HookEvent::CommitMsg => sn.commit_msg.as_deref(),
+        HookEvent::PrePush   => sn.pre_push.as_deref(),
+    });
     match provider {
         AgentProvider::Claude => {
-            // Skills subdirectory: .claude/skills/lt-{event}/SKILL.md
-            // global uses same .claude path (resolved relative to user home by caller)
-            base.join(".claude/skills").join(format!("lt-{}", event_name)).join("SKILL.md")
+            // Skills subdirectory: .claude/skills/<name>/SKILL.md
+            let dir_name = custom_name.map_or_else(|| format!("lt-{}", event_name), |n| n.to_string());
+            base.join(".claude/skills").join(dir_name).join("SKILL.md")
         }
         AgentProvider::Codex => {
             // Section-based: AGENTS.md (path doesn't change per event; event handled by section content)
             if global { base.join(".codex/AGENTS.md") } else { base.join("AGENTS.md") }
         }
         AgentProvider::Gemini => {
-            // Flat directory: .gemini/linthis-{lint,cmsg,review}.md
-            base.join(".gemini").join(format!("linthis-{}.md", event_name))
+            let name = custom_name.map_or_else(|| format!("linthis-{}", event_name), |n| n.to_string());
+            base.join(".gemini").join(format!("{}.md", name))
         }
         AgentProvider::Cursor => {
-            // Rules directory: .cursor/rules/linthis-{lint,cmsg,review}.mdc
-            base.join(".cursor/rules").join(format!("linthis-{}.mdc", event_name))
+            let name = custom_name.map_or_else(|| format!("linthis-{}", event_name), |n| n.to_string());
+            base.join(".cursor/rules").join(format!("{}.mdc", name))
         }
         AgentProvider::Droid => {
-            base.join(".droid/rules").join(format!("linthis-{}.md", event_name))
+            let name = custom_name.map_or_else(|| format!("linthis-{}", event_name), |n| n.to_string());
+            base.join(".droid/rules").join(format!("{}.md", name))
         }
         AgentProvider::Auggie => {
-            base.join(".augment/rules").join(format!("linthis-{}.md", event_name))
+            let name = custom_name.map_or_else(|| format!("linthis-{}", event_name), |n| n.to_string());
+            base.join(".augment/rules").join(format!("{}.md", name))
         }
         AgentProvider::Codebuddy => {
-            // Skills subdirectory: .codebuddy/skills/lt-{event}/SKILL.md
-            base.join(".codebuddy/skills").join(format!("lt-{}", event_name)).join("SKILL.md")
+            let dir_name = custom_name.map_or_else(|| format!("lt-{}", event_name), |n| n.to_string());
+            base.join(".codebuddy/skills").join(dir_name).join("SKILL.md")
         }
     }
 }
@@ -3097,10 +3108,15 @@ fn print_extra_installed(base: &std::path::Path, provider: &AgentProvider) {
 }
 
 /// Print info about an already-installed agent provider (file path + content)
-fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, global: bool) {
+fn print_agent_installed_info(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    global: bool,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) {
     let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
     for event in &events {
-        let path = agent_skill_path(base, provider, global, event);
+        let path = agent_skill_path(base, provider, global, event, skill_names);
         if path.exists() {
             let event_name = match event {
                 HookEvent::PreCommit => "pre-commit",
@@ -3118,12 +3134,17 @@ fn print_agent_installed_info(base: &std::path::Path, provider: &AgentProvider, 
 }
 
 /// Check if agent integration is installed for a given provider
-fn agent_is_installed(base: &std::path::Path, provider: &AgentProvider, global: bool) -> bool {
+fn agent_is_installed(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    global: bool,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> bool {
     let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
     match provider {
         // Section-based: check for any event section marker in AGENTS.md
         AgentProvider::Codex => {
-            let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit);
+            let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit, skill_names);
             path.exists()
                 && std::fs::read_to_string(&path)
                     .map(|c| {
@@ -3136,14 +3157,14 @@ fn agent_is_installed(base: &std::path::Path, provider: &AgentProvider, global: 
         }
         // Append-style: check for section marker in file (current or legacy)
         AgentProvider::Claude | AgentProvider::Codebuddy => {
-            let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit);
+            let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit, skill_names);
             path.exists()
                 && std::fs::read_to_string(&path)
                     .map(|c| c.contains(AGENT_SECTION_MARKER) || c.contains(AGENT_SECTION_MARKER_LEGACY))
                     .unwrap_or(false)
         }
         // File-based: check if any per-event file exists
-        _ => events.iter().any(|e| agent_skill_path(base, provider, global, e).exists()),
+        _ => events.iter().any(|e| agent_skill_path(base, provider, global, e, skill_names).exists()),
     }
 }
 
@@ -3291,11 +3312,12 @@ fn install_agent_plugin_from_dir(
     base: &std::path::Path,
     provider: &AgentProvider,
     event: &HookEvent,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> Result<(), String> {
     use std::fs;
 
-    let skill_path = agent_skill_path(base, provider, false, event);
-    let (skill_name, _) = agent_event_skill_metadata(event);
+    let skill_path = agent_skill_path(base, provider, false, event, skill_names);
+    let (skill_name, _) = agent_event_skill_metadata(event, skill_names);
 
     // ── skill ───────────────────────────────────────────────────────────
     let skill_src_dir = plugin_dir.join("skills").join(skill_name);
@@ -3388,6 +3410,7 @@ fn resolve_and_install_agent_plugin_override(
     provider: &AgentProvider,
     event: &HookEvent,
     global: bool,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> Result<bool, String> {
     use linthis::config::Config;
     use linthis::hooks::resolver;
@@ -3401,7 +3424,7 @@ fn resolve_and_install_agent_plugin_override(
     //   1b: hooks/agent/plugins/<plugin>/              (default fallback)
     if !global {
         if let Some(plugin_dir) = resolver::fixed_agent_plugin_dir(&project_root, &provider_name, plugin_id) {
-            install_agent_plugin_from_dir(&plugin_dir, base, provider, event)?;
+            install_agent_plugin_from_dir(&plugin_dir, base, provider, event, skill_names)?;
             return Ok(true);
         }
     }
@@ -3411,7 +3434,7 @@ fn resolve_and_install_agent_plugin_override(
     if let Some(entry) = config.hooks.agent_plugins.get(plugin_id) {
         let resolved = resolver::resolve_to_dir(&entry.source, &project_root, &config.hooks.marketplaces)
             .map_err(|e| format!("Failed to resolve agent plugin '{}': {}", plugin_id, e))?;
-        install_agent_plugin_from_dir(resolved.path(), base, provider, event)?;
+        install_agent_plugin_from_dir(resolved.path(), base, provider, event, skill_names)?;
         return Ok(true);
     }
 
@@ -3440,7 +3463,7 @@ fn resolve_and_install_agent_plugin_override(
                             .join(&provider_name)
                             .join(plugin_id);
                         if provider_dir.is_dir() {
-                            install_agent_plugin_from_dir(&provider_dir, base, provider, event)?;
+                            install_agent_plugin_from_dir(&provider_dir, base, provider, event, skill_names)?;
                             return Ok(true);
                         }
                         let default_dir = cache_path
@@ -3450,7 +3473,7 @@ fn resolve_and_install_agent_plugin_override(
                             .join("_default")
                             .join(plugin_id);
                         if default_dir.is_dir() {
-                            install_agent_plugin_from_dir(&default_dir, base, provider, event)?;
+                            install_agent_plugin_from_dir(&default_dir, base, provider, event, skill_names)?;
                             return Ok(true);
                         }
                     }
@@ -3469,12 +3492,13 @@ fn install_agent_skill(
     provider: &AgentProvider,
     global: bool,
     event: &HookEvent,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> Result<(), String> {
     // ── Tier-1/2 override check ──────────────────────────────────────────
     // Agent plugins bundle skill + command + memory; check before built-in generation.
     // Tier-1 (project-local fixed paths) is skipped for global installs; tier-2
     // (TOML agent-plugins config) applies to both local and global installs.
-    match resolve_and_install_agent_plugin_override(base, provider, event, global) {
+    match resolve_and_install_agent_plugin_override(base, provider, event, global, skill_names) {
         Ok(true) => {
             // Override installed skill/command/memory/hooks; stop hook is handled
             // inside install_agent_plugin_from_dir if hooks/hooks.json exists.
@@ -3485,8 +3509,8 @@ fn install_agent_skill(
     }
     // ── End override check ───────────────────────────────────────────────
 
-    let skill_path = agent_skill_path(base, provider, global, event);
-    let content = agent_event_content_for_provider(provider, event);
+    let skill_path = agent_skill_path(base, provider, global, event, skill_names);
+    let content = agent_event_content_for_provider(provider, event, skill_names);
 
     match provider {
         AgentProvider::Codex => {
@@ -3517,8 +3541,9 @@ fn uninstall_agent_skill(
     provider: &AgentProvider,
     global: bool,
     event: &HookEvent,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> Result<(), String> {
-    let skill_path = agent_skill_path(base, provider, global, event);
+    let skill_path = agent_skill_path(base, provider, global, event, skill_names);
 
     match provider {
         AgentProvider::Codex => {
@@ -3550,9 +3575,13 @@ fn uninstall_agent_skill(
 }
 
 /// Format skill content for a provider + event, wrapping in provider-specific frontmatter.
-fn agent_event_content_for_provider(provider: &AgentProvider, event: &HookEvent) -> String {
+fn agent_event_content_for_provider(
+    provider: &AgentProvider,
+    event: &HookEvent,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> String {
     let body = agent_event_content_generic(event);
-    let (name, desc) = agent_event_skill_metadata(event);
+    let (name, desc) = agent_event_skill_metadata(event, skill_names);
     match provider {
         AgentProvider::Codex => body, // section body only; marker handled separately
         AgentProvider::Claude | AgentProvider::Codebuddy => {
@@ -3568,19 +3597,27 @@ fn agent_event_content_for_provider(provider: &AgentProvider, event: &HookEvent)
     }
 }
 
-fn agent_event_skill_metadata(event: &HookEvent) -> (&'static str, &'static str) {
-    // Name must match the directory name under .claude/skills/ (lt-{event})
+fn agent_event_skill_metadata(
+    event: &HookEvent,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> (String, &'static str) {
+    // Check for a configured skill name override for this event
+    let custom_name: Option<&str> = skill_names.and_then(|sn| match event {
+        HookEvent::PreCommit => sn.pre_commit.as_deref(),
+        HookEvent::CommitMsg => sn.commit_msg.as_deref(),
+        HookEvent::PrePush   => sn.pre_push.as_deref(),
+    });
     match event {
         HookEvent::PreCommit => (
-            "lt-lint",
+            custom_name.unwrap_or("lt-lint").to_string(),
             "对暂存/修改的代码文件运行 linthis 代码检查，提交前修复所有问题。使用 `linthis -i <file> -c` 按项目编码规范检查，必须手动编辑修复（不能用 linthis --fix）。由 pre-commit hook 触发。Run linthis lint checks on staged/modified code files and fix all issues before committing. Uses `linthis -i <file> -c`. Issues must be fixed by editing code directly. Triggered by pre-commit hook.",
         ),
         HookEvent::CommitMsg => (
-            "lt-cmsg",
+            custom_name.unwrap_or("lt-cmsg").to_string(),
             "验证并自动修复 git 提交信息，使其符合 Conventional Commits 规范。分析暂存区 diff 选择正确的 type 前缀（feat/fix/refactor 等），检查标题格式，自动改写不合规的提交信息。由 commit-msg hook 触发。Validate and auto-fix git commit messages to comply with Conventional Commits. Analyzes staged diff to select correct type prefix, checks format, auto-rewrites malformed messages. Triggered by commit-msg hook.",
         ),
         HookEvent::PrePush => (
-            "lt-review",
+            custom_name.unwrap_or("lt-review").to_string(),
             "推送前审查待推送的提交，检查代码质量、安全性和正确性问题。检查完整 diff 发现逻辑错误、安全漏洞（注入、硬编码密钥）、代码质量问题及测试覆盖缺失。由 pre-push hook 触发。Review outgoing commits for quality, security, and correctness before pushing. Catches logic errors, security vulnerabilities, code quality issues. Triggered by pre-push hook.",
         ),
     }
@@ -3940,6 +3977,11 @@ fn handle_agent_hook_install(
         base.to_str().unwrap_or("").to_string()
     };
 
+    // Load configured skill name aliases
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hooks.agent_skill_names;
+    let skill_names = Some(&skill_names_cfg);
+
     println!("{}", "🤖 AI Coding Agent Integration".bold());
     if global {
         println!("  {} Installing user-level skills in {}", "→".dimmed(), base.display());
@@ -3948,23 +3990,23 @@ fn handle_agent_hook_install(
 
     // If a specific provider was given, install just that one
     if let Some(ref p) = provider {
-        let installed = agent_is_installed(&base, p, global);
+        let installed = agent_is_installed(&base, p, global, skill_names);
         if installed && !force {
             println!(
                 "{}: {} is already installed",
                 "Info".cyan(),
                 p
             );
-            print_agent_installed_info(&base, p, global);
+            print_agent_installed_info(&base, p, global, skill_names);
             return ExitCode::SUCCESS;
         }
 
         warn_legacy_if_present(&base, p);
         let provider_name = format!("{}", p).to_lowercase();
         for event in events {
-            match install_agent_skill(&base, p, global, event) {
+            match install_agent_skill(&base, p, global, event, skill_names) {
                 Ok(_) => {
-                    let path = agent_skill_path(&base, p, global, event);
+                    let path = agent_skill_path(&base, p, global, event, skill_names);
                     println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
                     add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
                 }
@@ -3989,18 +4031,18 @@ fn handle_agent_hook_install(
 
         let mut any_installed = false;
         for p in &targets {
-            if agent_is_installed(&base, p, global) && !force {
+            if agent_is_installed(&base, p, global, skill_names) && !force {
                 println!("{}: {} already installed", "Info".cyan(), p);
-                print_agent_installed_info(&base, p, global);
+                print_agent_installed_info(&base, p, global, skill_names);
                 continue;
             }
             warn_legacy_if_present(&base, p);
             let provider_name = format!("{}", p).to_lowercase();
             let mut provider_ok = true;
             for event in events {
-                match install_agent_skill(&base, p, global, event) {
+                match install_agent_skill(&base, p, global, event, skill_names) {
                     Ok(_) => {
-                        let path = agent_skill_path(&base, p, global, event);
+                        let path = agent_skill_path(&base, p, global, event, skill_names);
                         println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
                         add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
                     }
@@ -4030,7 +4072,7 @@ fn handle_agent_hook_install(
     let mut ordered: Vec<&AgentProvider> = Vec::new();
     for p in ALL_AGENT_PROVIDERS {
         if detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p))
-            || agent_is_installed(&base, p, global)
+            || agent_is_installed(&base, p, global, skill_names)
         {
             ordered.push(p);
         }
@@ -4046,7 +4088,7 @@ fn handle_agent_hook_install(
     println!();
 
     for (i, p) in ordered.iter().enumerate() {
-        let is_installed = agent_is_installed(&base, p, global);
+        let is_installed = agent_is_installed(&base, p, global, skill_names);
         let is_detected = detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p));
         let mut status_parts = Vec::new();
         if is_installed {
@@ -4118,18 +4160,18 @@ fn handle_agent_hook_install(
     println!();
     let mut any_installed = false;
     for p in &selected {
-        if agent_is_installed(&base, p, global) && !force {
+        if agent_is_installed(&base, p, global, skill_names) && !force {
             println!("{}: {} already installed", "Info".cyan(), p);
-            print_agent_installed_info(&base, p, global);
+            print_agent_installed_info(&base, p, global, skill_names);
             continue;
         }
         warn_legacy_if_present(&base, p);
         let provider_name = format!("{}", p).to_lowercase();
         let mut provider_ok = true;
         for event in events {
-            match install_agent_skill(&base, p, global, event) {
+            match install_agent_skill(&base, p, global, event, skill_names) {
                 Ok(_) => {
-                    let path = agent_skill_path(&base, p, global, event);
+                    let path = agent_skill_path(&base, p, global, event, skill_names);
                     println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
                     add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
                 }
@@ -4177,10 +4219,15 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) ->
         }
     };
 
+    // Load configured skill name aliases
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hooks.agent_skill_names;
+    let skill_names = Some(&skill_names_cfg);
+
     // Find all installed providers in the target scope
     let installed: Vec<&AgentProvider> = ALL_AGENT_PROVIDERS
         .iter()
-        .filter(|p| agent_is_installed(&base, p, global))
+        .filter(|p| agent_is_installed(&base, p, global, skill_names))
         .collect();
 
     if installed.is_empty() {
@@ -4190,7 +4237,7 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) ->
     if !yes {
         println!("{}", "Agent Integration:".bold());
         for p in &installed {
-            let path = agent_skill_path(&base, p, global, &HookEvent::PreCommit);
+            let path = agent_skill_path(&base, p, global, &HookEvent::PreCommit, skill_names);
             println!("  {} {} ({})", "✓".green(), p, path.display());
         }
         println!();
@@ -4218,7 +4265,7 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) ->
         let provider_name = format!("{}", p).to_lowercase();
         for event in events {
             let event_name = event.hook_filename();
-            match uninstall_agent_skill(&base, p, global, event) {
+            match uninstall_agent_skill(&base, p, global, event, skill_names) {
                 Ok(_) => {
                     println!("{} Uninstalled {} ({}) skill", "✓".green(), p, event_name);
                     // Remove this provider from the skill_providers list in TOML
@@ -4816,6 +4863,11 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
         PathBuf::new()
     };
 
+    // Load configured skill name aliases
+    let sync_project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let skill_names_cfg = linthis::config::Config::load_merged(&sync_project_root).hooks.agent_skill_names;
+    let skill_names = Some(&skill_names_cfg);
+
     let filtered: Vec<&InstalledHook> = hooks_file
         .hooks
         .iter()
@@ -5028,8 +5080,8 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
             }
 
             for provider in &skill_targets {
-                let skill_path = agent_skill_path(&base, provider, global, &event);
-                if let Err(e) = install_agent_skill(&base, provider, global, &event) {
+                let skill_path = agent_skill_path(&base, provider, global, &event, skill_names);
+                if let Err(e) = install_agent_skill(&base, provider, global, &event, skill_names) {
                     eprintln!("     {} agent sync error ({}): {}", "✗".red(), provider, e);
                     errors += 1;
                     continue;
@@ -5072,7 +5124,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
     let all_scan_events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
     for scan_event in &all_scan_events {
         for scan_provider in &all_scan_providers {
-            let skill_path = agent_skill_path(&base_for_scan, scan_provider, global, scan_event);
+            let skill_path = agent_skill_path(&base_for_scan, scan_provider, global, scan_event, skill_names);
             if !skill_path.exists() {
                 continue;
             }
@@ -5087,7 +5139,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
                 continue;
             }
             // Unregistered but exists on disk — refresh silently
-            if let Err(e) = install_agent_skill(&base_for_scan, scan_provider, global, scan_event) {
+            if let Err(e) = install_agent_skill(&base_for_scan, scan_provider, global, scan_event, skill_names) {
                 eprintln!("  {} skill refresh error ({:?}/{}): {}", "⚠".yellow(), scan_provider, scan_event.as_str(), e);
             }
         }
@@ -5223,13 +5275,13 @@ mod tests {
     fn test_skill_path_claude_per_event() {
         use std::path::PathBuf;
         let base = PathBuf::from("/repo");
-        let lint_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PreCommit);
+        let lint_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PreCommit, None);
         assert_eq!(lint_path, PathBuf::from("/repo/.claude/skills/lt-lint/SKILL.md"));
 
-        let cmsg_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::CommitMsg);
+        let cmsg_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::CommitMsg, None);
         assert_eq!(cmsg_path, PathBuf::from("/repo/.claude/skills/lt-cmsg/SKILL.md"));
 
-        let review_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PrePush);
+        let review_path = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PrePush, None);
         assert_eq!(review_path, PathBuf::from("/repo/.claude/skills/lt-review/SKILL.md"));
     }
 
@@ -5237,7 +5289,7 @@ mod tests {
     fn test_skill_path_claude_global() {
         use std::path::PathBuf;
         let base = PathBuf::from("/home/user");
-        let p = agent_skill_path(&base, &AgentProvider::Claude, true, &HookEvent::PreCommit);
+        let p = agent_skill_path(&base, &AgentProvider::Claude, true, &HookEvent::PreCommit, None);
         assert_eq!(p, PathBuf::from("/home/user/.claude/skills/lt-lint/SKILL.md"));
     }
 
@@ -5245,7 +5297,7 @@ mod tests {
     fn test_skill_path_cursor_per_event() {
         use std::path::PathBuf;
         let base = PathBuf::from("/repo");
-        let p = agent_skill_path(&base, &AgentProvider::Cursor, false, &HookEvent::PrePush);
+        let p = agent_skill_path(&base, &AgentProvider::Cursor, false, &HookEvent::PrePush, None);
         assert_eq!(p, PathBuf::from("/repo/.cursor/rules/linthis-review.mdc"));
     }
 
@@ -5253,7 +5305,7 @@ mod tests {
     fn test_skill_path_gemini_per_event() {
         use std::path::PathBuf;
         let base = PathBuf::from("/repo");
-        let p = agent_skill_path(&base, &AgentProvider::Gemini, false, &HookEvent::CommitMsg);
+        let p = agent_skill_path(&base, &AgentProvider::Gemini, false, &HookEvent::CommitMsg, None);
         assert_eq!(p, PathBuf::from("/repo/.gemini/linthis-cmsg.md"));
     }
 
@@ -5261,8 +5313,35 @@ mod tests {
     fn test_skill_path_codebuddy_per_event() {
         use std::path::PathBuf;
         let base = PathBuf::from("/repo");
-        let p = agent_skill_path(&base, &AgentProvider::Codebuddy, false, &HookEvent::PreCommit);
+        let p = agent_skill_path(&base, &AgentProvider::Codebuddy, false, &HookEvent::PreCommit, None);
         assert_eq!(p, PathBuf::from("/repo/.codebuddy/skills/lt-lint/SKILL.md"));
+    }
+
+    #[test]
+    fn test_skill_path_with_custom_names() {
+        use std::path::PathBuf;
+        use linthis::config::AgentSkillNamesConfig;
+        let base = PathBuf::from("/repo");
+        let cfg = AgentSkillNamesConfig {
+            pre_commit: Some("custom-lint".to_string()),
+            commit_msg: None,
+            pre_push: Some("my-review".to_string()),
+        };
+        // Custom pre-commit name
+        let p = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::PreCommit, Some(&cfg));
+        assert_eq!(p, PathBuf::from("/repo/.claude/skills/custom-lint/SKILL.md"));
+        // Default commit-msg (not overridden)
+        let p = agent_skill_path(&base, &AgentProvider::Claude, false, &HookEvent::CommitMsg, Some(&cfg));
+        assert_eq!(p, PathBuf::from("/repo/.claude/skills/lt-cmsg/SKILL.md"));
+        // Custom pre-push name for Gemini
+        let p = agent_skill_path(&base, &AgentProvider::Gemini, false, &HookEvent::PrePush, Some(&cfg));
+        assert_eq!(p, PathBuf::from("/repo/.gemini/my-review.md"));
+        // Custom pre-commit for Codebuddy
+        let p = agent_skill_path(&base, &AgentProvider::Codebuddy, false, &HookEvent::PreCommit, Some(&cfg));
+        assert_eq!(p, PathBuf::from("/repo/.codebuddy/skills/custom-lint/SKILL.md"));
+        // Custom pre-commit for Cursor
+        let p = agent_skill_path(&base, &AgentProvider::Cursor, false, &HookEvent::PreCommit, Some(&cfg));
+        assert_eq!(p, PathBuf::from("/repo/.cursor/rules/custom-lint.mdc"));
     }
 
     // ==================== New directory structure tests ====================
@@ -5343,7 +5422,7 @@ mod tests {
 
         // Install into a temp base for Claude
         let base = tempfile::TempDir::new().unwrap();
-        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit).unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None).unwrap();
 
         // Verify skill was installed
         let skill_target = base.path().join(".claude/skills/lt-lint/SKILL.md");
@@ -5379,7 +5458,7 @@ mod tests {
 
         // Install for Claude (supports skill subdirectories)
         let base = tempfile::TempDir::new().unwrap();
-        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit).unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None).unwrap();
 
         let target_dir = base.path().join(".claude/skills/lt-lint");
         assert!(target_dir.join("SKILL.md").exists(), "SKILL.md should exist");
@@ -5403,7 +5482,7 @@ mod tests {
         std::fs::write(skill_dir.join("scripts/check.sh"), "#!/bin/bash\n").unwrap();
 
         let base = tempfile::TempDir::new().unwrap();
-        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Gemini, &HookEvent::PreCommit).unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Gemini, &HookEvent::PreCommit, None).unwrap();
 
         // Gemini: single file at .gemini/linthis-lint.md
         let target = base.path().join(".gemini/linthis-lint.md");
@@ -5432,7 +5511,7 @@ mod tests {
         std::fs::write(hooks_dir.join("hooks.json"), r#"{"hooks":{"Stop":[{"hooks":[{"type":"prompt","prompt":"test stop hook"}]}]}}"#).unwrap();
 
         let base = tempfile::TempDir::new().unwrap();
-        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit).unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None).unwrap();
 
         // Verify .claude/settings.json was created with stop hook
         let settings = base.path().join(".claude/settings.json");

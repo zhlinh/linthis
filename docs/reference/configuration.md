@@ -346,7 +346,7 @@ Similar override sections exist for other hook types:
 
 ### `[hooks.agent-plugins]`
 
-Override agent plugin bundles (Tier 2). Each entry points to a directory containing `skill/<provider>/`, `command/<provider>/`, and `memory/<provider>/` subdirectories. Key is the plugin ID.
+Override agent plugin bundles (Tier 2). Each entry points to a directory containing skill, command, memory, and hook subdirectories. Key is the plugin ID.
 
 ```toml
 [hooks.agent-plugins]
@@ -359,9 +359,10 @@ The resolved directory must contain one or more of:
 
 ```
 <plugin-dir>/
-├── skill/<provider>/          — skill instruction file (e.g. claude/lint.md)
-├── command/<provider>/        — slash command definition file (optional)
-└── memory/<provider>/         — memory section injected into CLAUDE.md etc. (optional)
+├── skills/<skill_name>/SKILL.md    — skill instruction file (e.g., skills/lt-lint/SKILL.md)
+├── commands/                        — slash command files (optional)
+├── memories/TOPLEVEL.md             — memory section injected into CLAUDE.md etc. (optional)
+└── hooks/hooks.json                 — stop hook settings (optional)
 ```
 
 ---
@@ -378,6 +379,31 @@ Override the agent Stop Hook settings file (Tier 2). Key format is `<provider>.<
 | Key format | Example | Description |
 |------------|---------|-------------|
 | `<provider>.<stem>` | `claude.settings` | Overrides `.claude/settings.json` for the Claude provider |
+
+---
+
+### `[hooks.agent-skill-names]`
+
+Configure custom skill directory names for each hook event. This allows teams with existing skill directories to map linthis events to their custom names instead of the defaults.
+
+```toml
+[hooks.agent-skill-names]
+pre-commit = "my-team-lint"     # default: "lt-lint"
+commit-msg = "my-team-cmsg"     # default: "lt-cmsg"
+pre-push = "my-team-review"     # default: "lt-review"
+```
+
+The values are used as:
+- **Directory names** under `.claude/skills/` and `.codebuddy/skills/` (e.g., `.claude/skills/my-team-lint/SKILL.md`)
+- **Base file names** for flat-file providers (Gemini: `my-team-lint.md`, Cursor: `my-team-lint.mdc`, etc.)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pre-commit` | String | `"lt-lint"` | Skill name for the pre-commit (lint) event |
+| `commit-msg` | String | `"lt-cmsg"` | Skill name for the commit-msg event |
+| `pre-push` | String | `"lt-review"` | Skill name for the pre-push (review) event |
+
+Without this config, the defaults are used (backward compatible).
 
 ---
 
@@ -832,6 +858,10 @@ pre-commit = { source = { plugin = "company", file = "hooks/git/pre-commit" } }
 
 [hooks.agent-hook.stop]
 "claude.settings" = { source = { plugin = "company", file = "hooks/agent/hook/stop/claude/settings.json" } }
+
+# Custom skill directory names (optional)
+[hooks.agent-skill-names]
+pre-commit = "custom-lint"
 
 # Language-specific overrides
 [rust]

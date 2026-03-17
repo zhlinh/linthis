@@ -590,6 +590,8 @@ All modifications preserve TOML file format and comments.
 |                  | `-y`  | `--yes`         | Non-interactive mode                                                                                                                                    |
 | `hook status`    |       |                 | Show git hook status (Project Hooks and Global Hooks sections)                                                                                          |
 | `hook check`     |       |                 | Check for hook conflicts                                                                                                                                |
+| `hook sync`      |       |                 | Re-sync all installed hooks and agent skills                                                                                                            |
+|                  | `-g`  | `--global`      | Sync global hooks                                                                                                                                       |
 
 **Hook types**:
 
@@ -610,6 +612,8 @@ All modifications preserve TOML file format and comments.
 - `pre-commit`: Run before commit (default, checks staged files)
 - `pre-push`: Run before push (checks all files)
 - `commit-msg`: Validate commit message format (calls `linthis cmsg "$1"`)
+
+Each hook event generates a separate per-event skill file for agent integrations (e.g., `lt-lint` for pre-commit, `lt-cmsg` for commit-msg, `lt-review` for pre-push). All skills belong to a single unified plugin bundle `lt`.
 
 ### cmsg Subcommand
 
@@ -986,7 +990,7 @@ Create `linthis-config.toml` in the plugin root to ship custom git/agent hooks. 
 pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
 
 [hooks.agent-plugins]
-"lt.lint" = { source = { plugin = "self", file = "hooks/agent/plugins/lt/lint" } }
+"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/lt" } }
 
 [hooks.agent-hook.stop]
 "claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }

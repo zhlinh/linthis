@@ -321,6 +321,11 @@ pub struct HooksConfig {
     /// `[hooks.agent-hook.stop]`  key = "<provider>.<filename-stem>" ("claude.settings")
     #[serde(default, rename = "agent-hook")]
     pub agent_hook: AgentHookConfig,
+
+    // ── Configurable skill directory names ────────────────────────────────
+    /// `[hooks.agent-skill-names]`  Maps hook events to custom skill directory names.
+    #[serde(default, rename = "agent-skill-names")]
+    pub agent_skill_names: AgentSkillNamesConfig,
 }
 
 /// Aggregates per-event agent hook override maps.
@@ -330,6 +335,30 @@ pub struct AgentHookConfig {
     /// `[hooks.agent-hook.stop]`  key = "<provider>.<filename-stem>"
     #[serde(default)]
     pub stop: HashMap<String, HookSourceEntry>,
+}
+
+/// Configurable skill directory/file names for each hook event.
+///
+/// Allows teams to map linthis hook events to custom skill directory names
+/// instead of the defaults (`lt-lint`, `lt-cmsg`, `lt-review`).
+///
+/// ```toml
+/// [hooks.agent-skill-names]
+/// pre-commit = "my-team-lint"     # default: "lt-lint"
+/// commit-msg = "my-team-cmsg"     # default: "lt-cmsg"
+/// pre-push = "my-team-review"     # default: "lt-review"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentSkillNamesConfig {
+    /// Custom skill name for the pre-commit event (default: "lt-lint")
+    #[serde(default, rename = "pre-commit")]
+    pub pre_commit: Option<String>,
+    /// Custom skill name for the commit-msg event (default: "lt-cmsg")
+    #[serde(default, rename = "commit-msg")]
+    pub commit_msg: Option<String>,
+    /// Custom skill name for the pre-push event (default: "lt-review")
+    #[serde(default, rename = "pre-push")]
+    pub pre_push: Option<String>,
 }
 
 impl Default for HooksConfig {
@@ -347,6 +376,7 @@ impl Default for HooksConfig {
             pre_commit_tool_with_agent: HashMap::new(),
             agent_plugins: HashMap::new(),
             agent_hook: AgentHookConfig::default(),
+            agent_skill_names: AgentSkillNamesConfig::default(),
         }
     }
 }

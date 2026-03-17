@@ -212,8 +212,8 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
     // Print full report content
     println!("{}", report_content);
 
-    // Print summary
-    println!("{}", review_result.summary);
+    // Print boxed summary
+    println!("{}", linthis::utils::output::format_review_box(&review_result));
 
     // 6. Handle auto-fix + PR creation if enabled
     let auto_fix = options.auto_fix || config.review.auto_fix;
