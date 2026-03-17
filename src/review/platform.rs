@@ -1,26 +1,36 @@
 //! Git platform detection and PR/MR creation.
 
+use crate::config::PlatformConfig;
 use std::collections::HashMap;
 use std::process::Command;
-use crate::config::PlatformConfig;
 
 /// Built-in platform defaults
 fn builtin_platforms() -> HashMap<String, PlatformConfig> {
     let mut map = HashMap::new();
-    map.insert("github.com".to_string(), PlatformConfig {
-        pr_create: "gh pr create".to_string(),
-        pr_list: Some("gh pr list".to_string()),
-        reviewer_flag: "--reviewer".to_string(),
-        install_cmd: None,
-        install_hint: Some("Install: https://cli.github.com/\n  Auth: gh auth login".to_string()),
-    });
-    map.insert("gitlab.com".to_string(), PlatformConfig {
-        pr_create: "glab mr create".to_string(),
-        pr_list: Some("glab mr list".to_string()),
-        reviewer_flag: "--reviewer".to_string(),
-        install_cmd: None,
-        install_hint: Some("Install: https://gitlab.com/gitlab-org/cli\n  Auth: glab auth login".to_string()),
-    });
+    map.insert(
+        "github.com".to_string(),
+        PlatformConfig {
+            pr_create: "gh pr create".to_string(),
+            pr_list: Some("gh pr list".to_string()),
+            reviewer_flag: "--reviewer".to_string(),
+            install_cmd: None,
+            install_hint: Some(
+                "Install: https://cli.github.com/\n  Auth: gh auth login".to_string(),
+            ),
+        },
+    );
+    map.insert(
+        "gitlab.com".to_string(),
+        PlatformConfig {
+            pr_create: "glab mr create".to_string(),
+            pr_list: Some("glab mr list".to_string()),
+            reviewer_flag: "--reviewer".to_string(),
+            install_cmd: None,
+            install_hint: Some(
+                "Install: https://gitlab.com/gitlab-org/cli\n  Auth: glab auth login".to_string(),
+            ),
+        },
+    );
     map
 }
 
@@ -71,24 +81,31 @@ pub fn resolve_platform(
     domain: &str,
     user_platforms: &HashMap<String, PlatformConfig>,
 ) -> Option<PlatformConfig> {
-    user_platforms.get(domain).cloned()
+    user_platforms
+        .get(domain)
+        .cloned()
         .or_else(|| builtin_platforms().get(domain).cloned())
 }
 
 /// Check if the platform CLI tool is available, offering auto-install if possible.
 pub fn check_tool_available(platform: &PlatformConfig) -> Result<(), String> {
     let tool = platform.pr_create.split_whitespace().next().unwrap_or("");
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let output = Command::new(which_cmd)
-        .arg(tool)
-        .output();
+    let which_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    let output = Command::new(which_cmd).arg(tool).output();
 
     match output {
         Ok(o) if o.status.success() => Ok(()),
         _ => {
             // Try auto-install if install_cmd is configured and we have a TTY
             if let Some(ref install_cmd) = platform.install_cmd {
-                let hint_msg = platform.install_hint.as_deref().unwrap_or("Install CLI tool");
+                let hint_msg = platform
+                    .install_hint
+                    .as_deref()
+                    .unwrap_or("Install CLI tool");
                 if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
                     eprintln!("⚠ {} is required for PR creation but not found.", tool);
                     eprint!("  {} Install now? [Y/n] ", hint_msg);
@@ -98,10 +115,7 @@ pub fn check_tool_available(platform: &PlatformConfig) -> Result<(), String> {
                         let answer = answer.trim().to_lowercase();
                         if answer.is_empty() || answer == "y" || answer == "yes" {
                             eprintln!("  → Installing {}...", tool);
-                            let status = Command::new("sh")
-                                .arg("-c")
-                                .arg(install_cmd)
-                                .status();
+                            let status = Command::new("sh").arg("-c").arg(install_cmd).status();
 
                             match status {
                                 Ok(s) if s.success() => {
@@ -138,11 +152,15 @@ pub fn check_tool_available(platform: &PlatformConfig) -> Result<(), String> {
             } else {
                 match tool {
                     "gh" => "Install: https://cli.github.com/\n  Auth: gh auth login".to_string(),
-                    "glab" => "Install: https://gitlab.com/gitlab-org/cli\n  Auth: glab auth login".to_string(),
+                    "glab" => "Install: https://gitlab.com/gitlab-org/cli\n  Auth: glab auth login"
+                        .to_string(),
                     _ => "Ensure the CLI tool is installed and in PATH".to_string(),
                 }
             };
-            Err(format!("⚠ {} is required for PR creation.\n  {}", tool, hint))
+            Err(format!(
+                "⚠ {} is required for PR creation.\n  {}",
+                tool, hint
+            ))
         }
     }
 }
@@ -195,14 +213,21 @@ pub fn create_pr(
     let cmd_template = &platform.pr_create;
 
     // Build command with standard flags
-    let mut parts: Vec<String> = cmd_template.split_whitespace().map(|s| s.to_string()).collect();
+    let mut parts: Vec<String> = cmd_template
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
 
     // Add title and description if not already in template
     if !cmd_template.contains("{{title}}") {
         parts.extend(["--title".to_string(), title.to_string()]);
     }
     if !cmd_template.contains("{{description}}") {
-        let desc_flag = if cmd_template.contains("glab") { "--description" } else { "--body" };
+        let desc_flag = if cmd_template.contains("glab") {
+            "--description"
+        } else {
+            "--body"
+        };
         parts.extend([desc_flag.to_string(), description.to_string()]);
     }
 
@@ -242,19 +267,34 @@ mod tests {
 
     #[test]
     fn test_extract_domain_ssh() {
-        assert_eq!(extract_domain("git@github.com:user/repo.git"), Some("github.com".to_string()));
-        assert_eq!(extract_domain("git@git.company.com:group/repo"), Some("git.company.com".to_string()));
+        assert_eq!(
+            extract_domain("git@github.com:user/repo.git"),
+            Some("github.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("git@git.company.com:group/repo"),
+            Some("git.company.com".to_string())
+        );
     }
 
     #[test]
     fn test_extract_domain_https() {
-        assert_eq!(extract_domain("https://github.com/user/repo.git"), Some("github.com".to_string()));
-        assert_eq!(extract_domain("https://gitlab.com/user/repo.git"), Some("gitlab.com".to_string()));
+        assert_eq!(
+            extract_domain("https://github.com/user/repo.git"),
+            Some("github.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("https://gitlab.com/user/repo.git"),
+            Some("gitlab.com".to_string())
+        );
     }
 
     #[test]
     fn test_extract_domain_ssh_scheme() {
-        assert_eq!(extract_domain("ssh://git@github.com/user/repo.git"), Some("github.com".to_string()));
+        assert_eq!(
+            extract_domain("ssh://git@github.com/user/repo.git"),
+            Some("github.com".to_string())
+        );
     }
 
     #[test]
@@ -270,7 +310,10 @@ mod tests {
         vars.insert("title".to_string(), "Fix bug".to_string());
         vars.insert("description".to_string(), "Details".to_string());
 
-        let result = expand_template("cli mr create --title {{title}} --desc {{description}}", &vars);
+        let result = expand_template(
+            "cli mr create --title {{title}} --desc {{description}}",
+            &vars,
+        );
         assert_eq!(result, "cli mr create --title Fix bug --desc Details");
     }
 
@@ -288,13 +331,16 @@ mod tests {
     #[test]
     fn test_resolve_platform_user_override() {
         let mut user = HashMap::new();
-        user.insert("github.com".to_string(), PlatformConfig {
-            pr_create: "custom-gh pr create".to_string(),
-            pr_list: None,
-            reviewer_flag: "--assignee".to_string(),
-            install_cmd: None,
-            install_hint: None,
-        });
+        user.insert(
+            "github.com".to_string(),
+            PlatformConfig {
+                pr_create: "custom-gh pr create".to_string(),
+                pr_list: None,
+                reviewer_flag: "--assignee".to_string(),
+                install_cmd: None,
+                install_hint: None,
+            },
+        );
         let result = resolve_platform("github.com", &user).unwrap();
         assert!(result.pr_create.contains("custom-gh"));
     }

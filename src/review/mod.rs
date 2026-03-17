@@ -19,6 +19,46 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
+
+/// Auto-fix mode for the review command
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoFixMode {
+    /// Create fix branch, commit, push, create PR/MR
+    Pr,
+    /// Commit fixes on current branch, do not push (exit 1 to block push)
+    Commit,
+    /// Apply fixes to working tree only, do not commit (exit 1 to block push)
+    #[default]
+    Apply,
+}
+
+impl FromStr for AutoFixMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "pr" => Ok(AutoFixMode::Pr),
+            "commit" => Ok(AutoFixMode::Commit),
+            "apply" => Ok(AutoFixMode::Apply),
+            _ => Err(format!(
+                "invalid auto-fix mode '{}': expected pr, commit, or apply",
+                s
+            )),
+        }
+    }
+}
+
+impl fmt::Display for AutoFixMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AutoFixMode::Pr => write!(f, "pr"),
+            AutoFixMode::Commit => write!(f, "commit"),
+            AutoFixMode::Apply => write!(f, "apply"),
+        }
+    }
+}
 
 /// Overall assessment of a code review
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

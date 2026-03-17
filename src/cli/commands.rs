@@ -847,6 +847,10 @@ pub enum Commands {
         #[arg(long)]
         auto_fix: bool,
 
+        /// Auto-fix mode: pr, commit, apply (default: apply)
+        #[arg(long)]
+        auto_fix_mode: Option<String>,
+
         /// Specify reviewer(s) for PR/MR (repeatable)
         #[arg(long = "reviewer", short = 'r')]
         reviewers: Option<Vec<String>>,

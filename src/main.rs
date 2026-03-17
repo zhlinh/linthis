@@ -286,6 +286,7 @@ fn main() -> ExitCode {
     if let Some(Commands::Review {
         background,
         auto_fix,
+        auto_fix_mode,
         reviewers,
         provider,
         base,
@@ -301,6 +302,7 @@ fn main() -> ExitCode {
         return handle_review_command(ReviewCommandOptions {
             background,
             auto_fix,
+            auto_fix_mode,
             reviewers,
             provider,
             base,
