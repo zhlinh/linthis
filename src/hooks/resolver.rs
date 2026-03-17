@@ -74,7 +74,7 @@ fn plugin_cache_dir(alias: &str) -> Result<PathBuf, String> {
 ///
 /// Clones to the plugin cache directory (identified by marketplace URL), or
 /// updates an existing clone.  The marketplace git URL is taken directly from
-/// the caller (already resolved from `HooksConfig.marketplaces`).
+/// the caller (already resolved from `HookConfig.marketplaces`).
 fn marketplace_plugin_dir(marketplace_url: &str, plugin_name: &str) -> Result<PathBuf, String> {
     use crate::plugin::{fetcher::PluginFetcher, PluginCache};
 
@@ -140,7 +140,7 @@ fn git_clone_temp(
 fn resolve_marketplace_url(name: &str, marketplaces: &HashMap<String, String>) -> Result<String, String> {
     marketplaces.get(name).cloned().ok_or_else(|| {
         format!(
-            "Marketplace '{}' is not defined in [hooks.marketplaces]",
+            "Marketplace '{}' is not defined in [hook.marketplaces]",
             name
         )
     })
@@ -153,7 +153,7 @@ fn resolve_marketplace_url(name: &str, marketplaces: &HashMap<String, String>) -
 /// Used for git hook scripts, agent-hook JSON, and memory markdown content.
 ///
 /// `project_root` is the root of the current project (git worktree root or CWD).
-/// `marketplaces` maps marketplace names to their git URLs (from `HooksConfig.marketplaces`).
+/// `marketplaces` maps marketplace names to their git URLs (from `HookConfig.marketplaces`).
 pub fn resolve_to_string(
     source: &HookSource,
     project_root: &Path,

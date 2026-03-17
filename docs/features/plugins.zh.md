@@ -7,7 +7,7 @@
 linthis 插件是一个包含以下内容的 Git 仓库：
 - `linthis-plugin.toml` 清单文件
 - 一个或多个语言配置文件（TOML、YAML 或 JSON）
-- 可选的 `linthis-config.toml`，用于捆绑 hook 覆盖配置
+- 可选的 `linthis-hook.toml`，用于捆绑 hook 覆盖配置
 - 可选的自定义规则和预设
 
 插件允许您在项目或团队之间共享 lint 配置**以及 git/agent hook 设置**。
@@ -17,7 +17,7 @@ linthis 插件是一个包含以下内容的 Git 仓库：
 ```
 my-linthis-plugin/
 ├── linthis-plugin.toml           # 必需：插件清单
-├── linthis-config.toml           # 可选：Hook 来源覆盖（plugin add 时自动合并）
+├── linthis-hook.toml           # 可选：Hook 来源覆盖（plugin add 时自动合并）
 ├── config.toml                   # 主 lint 配置
 ├── hooks/                        # 可选：自定义 hook 文件
 │   ├── git/
@@ -43,29 +43,29 @@ my-linthis-plugin/
 └── README.md                     # 可选：文档
 ```
 
-## 通过 `linthis-config.toml` 捆绑 Hook 配置
+## 通过 `linthis-hook.toml` 捆绑 Hook 配置
 
-插件可以在插件根目录包含一个 `linthis-config.toml`，与 lint 配置一起发布。该文件使用 `plugin = "self"` 声明指向插件自身的 `[hooks.*]` 来源覆盖。
+插件可以在插件根目录包含一个 `linthis-hook.toml`，与 lint 配置一起发布。该文件使用 `plugin = "self"` 声明指向插件自身的 `[hook.*]` 来源覆盖。
 
 当用户运行 `linthis plugin add <alias> <url>` 时，linthis 自动：
 
 1. 将所有 `plugin = "self"` 替换为 `plugin = "<alias>"`（用户选择的别名）
-2. 将 `[hooks.*]` 条目以非覆盖方式合并到用户的 `.linthis/config.toml` 中
+2. 将 `[hook.*]` 条目以非覆盖方式合并到用户的 `.linthis/config.toml` 中
 
 之后运行 `linthis hook install` 将自动使用插件的定制 hook 脚本和 agent 包——无需手动配置。
 
-### `linthis-config.toml` 示例
+### `linthis-hook.toml` 示例
 
 ```toml
 # 插件内置。引用使用 plugin = "self"。
 
-[hooks.git]
+[hook.git]
 pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
 
-[hooks.agent-plugins]
+[hook.agent.plugins._default]
 "lt" = { source = { plugin = "self", file = "hooks/agent/plugins/lt" } }
 
-[hooks.agent-hook.stop]
+[hook.agent.stop]
 "claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }
 ```
 

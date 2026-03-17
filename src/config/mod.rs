@@ -73,6 +73,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::review::AutoFixMode;
 use crate::rules::RulesConfig;
 
 /// Main configuration structure for linthis.
@@ -147,9 +148,9 @@ pub struct Config {
     #[serde(default)]
     pub performance: PerformanceConfig,
 
-    /// Git hooks settings
+    /// Hook settings
     #[serde(default)]
-    pub hooks: HooksConfig,
+    pub hook: HookConfig,
 
     /// Commit message validation settings
     #[serde(default)]
@@ -271,9 +272,9 @@ pub struct HookSourceEntry {
     pub source: HookSource,
 }
 
-/// Git hooks configuration section
+/// Hook configuration section — `[hook]` in TOML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HooksConfig {
+pub struct HookConfig {
     /// Hook timeout in seconds (default: 60)
     #[serde(default = "default_hook_timeout")]
     pub timeout: u32,
@@ -286,55 +287,66 @@ pub struct HooksConfig {
 
     // ── Tier-2 override: marketplace URLs ────────────────────────────────
     /// Named marketplace git repositories.
-    /// `[hooks.marketplaces]`  key = name, value = git URL.
+    /// `[hook.marketplaces]`  key = name, value = git URL.
     /// The key `"default"` is used when no `marketplace` field is given in a source entry.
     #[serde(default)]
     pub marketplaces: HashMap<String, String>,
 
     // ── Tier-2 override: git hook source mappings ─────────────────────────
-    /// `[hooks.git]`  key = event name ("pre-commit", "commit-msg", "pre-push")
+    /// `[hook.git]`  key = event name ("pre-commit", "commit-msg", "pre-push")
     #[serde(default)]
     pub git: HashMap<String, HookSourceEntry>,
-    /// `[hooks.git-with-agent]`
+    /// `[hook.git-with-agent]`
     #[serde(default, rename = "git-with-agent")]
     pub git_with_agent: HashMap<String, HookSourceEntry>,
-    /// `[hooks.prek]`
+    /// `[hook.prek]`
     #[serde(default)]
     pub prek: HashMap<String, HookSourceEntry>,
-    /// `[hooks.prek-with-agent]`
+    /// `[hook.prek-with-agent]`
     #[serde(default, rename = "prek-with-agent")]
     pub prek_with_agent: HashMap<String, HookSourceEntry>,
-    /// `[hooks.pre-commit-tool]`
-    #[serde(default, rename = "pre-commit-tool")]
-    pub pre_commit_tool: HashMap<String, HookSourceEntry>,
-    /// `[hooks.pre-commit-tool-with-agent]`
-    #[serde(default, rename = "pre-commit-tool-with-agent")]
-    pub pre_commit_tool_with_agent: HashMap<String, HookSourceEntry>,
 
-    // ── Tier-2 override: agent plugins ───────────────────────────────────
-    /// `[hooks.agent-plugins]`  key = plugin ID ("lt.lint", "lt.cmsg", "lt.review")
-    /// Source must resolve to a directory containing skill/, command/, memory/ subdirs.
-    #[serde(default, rename = "agent-plugins")]
-    pub agent_plugins: HashMap<String, HookSourceEntry>,
+    // ── Agent namespace ──────────────────────────────────────────────────
+    /// `[hook.agent]` — agent plugins and skill names
+    #[serde(default)]
+    pub agent: AgentConfig,
 
-    // ── Tier-2 override: agent event hooks ───────────────────────────────
-    /// `[hooks.agent-hook.stop]`  key = "<provider>.<filename-stem>" ("claude.settings")
-    #[serde(default, rename = "agent-hook")]
-    pub agent_hook: AgentHookConfig,
-
-    // ── Configurable skill directory names ────────────────────────────────
-    /// `[hooks.agent-skill-names]`  Maps hook events to custom skill directory names.
-    #[serde(default, rename = "agent-skill-names")]
-    pub agent_skill_names: AgentSkillNamesConfig,
+    // ── Review hook configuration ────────────────────────────────────────
+    /// `[hook.review]` — auto-fix mode for background/hook context
+    #[serde(default)]
+    pub review: HookReviewConfig,
 }
 
-/// Aggregates per-event agent hook override maps.
-/// Designed to accommodate future events (start, tool-use, etc.) without schema changes.
+/// Agent namespace configuration — `[hook.agent]` in TOML.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AgentHookConfig {
-    /// `[hooks.agent-hook.stop]`  key = "<provider>.<filename-stem>"
+pub struct AgentConfig {
+    /// Provider → (plugin_id → source), `_default` is the fallback provider.
+    /// `[hook.agent.plugins._default]`, `[hook.agent.plugins.claude]`, etc.
     #[serde(default)]
-    pub stop: HashMap<String, HookSourceEntry>,
+    pub plugins: HashMap<String, HashMap<String, HookSourceEntry>>,
+    /// Custom skill directory names per hook event — `[hook.agent.skill-names]`
+    #[serde(default, rename = "skill-names")]
+    pub skill_names: AgentSkillNamesConfig,
+}
+
+/// Review hook configuration — `[hook.review]` in TOML.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookReviewConfig {
+    /// Auto-fix mode when triggered from background/hook context (default: pr)
+    #[serde(default = "default_hook_review_auto_fix_mode")]
+    pub auto_fix_mode: AutoFixMode,
+}
+
+impl Default for HookReviewConfig {
+    fn default() -> Self {
+        Self {
+            auto_fix_mode: default_hook_review_auto_fix_mode(),
+        }
+    }
+}
+
+fn default_hook_review_auto_fix_mode() -> AutoFixMode {
+    AutoFixMode::Pr
 }
 
 /// Configurable skill directory/file names for each hook event.
@@ -343,7 +355,7 @@ pub struct AgentHookConfig {
 /// instead of the defaults (`lt-lint`, `lt-cmsg`, `lt-review`).
 ///
 /// ```toml
-/// [hooks.agent-skill-names]
+/// [hook.agent.skill-names]
 /// pre-commit = "my-team-lint"     # default: "lt-lint"
 /// commit-msg = "my-team-cmsg"     # default: "lt-cmsg"
 /// pre-push = "my-team-review"     # default: "lt-review"
@@ -361,7 +373,7 @@ pub struct AgentSkillNamesConfig {
     pub pre_push: Option<String>,
 }
 
-impl Default for HooksConfig {
+impl Default for HookConfig {
     fn default() -> Self {
         Self {
             timeout: default_hook_timeout(),
@@ -372,11 +384,8 @@ impl Default for HooksConfig {
             git_with_agent: HashMap::new(),
             prek: HashMap::new(),
             prek_with_agent: HashMap::new(),
-            pre_commit_tool: HashMap::new(),
-            pre_commit_tool_with_agent: HashMap::new(),
-            agent_plugins: HashMap::new(),
-            agent_hook: AgentHookConfig::default(),
-            agent_skill_names: AgentSkillNamesConfig::default(),
+            agent: AgentConfig::default(),
+            review: HookReviewConfig::default(),
         }
     }
 }
@@ -426,6 +435,9 @@ pub struct ReviewConfig {
     /// Auto-fix mode (create fix branch + PR/MR)
     #[serde(default)]
     pub auto_fix: bool,
+    /// Auto-fix mode for direct usage: pr, commit, apply (default: apply)
+    #[serde(default)]
+    pub auto_fix_mode: AutoFixMode,
     /// AI provider override for review
     #[serde(default)]
     pub provider: Option<String>,
@@ -448,6 +460,7 @@ impl Default for ReviewConfig {
         Self {
             enabled: default_review_enabled(),
             auto_fix: false,
+            auto_fix_mode: AutoFixMode::default(),
             provider: None,
             retention_days: default_retention_days(),
             platforms: std::collections::HashMap::new(),
@@ -908,36 +921,30 @@ impl Config {
         // Merge rules configuration
         self.rules.merge(other.rules);
 
-        // Merge hooks configuration (other's entries override self's on conflict)
-        if !other.hooks.marketplaces.is_empty() {
-            self.hooks.marketplaces.extend(other.hooks.marketplaces);
+        // Merge hook configuration (other's entries override self's on conflict)
+        if !other.hook.marketplaces.is_empty() {
+            self.hook.marketplaces.extend(other.hook.marketplaces);
         }
-        if !other.hooks.git.is_empty() {
-            self.hooks.git.extend(other.hooks.git);
+        if !other.hook.git.is_empty() {
+            self.hook.git.extend(other.hook.git);
         }
-        if !other.hooks.git_with_agent.is_empty() {
-            self.hooks.git_with_agent.extend(other.hooks.git_with_agent);
+        if !other.hook.git_with_agent.is_empty() {
+            self.hook.git_with_agent.extend(other.hook.git_with_agent);
         }
-        if !other.hooks.prek.is_empty() {
-            self.hooks.prek.extend(other.hooks.prek);
+        if !other.hook.prek.is_empty() {
+            self.hook.prek.extend(other.hook.prek);
         }
-        if !other.hooks.prek_with_agent.is_empty() {
-            self.hooks.prek_with_agent.extend(other.hooks.prek_with_agent);
+        if !other.hook.prek_with_agent.is_empty() {
+            self.hook.prek_with_agent.extend(other.hook.prek_with_agent);
         }
-        if !other.hooks.pre_commit_tool.is_empty() {
-            self.hooks.pre_commit_tool.extend(other.hooks.pre_commit_tool);
+        // Merge agent plugins: per-provider maps
+        for (provider, plugins) in other.hook.agent.plugins {
+            self.hook.agent.plugins.entry(provider)
+                .or_default()
+                .extend(plugins);
         }
-        if !other.hooks.pre_commit_tool_with_agent.is_empty() {
-            self.hooks.pre_commit_tool_with_agent.extend(other.hooks.pre_commit_tool_with_agent);
-        }
-        if !other.hooks.agent_plugins.is_empty() {
-            self.hooks.agent_plugins.extend(other.hooks.agent_plugins);
-        }
-        if !other.hooks.agent_hook.stop.is_empty() {
-            self.hooks.agent_hook.stop.extend(other.hooks.agent_hook.stop);
-        }
-        if other.hooks.timeout != default_hook_timeout() {
-            self.hooks.timeout = other.hooks.timeout;
+        if other.hook.timeout != default_hook_timeout() {
+            self.hook.timeout = other.hook.timeout;
         }
     }
 

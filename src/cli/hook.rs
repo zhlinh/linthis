@@ -1249,7 +1249,7 @@ fn handle_hook_status() -> ExitCode {
 
     // Check agent integration status (project-level only for status display)
     println!("\n{}", "Agent Integration".bold());
-    let status_skill_names_cfg = linthis::config::Config::load_merged(&git_root).hooks.agent_skill_names;
+    let status_skill_names_cfg = linthis::config::Config::load_merged(&git_root).hook.agent.skill_names;
     let status_skill_names = Some(&status_skill_names_cfg);
     let mut any_agent_installed = false;
     for p in ALL_AGENT_PROVIDERS {
@@ -1696,7 +1696,7 @@ fn format_hook_source(source: &linthis::config::HookSource) -> String {
 /// Describe where the hook behavior comes from (Tier 1/2/3) as a human-readable string.
 ///
 /// - Tier 1 (fixed path): `"hooks/git-with-agent/pre-push (fixed path)"`
-/// - Tier 2 (TOML entry): `"[hooks.git-with-agent]\npre-push = { source = { ... } }"`
+/// - Tier 2 (TOML entry): `"[hook.git-with-agent]\npre-push = { source = { ... } }"`
 /// - Tier 3 (built-in):   `"built-in → linthis -c --hook-event=pre-push"`
 fn describe_hook_source(tool: &HookTool, hook_event: &HookEvent) -> String {
     use linthis::config::Config;
@@ -1721,22 +1721,21 @@ fn describe_hook_source(tool: &HookTool, hook_event: &HookEvent) -> String {
 
     // Tier 2: TOML source mapping
     let config = Config::load_merged(&project_root);
-    let hooks = &config.hooks;
+    let hook_cfg = &config.hook;
     let event_key = hook_event.hook_filename();
 
     let entry = match tool {
-        HookTool::Git => hooks.git.get(event_key),
-        HookTool::GitWithAgent => hooks.git_with_agent.get(event_key),
-        HookTool::Prek => hooks.prek.get(event_key),
-        HookTool::PrekWithAgent => hooks.prek_with_agent.get(event_key),
-        HookTool::PreCommit => hooks.pre_commit_tool.get(event_key),
-        HookTool::PreCommitWithAgent => hooks.pre_commit_tool_with_agent.get(event_key),
+        HookTool::Git => hook_cfg.git.get(event_key),
+        HookTool::GitWithAgent => hook_cfg.git_with_agent.get(event_key),
+        HookTool::Prek => hook_cfg.prek.get(event_key),
+        HookTool::PrekWithAgent => hook_cfg.prek_with_agent.get(event_key),
+        HookTool::PreCommit | HookTool::PreCommitWithAgent => None,
         HookTool::Agent => unreachable!(),
     };
 
     if let Some(entry) = entry {
-        // e.g. "git-with-agent" → "[hooks.git-with-agent]"
-        let section = format!("[hooks.{}]", tool_type_dir);
+        // e.g. "git-with-agent" → "[hook.git-with-agent]"
+        let section = format!("[hook.{}]", tool_type_dir);
         let source_str = format_hook_source(&entry.source);
         return format!("{}\n{} = {{ source = {} }}", section, event_key, source_str);
     }
@@ -1779,21 +1778,20 @@ fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> Result<Opti
 
     // Tier 2: TOML source mapping
     let config = Config::load_merged(&project_root);
-    let hooks = &config.hooks;
+    let hook_cfg = &config.hook;
     let event_key = hook_event.hook_filename(); // "pre-commit", "commit-msg", "pre-push"
 
     let entry = match tool {
-        HookTool::Git => hooks.git.get(event_key),
-        HookTool::GitWithAgent => hooks.git_with_agent.get(event_key),
-        HookTool::Prek => hooks.prek.get(event_key),
-        HookTool::PrekWithAgent => hooks.prek_with_agent.get(event_key),
-        HookTool::PreCommit => hooks.pre_commit_tool.get(event_key),
-        HookTool::PreCommitWithAgent => hooks.pre_commit_tool_with_agent.get(event_key),
+        HookTool::Git => hook_cfg.git.get(event_key),
+        HookTool::GitWithAgent => hook_cfg.git_with_agent.get(event_key),
+        HookTool::Prek => hook_cfg.prek.get(event_key),
+        HookTool::PrekWithAgent => hook_cfg.prek_with_agent.get(event_key),
+        HookTool::PreCommit | HookTool::PreCommitWithAgent => None,
         HookTool::Agent => return Ok(None),
     };
 
     if let Some(entry) = entry {
-        match resolver::resolve_to_string(&entry.source, &project_root, &hooks.marketplaces) {
+        match resolver::resolve_to_string(&entry.source, &project_root, &hook_cfg.marketplaces) {
             Ok(content) => return Ok(Some(content)),
             Err(e) => {
                 eprintln!("{}: Failed to resolve hook override for '{}/{}': {}", "Error".red(), tool_type_dir, event_key, e);
@@ -3398,6 +3396,20 @@ fn install_agent_plugin_from_dir(
     Ok(())
 }
 
+/// Resolve an agent plugin entry from the nested `[hook.agent.plugins]` config.
+///
+/// Looks up the provider-specific map first, then falls back to `_default`.
+fn resolve_agent_plugin<'a>(
+    hook_config: &'a linthis::config::HookConfig,
+    plugin_id: &str,
+    provider: &str,
+) -> Option<&'a linthis::config::HookSourceEntry> {
+    hook_config.agent.plugins.get(provider)
+        .and_then(|m| m.get(plugin_id))
+        .or_else(|| hook_config.agent.plugins.get("_default")
+            .and_then(|m| m.get(plugin_id)))
+}
+
 /// Tier-1/2 override check for an agent plugin (skill + command + memory bundle).
 ///
 /// Returns `Ok(true)` if an override was found and installed, `Ok(false)` to fall through
@@ -3429,10 +3441,10 @@ fn resolve_and_install_agent_plugin_override(
         }
     }
 
-    // Tier 2: TOML agent-plugins entry (applies to both local and global installs)
+    // Tier 2: TOML agent plugin entry with provider fallback
     let config = Config::load_merged(&project_root);
-    if let Some(entry) = config.hooks.agent_plugins.get(plugin_id) {
-        let resolved = resolver::resolve_to_dir(&entry.source, &project_root, &config.hooks.marketplaces)
+    if let Some(entry) = resolve_agent_plugin(&config.hook, plugin_id, &provider_name) {
+        let resolved = resolver::resolve_to_dir(&entry.source, &project_root, &config.hook.marketplaces)
             .map_err(|e| format!("Failed to resolve agent plugin '{}': {}", plugin_id, e))?;
         install_agent_plugin_from_dir(resolved.path(), base, provider, event, skill_names)?;
         return Ok(true);
@@ -3440,7 +3452,7 @@ fn resolve_and_install_agent_plugin_override(
 
     // Tier 2.5: Scan cached plugin directories for agent plugin overrides.
     // This covers global installs where plugin sources are configured but
-    // [hooks.agent-plugins] is not explicitly set in the TOML.
+    // [hook.agent.plugins] is not explicitly set in the TOML.
     {
         use linthis::plugin::{PluginCache, PluginConfigManager};
 
@@ -3820,26 +3832,11 @@ fn install_agent_stop_hook_from_json(
 /// Plugin overrides install stop hooks directly via `install_agent_plugin_from_dir`.
 fn install_agent_stop_hook(
     git_root: &std::path::Path,
-    provider: &AgentProvider,
+    _provider: &AgentProvider,
     settings_path: &std::path::Path,
 ) -> Result<(), String> {
-    use linthis::config::Config;
-    use linthis::hooks::resolver;
-
-    let project_root = git_root.to_path_buf();
-    let provider_dir = format!("{:?}", provider).to_lowercase();
-
-    // Tier 2: TOML entry
-    let override_json_str: Option<String> = {
-        let config = Config::load_merged(&project_root);
-        let toml_key = format!("{}.settings", provider_dir);
-        if let Some(entry) = config.hooks.agent_hook.stop.get(&toml_key) {
-            Some(resolver::resolve_to_string(&entry.source, &project_root, &config.hooks.marketplaces)
-                .map_err(|e| format!("Failed to resolve stop hook for '{}': {}", toml_key, e))?)
-        } else {
-            None // Tier 3: use built-in
-        }
-    };
+    // Stop hook is now handled via plugin packages; use built-in only.
+    let override_json_str: Option<String> = None;
 
     let override_json = override_json_str.as_deref().unwrap_or_else(|| agent_stop_hook_json_ref());
     install_agent_stop_hook_from_json(git_root, settings_path, override_json)
@@ -3979,7 +3976,7 @@ fn handle_agent_hook_install(
 
     // Load configured skill name aliases
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hooks.agent_skill_names;
+    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hook.agent.skill_names;
     let skill_names = Some(&skill_names_cfg);
 
     println!("{}", "🤖 AI Coding Agent Integration".bold());
@@ -4221,7 +4218,7 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) ->
 
     // Load configured skill name aliases
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hooks.agent_skill_names;
+    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hook.agent.skill_names;
     let skill_names = Some(&skill_names_cfg);
 
     // Find all installed providers in the target scope
@@ -4865,7 +4862,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
 
     // Load configured skill name aliases
     let sync_project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let skill_names_cfg = linthis::config::Config::load_merged(&sync_project_root).hooks.agent_skill_names;
+    let skill_names_cfg = linthis::config::Config::load_merged(&sync_project_root).hook.agent.skill_names;
     let skill_names = Some(&skill_names_cfg);
 
     let filtered: Vec<&InstalledHook> = hooks_file

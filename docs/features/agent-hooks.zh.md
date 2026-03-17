@@ -190,7 +190,7 @@ linthis hook install --type agent -g
 | 层级 | 来源 | 使用方式 |
 |------|------|---------|
 | **第 1 层** | 固定路径自动发现 | 在项目根目录的 `hooks/agent/plugins/<id>/` 或 `hooks/agent/hook/stop/<provider>/` 放置文件 |
-| **第 2 层** | TOML 来源映射 | 在 `.linthis/config.toml` 中设置 `[hooks.agent-plugins]` / `[hooks.agent-hook.stop]` 条目 |
+| **第 2 层** | TOML 来源映射 | 在 `.linthis/config.toml` 中设置 `[hook.agent.plugins._default]` / `[hook.agent.stop]` 条目 |
 | **第 3 层** | 内置生成器 | 默认——linthis 内置生成的规则内容 |
 
 ### Agent 插件包目录结构
@@ -210,12 +210,12 @@ Agent 插件包是包含以下扁平化目录布局的文件夹，各子目录�
 在 `.linthis/config.toml` 中覆盖 agent 插件包和 Stop Hook：
 
 ```toml
-[hooks.agent-plugins]
+[hook.agent.plugins._default]
 "lt.lint"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/lint" } }
 "lt.cmsg"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/cmsg" } }
 "lt.review" = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/review" } }
 
-[hooks.agent-hook.stop]
+[hook.agent.stop]
 "claude.settings" = { source = { plugin = "my-plugin", file = "hooks/agent/hook/stop/claude/settings.json" } }
 ```
 
@@ -223,14 +223,14 @@ git hook 可用的五种 `HookSource` 变体同样适用于此处（参见[配�
 
 ### 插件捆绑 Agent Hook
 
-插件可以在插件根目录的 `linthis-config.toml` 中捆绑 agent hook 覆盖配置。当用户运行 `linthis plugin add <alias> <url>` 时，这些条目会自动合并到用户的 `.linthis/config.toml` 中。之后运行 `linthis hook install --type agent --provider claude` 将自动使用插件的定制技能/命令/记忆包和 Stop Hook 设置。
+插件可以在插件根目录的 `linthis-hook.toml` 中捆绑 agent hook 覆盖配置。当用户运行 `linthis plugin add <alias> <url>` 时，这些条目会自动合并到用户的 `.linthis/config.toml` 中。之后运行 `linthis hook install --type agent --provider claude` 将自动使用插件的定制技能/命令/记忆包和 Stop Hook 设置。
 
 ### 可配置技能目录名
 
 已有自定义技能目录名的团队，可以在 `.linthis/config.toml` 中将 linthis 的 hook 事件映射到自定义技能目录名：
 
 ```toml
-[hooks.agent-skill-names]
+[hook.agent.skill-names]
 pre-commit = "my-team-lint"     # 默认: "lt-lint"
 commit-msg = "my-team-cmsg"     # 默认: "lt-cmsg"
 pre-push = "my-team-review"     # 默认: "lt-review"

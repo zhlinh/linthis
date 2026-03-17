@@ -238,12 +238,12 @@ cache_max_age_days = 7
 
 ## Git Hooks 配置
 
-### `[hooks]`
+### `[hook]`
 
 配置 git hook 行为和来源覆盖。
 
 ```toml
-[hooks]
+[hook]
 timeout = 60
 parallel = true
 output_width = 0   # 0 = 自动检测终端宽度
@@ -264,7 +264,7 @@ output_width = 0   # 0 = 自动检测终端宽度
 | 层级 | 描述 |
 |------|------|
 | **第 1 层** | 固定路径自动发现——项目根目录的 `hooks/<type>/<event>`（git hook）或 `hooks/agent/plugins/<id>/`（agent 插件） |
-| **第 2 层** | TOML 来源映射——`.linthis/config.toml` 中的 `[hooks.git]`、`[hooks.agent-plugins]`、`[hooks.agent-hook.stop]` 条目 |
+| **第 2 层** | TOML 来源映射——`.linthis/config.toml` 中的 `[hook.git]`、`[hook.agent.plugins._default]`、`[hook.agent.stop]` 条目 |
 | **第 3 层** | 内置生成器——默认的内置生成脚本或规则内容（兜底） |
 
 第 1 层无需配置，只需在约定路径放置文件即可自动生效。第 2 层通过 TOML 实现细粒度来源覆盖。第 3 层始终作为兜底。
@@ -273,7 +273,7 @@ output_width = 0   # 0 = 自动检测终端宽度
 
 ### `HookSource` — 来源规格
 
-所有 `[hooks.*]` 覆盖条目均使用 `source = { ... }` 字段，支持以下五种变体：
+所有 `[hook.*]` 覆盖条目均使用 `source = { ... }` 字段，支持以下五种变体：
 
 ```toml
 # 变体 1 — File：相对于项目根目录的本地路径
@@ -296,50 +296,48 @@ source = { git = "https://github.com/org/repo.git", ref = "v1.0", path = "hooks/
 |------|---------|---------|------|
 | `File` | `file` | — | 相对于项目根目录的路径 |
 | `Plugin` | `plugin`、`file` | — | 插件须通过 `linthis plugin add` 添加 |
-| `Marketplace` | `marketplace`、`plugin`、`file` | — | 市场 URL 在 `[hooks.marketplaces]` 中定义 |
+| `Marketplace` | `marketplace`、`plugin`、`file` | — | 市场 URL 在 `[hook.marketplaces]` 中定义 |
 | `Url` | `url` | — | 仅支持文件，不支持目录 |
 | `Git` | `git`、`path` | `ref` | 首次使用时克隆，本地缓存 |
 
 ---
 
-### `[hooks.marketplaces]`
+### `[hook.marketplaces]`
 
 `HookSource::Marketplace` 使用的命名市场仓库。键 `"default"` 在未指定 `marketplace` 字段时使用。
 
 ```toml
-[hooks.marketplaces]
+[hook.marketplaces]
 default = "https://github.com/linthis-group/marketplace.git"
 corp    = "https://github.com/mycompany/linthis-marketplace.git"
 ```
 
 ---
 
-### `[hooks.git]`
+### `[hook.git]`
 
 覆盖 git hook 脚本（第 2 层）。键为事件名称。
 
 ```toml
-[hooks.git]
+[hook.git]
 pre-commit = { source = { plugin = "my-plugin", file = "hooks/git/pre-commit" } }
 pre-push   = { source = { file = "hooks/git/pre-push" } }
 commit-msg = { source = { url = "https://example.com/hooks/commit-msg" } }
 ```
 
 其他 hook 类型也有对应的覆盖节：
-- `[hooks.git-with-agent]` — 带 AI 修复兜底的 git hook
-- `[hooks.prek]` — prek hook 脚本
-- `[hooks.prek-with-agent]` — 带 AI 修复兜底的 prek hook
-- `[hooks.pre-commit-tool]` — pre-commit 框架配置
-- `[hooks.pre-commit-tool-with-agent]` — 带 AI 修复兜底的 pre-commit
+- `[hook.git-with-agent]` — 带 AI 修复兜底的 git hook
+- `[hook.prek]` — prek hook 脚本
+- `[hook.prek-with-agent]` — 带 AI 修复兜底的 prek hook
 
 ---
 
-### `[hooks.agent-plugins]`
+### `[hook.agent.plugins._default]`
 
 覆盖 agent 插件包（第 2 层）。每个条目指向包含技能、命令、记忆和 hook 子目录的目录。键为插件 ID。
 
 ```toml
-[hooks.agent-plugins]
+[hook.agent.plugins._default]
 "lt.lint"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/lint" } }
 "lt.cmsg"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/cmsg" } }
 "lt.review" = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/review" } }
@@ -357,23 +355,23 @@ commit-msg = { source = { url = "https://example.com/hooks/commit-msg" } }
 
 ---
 
-### `[hooks.agent-hook.stop]`
+### `[hook.agent.stop]`
 
 覆盖 agent Stop Hook 设置文件（第 2 层）。键格式为 `<provider>.<filename-stem>`。
 
 ```toml
-[hooks.agent-hook.stop]
+[hook.agent.stop]
 "claude.settings" = { source = { plugin = "my-plugin", file = "hooks/agent/hook/stop/claude/settings.json" } }
 ```
 
 ---
 
-### `[hooks.agent-skill-names]`
+### `[hook.agent.skill-names]`
 
 配置每个 hook 事件的自定义技能目录名。允许已有自定义技能目录的团队将 linthis 事件映射到其自定义名称，而非使用默认值。
 
 ```toml
-[hooks.agent-skill-names]
+[hook.agent.skill-names]
 pre-commit = "my-team-lint"     # 默认值: "lt-lint"
 commit-msg = "my-team-cmsg"     # 默认值: "lt-cmsg"
 pre-push = "my-team-review"     # 默认值: "lt-review"
@@ -674,23 +672,21 @@ large_file_threshold = 2097152  # 2MB
 skip_large_files = true
 
 # Git hooks
-[hooks]
+[hook]
 timeout = 120
-require_ticket = true
-ticket_pattern = "\\[PROJ-\\d+\\]"
 
 # Hook 来源覆盖（第 2 层）
-[hooks.git]
+[hook.git]
 pre-commit = { source = { plugin = "company", file = "hooks/git/pre-commit" } }
 
-[hooks.agent-plugins]
+[hook.agent.plugins._default]
 "lt.lint" = { source = { plugin = "company", file = "hooks/agent/plugins/lt/lint" } }
 
-[hooks.agent-hook.stop]
+[hook.agent.stop]
 "claude.settings" = { source = { plugin = "company", file = "hooks/agent/hook/stop/claude/settings.json" } }
 
 # 自定义技能目录名（可选）
-[hooks.agent-skill-names]
+[hook.agent.skill-names]
 pre-commit = "custom-lint"
 
 # 语言特定覆盖

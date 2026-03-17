@@ -238,12 +238,12 @@ cache_max_age_days = 7
 
 ## Git Hooks Configuration
 
-### `[hooks]`
+### `[hook]`
 
 Configure git hook behavior and source overrides.
 
 ```toml
-[hooks]
+[hook]
 timeout = 60
 parallel = true
 output_width = 0   # 0 = auto-detect terminal width
@@ -264,7 +264,7 @@ When `linthis hook install` generates or resolves a hook, it applies a three-tie
 | Tier | Description |
 |------|-------------|
 | **Tier 1** | Fixed-path auto-discovery — `hooks/<type>/<event>` in project root (for git hooks) or `hooks/agent/plugins/<id>/` (for agent plugins) |
-| **Tier 2** | TOML source mapping — `[hooks.git]`, `[hooks.agent-plugins]`, `[hooks.agent-hook.stop]` entries in `.linthis/config.toml` |
+| **Tier 2** | TOML source mapping — `[hook.git]`, `[hook.agent.plugins._default]`, `[hook.agent.stop]` entries in `.linthis/config.toml` |
 | **Tier 3** | Built-in generator — the default generated script or rules content (unchanged fallback) |
 
 Tier 1 takes effect automatically without any configuration — just place a file at the expected path. Tier 2 allows fine-grained source overrides via TOML. Tier 3 is always the fallback.
@@ -273,7 +273,7 @@ Tier 1 takes effect automatically without any configuration — just place a fil
 
 ### `HookSource` — Source Specification
 
-All `[hooks.*]` override entries use a `source = { ... }` field with one of five variants:
+All `[hook.*]` override entries use a `source = { ... }` field with one of five variants:
 
 ```toml
 # Variant 1 — File: local path relative to project root
@@ -296,18 +296,18 @@ source = { git = "https://github.com/org/repo.git", ref = "v1.0", path = "hooks/
 |---------|-----------------|-----------------|-------|
 | `File` | `file` | — | Path relative to project root |
 | `Plugin` | `plugin`, `file` | — | Plugin must be added via `linthis plugin add` |
-| `Marketplace` | `marketplace`, `plugin`, `file` | — | Marketplace URL defined in `[hooks.marketplaces]` |
+| `Marketplace` | `marketplace`, `plugin`, `file` | — | Marketplace URL defined in `[hook.marketplaces]` |
 | `Url` | `url` | — | Files only, not directories |
 | `Git` | `git`, `path` | `ref` | Clones on first use, cached locally |
 
 ---
 
-### `[hooks.marketplaces]`
+### `[hook.marketplaces]`
 
 Named marketplace repositories used by `HookSource::Marketplace`. The key `"default"` is used when no `marketplace` field is given.
 
 ```toml
-[hooks.marketplaces]
+[hook.marketplaces]
 default = "https://github.com/linthis-group/marketplace.git"
 corp    = "https://github.com/mycompany/linthis-marketplace.git"
 ```
@@ -318,12 +318,12 @@ corp    = "https://github.com/mycompany/linthis-marketplace.git"
 
 ---
 
-### `[hooks.git]`
+### `[hook.git]`
 
 Override the hook script for git hooks (Tier 2). Key is the event name.
 
 ```toml
-[hooks.git]
+[hook.git]
 pre-commit = { source = { plugin = "my-plugin", file = "hooks/git/pre-commit" } }
 pre-push   = { source = { file = "hooks/git/pre-push" } }
 commit-msg = { source = { url = "https://example.com/hooks/commit-msg" } }
@@ -336,20 +336,18 @@ commit-msg = { source = { url = "https://example.com/hooks/commit-msg" } }
 | `commit-msg` | Script to run for the commit-msg event |
 
 Similar override sections exist for other hook types:
-- `[hooks.git-with-agent]` — git hooks with AI fix fallback
-- `[hooks.prek]` — prek hook scripts
-- `[hooks.prek-with-agent]` — prek hooks with AI fix fallback
-- `[hooks.pre-commit-tool]` — pre-commit framework config
-- `[hooks.pre-commit-tool-with-agent]` — pre-commit with AI fix fallback
+- `[hook.git-with-agent]` — git hooks with AI fix fallback
+- `[hook.prek]` — prek hook scripts
+- `[hook.prek-with-agent]` — prek hooks with AI fix fallback
 
 ---
 
-### `[hooks.agent-plugins]`
+### `[hook.agent.plugins._default]`
 
 Override agent plugin bundles (Tier 2). Each entry points to a directory containing skill, command, memory, and hook subdirectories. Key is the plugin ID.
 
 ```toml
-[hooks.agent-plugins]
+[hook.agent.plugins._default]
 "lt.lint"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/lint" } }
 "lt.cmsg"   = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/cmsg" } }
 "lt.review" = { source = { plugin = "my-plugin", file = "hooks/agent/plugins/lt/review" } }
@@ -367,12 +365,12 @@ The resolved directory must contain one or more of:
 
 ---
 
-### `[hooks.agent-hook.stop]`
+### `[hook.agent.stop]`
 
 Override the agent Stop Hook settings file (Tier 2). Key format is `<provider>.<filename-stem>`.
 
 ```toml
-[hooks.agent-hook.stop]
+[hook.agent.stop]
 "claude.settings" = { source = { plugin = "my-plugin", file = "hooks/agent/hook/stop/claude/settings.json" } }
 ```
 
@@ -382,12 +380,12 @@ Override the agent Stop Hook settings file (Tier 2). Key format is `<provider>.<
 
 ---
 
-### `[hooks.agent-skill-names]`
+### `[hook.agent.skill-names]`
 
 Configure custom skill directory names for each hook event. This allows teams with existing skill directories to map linthis events to their custom names instead of the defaults.
 
 ```toml
-[hooks.agent-skill-names]
+[hook.agent.skill-names]
 pre-commit = "my-team-lint"     # default: "lt-lint"
 commit-msg = "my-team-cmsg"     # default: "lt-cmsg"
 pre-push = "my-team-review"     # default: "lt-review"
@@ -846,21 +844,21 @@ large_file_threshold = 2097152  # 2MB
 skip_large_files = true
 
 # Git hooks
-[hooks]
+[hook]
 timeout = 120
 
 # Hook source overrides (Tier 2)
-[hooks.git]
+[hook.git]
 pre-commit = { source = { plugin = "company", file = "hooks/git/pre-commit" } }
 
-[hooks.agent-plugins]
+[hook.agent.plugins._default]
 "lt.lint" = { source = { plugin = "company", file = "hooks/agent/plugins/lt/lint" } }
 
-[hooks.agent-hook.stop]
+[hook.agent.stop]
 "claude.settings" = { source = { plugin = "company", file = "hooks/agent/hook/stop/claude/settings.json" } }
 
 # Custom skill directory names (optional)
-[hooks.agent-skill-names]
+[hook.agent.skill-names]
 pre-commit = "custom-lint"
 
 # Language-specific overrides

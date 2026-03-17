@@ -982,17 +982,17 @@ cp /path/to/pyproject.toml python/
 
 ### 3b. (Optional) Bundle Hook Overrides
 
-Create `linthis-config.toml` in the plugin root to ship custom git/agent hooks. Use `plugin = "self"` — it is replaced with the user's alias when they add the plugin.
+Create `linthis-hook.toml` in the plugin root to ship custom git/agent hooks. Use `plugin = "self"` — it is replaced with the user's alias when they add the plugin.
 
 ```toml
-# linthis-config.toml — bundled hook overrides
-[hooks.git]
+# linthis-hook.toml — bundled hook overrides
+[hook.git]
 pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
 
-[hooks.agent-plugins]
+[hook.agent.plugins._default]
 "lt" = { source = { plugin = "self", file = "hooks/agent/plugins/lt" } }
 
-[hooks.agent-hook.stop]
+[hook.agent.stop]
 "claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }
 ```
 

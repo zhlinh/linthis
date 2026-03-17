@@ -172,10 +172,10 @@ By default, linthis saves lint results to `.linthis/result/` directory:
 The git hook output box width is now adaptive to your terminal width:
 
 - Auto-detects terminal width (50-120 characters)
-- Can be configured via `hooks.output_width` in config file
+- Can be configured via `hook.output_width` in config file
 
 ```toml
 # .linthis/config.toml
-[hooks]
+[hook]
 output_width = 100  # 0 = auto-detect (default)
 ```
