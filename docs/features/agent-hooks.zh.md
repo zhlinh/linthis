@@ -10,13 +10,13 @@ linthis 可以与 AI 编程助手（Claude Code、Codex、Gemini、Cursor、Droi
 
 | AI 助手 | 规则文件 | 检测方式 | 安装策略 |
 |--------|---------|---------|---------|
-| Claude Code | `CLAUDE.md` + `.claude/settings.json` | `.claude/` 目录 | 追加段落 + Stop Hook |
-| Codex | `AGENTS.md` | `AGENTS.md` 或 `.codex/` | 追加段落 |
-| Gemini | `.gemini/instructions.md` | `.gemini/` 目录 | 独立文件 |
-| Cursor | `.cursor/rules/linthis.mdc` | `.cursor/` 目录 | 独立文件 |
-| Droid | `.droid/rules/linthis.md` | `.droid/` 目录 | 独立文件 |
-| Auggie | `.augment/rules/linthis.md` | `.augment/` 目录 | 独立文件 |
-| CodeBuddy | `.codebuddy/rules/linthis.md` + `.codebuddy/settings.json` | `.codebuddy/` 目录 | 独立文件 + Stop Hook |
+| Claude Code | `.claude/skills/lt-lint/SKILL.md`, `.claude/skills/lt-cmsg/SKILL.md`, `.claude/skills/lt-review/SKILL.md` + `.claude/settings.json` | `.claude/` 目录 | 每事件技能文件 + Stop Hook |
+| Codex | `AGENTS.md` | `AGENTS.md` 或 `.codex/` | 每事件段落 |
+| Gemini | `.gemini/linthis-lint.md`, `.gemini/linthis-cmsg.md`, `.gemini/linthis-review.md` | `.gemini/` 目录 | 每事件独立文件 |
+| Cursor | `.cursor/rules/linthis-lint.mdc`, `.cursor/rules/linthis-cmsg.mdc`, `.cursor/rules/linthis-review.mdc` | `.cursor/` 目录 | 每事件独立文件 |
+| Droid | `.droid/rules/linthis-lint.md`, `.droid/rules/linthis-cmsg.md`, `.droid/rules/linthis-review.md` | `.droid/` 目录 | 每事件独立文件 |
+| Auggie | `.augment/rules/linthis-lint.md`, `.augment/rules/linthis-cmsg.md`, `.augment/rules/linthis-review.md` | `.augment/` 目录 | 每事件独立文件 |
+| CodeBuddy | `.codebuddy/skills/lt-lint/SKILL.md`, `.codebuddy/skills/lt-cmsg/SKILL.md`, `.codebuddy/skills/lt-review/SKILL.md` + `.codebuddy/settings.json` | `.codebuddy/` 目录 | 每事件技能文件 + Stop Hook |
 
 ## 快速开始
 
@@ -98,73 +98,79 @@ linthis hook install --type agent -g
 
 | AI 助手 | 项目级别 | 全局（`--global`） |
 |--------|---------|------------------|
-| Claude Code | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| Claude Code | `.claude/skills/lt-{lint,cmsg,review}/SKILL.md` | `~/.claude/skills/lt-{lint,cmsg,review}/SKILL.md` |
 | Codex | `AGENTS.md` | `~/.codex/AGENTS.md` |
-| Gemini | `.gemini/instructions.md` | `~/.gemini/instructions.md` |
-| Cursor | `.cursor/rules/linthis.mdc` | `~/.cursor/rules/linthis.mdc` |
-| Droid | `.droid/rules/linthis.md` | `~/.droid/rules/linthis.md` |
-| Auggie | `.augment/rules/linthis.md` | `~/.augment/rules/linthis.md` |
-| CodeBuddy | `.codebuddy/rules/linthis.md` | `~/.codebuddy/rules/linthis.md` |
+| Gemini | `.gemini/linthis-{lint,cmsg,review}.md` | `~/.gemini/linthis-{lint,cmsg,review}.md` |
+| Cursor | `.cursor/rules/linthis-{lint,cmsg,review}.mdc` | `~/.cursor/rules/linthis-{lint,cmsg,review}.mdc` |
+| Droid | `.droid/rules/linthis-{lint,cmsg,review}.md` | `~/.droid/rules/linthis-{lint,cmsg,review}.md` |
+| Auggie | `.augment/rules/linthis-{lint,cmsg,review}.md` | `~/.augment/rules/linthis-{lint,cmsg,review}.md` |
+| CodeBuddy | `.codebuddy/skills/lt-{lint,cmsg,review}/SKILL.md` | `~/.codebuddy/skills/lt-{lint,cmsg,review}/SKILL.md` |
 
 ## 安装内容详解
 
 ### Claude Code
 
-创建两个文件：
+技能文件按 hook 事件分别安装，共创建三个技能文件和一个 Stop Hook 设置：
 
-1. **`CLAUDE.md`** — 追加 `## Linthis Agent Rules` 段落（如果文件不存在则创建）
-2. **`.claude/settings.json`** — Stop Hook，在 AI 助手结束前触发 linthis 检查
+1. **`.claude/skills/lt-lint/SKILL.md`** — `pre-commit` 事件：暂存文件 lint 检查
+2. **`.claude/skills/lt-cmsg/SKILL.md`** — `commit-msg` 事件：提交信息格式验证
+3. **`.claude/skills/lt-review/SKILL.md`** — `pre-push` 事件：推送前代码审查
+4. **`.claude/settings.json`** — Stop Hook，在 AI 助手结束前触发 linthis 检查
 
 ### Codex
 
-在以下文件中追加 `## Linthis Agent Rules` 段落：
-
-```
-AGENTS.md
-```
-
-如果文件不存在，会使用默认标题创建。
+在 `AGENTS.md` 中按 hook 事件追加每事件段落（如果文件不存在则创建）。
 
 ### Gemini
 
-创建独立规则文件：
+按 hook 事件创建独立规则文件：
 
 ```
-.gemini/instructions.md
+.gemini/linthis-lint.md
+.gemini/linthis-cmsg.md
+.gemini/linthis-review.md
 ```
 
 ### Cursor
 
-创建带 YAML frontmatter 的独立规则文件：
+按 hook 事件创建带 YAML frontmatter 的独立规则文件：
 
 ```
-.cursor/rules/linthis.mdc
+.cursor/rules/linthis-lint.mdc
+.cursor/rules/linthis-cmsg.mdc
+.cursor/rules/linthis-review.mdc
 ```
 
 `alwaysApply: true` 前置信息确保规则在所有对话中生效。
 
 ### Droid
 
-创建独立规则文件：
+按 hook 事件创建独立规则文件：
 
 ```
-.droid/rules/linthis.md
+.droid/rules/linthis-lint.md
+.droid/rules/linthis-cmsg.md
+.droid/rules/linthis-review.md
 ```
 
 ### Auggie
 
-创建独立规则文件：
+按 hook 事件创建独立规则文件：
 
 ```
-.augment/rules/linthis.md
+.augment/rules/linthis-lint.md
+.augment/rules/linthis-cmsg.md
+.augment/rules/linthis-review.md
 ```
 
 ### CodeBuddy
 
-创建两个文件：
+技能文件按 hook 事件分别安装，共创建三个技能文件和一个 Stop Hook 设置：
 
-1. **`.codebuddy/rules/linthis.md`** — 独立规则文件
-2. **`.codebuddy/settings.json`** — Stop Hook，在 AI 助手结束前触发 linthis 检查
+1. **`.codebuddy/skills/lt-lint/SKILL.md`** — `pre-commit` 事件：暂存文件 lint 检查
+2. **`.codebuddy/skills/lt-cmsg/SKILL.md`** — `commit-msg` 事件：提交信息格式验证
+3. **`.codebuddy/skills/lt-review/SKILL.md`** — `pre-push` 事件：推送前代码审查
+4. **`.codebuddy/settings.json`** — Stop Hook，在 AI 助手结束前触发 linthis 检查
 
 ## 工作原理
 
@@ -189,21 +195,14 @@ AGENTS.md
 
 ### Agent 插件包目录结构
 
-Agent 插件包是包含以下目录布局的文件夹，各子目录均为可选：
+Agent 插件包是包含以下扁平化目录布局的文件夹，各子目录均为可选：
 
 ```
 <bundle-dir>/
-├── skill/<provider>/          — 技能指令文件（如 claude/lint.md）
-├── command/<provider>/        — 斜杠命令定义文件（可选）
-└── memory/<provider>/         — 注入 CLAUDE.md 等文件的记忆段落（可选）
-```
-
-Claude Code 示例：
-```
-hooks/agent/plugins/lt/lint/
-├── skill/claude/lint.md       — Claude 遵循的 lint 指令
-├── command/claude/lt-lint.md  — 定义 /lt-lint 斜杠命令
-└── memory/claude/lint.md      — 添加到 ~/.claude/projects/.../MEMORY.md 的记忆段落
+├── skills/<skill_name>/SKILL.md    — 技能指令文件（如 skills/lt-lint/SKILL.md）
+├── commands/                        — 斜杠命令文件（可选）
+├── memories/TOPLEVEL.md             — 注入 CLAUDE.md 等文件的记忆段落（可选）
+└── hooks/hooks.json                 — Stop Hook 设置（可选）
 ```
 
 ### 第 2 层：Agent Hook 的 TOML 来源映射
@@ -225,6 +224,21 @@ git hook 可用的五种 `HookSource` 变体同样适用于此处（参见[配�
 ### 插件捆绑 Agent Hook
 
 插件可以在插件根目录的 `linthis-config.toml` 中捆绑 agent hook 覆盖配置。当用户运行 `linthis plugin add <alias> <url>` 时，这些条目会自动合并到用户的 `.linthis/config.toml` 中。之后运行 `linthis hook install --type agent --provider claude` 将自动使用插件的定制技能/命令/记忆包和 Stop Hook 设置。
+
+### 可配置技能目录名
+
+已有自定义技能目录名的团队，可以在 `.linthis/config.toml` 中将 linthis 的 hook 事件映射到自定义技能目录名：
+
+```toml
+[hooks.agent-skill-names]
+pre-commit = "my-team-lint"     # 默认: "lt-lint"
+commit-msg = "my-team-cmsg"     # 默认: "lt-cmsg"
+pre-push = "my-team-review"     # 默认: "lt-review"
+```
+
+值为 `.claude/skills/`、`.codebuddy/skills/` 下使用的目录名，同时也是扁平文件提供者的基础文件名（Gemini: `{name}.md`，Cursor: `{name}.mdc` 等）。
+
+未配置时，使用默认值 `lt-lint`、`lt-cmsg`、`lt-review`（向后兼容）。
 
 ---
 
@@ -346,11 +360,26 @@ linthis hook uninstall --type agent --global -y
 ```
 
 卸载命令会移除：
-- `CLAUDE.md` 和 `AGENTS.md` 中的 linthis 段落（追加式文件）
-- 独立规则文件（`.cursor/rules/linthis.mdc`、`.gemini/instructions.md` 等）
+- `AGENTS.md` 中的 linthis 段落（追加式文件）
+- 每事件技能文件（`.claude/skills/lt-lint/SKILL.md`、`.codebuddy/skills/lt-lint/SKILL.md` 等）
+- 每事件独立规则文件（`.cursor/rules/linthis-lint.mdc`、`.gemini/linthis-lint.md` 等）
 - Claude Code Stop Hook（`.claude/settings.json`）
 - CodeBuddy Stop Hook（`.codebuddy/settings.json`）
 - linthis 创建的空目录
+
+## Hook 同步
+
+重新同步所有已安装的 hook 和 agent 技能文件，确保它们是最新的：
+
+```bash
+# 同步本地项目 hook
+linthis hook sync
+
+# 同步全局 hook
+linthis hook sync -g
+```
+
+此命令会重新生成 thin wrapper 脚本，并刷新所有已记录安装的 agent 技能文件。
 
 ## 常见问题
 

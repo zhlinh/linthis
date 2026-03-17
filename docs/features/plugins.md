@@ -24,8 +24,15 @@ my-linthis-plugin/
 │   │   └── pre-commit            # Custom pre-commit script
 │   └── agent/
 │       ├── plugins/
-│       │   └── lt/
-│       │       └── lint/         # Agent plugin bundle (skill/command/memory)
+│       │   ├── _default/                     # Default fallback (all providers)
+│       │   │   └── lt/                       # Plugin bundle
+│       │   │       ├── skills/lt-lint/SKILL.md
+│       │   │       ├── commands/
+│       │   │       ├── memories/TOPLEVEL.md
+│       │   │       └── hooks/hooks.json
+│       │   └── claude/                       # Provider-specific override (optional)
+│       │       └── lt/
+│       │           └── skills/lt-lint/SKILL.md
 │       └── hook/
 │           └── stop/
 │               └── claude/
@@ -56,9 +63,7 @@ After this, running `linthis hook install` will pick up the plugin's custom hook
 pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
 
 [hooks.agent-plugins]
-"lt.lint"   = { source = { plugin = "self", file = "hooks/agent/plugins/lt/lint" } }
-"lt.cmsg"   = { source = { plugin = "self", file = "hooks/agent/plugins/lt/cmsg" } }
-"lt.review" = { source = { plugin = "self", file = "hooks/agent/plugins/lt/review" } }
+"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/lt" } }
 
 [hooks.agent-hook.stop]
 "claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }

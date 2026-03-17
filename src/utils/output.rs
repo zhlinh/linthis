@@ -686,6 +686,116 @@ pub fn format_result_with_hook_type(result: &RunResult, format: OutputFormat, ho
     }
 }
 
+/// Format a review result summary in a bordered box for terminal output.
+///
+/// Produces a box similar to the hook result box, with assessment header,
+/// issue counts, and top issues listed.
+pub fn format_review_box(result: &crate::review::ReviewResult) -> String {
+    use crate::review::{Assessment, Severity};
+
+    let box_width = get_terminal_width().clamp(50, 120);
+    let content_width = box_width - 4;
+
+    let top_border = format!("╭{}╮", "─".repeat(box_width - 2));
+    let mid_border = format!("├{}┤", "─".repeat(box_width - 2));
+    let bot_border = format!("╰{}╯", "─".repeat(box_width - 2));
+
+    let pad_line = |content: &str, emoji_count: usize| -> String {
+        let visual_len = content.chars().count() + emoji_count;
+        let padding = content_width.saturating_sub(visual_len);
+        format!("│ {}{} │", content, " ".repeat(padding))
+    };
+
+    let summary = &result.summary;
+    let (header_icon, header_text) = match summary.assessment {
+        Assessment::Ready => ("✓", "Code Review — Ready"),
+        Assessment::NeedsWork => ("!", "Code Review — Needs Work"),
+        Assessment::CriticalIssues => ("X", "Code Review — Critical Issues"),
+    };
+    let header = format!("{} {}", header_icon, header_text);
+
+    let is_success = summary.assessment == Assessment::Ready;
+
+    let mut output = String::new();
+
+    // Header
+    if is_success {
+        output.push_str(&format!("{}\n", top_border.green()));
+        output.push_str(&format!("{}\n", pad_line(&header, 1).green()));
+        output.push_str(&format!("{}\n", mid_border.green()));
+    } else {
+        output.push_str(&format!("{}\n", top_border.red()));
+        output.push_str(&format!("{}\n", pad_line(&header, 1).red()));
+        output.push_str(&format!("{}\n", mid_border.red()));
+    }
+
+    // Summary counts
+    let counts = format!(
+        "{} issue{}: {} critical, {} important, {} minor",
+        summary.total_issues,
+        if summary.total_issues == 1 { "" } else { "s" },
+        summary.critical_count,
+        summary.important_count,
+        summary.minor_count
+    );
+    output.push_str(&format!("{}\n", pad_line(&counts, 0)));
+    output.push_str(&format!("{}\n", pad_line(
+        &format!("Files reviewed: {}", summary.files_reviewed), 0
+    )));
+    output.push_str(&format!("{}\n", pad_line(&format!("Diff: {}..{}", result.base_ref, result.head_ref), 0)));
+
+    // Top issues (if any)
+    if !result.issues.is_empty() {
+        output.push_str(&format!("{}\n", pad_line("", 0)));
+        let max_issues = 6;
+        for issue in result.issues.iter().take(max_issues) {
+            let severity_char = match issue.severity {
+                Severity::Critical => "C",
+                Severity::Important => "I",
+                Severity::Minor => "M",
+            };
+            let location = if let Some(line) = issue.line {
+                format!("{}:{}", issue.file.display(), line)
+            } else {
+                issue.file.display().to_string()
+            };
+            // Truncate location if needed
+            let location_max = (content_width / 3).clamp(10, 35);
+            let location_display = if location.len() > location_max {
+                format!("{}...", &location[..location_max.saturating_sub(3)])
+            } else {
+                location
+            };
+            let msg_prefix_len = 4; // " C " + trailing space
+            let max_msg_len = content_width.saturating_sub(msg_prefix_len + location_display.len());
+            let msg = if issue.message.len() > max_msg_len {
+                format!("{}...", &issue.message[..max_msg_len.saturating_sub(3)])
+            } else {
+                issue.message.clone()
+            };
+            let line_content = format!(" {} {} {}", severity_char, location_display, msg);
+            output.push_str(&format!("{}\n", pad_line(&line_content, 0)));
+        }
+        if result.issues.len() > max_issues {
+            let more = format!(
+                " ... and {} more issue{}",
+                result.issues.len() - max_issues,
+                if result.issues.len() - max_issues == 1 { "" } else { "s" }
+            );
+            output.push_str(&format!("{}\n", pad_line(&more, 0)));
+        }
+    }
+
+    // Bottom border
+    if is_success {
+        output.push_str(&format!("{}", bot_border.green()));
+    } else {
+        output.push_str(&format!("{}", bot_border.red()));
+    }
+
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
