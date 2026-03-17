@@ -28,23 +28,26 @@ pub fn timestamp() -> String {
 
 /// Spawn a background review process.
 pub fn spawn_background_review(args: &[String]) -> Result<u32, String> {
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("Failed to get current exe: {}", e))?;
+    let exe = std::env::current_exe().map_err(|e| format!("Failed to get current exe: {}", e))?;
 
     let ts = timestamp();
     let dir = review_dir()?;
     let log_path = dir.join(format!("{}.log", ts));
     let pid_path = dir.join(format!("{}.pid", ts));
 
-    let log_file = fs::File::create(&log_path)
-        .map_err(|e| format!("Failed to create log file: {}", e))?;
+    let log_file =
+        fs::File::create(&log_path).map_err(|e| format!("Failed to create log file: {}", e))?;
 
     let mut cmd = Command::new(exe);
     cmd.args(["review"]);
     cmd.args(args);
 
     // Redirect stdout/stderr to log file
-    cmd.stdout(log_file.try_clone().map_err(|e| format!("Failed to clone file handle: {}", e))?);
+    cmd.stdout(
+        log_file
+            .try_clone()
+            .map_err(|e| format!("Failed to clone file handle: {}", e))?,
+    );
     cmd.stderr(log_file);
 
     // Platform-specific detaching
@@ -67,7 +70,8 @@ pub fn spawn_background_review(args: &[String]) -> Result<u32, String> {
         cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
     }
 
-    let child = cmd.spawn()
+    let child = cmd
+        .spawn()
         .map_err(|e| format!("Failed to spawn background process: {}", e))?;
 
     let pid = child.id();
@@ -76,7 +80,11 @@ pub fn spawn_background_review(args: &[String]) -> Result<u32, String> {
     fs::write(&pid_path, pid.to_string())
         .map_err(|e| format!("Failed to write PID file: {}", e))?;
 
-    eprintln!("Background review started (PID: {}, log: {})", pid, log_path.display());
+    eprintln!(
+        "Background review started (PID: {}, log: {})",
+        pid,
+        log_path.display()
+    );
     Ok(pid)
 }
 
@@ -172,13 +180,14 @@ fn is_process_running(pid: u32) -> bool {
 pub fn clean_artifacts(retention_days: u32) -> Result<usize, String> {
     let dir = review_dir()?;
     let cutoff = SystemTime::now()
-        .checked_sub(std::time::Duration::from_secs(retention_days as u64 * 86400))
+        .checked_sub(std::time::Duration::from_secs(
+            retention_days as u64 * 86400,
+        ))
         .unwrap_or(SystemTime::now());
 
     let mut removed = 0;
 
-    let entries = fs::read_dir(&dir)
-        .map_err(|e| format!("Failed to read review dir: {}", e))?;
+    let entries = fs::read_dir(&dir).map_err(|e| format!("Failed to read review dir: {}", e))?;
 
     for entry in entries.flatten() {
         let path = entry.path();

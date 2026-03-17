@@ -1,20 +1,32 @@
 //! Notification system (system/webhook/custom).
 
+use crate::config::NotificationConfig;
+use crate::review::report::generate_notification_summary;
+use crate::review::ReviewResult;
+use crate::review::Severity;
 use std::collections::HashMap;
 use std::process::Command;
-use crate::config::NotificationConfig;
-use crate::review::ReviewResult;
-use crate::review::report::generate_notification_summary;
-use crate::review::Severity;
 
 /// Template variables available for notification rendering.
-pub fn build_template_vars(result: &ReviewResult, branch: &str, report_path: &str, pr_url: Option<&str>) -> HashMap<String, String> {
+pub fn build_template_vars(
+    result: &ReviewResult,
+    branch: &str,
+    report_path: &str,
+    pr_url: Option<&str>,
+) -> HashMap<String, String> {
     let mut vars = HashMap::new();
     vars.insert("status".to_string(), result.summary.assessment.to_string());
     vars.insert("branch".to_string(), branch.to_string());
     vars.insert("issues_count".to_string(), result.issues.len().to_string());
     let severity_counts = result.count_by_severity();
-    vars.insert("critical_count".to_string(), severity_counts.get(&Severity::Critical).copied().unwrap_or(0).to_string());
+    vars.insert(
+        "critical_count".to_string(),
+        severity_counts
+            .get(&Severity::Critical)
+            .copied()
+            .unwrap_or(0)
+            .to_string(),
+    );
     vars.insert("report_path".to_string(), report_path.to_string());
     vars.insert("pr_url".to_string(), pr_url.unwrap_or("").to_string());
     vars.insert("message".to_string(), generate_notification_summary(result));
@@ -26,23 +38,27 @@ pub fn send_notifications(
     configs: &[NotificationConfig],
     vars: &HashMap<String, String>,
 ) -> Vec<Result<(), String>> {
-    configs.iter().map(|config| {
-        let result = match config {
-            NotificationConfig::System => send_system_notification(vars),
-            NotificationConfig::Webhook { url, method, headers, body_template } => {
-                send_webhook(url, method, headers, body_template.as_deref(), vars)
-            }
-            NotificationConfig::Custom { command } => {
-                send_custom(command, vars)
-            }
-        };
+    configs
+        .iter()
+        .map(|config| {
+            let result = match config {
+                NotificationConfig::System => send_system_notification(vars),
+                NotificationConfig::Webhook {
+                    url,
+                    method,
+                    headers,
+                    body_template,
+                } => send_webhook(url, method, headers, body_template.as_deref(), vars),
+                NotificationConfig::Custom { command } => send_custom(command, vars),
+            };
 
-        if let Err(ref e) = result {
-            eprintln!("Notification failed: {}", e);
-        }
+            if let Err(ref e) = result {
+                eprintln!("Notification failed: {}", e);
+            }
 
-        result
-    }).collect()
+            result
+        })
+        .collect()
 }
 
 fn expand_template(template: &str, vars: &HashMap<String, String>) -> String {
@@ -70,7 +86,10 @@ fn send_system_notification(vars: &HashMap<String, String>) -> Result<(), String
             .map_err(|e| format!("macOS notification failed: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("osascript failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "osascript failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
     }
 
@@ -82,7 +101,10 @@ fn send_system_notification(vars: &HashMap<String, String>) -> Result<(), String
             .map_err(|e| format!("Linux notification failed: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("notify-send failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "notify-send failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
     }
 
@@ -94,12 +116,18 @@ fn send_system_notification(vars: &HashMap<String, String>) -> Result<(), String
             title
         );
         let output = Command::new("powershell")
-            .args(["-Command", &format!("Add-Type -AssemblyName System.Windows.Forms; {}", ps_cmd)])
+            .args([
+                "-Command",
+                &format!("Add-Type -AssemblyName System.Windows.Forms; {}", ps_cmd),
+            ])
             .output()
             .map_err(|e| format!("Windows notification failed: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("PowerShell notification failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "PowerShell notification failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
     }
 
@@ -116,7 +144,10 @@ fn send_webhook(
     let body = body_template
         .map(|t| expand_template(t, vars))
         .unwrap_or_else(|| {
-            format!(r#"{{"text": "{}"}}"#, vars.get("message").cloned().unwrap_or_default())
+            format!(
+                r#"{{"text": "{}"}}"#,
+                vars.get("message").cloned().unwrap_or_default()
+            )
         });
 
     let mut cmd = Command::new("curl");
@@ -134,11 +165,15 @@ fn send_webhook(
         cmd.args(["-H", "Content-Type: application/json"]);
     }
 
-    let output = cmd.output()
+    let output = cmd
+        .output()
         .map_err(|e| format!("Webhook request failed: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("Webhook returned error: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "Webhook returned error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     Ok(())
@@ -148,19 +183,18 @@ fn send_custom(command: &str, vars: &HashMap<String, String>) -> Result<(), Stri
     let expanded = expand_template(command, vars);
 
     let output = if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args(["/C", &expanded])
-            .output()
+        Command::new("cmd").args(["/C", &expanded]).output()
     } else {
-        Command::new("sh")
-            .args(["-c", &expanded])
-            .output()
+        Command::new("sh").args(["-c", &expanded]).output()
     };
 
     let output = output.map_err(|e| format!("Custom notification command failed: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("Custom command failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "Custom command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     Ok(())
@@ -169,7 +203,7 @@ fn send_custom(command: &str, vars: &HashMap<String, String>) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::review::{ReviewResult, ReviewSummary, Assessment};
+    use crate::review::{Assessment, ReviewResult, ReviewSummary};
 
     #[test]
     fn test_build_template_vars() {
@@ -190,7 +224,12 @@ mod tests {
             auto_fixes: vec![],
         };
 
-        let vars = build_template_vars(&result, "main", "/path/report.md", Some("https://github.com/pr/1"));
+        let vars = build_template_vars(
+            &result,
+            "main",
+            "/path/report.md",
+            Some("https://github.com/pr/1"),
+        );
         assert_eq!(vars["status"], "Ready");
         assert_eq!(vars["branch"], "main");
         assert_eq!(vars["issues_count"], "0");

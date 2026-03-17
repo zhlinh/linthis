@@ -1,8 +1,8 @@
 //! Reviewer management and recommendation.
 
+use crate::config::ReviewerConfig;
 use std::collections::HashMap;
 use std::process::Command;
-use crate::config::ReviewerConfig;
 
 /// Resolve reviewers from CLI args, config, or git history.
 /// Priority: CLI args > config default > history recommendation.
@@ -46,7 +46,11 @@ pub fn recommend_from_history(changed_files: &[String], top_n: usize) -> Vec<Str
     let mut sorted: Vec<(String, usize)> = contributor_counts.into_iter().collect();
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
 
-    sorted.into_iter().take(top_n).map(|(name, _)| name).collect()
+    sorted
+        .into_iter()
+        .take(top_n)
+        .map(|(name, _)| name)
+        .collect()
 }
 
 fn get_current_git_user() -> Result<String, String> {

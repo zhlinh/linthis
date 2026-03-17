@@ -68,7 +68,7 @@ pub fn build_review_prompt(files: &[&FileDiff]) -> String {
 /// Build a cross-file summary review prompt.
 pub fn build_summary_review_prompt(file_summaries: &[(String, String)]) -> String {
     let mut prompt = String::from(
-        "You previously reviewed individual file diffs. Now review for cross-file concerns:\n\n"
+        "You previously reviewed individual file diffs. Now review for cross-file concerns:\n\n",
     );
     prompt.push_str("Look for:\n");
     prompt.push_str("- API contract mismatches between files\n");
@@ -79,7 +79,9 @@ pub fn build_summary_review_prompt(file_summaries: &[(String, String)]) -> Strin
         prompt.push_str(&format!("**{}**: {}\n", path, summary));
     }
 
-    prompt.push_str("\nReturn only NEW cross-file issues not found in per-file reviews. Same JSON format.\n");
+    prompt.push_str(
+        "\nReturn only NEW cross-file issues not found in per-file reviews. Same JSON format.\n",
+    );
     prompt
 }
 

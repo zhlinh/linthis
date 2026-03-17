@@ -65,9 +65,7 @@ pub fn generate_and_apply_fixes(
     for (file_path, issues) in &issues_by_file {
         // Sort issues by line number descending (apply bottom-up)
         let mut sorted_issues = issues.clone();
-        sorted_issues.sort_by(|a, b| {
-            b.line.unwrap_or(0).cmp(&a.line.unwrap_or(0))
-        });
+        sorted_issues.sort_by(|a, b| b.line.unwrap_or(0).cmp(&a.line.unwrap_or(0)));
 
         let mut file_modified = false;
 
@@ -81,13 +79,8 @@ pub fn generate_and_apply_fixes(
             let rule_id = &issue.category;
             let message = &issue.message;
 
-            let suggestion_result = suggester.suggest_fix_for_file(
-                file_path,
-                line,
-                message,
-                rule_id,
-                &options,
-            );
+            let suggestion_result =
+                suggester.suggest_fix_for_file(file_path, line, message, rule_id, &options);
 
             if !suggestion_result.is_success() {
                 eprintln!(
@@ -122,11 +115,7 @@ pub fn generate_and_apply_fixes(
                 file_modified = true;
                 report.applied += 1;
             } else {
-                eprintln!(
-                    "  Failed to apply fix for {}:{}",
-                    file_path.display(),
-                    line
-                );
+                eprintln!("  Failed to apply fix for {}:{}", file_path.display(), line);
                 report.failed += 1;
             }
         }
@@ -190,9 +179,7 @@ fn apply_fix(file_path: &Path, suggestion: &FixSuggestion) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::review::{
-        Assessment, ReviewIssue, ReviewResult, ReviewSummary, Severity,
-    };
+    use crate::review::{Assessment, ReviewIssue, ReviewResult, ReviewSummary, Severity};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -203,12 +190,7 @@ mod tests {
         writeln!(tmp, "line 2").unwrap();
         writeln!(tmp, "line 3").unwrap();
 
-        let suggestion = FixSuggestion::new(
-            "replaced line 2".to_string(),
-            2,
-            2,
-            "text",
-        );
+        let suggestion = FixSuggestion::new("replaced line 2".to_string(), 2, 2, "text");
 
         assert!(apply_fix(tmp.path(), &suggestion));
 
@@ -227,12 +209,7 @@ mod tests {
         writeln!(tmp, "c").unwrap();
         writeln!(tmp, "d").unwrap();
 
-        let suggestion = FixSuggestion::new(
-            "X\nY".to_string(),
-            2,
-            3,
-            "text",
-        );
+        let suggestion = FixSuggestion::new("X\nY".to_string(), 2, 3, "text");
 
         assert!(apply_fix(tmp.path(), &suggestion));
 

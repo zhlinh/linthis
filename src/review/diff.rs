@@ -54,7 +54,12 @@ pub fn detect_base_ref(explicit_base: Option<&str>) -> Result<String, String> {
 
     // Try to get remote tracking branch
     let output = Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ])
         .output()
         .map_err(|e| format!("Failed to run git: {}", e))?;
 
@@ -408,10 +413,15 @@ index abc..def 100644
             old_path: None,
             status: DiffStatus::Modified,
             hunks: vec![DiffHunk {
-                old_start: 1, old_count: 1, new_start: 1, new_count: 2,
+                old_start: 1,
+                old_count: 1,
+                new_start: 1,
+                new_count: 2,
                 content: "small".to_string(),
             }],
-            additions: 1, deletions: 0, is_binary: false,
+            additions: 1,
+            deletions: 0,
+            is_binary: false,
         }];
         let chunks = chunk_diff(&files, 10000);
         assert_eq!(chunks.len(), 1);

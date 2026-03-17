@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use crate::ai::provider::AiProviderTrait;
 use crate::review::diff::{chunk_diff, DiffResult, FileDiff};
-use crate::review::prompts::{build_review_prompt, build_summary_review_prompt, review_system_prompt};
+use crate::review::prompts::{
+    build_review_prompt, build_summary_review_prompt, review_system_prompt,
+};
 use crate::review::{
     Assessment, FileStatus, ReviewIssue, ReviewResult, ReviewSummary, ReviewedFile, Severity,
 };
@@ -73,32 +75,45 @@ pub fn analyze(diff: &DiffResult, provider: &dyn AiProviderTrait) -> Result<Revi
     let assessment = determine_assessment(&all_issues);
 
     // Count by severity
-    let critical_count = all_issues.iter().filter(|i| i.severity == Severity::Critical).count();
-    let important_count = all_issues.iter().filter(|i| i.severity == Severity::Important).count();
-    let minor_count = all_issues.iter().filter(|i| i.severity == Severity::Minor).count();
+    let critical_count = all_issues
+        .iter()
+        .filter(|i| i.severity == Severity::Critical)
+        .count();
+    let important_count = all_issues
+        .iter()
+        .filter(|i| i.severity == Severity::Important)
+        .count();
+    let minor_count = all_issues
+        .iter()
+        .filter(|i| i.severity == Severity::Minor)
+        .count();
     let total_issues = all_issues.len();
 
     // Build reviewed file list
-    let files: Vec<ReviewedFile> = diff.files.iter().map(|f| {
-        let file_issues: Vec<ReviewIssue> = all_issues
-            .iter()
-            .filter(|i| i.file == std::path::Path::new(&f.path))
-            .cloned()
-            .collect();
+    let files: Vec<ReviewedFile> = diff
+        .files
+        .iter()
+        .map(|f| {
+            let file_issues: Vec<ReviewIssue> = all_issues
+                .iter()
+                .filter(|i| i.file == std::path::Path::new(&f.path))
+                .cloned()
+                .collect();
 
-        ReviewedFile {
-            path: PathBuf::from(&f.path),
-            status: match f.status {
-                crate::review::diff::DiffStatus::Added => FileStatus::Added,
-                crate::review::diff::DiffStatus::Modified => FileStatus::Modified,
-                crate::review::diff::DiffStatus::Deleted => FileStatus::Deleted,
-                crate::review::diff::DiffStatus::Renamed => FileStatus::Renamed {
-                    from: PathBuf::from(f.old_path.clone().unwrap_or_default()),
+            ReviewedFile {
+                path: PathBuf::from(&f.path),
+                status: match f.status {
+                    crate::review::diff::DiffStatus::Added => FileStatus::Added,
+                    crate::review::diff::DiffStatus::Modified => FileStatus::Modified,
+                    crate::review::diff::DiffStatus::Deleted => FileStatus::Deleted,
+                    crate::review::diff::DiffStatus::Renamed => FileStatus::Renamed {
+                        from: PathBuf::from(f.old_path.clone().unwrap_or_default()),
+                    },
                 },
-            },
-            issues: file_issues,
-        }
-    }).collect();
+                issues: file_issues,
+            }
+        })
+        .collect();
 
     Ok(ReviewResult {
         summary: ReviewSummary {

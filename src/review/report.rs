@@ -1,6 +1,6 @@
 //! Review report generation (Markdown).
 
-use crate::review::{Assessment, ReviewResult, ReviewIssue, Severity};
+use crate::review::{Assessment, ReviewIssue, ReviewResult, Severity};
 
 /// Generate a Markdown report from review results.
 pub fn generate_markdown_report(result: &ReviewResult) -> String {
@@ -19,8 +19,14 @@ pub fn generate_markdown_report(result: &ReviewResult) -> String {
     report.push_str("## Summary\n");
     report.push_str("| Metric | Value |\n");
     report.push_str("|--------|-------|\n");
-    report.push_str(&format!("| Files Reviewed | {} |\n", result.summary.files_reviewed));
-    report.push_str(&format!("| Total Issues | {} |\n", result.summary.total_issues));
+    report.push_str(&format!(
+        "| Files Reviewed | {} |\n",
+        result.summary.files_reviewed
+    ));
+    report.push_str(&format!(
+        "| Total Issues | {} |\n",
+        result.summary.total_issues
+    ));
     report.push_str(&format!("| Assessment | {} |\n", assessment_icon));
     report.push('\n');
 
