@@ -9,6 +9,7 @@ use linthis::config::Config;
 use linthis::review::analyzer;
 use linthis::review::background;
 use linthis::review::diff;
+use linthis::review::fixer;
 use linthis::review::notifier;
 use linthis::review::platform;
 use linthis::review::report;
@@ -167,7 +168,7 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
     let provider_kind: AiProviderKind = provider_str.parse().unwrap_or_default();
     let ai_config = create_provider_config(&provider_kind);
 
-    let provider = AiProvider::new(ai_config);
+    let provider = AiProvider::new(ai_config.clone());
 
     if !linthis::ai::is_provider_available(&provider_kind) {
         eprintln!(
@@ -183,7 +184,7 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
 
     // 4. Run AI analysis
     eprintln!("{} Analyzing code changes...", "→".cyan());
-    let review_result = match analyzer::analyze(&diff_result, &provider) {
+    let mut review_result = match analyzer::analyze(&diff_result, &provider) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{}: AI review failed: {}", "Error".red(), e);
@@ -221,10 +222,11 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
         match handle_auto_fix_pr(
             &options,
             &config,
-            &review_result,
+            &mut review_result,
             &report_path,
             &base_ref,
             &provider_str,
+            &ai_config,
         ) {
             Ok(url) => Some(url),
             Err(e) => {
@@ -267,10 +269,11 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
 fn handle_auto_fix_pr(
     options: &ReviewCommandOptions,
     config: &Config,
-    review_result: &linthis::review::ReviewResult,
+    review_result: &mut linthis::review::ReviewResult,
     report_path: &str,
     base_branch: &str,
     _provider_str: &str,
+    ai_config: &linthis::ai::AiProviderConfig,
 ) -> Result<String, String> {
     // Detect platform
     let domain = platform::detect_platform_domain()?;
@@ -290,6 +293,36 @@ fn handle_auto_fix_pr(
         &changed_files,
     );
 
+    // Generate and apply fixes before creating the branch
+    let fixable_count = review_result
+        .issues
+        .iter()
+        .filter(|i| {
+            matches!(
+                i.severity,
+                linthis::review::Severity::Critical | linthis::review::Severity::Important
+            ) && i.line.is_some()
+        })
+        .count();
+
+    let fix_report = if fixable_count > 0 {
+        eprintln!(
+            "{} Generating fixes for {} issue(s)...",
+            "→".cyan(),
+            fixable_count
+        );
+        let report = fixer::generate_and_apply_fixes(review_result, ai_config);
+        eprintln!(
+            "{} Fixed {}/{} issue(s)",
+            "✓".green(),
+            report.applied,
+            fixable_count
+        );
+        Some(report)
+    } else {
+        None
+    };
+
     // Create fix branch
     let original_branch = get_current_branch()?;
     let fix_branch = platform::fix_branch_name(&original_branch);
@@ -297,9 +330,30 @@ fn handle_auto_fix_pr(
     // Create and checkout the fix branch
     run_git(&["checkout", "-b", &fix_branch])?;
 
-    // Stage and commit the review report
+    // Stage fixed source files
+    if let Some(ref fix_report) = fix_report {
+        for file in &fix_report.modified_files {
+            run_git(&["add", &file.display().to_string()])?;
+        }
+    }
+
+    // Stage the review report
     run_git(&["add", report_path])?;
-    run_git(&["commit", "-m", &format!("review: add code review report for {}", original_branch)])?;
+
+    // Commit with descriptive message
+    let fix_count = fix_report.as_ref().map_or(0, |r| r.applied);
+    let commit_msg = if fix_count > 0 {
+        format!(
+            "review: auto-fix {} issue(s) in {}",
+            fix_count, original_branch
+        )
+    } else {
+        format!(
+            "review: add code review report for {}",
+            original_branch
+        )
+    };
+    run_git(&["commit", "-m", &commit_msg])?;
 
     // Push the branch
     if !options.dry_run {
@@ -307,12 +361,19 @@ fn handle_auto_fix_pr(
     }
 
     // Generate PR description
-    let pr_title = format!(
-        "review: {} — {} issues ({})",
-        review_result.summary.assessment,
-        review_result.summary.total_issues,
-        original_branch
-    );
+    let pr_title = if fix_count > 0 {
+        format!(
+            "review: auto-fix {} issue(s) — {} ({})",
+            fix_count, review_result.summary.assessment, original_branch
+        )
+    } else {
+        format!(
+            "review: {} — {} issues ({})",
+            review_result.summary.assessment,
+            review_result.summary.total_issues,
+            original_branch
+        )
+    };
     let pr_description = report::generate_notification_summary(review_result);
 
     // Create PR
@@ -325,8 +386,13 @@ fn handle_auto_fix_pr(
         options.dry_run,
     )?;
 
-    // Switch back to original branch
+    // Switch back to original branch and restore original files
     let _ = run_git(&["checkout", &original_branch]);
+    if let Some(ref fix_report) = fix_report {
+        for file in &fix_report.modified_files {
+            let _ = run_git(&["checkout", "--", &file.display().to_string()]);
+        }
+    }
 
     eprintln!("{} PR created: {}", "✓".green(), pr_result);
     Ok(pr_result)

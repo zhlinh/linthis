@@ -114,6 +114,7 @@ pub fn analyze(diff: &DiffResult, provider: &dyn AiProviderTrait) -> Result<Revi
         issues: all_issues,
         base_ref: diff.base.clone(),
         head_ref: diff.head.clone(),
+        auto_fixes: vec![],
     })
 }
 
@@ -132,6 +133,7 @@ fn empty_review_result(diff: &DiffResult) -> ReviewResult {
         issues: vec![],
         base_ref: diff.base.clone(),
         head_ref: diff.head.clone(),
+        auto_fixes: vec![],
     }
 }
 

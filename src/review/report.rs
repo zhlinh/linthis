@@ -89,6 +89,21 @@ pub fn generate_markdown_report(result: &ReviewResult) -> String {
         }
     }
 
+    // Auto-fixed issues
+    if !result.auto_fixes.is_empty() {
+        report.push_str("## Auto-Fixed Issues\n\n");
+        report.push_str("The following issues were automatically fixed:\n\n");
+        for fix in &result.auto_fixes {
+            let location = if let Some(line) = fix.line {
+                format!("{}:{}", fix.file.display(), line)
+            } else {
+                fix.file.display().to_string()
+            };
+            report.push_str(&format!("- {} — {}\n", location, fix.description));
+        }
+        report.push('\n');
+    }
+
     // Assessment
     report.push_str("## Assessment\n");
     match result.summary.assessment {
@@ -192,6 +207,7 @@ mod tests {
             ],
             base_ref: "main".to_string(),
             head_ref: "feature".to_string(),
+            auto_fixes: vec![],
         }
     }
 
@@ -238,6 +254,7 @@ mod tests {
             issues: vec![],
             base_ref: "main".to_string(),
             head_ref: "feature".to_string(),
+            auto_fixes: vec![],
         };
         let report = generate_markdown_report(&result);
         assert!(report.contains("Ready"));
