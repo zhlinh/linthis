@@ -187,6 +187,7 @@ mod tests {
                 assessment: Assessment::Ready,
                 summary_text: String::new(),
             },
+            auto_fixes: vec![],
         };
 
         let vars = build_template_vars(&result, "main", "/path/report.md", Some("https://github.com/pr/1"));

@@ -13,6 +13,8 @@ pub mod prompts;
 pub mod report;
 pub mod reviewer;
 
+pub mod fixer;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -173,6 +175,17 @@ impl fmt::Display for ReviewedFile {
     }
 }
 
+/// A single auto-fixed issue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoFix {
+    /// File that was fixed
+    pub file: PathBuf,
+    /// Line number of the fix
+    pub line: Option<u32>,
+    /// Description of what was fixed
+    pub description: String,
+}
+
 /// Complete result of a code review
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewResult {
@@ -186,6 +199,9 @@ pub struct ReviewResult {
     pub base_ref: String,
     /// Head ref used for the diff
     pub head_ref: String,
+    /// Issues that were auto-fixed
+    #[serde(default)]
+    pub auto_fixes: Vec<AutoFix>,
 }
 
 impl ReviewResult {
