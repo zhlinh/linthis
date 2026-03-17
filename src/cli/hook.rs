@@ -2450,17 +2450,23 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
          \n\
          # Run lint check on pushed files only (skip if no file changes, e.g. empty commits)\n\
          # Build -i <file> args for each pushed file (linthis uses -i, not positional paths)\n\
+         _LINTHIS_CHECKED=0\n\
          if [ -n \"$_PUSHED_FILES\" ]; then\n\
          \x20 set --\n\
          \x20 while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
          $_PUSHED_FILES\n\
          _EOF_\n\
-         \x20 {linthis} \"$@\"\n\
+         \x20 _LINT_OUT=$({linthis} \"$@\" 2>&1)\n\
+         \x20 LINTHIS_EXIT=$?\n\
+         \x20 printf \"%s\\n\" \"$_LINT_OUT\" >&2\n\
+         \x20 # Extract actual number of files checked from linthis output\n\
+         \x20 _LINTHIS_CHECKED=$(printf \"%s\" \"$_LINT_OUT\" | sed -n 's/.*Files checked:[[:space:]]*\\([0-9]*\\).*/\\1/p' | tail -1)\n\
+         \x20 _LINTHIS_CHECKED=${{_LINTHIS_CHECKED:-0}}\n\
          fi\n\
          \n\
-         # Skip agent review if no file changes (empty push / tag-only push)\n\
-         if [ -z \"$_PUSHED_FILES\" ]; then\n\
-         \x20 echo \"[linthis] No files changed — skipping code review\" >&2\n\
+         # Skip agent review if no files were actually checked\n\
+         if [ -z \"$_PUSHED_FILES\" ] || [ \"$_LINTHIS_CHECKED\" = \"0\" ]; then\n\
+         \x20 echo \"[linthis] No files to review — skipping code review\" >&2\n\
          \x20 exit 0\n\
          fi\n\
          \n\
