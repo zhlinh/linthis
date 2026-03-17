@@ -7,7 +7,7 @@ This guide explains how to create and distribute linthis plugins.
 A linthis plugin is a Git repository containing:
 - A `linthis-plugin.toml` manifest file
 - One or more language configuration files (TOML, YAML, or JSON)
-- An optional `linthis-config.toml` that bundles hook overrides
+- An optional `linthis-hook.toml` that bundles hook source overrides
 - Optional custom rules and presets
 
 Plugins allow you to share lint configurations **and git/agent hook setups** across projects or teams.
@@ -17,7 +17,7 @@ Plugins allow you to share lint configurations **and git/agent hook setups** acr
 ```
 my-linthis-plugin/
 ├── linthis-plugin.toml           # Required: Plugin manifest
-├── linthis-config.toml           # Optional: Hook source overrides (auto-merged on plugin add)
+├── linthis-hook.toml           # Optional: Hook source overrides (auto-merged on plugin add)
 ├── config.toml                   # Main lint configuration
 ├── hooks/                        # Optional: Custom hook files
 │   ├── git/
@@ -43,29 +43,29 @@ my-linthis-plugin/
 └── README.md                     # Optional: Documentation
 ```
 
-## Hook Bundling via `linthis-config.toml`
+## Hook Bundling via `linthis-hook.toml`
 
-A plugin can ship a `linthis-config.toml` alongside its lint configs. This file declares `[hooks.*]` source overrides that point back into the plugin itself using `plugin = "self"`.
+A plugin can ship a `linthis-hook.toml` alongside its lint configs. This file declares `[hook.*]` source overrides that point back into the plugin itself using `plugin = "self"`.
 
 When a user runs `linthis plugin add <alias> <url>`, linthis automatically:
 
 1. Replaces every `plugin = "self"` reference with `plugin = "<alias>"` (the user's chosen alias)
-2. Non-overwritingly merges `[hooks.*]` entries into the user's `.linthis/config.toml`
+2. Non-overwritingly merges `[hook.*]` entries into the user's `.linthis/config.toml`
 
 After this, running `linthis hook install` will pick up the plugin's custom hook scripts and agent bundles automatically — no manual configuration needed.
 
-### Example `linthis-config.toml`
+### Example `linthis-hook.toml`
 
 ```toml
 # Bundled inside the plugin. References use plugin = "self".
 
-[hooks.git]
+[hook.git]
 pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
 
-[hooks.agent-plugins]
+[hook.agent.plugins._default]
 "lt" = { source = { plugin = "self", file = "hooks/agent/plugins/lt" } }
 
-[hooks.agent-hook.stop]
+[hook.agent.stop]
 "claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }
 ```
 

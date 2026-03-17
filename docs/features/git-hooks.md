@@ -200,7 +200,7 @@ When `linthis hook install` runs, it resolves the hook script through three tier
 | Tier | Source | How to use |
 |------|--------|------------|
 | **Tier 1** | Fixed-path auto-discovery | Place a script at `hooks/git/<event>` in your project root |
-| **Tier 2** | TOML source mapping | Set `[hooks.git]` entries in `.linthis/config.toml` |
+| **Tier 2** | TOML source mapping | Set `[hook.git]` entries in `.linthis/config.toml` |
 | **Tier 3** | Built-in generator | Default — the built-in generated script |
 
 ### Tier 1: Fixed-Path Auto-Discovery
@@ -220,7 +220,7 @@ If this file exists, linthis uses it directly without generating its own script.
 Override the hook source in `.linthis/config.toml` using a `source` entry. Plugins typically inject these entries automatically when added via `linthis plugin add`.
 
 ```toml
-[hooks.git]
+[hook.git]
 pre-commit = { source = { plugin = "my-plugin", file = "hooks/git/pre-commit" } }
 ```
 
@@ -243,14 +243,14 @@ pre-commit = { source = { url = "https://example.com/hooks/pre-commit" } }
 pre-commit = { source = { git = "https://github.com/org/hooks.git", ref = "main", path = "pre-commit" } }
 ```
 
-The same override structure applies to all hook types (`[hooks.git-with-agent]`, `[hooks.prek]`, `[hooks.prek-with-agent]`, etc.).
+The same override structure applies to all hook types (`[hook.git-with-agent]`, `[hook.prek]`, `[hook.prek-with-agent]`, etc.).
 
 ### Plugin-Bundled Hooks
 
-Plugins can bundle hook overrides inside a `linthis-config.toml` at the plugin root. When a user runs `linthis plugin add <alias> <url>`, linthis automatically:
+Plugins can bundle hook overrides inside a `linthis-hook.toml` at the plugin root. When a user runs `linthis plugin add <alias> <url>`, linthis automatically:
 
 1. Replaces `plugin = "self"` with `plugin = "<alias>"` in the bundled config
-2. Non-overwritingly merges `[hooks.*]` entries into the user's `.linthis/config.toml`
+2. Non-overwritingly merges `[hook.*]` entries into the user's `.linthis/config.toml`
 
 This means adding a team plugin is all it takes for everyone to get the team's custom pre-commit scripts automatically.
 

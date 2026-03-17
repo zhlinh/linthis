@@ -200,7 +200,7 @@ fi
 | 层级 | 来源 | 使用方式 |
 |------|------|---------|
 | **第 1 层** | 固定路径自动发现 | 在项目根目录的 `hooks/git/<event>` 放置脚本 |
-| **第 2 层** | TOML 来源映射 | 在 `.linthis/config.toml` 中设置 `[hooks.git]` 条目 |
+| **第 2 层** | TOML 来源映射 | 在 `.linthis/config.toml` 中设置 `[hook.git]` 条目 |
 | **第 3 层** | 内置生成器 | 默认——内置生成的脚本 |
 
 ### 第 1 层：固定路径自动发现
@@ -220,7 +220,7 @@ hooks/git/commit-msg
 在 `.linthis/config.toml` 中通过 `source` 条目覆盖 hook 来源。插件通过 `linthis plugin add` 添加时通常会自动注入这些条目。
 
 ```toml
-[hooks.git]
+[hook.git]
 pre-commit = { source = { plugin = "my-plugin", file = "hooks/git/pre-commit" } }
 ```
 
@@ -243,14 +243,14 @@ pre-commit = { source = { url = "https://example.com/hooks/pre-commit" } }
 pre-commit = { source = { git = "https://github.com/org/hooks.git", ref = "main", path = "pre-commit" } }
 ```
 
-同样的覆盖结构适用于所有 hook 类型（`[hooks.git-with-agent]`、`[hooks.prek]`、`[hooks.prek-with-agent]` 等）。
+同样的覆盖结构适用于所有 hook 类型（`[hook.git-with-agent]`、`[hook.prek]`、`[hook.prek-with-agent]` 等）。
 
 ### 插件捆绑 Hook
 
-插件可以在插件根目录的 `linthis-config.toml` 中捆绑 hook 覆盖配置。当用户运行 `linthis plugin add <alias> <url>` 时，linthis 自动：
+插件可以在插件根目录的 `linthis-hook.toml` 中捆绑 hook 覆盖配置。当用户运行 `linthis plugin add <alias> <url>` 时，linthis 自动：
 
 1. 将 `plugin = "self"` 替换为 `plugin = "<alias>"`（用户指定的别名）
-2. 将 `[hooks.*]` 条目以非覆盖方式合并到用户的 `.linthis/config.toml` 中
+2. 将 `[hook.*]` 条目以非覆盖方式合并到用户的 `.linthis/config.toml` 中
 
 这意味着添加团队插件即可让所有成员自动获得团队定制的 pre-commit 脚本。
 

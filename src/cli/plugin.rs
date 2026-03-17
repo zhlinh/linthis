@@ -113,14 +113,14 @@ fn merge_plugin_linthis_config(
     let fetcher = PluginFetcher::new();
     let cached = fetcher.fetch(&source, &cache, false).map_err(|e| e.to_string())?;
 
-    // Look for linthis-config.toml in the plugin root.
-    let plugin_config_path = cached.cache_path.join("linthis-config.toml");
+    // Look for linthis-hook.toml in the plugin root.
+    let plugin_config_path = cached.cache_path.join("linthis-hook.toml");
     if !plugin_config_path.exists() {
         return Ok(()); // No bundled config — silently skip
     }
 
     let raw = std::fs::read_to_string(&plugin_config_path)
-        .map_err(|e| format!("Failed to read plugin linthis-config.toml: {}", e))?;
+        .map_err(|e| format!("Failed to read plugin linthis-hook.toml: {}", e))?;
 
     // Replace `plugin = "self"` with `plugin = "<alias>"`.
     let resolved = raw.replace("\"self\"", &format!("\"{}\"", alias));
@@ -128,7 +128,7 @@ fn merge_plugin_linthis_config(
     // Parse the resolved TOML.
     let plugin_doc: DocumentMut = resolved
         .parse()
-        .map_err(|e| format!("Failed to parse plugin linthis-config.toml: {}", e))?;
+        .map_err(|e| format!("Failed to parse plugin linthis-hook.toml: {}", e))?;
 
     // Load (or create) the target user config.
     let target_manager = if global {
@@ -150,16 +150,16 @@ fn merge_plugin_linthis_config(
         .parse()
         .map_err(|e| format!("Failed to parse {}: {}", config_path.display(), e))?;
 
-    // Ensure [hooks] table exists in user doc.
-    if !user_doc.contains_key("hooks") {
-        user_doc["hooks"] = Item::Table(Table::new());
+    // Ensure [hook] table exists in user doc.
+    if !user_doc.contains_key("hook") {
+        user_doc["hook"] = Item::Table(Table::new());
     }
 
-    // Merge top-level keys from plugin doc's [hooks] into user doc's [hooks].
+    // Merge top-level keys from plugin doc's [hook] into user doc's [hook].
     // Only add keys that don't already exist in the user's config (non-overwriting merge).
     let mut merged_count = 0usize;
-    if let Some(plugin_hooks) = plugin_doc.get("hooks").and_then(|h| h.as_table()) {
-        if let Some(user_hooks) = user_doc["hooks"].as_table_mut() {
+    if let Some(plugin_hooks) = plugin_doc.get("hook").and_then(|h| h.as_table()) {
+        if let Some(user_hooks) = user_doc["hook"].as_table_mut() {
             for (key, value) in plugin_hooks.iter() {
                 if !user_hooks.contains_key(key) {
                     user_hooks.insert(key, value.clone());

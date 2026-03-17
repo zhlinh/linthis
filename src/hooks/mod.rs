@@ -12,7 +12,7 @@
 //!
 //! Implements the three-tier override system:
 //! 1. Fixed-path auto-discovery (project-relative)
-//! 2. TOML `[hooks.*]` source entries
+//! 2. TOML `[hook.*]` source entries
 //! 3. Built-in generator (fallback — handled by callers)
 
 pub mod resolver;

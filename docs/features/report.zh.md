@@ -172,10 +172,10 @@ linthis report consistency --format json
 Git hook 输出框的宽度现在会自适应终端宽度：
 
 - 自动检测终端宽度（50-120 字符）
-- 可通过配置文件中的 `hooks.output_width` 配置
+- 可通过配置文件中的 `hook.output_width` 配置
 
 ```toml
 # .linthis/config.toml
-[hooks]
+[hook]
 output_width = 100  # 0 = 自动检测（默认）
 ```

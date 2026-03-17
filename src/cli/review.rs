@@ -14,7 +14,7 @@ use linthis::review::notifier;
 use linthis::review::platform;
 use linthis::review::report;
 use linthis::review::reviewer;
-use linthis::review::Assessment;
+use linthis::review::{Assessment, AutoFixMode};
 
 use crate::cli::helpers::resolve_ai_provider;
 
@@ -22,6 +22,7 @@ use crate::cli::helpers::resolve_ai_provider;
 pub struct ReviewCommandOptions {
     pub background: bool,
     pub auto_fix: bool,
+    pub auto_fix_mode: Option<String>,
     pub reviewers: Option<Vec<String>>,
     pub provider: Option<String>,
     pub base: Option<String>,
@@ -76,11 +77,23 @@ fn handle_review_clean() -> ExitCode {
 }
 
 fn handle_review_background(options: ReviewCommandOptions) -> ExitCode {
+    let config = Config::load_merged(&std::env::current_dir().unwrap_or_default());
+
     // Build args for the foreground review (everything except --background)
     let mut args: Vec<String> = Vec::new();
 
     if options.auto_fix {
         args.push("--auto-fix".to_string());
+    }
+    if let Some(ref mode) = options.auto_fix_mode {
+        // Explicit CLI mode takes priority
+        args.extend(["--auto-fix-mode".to_string(), mode.clone()]);
+    } else {
+        // Background/hook context: use hook_auto_fix_mode from config
+        args.extend([
+            "--auto-fix-mode".to_string(),
+            config.hook.review.auto_fix_mode.to_string(),
+        ]);
     }
     if let Some(ref reviewers) = options.reviewers {
         for r in reviewers {
@@ -216,26 +229,69 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
     // Print boxed summary
     println!("{}", linthis::utils::output::format_review_box(&review_result));
 
-    // 6. Handle auto-fix + PR creation if enabled
+    // 6. Handle auto-fix if enabled
     let auto_fix = options.auto_fix || config.review.auto_fix;
-    let pr_url = if auto_fix && !options.no_pr {
-        match handle_auto_fix_pr(
-            &options,
-            &config,
-            &mut review_result,
-            &report_path,
-            &base_ref,
-            &provider_str,
-            &ai_config,
-        ) {
-            Ok(url) => Some(url),
+
+    // Resolve auto-fix mode: CLI arg > config > default (pr)
+    let auto_fix_mode = if let Some(ref mode_str) = options.auto_fix_mode {
+        match mode_str.parse::<AutoFixMode>() {
+            Ok(m) => m,
             Err(e) => {
-                eprintln!("{}: Auto-fix/PR creation failed: {}", "Warning".yellow(), e);
-                None
+                eprintln!("{}: {}", "Error".red(), e);
+                return ExitCode::from(1);
             }
         }
     } else {
-        None
+        config.review.auto_fix_mode.clone()
+    };
+
+    let (pr_url, force_exit) = if auto_fix {
+        match auto_fix_mode {
+            AutoFixMode::Pr if !options.no_pr => {
+                match handle_auto_fix_pr(
+                    &options,
+                    &config,
+                    &mut review_result,
+                    &report_path,
+                    &base_ref,
+                    &provider_str,
+                    &ai_config,
+                ) {
+                    Ok(url) => (Some(url), None),
+                    Err(e) => {
+                        eprintln!("{}: Auto-fix/PR creation failed: {}", "Warning".yellow(), e);
+                        (None, None)
+                    }
+                }
+            }
+            AutoFixMode::Commit => {
+                match handle_auto_fix_commit(
+                    &mut review_result,
+                    &ai_config,
+                ) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("{}: Auto-fix commit failed: {}", "Warning".yellow(), e);
+                    }
+                }
+                (None, Some(ExitCode::from(1)))
+            }
+            AutoFixMode::Apply => {
+                match handle_auto_fix_apply(
+                    &mut review_result,
+                    &ai_config,
+                ) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("{}: Auto-fix apply failed: {}", "Warning".yellow(), e);
+                    }
+                }
+                (None, Some(ExitCode::from(1)))
+            }
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
     };
 
     // 7. Send notifications
@@ -258,7 +314,11 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
         }
     }
 
-    // 8. Exit code based on assessment
+    // 8. Exit code: commit/apply modes force exit 1 to block push
+    if let Some(exit_code) = force_exit {
+        return exit_code;
+    }
+
     match review_result.summary.assessment {
         Assessment::CriticalIssues => ExitCode::from(2),
         Assessment::NeedsWork => ExitCode::from(1),
@@ -396,6 +456,103 @@ fn handle_auto_fix_pr(
 
     eprintln!("{} PR created: {}", "✓".green(), pr_result);
     Ok(pr_result)
+}
+
+fn handle_auto_fix_commit(
+    review_result: &mut linthis::review::ReviewResult,
+    ai_config: &linthis::ai::AiProviderConfig,
+) -> Result<(), String> {
+    let fixable_count = review_result
+        .issues
+        .iter()
+        .filter(|i| {
+            matches!(
+                i.severity,
+                linthis::review::Severity::Critical | linthis::review::Severity::Important
+            ) && i.line.is_some()
+        })
+        .count();
+
+    if fixable_count == 0 {
+        eprintln!("{} No fixable issues found", "→".cyan());
+        return Ok(());
+    }
+
+    eprintln!(
+        "{} Generating fixes for {} issue(s)...",
+        "→".cyan(),
+        fixable_count
+    );
+    let fix_report = fixer::generate_and_apply_fixes(review_result, ai_config);
+    eprintln!(
+        "{} Fixed {}/{} issue(s)",
+        "✓".green(),
+        fix_report.applied,
+        fixable_count
+    );
+
+    if fix_report.applied == 0 {
+        return Ok(());
+    }
+
+    // Stage fixed files
+    for file in &fix_report.modified_files {
+        run_git(&["add", &file.display().to_string()])?;
+    }
+
+    // Commit on current branch
+    let commit_msg = format!("review: auto-fix {} issue(s)", fix_report.applied);
+    run_git(&["commit", "-m", &commit_msg])?;
+
+    eprintln!(
+        "{} Committed {} fix(es) on current branch (not pushed)",
+        "✓".green(),
+        fix_report.applied
+    );
+    Ok(())
+}
+
+fn handle_auto_fix_apply(
+    review_result: &mut linthis::review::ReviewResult,
+    ai_config: &linthis::ai::AiProviderConfig,
+) -> Result<(), String> {
+    let fixable_count = review_result
+        .issues
+        .iter()
+        .filter(|i| {
+            matches!(
+                i.severity,
+                linthis::review::Severity::Critical | linthis::review::Severity::Important
+            ) && i.line.is_some()
+        })
+        .count();
+
+    if fixable_count == 0 {
+        eprintln!("{} No fixable issues found", "→".cyan());
+        return Ok(());
+    }
+
+    eprintln!(
+        "{} Generating fixes for {} issue(s)...",
+        "→".cyan(),
+        fixable_count
+    );
+    let fix_report = fixer::generate_and_apply_fixes(review_result, ai_config);
+    eprintln!(
+        "{} Applied {}/{} fix(es) to working tree (not committed)",
+        "✓".green(),
+        fix_report.applied,
+        fixable_count
+    );
+
+    if !fix_report.modified_files.is_empty() {
+        eprintln!("{} Modified files:", "→".cyan());
+        for file in &fix_report.modified_files {
+            eprintln!("  {}", file.display());
+        }
+    }
+
+    Ok(())
 }
 
 fn create_provider_config(kind: &AiProviderKind) -> AiProviderConfig {
