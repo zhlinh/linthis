@@ -41,6 +41,9 @@ struct InstalledHook {
     /// Used by `hook sync` to know which providers to refresh.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     skill_providers: Vec<String>,
+    /// Extra arguments passed verbatim to the AI agent CLI (e.g. "--model opus").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    provider_args: String,
 }
 
 /// Top-level structure of ~/.linthis/installed-hooks.toml.
@@ -79,8 +82,9 @@ fn save_installed_hook(
     event: &HookEvent,
     hook_type: &HookTool,
     provider: Option<&str>,
+    provider_args: Option<&str>,
 ) {
-    save_installed_hook_inner(scope, project, event, hook_type, provider, &[]);
+    save_installed_hook_inner(scope, project, event, hook_type, provider, &[], provider_args);
 }
 
 /// Save hook metadata with optional skill_providers list.
@@ -91,6 +95,7 @@ fn save_installed_hook_inner(
     hook_type: &HookTool,
     provider: Option<&str>,
     skill_providers: &[&str],
+    provider_args: Option<&str>,
 ) {
     let path = match installed_hooks_path() {
         Some(p) => p,
@@ -109,11 +114,13 @@ fn save_installed_hook_inner(
             && h.event == event_str
             && h.hook_type == hook_type_str
     });
+    let provider_args_str = provider_args.unwrap_or("").to_string();
     if let Some(entry) = existing {
         entry.provider = provider_str;
         if !skill_providers.is_empty() {
             entry.skill_providers = skill_providers.iter().map(|s| s.to_string()).collect();
         }
+        entry.provider_args = provider_args_str;
     } else {
         file.hooks.push(InstalledHook {
             scope: scope.to_string(),
@@ -122,6 +129,7 @@ fn save_installed_hook_inner(
             hook_type: hook_type_str,
             provider: provider_str,
             skill_providers: skill_providers.iter().map(|s| s.to_string()).collect(),
+            provider_args: provider_args_str,
         });
     }
 
@@ -168,6 +176,7 @@ fn add_skill_provider_to_hook(
             hook_type: "agent".to_string(),
             provider: String::new(),
             skill_providers: vec![skill_provider.to_string()],
+            provider_args: String::new(),
         });
     }
 
@@ -409,7 +418,7 @@ mod dirs {
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
-        HookCommands::Install { hook_types, hook_events, force, yes, global, provider, args } => {
+        HookCommands::Install { hook_types, hook_events, force, yes, global, provider, args, provider_args } => {
             // Resolve types and events (dedup + interactive prompt or -y fallback)
             let (hook_types, hook_events) = if yes {
                 apply_yes_fallback(
@@ -433,7 +442,7 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
                 } else { events };
                 (types, events)
             };
-            handle_hook_install(hook_types, hook_events, force, yes, global, provider, args)
+            handle_hook_install(hook_types, hook_events, force, yes, global, provider, args, provider_args)
         }
         HookCommands::Uninstall { hook_types, hook_events, all, all_types, all_events, yes, global } => {
             // --all / --all-types / --all-events: skip interactive prompts.
@@ -471,8 +480,8 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
         HookCommands::CommitMsgCheck { msg_or_file } => {
             handle_commit_msg_check(&msg_or_file, false, None)
         }
-        HookCommands::Run { event, hook_type, provider, global, hook_args } => {
-            let code = handle_hook_run(&event, &hook_type, provider.as_deref(), global, &hook_args);
+        HookCommands::Run { event, hook_type, provider, provider_args, global, hook_args } => {
+            let code = handle_hook_run(&event, &hook_type, provider.as_deref(), provider_args.as_deref(), global, &hook_args);
             ExitCode::from(code as u8)
         }
         HookCommands::Sync { global, yes } => {
@@ -491,6 +500,7 @@ fn handle_hook_install(
     global: bool,
     provider: Option<String>,
     args: Option<String>,
+    provider_args: Option<String>,
 ) -> ExitCode {
     let mut overall = ExitCode::SUCCESS;
 
@@ -518,6 +528,7 @@ fn handle_hook_install(
                 provider.clone(),
                 preresolved_fix_provider.clone(),
                 args.clone(),
+                provider_args.clone(),
             );
             if code != ExitCode::SUCCESS {
                 overall = code;
@@ -537,6 +548,7 @@ fn handle_hook_install_single(
     provider: Option<String>,
     preresolved_fix_provider: Option<AgentFixProvider>,
     args: Option<String>,
+    provider_args: Option<String>,
 ) -> ExitCode {
     use std::io::{self, Write};
 
@@ -552,7 +564,7 @@ fn handle_hook_install_single(
         };
         let base = hook_type.as_ref().unwrap().base_tool().clone();
         return match &base {
-            HookTool::Git => handle_git_with_agent_install(&hook_event, force, global, yes, &fix_provider, &args),
+            HookTool::Git => handle_git_with_agent_install(&hook_event, force, global, yes, &fix_provider, &args, provider_args.as_deref()),
             HookTool::Prek | HookTool::PreCommit => {
                 handle_precommit_with_agent_install(&base, &hook_event, force, &fix_provider, &args)
             }
@@ -587,7 +599,7 @@ fn handle_hook_install_single(
 
     // Global non-agent hook: install into ~/.config/git/hooks
     if global {
-        return handle_global_hook_install(hook_type, &hook_event, force, yes, &args);
+        return handle_global_hook_install(hook_type, &hook_event, force, yes, &args, provider_args.as_deref());
     }
 
     // Find git root
@@ -727,17 +739,23 @@ fn build_thin_wrapper_script(
     hook_type: &HookTool,
     provider: Option<&str>,
     global: bool,
+    provider_args: Option<&str>,
 ) -> String {
     let provider_arg = provider
         .filter(|p| !p.is_empty())
         .map(|p| format!(" --provider {p}"))
         .unwrap_or_default();
+    let provider_args_arg = provider_args
+        .filter(|a| !a.is_empty())
+        .map(|a| format!(" --provider-args '{}'", a.replace('\'', "'\\''")))
+        .unwrap_or_default();
     let global_arg = if global { " --global" } else { "" };
     format!(
-        "#!/bin/sh\nexec linthis hook run --event {} --type {}{}{} \"$@\"\n",
+        "#!/bin/sh\nexec linthis hook run --event {} --type {}{}{}{} \"$@\"\n",
         event.as_str(),
         hook_type.as_str(),
         provider_arg,
+        provider_args_arg,
         global_arg,
     )
 }
@@ -801,10 +819,10 @@ fn build_global_hook_script_for_event(
         None => String::new(),
         Some(p) => {
             let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
-                agent_fix_headless_cmd_commit_msg(p)
+                agent_fix_headless_cmd_commit_msg(p, None)
             } else {
                 let prompt = agent_fix_prompt_for_event(hook_event);
-                agent_fix_headless_cmd(p, &prompt)
+                agent_fix_headless_cmd(p, &prompt, None)
             };
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
@@ -828,10 +846,10 @@ fn build_global_hook_script_for_event(
         None => String::new(),
         Some(p) => {
             let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
-                agent_fix_headless_cmd_commit_msg(p)
+                agent_fix_headless_cmd_commit_msg(p, None)
             } else {
                 let prompt = agent_fix_prompt_for_event(hook_event);
-                agent_fix_headless_cmd(p, &prompt)
+                agent_fix_headless_cmd(p, &prompt, None)
             };
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
@@ -925,6 +943,7 @@ fn handle_global_hook_install(
     force: bool,
     yes: bool,
     args: &Option<String>,
+    provider_args: Option<&str>,
 ) -> ExitCode {
     use std::fs;
     #[cfg(unix)]
@@ -1009,7 +1028,7 @@ fn handle_global_hook_install(
     let provider_str = fix_provider.as_ref().map(|p| p.as_str());
 
     // Generate thin wrapper script (full logic runs from binary at hook execution time)
-    let content = build_thin_wrapper_script(hook_event, &effective_hook_type, provider_str, true);
+    let content = build_thin_wrapper_script(hook_event, &effective_hook_type, provider_str, true, provider_args);
     let _ = args; // args are embedded in binary logic at run time, not in the thin wrapper
 
     // Write hook file
@@ -1059,7 +1078,7 @@ fn handle_global_hook_install(
     }
 
     // Persist metadata for `linthis hook sync`
-    save_installed_hook("global", "", hook_event, &effective_hook_type, provider_str);
+    save_installed_hook("global", "", hook_event, &effective_hook_type, provider_str, provider_args);
 
     ExitCode::SUCCESS
 }
@@ -2067,7 +2086,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                 }
             } else {
                 // Create new hook file as thin wrapper (hook logic auto-updates with linthis)
-                let content = build_thin_wrapper_script(hook_event, &HookTool::Git, None, false);
+                let content = build_thin_wrapper_script(hook_event, &HookTool::Git, None, false, None);
 
                 match fs::write(&hook_path, &content) {
                     Ok(_) => {
@@ -2097,7 +2116,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
                         }
                         // Persist metadata for `linthis hook sync`
                         let project = git_root.to_str().unwrap_or("").to_string();
-                        save_installed_hook("local", &project, hook_event, &HookTool::Git, None);
+                        save_installed_hook("local", &project, hook_event, &HookTool::Git, None, None);
                         Ok(())
                     }
                     Err(e) => {
@@ -2188,17 +2207,21 @@ fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
 /// - Droid:     `droid exec --auto low '...'` (droid exec with --auto for edits)
 /// - Auggie:    `auggie --print '...'`        (auggie --print for headless/non-interactive)
 /// - Codebuddy: `codebuddy -p '...'`         (codebuddy -p / --prompt)
-fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str) -> String {
+fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str, provider_args: Option<&str>) -> String {
     // Escape single quotes in prompt for shell safety
     let escaped = prompt.replace('\'', "'\\''");
+    let extra = provider_args
+        .filter(|a| !a.is_empty())
+        .map(|a| format!(" {a}"))
+        .unwrap_or_default();
     match provider {
-        AgentFixProvider::Claude    => format!("claude -p --dangerously-skip-permissions '{}'", escaped),
-        AgentFixProvider::Codex     => format!("codex exec --ask-for-approval never '{}'", escaped),
-        AgentFixProvider::Gemini    => format!("gemini -p --approval-mode=auto_edit '{}'", escaped),
-        AgentFixProvider::Cursor    => format!("cursor-agent chat --force '{}'", escaped),
-        AgentFixProvider::Droid     => format!("droid exec --auto high '{}'", escaped),
-        AgentFixProvider::Auggie    => format!("auggie --print '{}'", escaped),
-        AgentFixProvider::Codebuddy => format!("codebuddy -p --dangerously-skip-permissions '{}'", escaped),
+        AgentFixProvider::Claude    => format!("claude -p{extra} --dangerously-skip-permissions '{}'", escaped),
+        AgentFixProvider::Codex     => format!("codex exec{extra} --ask-for-approval never '{}'", escaped),
+        AgentFixProvider::Gemini    => format!("gemini -p{extra} --approval-mode=auto_edit '{}'", escaped),
+        AgentFixProvider::Cursor    => format!("cursor-agent chat{extra} --force '{}'", escaped),
+        AgentFixProvider::Droid     => format!("droid exec{extra} --auto high '{}'", escaped),
+        AgentFixProvider::Auggie    => format!("auggie{extra} --print '{}'", escaped),
+        AgentFixProvider::Codebuddy => format!("codebuddy -p{extra} --dangerously-skip-permissions '{}'", escaped),
     }
 }
 
@@ -2301,7 +2324,7 @@ fn agent_fix_show_fixed_cmsg(indent: &str) -> String {
 
 /// Build the agent command for commit-msg hook: captures $1 in _MSG_FILE then invokes agent.
 /// Uses double-quoted prompt string so $_MSG_FILE expands at shell runtime.
-fn agent_fix_headless_cmd_commit_msg(provider: &AgentFixProvider) -> String {
+fn agent_fix_headless_cmd_commit_msg(provider: &AgentFixProvider, provider_args: Option<&str>) -> String {
     let prompt = "Commit message validation failed (not in Conventional Commits format). \
         Fix the commit message file at $_MSG_FILE: \
         (1) run 'git diff --cached --stat' to understand what actually changed, \
@@ -2314,14 +2337,18 @@ fn agent_fix_headless_cmd_commit_msg(provider: &AgentFixProvider) -> String {
         Verify with 'linthis cmsg $_MSG_FILE' until it passes.";
     // Escape backslashes and double quotes for use in double-quoted shell string
     let escaped = prompt.replace('\\', "\\\\").replace('"', "\\\"");
+    let extra = provider_args
+        .filter(|a| !a.is_empty())
+        .map(|a| format!(" {a}"))
+        .unwrap_or_default();
     let bin_cmd = match provider {
-        AgentFixProvider::Claude    => format!("claude -p --dangerously-skip-permissions \"{}\"", escaped),
-        AgentFixProvider::Codex     => format!("codex exec --ask-for-approval never \"{}\"", escaped),
-        AgentFixProvider::Gemini    => format!("gemini -p --approval-mode=auto_edit \"{}\"", escaped),
-        AgentFixProvider::Cursor    => format!("cursor-agent chat --force \"{}\"", escaped),
-        AgentFixProvider::Droid     => format!("droid exec --auto high \"{}\"", escaped),
-        AgentFixProvider::Auggie    => format!("auggie --print \"{}\"", escaped),
-        AgentFixProvider::Codebuddy => format!("codebuddy -p --dangerously-skip-permissions \"{}\"", escaped),
+        AgentFixProvider::Claude    => format!("claude -p{extra} --dangerously-skip-permissions \"{}\"", escaped),
+        AgentFixProvider::Codex     => format!("codex exec{extra} --ask-for-approval never \"{}\"", escaped),
+        AgentFixProvider::Gemini    => format!("gemini -p{extra} --approval-mode=auto_edit \"{}\"", escaped),
+        AgentFixProvider::Cursor    => format!("cursor-agent chat{extra} --force \"{}\"", escaped),
+        AgentFixProvider::Droid     => format!("droid exec{extra} --auto high \"{}\"", escaped),
+        AgentFixProvider::Auggie    => format!("auggie{extra} --print \"{}\"", escaped),
+        AgentFixProvider::Codebuddy => format!("codebuddy -p{extra} --dangerously-skip-permissions \"{}\"", escaped),
     };
     // Prepend variable capture so $_MSG_FILE is available in the double-quoted prompt
     format!("_MSG_FILE=\"$1\"; {}", bin_cmd)
@@ -2437,7 +2464,7 @@ stop_timer() {
 /// Unlike pre-commit (agent only called on failure), pre-push always invokes
 /// the agent to perform a structured review of the diff before pushing.
 /// The agent's exit code gates the push: non-zero = block, zero = allow.
-fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFixProvider) -> String {
+fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, provider_args: Option<&str>) -> String {
     let review_prompt = "Perform a structured pre-push code review using the lt.review skill. \
         Steps: \
         (1) Run: BASE_SHA=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD~1); \
@@ -2450,7 +2477,7 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
         If Important issues only: print '⚠️ Push with caution'. \
         If Minor or none: print '✅ Review passed'. \
         Exit 0 unless Critical issues were found.";
-    let agent_cmd = agent_fix_headless_cmd(fix_provider, review_prompt);
+    let agent_cmd = agent_fix_headless_cmd(fix_provider, review_prompt, provider_args);
     let timer_fns = shell_timer_functions();
     let review_box = shell_review_box_fn();
     format!(
@@ -2518,17 +2545,17 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
 }
 
 /// Build the full git hook shell script with agent fix fallback.
-fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
+fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, hook_event: &HookEvent, provider_args: Option<&str>) -> String {
     // Pre-push uses a dedicated review flow (always triggers agent, not only on failure)
     if matches!(hook_event, HookEvent::PrePush) {
-        return build_git_with_agent_prepush_script(linthis_cmd, fix_provider);
+        return build_git_with_agent_prepush_script(linthis_cmd, fix_provider, provider_args);
     }
 
     let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
-        agent_fix_headless_cmd_commit_msg(fix_provider)
+        agent_fix_headless_cmd_commit_msg(fix_provider, provider_args)
     } else {
         let prompt = agent_fix_prompt_for_event(hook_event);
-        agent_fix_headless_cmd(fix_provider, &prompt)
+        agent_fix_headless_cmd(fix_provider, &prompt, provider_args)
     };
     let error_msg = agent_fix_error_msg(hook_event);
     let timer_fns = shell_timer_functions();
@@ -2589,6 +2616,7 @@ fn handle_git_with_agent_install(
     yes: bool,
     fix_provider: &AgentFixProvider,
     args: &Option<String>,
+    provider_args: Option<&str>,
 ) -> ExitCode {
     use std::fs;
     #[cfg(unix)]
@@ -2646,6 +2674,7 @@ fn handle_git_with_agent_install(
         &HookTool::GitWithAgent,
         Some(fix_provider.as_str()),
         global,
+        provider_args,
     );
 
     if hook_path.exists() && !force {
@@ -2701,7 +2730,7 @@ fn handle_git_with_agent_install(
             }
 
             // Persist metadata for `linthis hook sync`
-            save_installed_hook(scope, &project, hook_event, &HookTool::GitWithAgent, Some(fix_provider.as_str()));
+            save_installed_hook(scope, &project, hook_event, &HookTool::GitWithAgent, Some(fix_provider.as_str()), provider_args);
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -2748,7 +2777,7 @@ fn handle_precommit_with_agent_install(
         tool = fix_provider,
         tool_cmd = tool_cmd,
     );
-    let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt);
+    let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt, None);
     let timer_fns = shell_timer_functions();
     let wrapper = format!(
         "#!/bin/sh\n\
@@ -4600,6 +4629,7 @@ fn handle_hook_run(
     event: &HookEvent,
     hook_type: &HookTool,
     provider: Option<&str>,
+    provider_args: Option<&str>,
     _global: bool,
     hook_args: &[String],
 ) -> i32 {
@@ -4660,7 +4690,7 @@ fn handle_hook_run(
                 }
             };
             let linthis_cmd = build_hook_command(event, &None);
-            build_git_with_agent_hook_script(&linthis_cmd, &fix_provider, event)
+            build_git_with_agent_hook_script(&linthis_cmd, &fix_provider, event, provider_args)
         }
         _ => {
             eprintln!("{}: hook run: unsupported hook type '{}' (supported: git, git-with-agent)", "Error".red(), hook_type.as_str());
@@ -4777,7 +4807,7 @@ fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, p
                 HookTool::Git
             };
             let scope = if global { "global" } else { "local" };
-            save_installed_hook(scope, project, event, &hook_type, provider_opt.as_deref());
+            save_installed_hook(scope, project, event, &hook_type, provider_opt.as_deref(), None);
             println!("  {} recorded thin wrapper {} {} ({})", "✓".green(), name, hook_type.as_str(), scope);
             migrated += 1;
             continue;
@@ -4812,7 +4842,7 @@ fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, p
         };
 
         // Build thin wrapper and overwrite the hook file
-        let thin = build_thin_wrapper_script(event, &hook_type, provider_opt, global);
+        let thin = build_thin_wrapper_script(event, &hook_type, provider_opt, global, None);
         match fs::write(&path, &thin) {
             Ok(_) => {
                 #[cfg(unix)]
@@ -4824,7 +4854,7 @@ fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, p
                     }
                 }
                 let scope = if global { "global" } else { "local" };
-                save_installed_hook(scope, project, event, &hook_type, provider_opt);
+                save_installed_hook(scope, project, event, &hook_type, provider_opt, None);
                 println!(
                     "  {} migrated {} → thin wrapper {} ({})",
                     "✓".green(),
@@ -5008,7 +5038,8 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
         // Only re-write thin wrapper for types that have one
         if !matches!(hook_type, HookTool::Agent | HookTool::Prek | HookTool::PreCommit) {
             let hook_file = hook_dir.join(event.hook_filename());
-            let thin_script = build_thin_wrapper_script(&event, &hook_type, provider_opt, global);
+            let pa_opt: Option<&str> = if hook.provider_args.is_empty() { None } else { Some(&hook.provider_args) };
+            let thin_script = build_thin_wrapper_script(&event, &hook_type, provider_opt, global, pa_opt);
             if let Some(parent) = hook_file.parent() {
                 let _ = fs::create_dir_all(parent);
             }

@@ -967,6 +967,10 @@ pub enum HookCommands {
         /// "-c -f --auto-fix --provider claude" (AI auto-fix)
         #[arg(long, allow_hyphen_values = true)]
         args: Option<String>,
+
+        /// Extra arguments passed to the AI agent CLI (e.g. "--model opus")
+        #[arg(long, allow_hyphen_values = true)]
+        provider_args: Option<String>,
     },
     /// Uninstall git hook
     Uninstall {
@@ -1032,6 +1036,9 @@ pub enum HookCommands {
         /// AI provider (for *-with-agent types)
         #[arg(long)]
         provider: Option<String>,
+        /// Extra arguments passed to the AI agent CLI
+        #[arg(long, allow_hyphen_values = true)]
+        provider_args: Option<String>,
         /// Run against global hooks
         #[arg(short = 'g', long)]
         global: bool,

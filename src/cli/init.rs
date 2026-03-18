@@ -268,6 +268,7 @@ pub fn handle_init_command(
                 global: false,             // Project-level install
                 provider: None,            // No provider specified
                 args: None,               // Use default args (-c -f)
+                provider_args: None,       // No extra agent CLI args
             });
             if exit_code != ExitCode::SUCCESS {
                 return exit_code;
