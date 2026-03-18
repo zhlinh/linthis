@@ -22,9 +22,15 @@ use std::path::PathBuf;
 #[command(
     author,
     version,
-    about = "A fast, cross-platform multi-language linter and formatter"
+    about = "A fast, cross-platform multi-language linter and formatter",
+    disable_version_flag = true
 )]
+#[non_exhaustive]
 pub struct Cli {
+    /// Print version
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    pub version: (),
+
     /// Files or directories to include (can be specified multiple times)
     /// Examples: -i src -i lib, --include ./plugin
     #[arg(short = 'i', long = "include")]
@@ -111,7 +117,7 @@ pub struct Cli {
     pub keep_results: usize,
 
     /// Verbose output
-    #[arg(short, long)]
+    #[arg(long)]
     pub verbose: bool,
 
     /// Suppress non-error output
@@ -214,7 +220,10 @@ impl HookTool {
 
     /// Returns true if this type includes an AI agent fix fallback
     pub fn has_agent_fix(&self) -> bool {
-        matches!(self, HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent)
+        matches!(
+            self,
+            HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent
+        )
     }
 
     /// Get the CLI string representation (kebab-case, matches clap ValueEnum)
@@ -255,12 +264,12 @@ impl AgentFixProvider {
     /// Get the CLI string representation (matches clap ValueEnum, parseable by resolve_agent_fix_provider)
     pub fn as_str(&self) -> &'static str {
         match self {
-            AgentFixProvider::Claude    => "claude",
-            AgentFixProvider::Codex     => "codex",
-            AgentFixProvider::Gemini    => "gemini",
-            AgentFixProvider::Cursor    => "cursor",
-            AgentFixProvider::Droid     => "droid",
-            AgentFixProvider::Auggie    => "auggie",
+            AgentFixProvider::Claude => "claude",
+            AgentFixProvider::Codex => "codex",
+            AgentFixProvider::Gemini => "gemini",
+            AgentFixProvider::Cursor => "cursor",
+            AgentFixProvider::Droid => "droid",
+            AgentFixProvider::Auggie => "auggie",
             AgentFixProvider::Codebuddy => "codebuddy",
         }
     }
@@ -269,12 +278,12 @@ impl AgentFixProvider {
 impl std::fmt::Display for AgentFixProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AgentFixProvider::Claude    => write!(f, "Claude Code"),
-            AgentFixProvider::Codex     => write!(f, "Codex"),
-            AgentFixProvider::Gemini    => write!(f, "Gemini"),
-            AgentFixProvider::Cursor    => write!(f, "Cursor"),
-            AgentFixProvider::Droid     => write!(f, "Droid"),
-            AgentFixProvider::Auggie    => write!(f, "Auggie"),
+            AgentFixProvider::Claude => write!(f, "Claude Code"),
+            AgentFixProvider::Codex => write!(f, "Codex"),
+            AgentFixProvider::Gemini => write!(f, "Gemini"),
+            AgentFixProvider::Cursor => write!(f, "Cursor"),
+            AgentFixProvider::Droid => write!(f, "Droid"),
+            AgentFixProvider::Auggie => write!(f, "Auggie"),
             AgentFixProvider::Codebuddy => write!(f, "CodeBuddy"),
         }
     }
@@ -303,12 +312,12 @@ pub enum AgentProvider {
 impl std::fmt::Display for AgentProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AgentProvider::Claude    => write!(f, "Claude Code"),
-            AgentProvider::Codex     => write!(f, "Codex"),
-            AgentProvider::Gemini    => write!(f, "Gemini"),
-            AgentProvider::Cursor    => write!(f, "Cursor"),
-            AgentProvider::Droid     => write!(f, "Droid"),
-            AgentProvider::Auggie    => write!(f, "Auggie"),
+            AgentProvider::Claude => write!(f, "Claude Code"),
+            AgentProvider::Codex => write!(f, "Codex"),
+            AgentProvider::Gemini => write!(f, "Gemini"),
+            AgentProvider::Cursor => write!(f, "Cursor"),
+            AgentProvider::Droid => write!(f, "Droid"),
+            AgentProvider::Auggie => write!(f, "Auggie"),
             AgentProvider::Codebuddy => write!(f, "CodeBuddy"),
         }
     }
@@ -420,7 +429,7 @@ pub enum Commands {
         fail_on: Option<String>,
 
         /// Verbose output
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
     },
     /// License compliance checking
@@ -463,7 +472,7 @@ pub enum Commands {
         fail_on_violation: bool,
 
         /// Verbose output
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
     },
     /// Code complexity analysis
@@ -526,7 +535,7 @@ pub enum Commands {
         fail_on_high: bool,
 
         /// Verbose output
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
     },
     /// Initialize configuration file
@@ -666,7 +675,7 @@ pub enum Commands {
         exclude: Option<Vec<String>>,
 
         /// Verbose output
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
     },
     /// Format files and manage format backups
@@ -716,7 +725,7 @@ pub enum Commands {
         list_backups: bool,
 
         /// Verbose output
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
 
         /// Suppress non-error output
@@ -807,7 +816,7 @@ pub enum Commands {
         with_context: bool,
 
         /// Verbose output
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
 
         /// Suppress non-error output
@@ -1072,7 +1081,7 @@ pub enum PluginCommands {
     /// List configured or cached plugins
     List {
         /// Show detailed information
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
         /// List global plugins (~/.linthis/config.toml)
         #[arg(short, long)]
@@ -1195,7 +1204,7 @@ pub enum ConfigCommands {
     /// List all configuration values
     List {
         /// Show detailed information (including source)
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
         /// List global configuration
         #[arg(short, long)]
@@ -1213,7 +1222,7 @@ pub enum ConfigCommands {
         #[arg(long)]
         backup: bool,
         /// Show detailed output
-        #[arg(short, long)]
+        #[arg(long)]
         verbose: bool,
     },
 }
