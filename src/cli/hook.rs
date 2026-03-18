@@ -303,7 +303,7 @@ fn apply_yes_fallback(
 }
 
 /// Interactive menu for selecting hook types. Returns selected types (never empty unless cancelled).
-fn prompt_hook_types() -> Option<Vec<HookTool>> {
+fn prompt_hook_types(show_all: bool) -> Option<Vec<HookTool>> {
     use std::io::{self, Write};
     // Use bare function pointers (fn() -> HookTool) — const-safe, no dyn trait needed.
     // Non-capturing closures over fieldless enum variants coerce to fn() pointers.
@@ -316,18 +316,26 @@ fn prompt_hook_types() -> Option<Vec<HookTool>> {
         ("pre-commit-with-agent", || HookTool::PreCommitWithAgent),
         ("agent", || HookTool::Agent),
     ];
+    let all_idx = TYPES.len() + 1;
+    let cancel_idx = if show_all { TYPES.len() + 2 } else { TYPES.len() + 1 };
     println!("\nSelect hook type(s) [comma-separated, e.g. 1,2]:");
     for (i, (name, _)) in TYPES.iter().enumerate() {
         println!("  {}. {}", i + 1, name);
     }
-    println!("  {}. Cancel", TYPES.len() + 1);
+    if show_all {
+        println!("  {}. all", all_idx);
+    }
+    println!("  {}. Cancel", cancel_idx);
     print!("\n> ");
     io::stdout().flush().ok();
     let mut input = String::new();
     io::stdin().read_line(&mut input).ok();
     let input = input.trim();
-    if input.is_empty() || input == (TYPES.len() + 1).to_string() {
+    if input.is_empty() || input == cancel_idx.to_string() {
         return None;
+    }
+    if show_all && (input == all_idx.to_string() || input.eq_ignore_ascii_case("all")) {
+        return Some(TYPES.iter().map(|(_, f)| f()).collect());
     }
     let selected: Vec<HookTool> = input
         .split(',')
@@ -343,7 +351,7 @@ fn prompt_hook_types() -> Option<Vec<HookTool>> {
 }
 
 /// Interactive menu for selecting hook events. Returns selected events (never empty unless cancelled).
-fn prompt_hook_events() -> Option<Vec<HookEvent>> {
+fn prompt_hook_events(show_all: bool) -> Option<Vec<HookEvent>> {
     use std::io::{self, Write};
     // Use bare function pointers for const-safety (matches prompt_hook_types pattern).
     // Non-capturing closures over fieldless enum variants coerce to fn() pointers.
@@ -352,18 +360,26 @@ fn prompt_hook_events() -> Option<Vec<HookEvent>> {
         ("commit-msg", || HookEvent::CommitMsg),
         ("pre-push", || HookEvent::PrePush),
     ];
+    let all_idx = EVENTS.len() + 1;
+    let cancel_idx = if show_all { EVENTS.len() + 2 } else { EVENTS.len() + 1 };
     println!("\nSelect event(s) [comma-separated, e.g. 1,2]:");
     for (i, (name, _)) in EVENTS.iter().enumerate() {
         println!("  {}. {}", i + 1, name);
     }
-    println!("  {}. Cancel", EVENTS.len() + 1);
+    if show_all {
+        println!("  {}. all", all_idx);
+    }
+    println!("  {}. Cancel", cancel_idx);
     print!("\n> ");
     io::stdout().flush().ok();
     let mut input = String::new();
     io::stdin().read_line(&mut input).ok();
     let input = input.trim();
-    if input.is_empty() || input == (EVENTS.len() + 1).to_string() {
+    if input.is_empty() || input == cancel_idx.to_string() {
         return None;
+    }
+    if show_all && (input == all_idx.to_string() || input.eq_ignore_ascii_case("all")) {
+        return Some(EVENTS.iter().map(|(_, f)| f()).collect());
     }
     let selected: Vec<HookEvent> = input
         .split(',')
@@ -403,14 +419,14 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             } else {
                 let types = deduplicate_hook_types(hook_types);
                 let types = if types.is_empty() {
-                    match prompt_hook_types() {
+                    match prompt_hook_types(false) {
                         Some(t) => t,
                         None => { println!("Installation cancelled"); return ExitCode::SUCCESS; }
                     }
                 } else { types };
                 let events = deduplicate_hook_events(hook_events);
                 let events = if events.is_empty() {
-                    match prompt_hook_events() {
+                    match prompt_hook_events(false) {
                         Some(e) => e,
                         None => { println!("Installation cancelled"); return ExitCode::SUCCESS; }
                     }
@@ -430,14 +446,14 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             } else {
                 let types = deduplicate_hook_types(hook_types);
                 let types = if types.is_empty() {
-                    match prompt_hook_types() {
+                    match prompt_hook_types(true) {
                         Some(t) => t,
                         None => { println!("Uninstall cancelled"); return ExitCode::SUCCESS; }
                     }
                 } else { types };
                 let events = deduplicate_hook_events(hook_events);
                 let events = if events.is_empty() {
-                    match prompt_hook_events() {
+                    match prompt_hook_events(true) {
                         Some(e) => e,
                         None => { println!("Uninstall cancelled"); return ExitCode::SUCCESS; }
                     }
