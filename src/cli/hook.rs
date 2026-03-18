@@ -2207,9 +2207,19 @@ fn parse_provider_with_model(raw: &str) -> (&str, Option<&str>) {
 
 /// Merge a model extracted from `provider/model` syntax into existing provider_args.
 ///
-/// Prepends `--model <model>` to the front. If `provider_args` already contains
-/// `--model`, the explicit `--provider-args` takes precedence (appended later).
+/// If `--provider-args` already contains `--model`, the `/model` part is ignored
+/// and a warning is printed (explicit `--provider-args` takes precedence).
 fn merge_model_into_provider_args(model: Option<&str>, existing: Option<&str>) -> Option<String> {
+    // Check if existing provider_args already specifies --model
+    if let (Some(m), Some(pa)) = (model, existing) {
+        if pa.contains("--model") {
+            eprintln!(
+                "{}: --provider-args already contains --model, ignoring '{}' from provider/model syntax",
+                "Warning".yellow(), m
+            );
+            return Some(pa.to_string());
+        }
+    }
     match (model, existing) {
         (Some(m), Some(pa)) => Some(format!("--model {} {}", m, pa)),
         (Some(m), None)     => Some(format!("--model {}", m)),
