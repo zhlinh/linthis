@@ -504,6 +504,15 @@ fn handle_hook_install(
 ) -> ExitCode {
     let mut overall = ExitCode::SUCCESS;
 
+    // Support provider/model syntax (e.g. "claude/opus" → provider="claude", model="opus")
+    let (provider, provider_args) = if let Some(ref raw) = provider {
+        let (name, model) = parse_provider_with_model(raw);
+        let merged = merge_model_into_provider_args(model, provider_args.as_deref());
+        (Some(name.to_string()), merged)
+    } else {
+        (provider, provider_args)
+    };
+
     // If any selected type needs an agent-fix provider, resolve it once upfront
     // so the interactive prompt is shown only once regardless of how many events
     // are being installed.
@@ -2182,6 +2191,32 @@ const ALL_AGENT_FIX_PROVIDERS: &[AgentFixProvider] = &[
     AgentFixProvider::Auggie,
     AgentFixProvider::Codebuddy,
 ];
+
+/// Split a `provider[/model]` string into (provider_name, Option<model>).
+///
+/// Examples:
+///   "claude"       → ("claude", None)
+///   "claude/opus"  → ("claude", Some("opus"))
+///   "gemini/flash" → ("gemini", Some("flash"))
+fn parse_provider_with_model(raw: &str) -> (&str, Option<&str>) {
+    match raw.split_once('/') {
+        Some((provider, model)) if !model.is_empty() => (provider, Some(model)),
+        _ => (raw, None),
+    }
+}
+
+/// Merge a model extracted from `provider/model` syntax into existing provider_args.
+///
+/// Prepends `--model <model>` to the front. If `provider_args` already contains
+/// `--model`, the explicit `--provider-args` takes precedence (appended later).
+fn merge_model_into_provider_args(model: Option<&str>, existing: Option<&str>) -> Option<String> {
+    match (model, existing) {
+        (Some(m), Some(pa)) => Some(format!("--model {} {}", m, pa)),
+        (Some(m), None)     => Some(format!("--model {}", m)),
+        (None, Some(pa))    => Some(pa.to_string()),
+        (None, None)        => None,
+    }
+}
 
 /// Return the binary name used to invoke the agent CLI headlessly.
 /// Used for PATH detection via `which`.
@@ -4628,11 +4663,21 @@ const LINTHIS_HOOK_RUNNING_PREFIX: &str = "LINTHIS_HOOK_RUNNING_";
 fn handle_hook_run(
     event: &HookEvent,
     hook_type: &HookTool,
-    provider: Option<&str>,
-    provider_args: Option<&str>,
+    raw_provider: Option<&str>,
+    raw_provider_args: Option<&str>,
     _global: bool,
     hook_args: &[String],
 ) -> i32 {
+    // Support provider/model syntax at runtime too (e.g. "claude/opus")
+    let (provider_name, merged_pa) = if let Some(raw) = raw_provider {
+        let (name, model) = parse_provider_with_model(raw);
+        (Some(name), merge_model_into_provider_args(model, raw_provider_args))
+    } else {
+        (None, raw_provider_args.map(|s| s.to_string()))
+    };
+    let provider: Option<&str> = provider_name;
+    let provider_args: Option<&str> = merged_pa.as_deref();
+
     // Detect re-entrant calls: the parent hook execution sets LINTHIS_HOOK_RUNNING_<pid>=1
     // before exec-ing the child hook.  If any such var is present, skip local delegation.
     let already_running = std::env::vars()
