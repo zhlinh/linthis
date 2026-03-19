@@ -321,8 +321,6 @@ fn prompt_hook_types(show_all: bool) -> Option<Vec<HookTool>> {
         ("git-with-agent", || HookTool::GitWithAgent),
         ("prek", || HookTool::Prek),
         ("prek-with-agent", || HookTool::PrekWithAgent),
-        ("pre-commit", || HookTool::PreCommit),
-        ("pre-commit-with-agent", || HookTool::PreCommitWithAgent),
         ("agent", || HookTool::Agent),
     ];
     let all_idx = TYPES.len() + 1;

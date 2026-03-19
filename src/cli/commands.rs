@@ -201,9 +201,11 @@ pub enum HookTool {
     Prek,
     /// Prek with AI agent fix fallback on failure
     PrekWithAgent,
-    /// Pre-commit (Python-based, standard)
+    /// Pre-commit (Python-based, standard) — hidden to avoid confusion with --event pre-commit
+    #[value(hide = true)]
     PreCommit,
-    /// Pre-commit with AI agent fix fallback on failure
+    /// Pre-commit with AI agent fix fallback on failure — hidden
+    #[value(hide = true)]
     PreCommitWithAgent,
 }
 
@@ -909,17 +911,17 @@ pub enum HookCommands {
     ///
     /// Hook types (--type):
     ///
-    ///   {git,prek,pre-commit}             Traditional shell hook
+    ///   {git,prek}             Traditional shell hook
     ///
-    ///   {git,prek,pre-commit}-with-agent  Shell hook + AI auto-fix on failure
+    ///   {git,prek}-with-agent  Shell hook + AI auto-fix on failure
     ///
     ///   agent                             AI coding agent lint skill (Claude, Cursor, etc.)
     Install {
         /// Hook tool(s) to use — comma-separated or repeated
         /// (e.g. --type git,agent or --type git --type agent)
         ///
-        /// Shell hooks:          git, prek, pre-commit
-        /// Shell hook + AI fix:  git-with-agent, prek-with-agent, pre-commit-with-agent
+        /// Shell hooks:          git, prek
+        /// Shell hook + AI fix:  git-with-agent, prek-with-agent
         /// AI agent skills:      agent
         ///
         /// If both x and x-with-agent are given, x-with-agent wins.
