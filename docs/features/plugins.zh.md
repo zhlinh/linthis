@@ -23,20 +23,17 @@ my-linthis-plugin/
 │   ├── git/
 │   │   └── pre-commit            # 自定义 pre-commit 脚本
 │   └── agent/
-│       ├── plugins/
-│       │   ├── _default/                     # 默认回退（所有 provider）
-│       │   │   └── lt/                       # 插件包
-│       │   │       ├── skills/lt-lint/SKILL.md
-│       │   │       ├── commands/
-│       │   │       ├── memories/TOPLEVEL.md
-│       │   │       └── hooks/hooks.json
-│       │   └── claude/                       # Provider 特定覆盖（可选）
-│       │       └── lt/
-│       │           └── skills/lt-lint/SKILL.md
-│       └── hook/
-│           └── stop/
-│               └── claude/
-│                   └── settings.json  # 自定义 Claude Stop Hook
+│       └── plugins/
+│           ├── _default/                     # 默认回退（所有 provider）
+│           │   └── lt/                       # 插件包
+│           │       ├── skills/lt-lint/SKILL.md
+│           │       ├── commands/
+│           │       ├── memories/TOPLEVEL.md
+│           │       └── hooks/hooks.json
+│           └── claude/                       # Provider 特定覆盖（可选）
+│               └── lt/
+│                   ├── skills/lt-lint/SKILL.md
+│                   └── settings.json         # Provider 设置（如 stop hook）
 ├── rules/                        # 可选：额外规则配置
 │   ├── strict.toml
 │   └── relaxed.toml
@@ -63,10 +60,10 @@ my-linthis-plugin/
 pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
 
 [hook.agent.plugins._default]
-"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/lt" } }
+"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/_default/lt" } }
 
-[hook.agent.stop]
-"claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }
+[hook.agent.plugins.claude]
+"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/claude/lt" } }
 ```
 
 用户运行 `linthis plugin add myteam <url>` 后，`plugin = "self"` 变为 `plugin = "myteam"`，所有条目合并到用户的 `.linthis/config.toml` 中。

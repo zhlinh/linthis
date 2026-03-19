@@ -23,20 +23,17 @@ my-linthis-plugin/
 │   ├── git/
 │   │   └── pre-commit            # Custom pre-commit script
 │   └── agent/
-│       ├── plugins/
-│       │   ├── _default/                     # Default fallback (all providers)
-│       │   │   └── lt/                       # Plugin bundle
-│       │   │       ├── skills/lt-lint/SKILL.md
-│       │   │       ├── commands/
-│       │   │       ├── memories/TOPLEVEL.md
-│       │   │       └── hooks/hooks.json
-│       │   └── claude/                       # Provider-specific override (optional)
-│       │       └── lt/
-│       │           └── skills/lt-lint/SKILL.md
-│       └── hook/
-│           └── stop/
-│               └── claude/
-│                   └── settings.json  # Custom Claude stop hook
+│       └── plugins/
+│           ├── _default/                     # Default fallback (all providers)
+│           │   └── lt/                       # Plugin bundle
+│           │       ├── skills/lt-lint/SKILL.md
+│           │       ├── commands/
+│           │       ├── memories/TOPLEVEL.md
+│           │       └── hooks/hooks.json
+│           └── claude/                       # Provider-specific override (optional)
+│               └── lt/
+│                   ├── skills/lt-lint/SKILL.md
+│                   └── settings.json         # Provider settings (e.g. stop hook)
 ├── rules/                        # Optional: Additional rule configs
 │   ├── strict.toml
 │   └── relaxed.toml
@@ -63,10 +60,10 @@ After this, running `linthis hook install` will pick up the plugin's custom hook
 pre-commit = { source = { plugin = "self", file = "hooks/git/pre-commit" } }
 
 [hook.agent.plugins._default]
-"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/lt" } }
+"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/_default/lt" } }
 
-[hook.agent.stop]
-"claude.settings" = { source = { plugin = "self", file = "hooks/agent/hook/stop/claude/settings.json" } }
+[hook.agent.plugins.claude]
+"lt" = { source = { plugin = "self", file = "hooks/agent/plugins/claude/lt" } }
 ```
 
 After `linthis plugin add myteam <url>`, `plugin = "self"` becomes `plugin = "myteam"` and all entries are merged into the user's `.linthis/config.toml`.
