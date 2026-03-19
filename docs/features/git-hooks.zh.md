@@ -9,7 +9,7 @@ linthis 与 Git 的 hook 系统集成，在提交（或推送）时自动运行 
 
 全局 hook 采用 **策略 B**：本地项目 hook 优先。如果本地 `.git/hooks/<event>` 已调用 `linthis`，全局 hook 完全委托给它。如果本地 hook 存在但不调用 `linthis`，全局 hook 先运行 `linthis`，再链式调用本地 hook。如果没有本地 hook，全局 hook 直接运行 `linthis`。此设计保证对其他 hook 工具零干扰。
 
-所有六种 hook 类型——`git`、`prek`、`pre-commit`、`git-with-agent`、`prek-with-agent`、`pre-commit-with-agent`——均支持在两个作用域安装。
+所有 hook 类型——`git`、`prek`、`git-with-agent`、`prek-with-agent`——均支持在两个作用域安装。
 
 ---
 
@@ -29,9 +29,6 @@ linthis hook install --event commit-msg
 
 # prek hook（适用于使用 prek 的项目）
 linthis hook install --type prek
-
-# pre-commit hook（适用于使用 pre-commit 框架的项目）
-linthis hook install --type pre-commit
 ```
 
 ### 全局 hook
@@ -62,10 +59,8 @@ linthis hook install --global -y
 |------|--------|---------|------|
 | `git` | Git 原生 | `.git/hooks/<event>` | 默认类型；无需额外工具 |
 | `prek` | [prek](https://github.com/prek-dev/prek) | prek 运行器 | 需要安装 prek；配置文件可提交到仓库 |
-| `pre-commit` | [pre-commit 框架](https://pre-commit.com) | pre-commit 运行器 | 需要安装 pre-commit；配置文件可提交 |
 | `git-with-agent` | Git 原生 | `.git/hooks/<event>` | 与 `git` 相同，lint 失败时额外触发 AI 智能修复 |
 | `prek-with-agent` | prek | prek 运行器 | 与 `prek` 相同，lint 失败时额外触发 AI 智能修复 |
-| `pre-commit-with-agent` | pre-commit 框架 | pre-commit 运行器 | 与 `pre-commit` 相同，lint 失败时额外触发 AI 智能修复 |
 
 ---
 
@@ -258,7 +253,7 @@ pre-commit = { source = { git = "https://github.com/org/hooks.git", ref = "main"
 
 ## *-with-agent Hook 类型
 
-`git-with-agent`、`prek-with-agent` 和 `pre-commit-with-agent` 类型添加了 AI agent 修复兜底机制。当 `linthis` 以非零状态码退出（lint 失败）时，hook 会以无头模式调用指定的 agent CLI 尝试自动修复，然后重新运行 `linthis` 验证结果。
+`git-with-agent` 和 `prek-with-agent` 类型添加了 AI agent 修复兜底机制。当 `linthis` 以非零状态码退出（lint 失败）时，hook 会以无头模式调用指定的 agent CLI 尝试自动修复，然后重新运行 `linthis` 验证结果。
 
 ### 支持的 provider
 
@@ -271,6 +266,8 @@ pre-commit = { source = { git = "https://github.com/org/hooks.git", ref = "main"
 | `droid` | Droid | `droid exec --auto low '<prompt>'` |
 | `auggie` | Auggie | `auggie --print '<prompt>'` |
 
+`--provider` 支持 `provider/model` 语法（如 `claude/opus`），等同于 `--provider claude --provider-args "--model opus"`。使用 `--provider-args` 可向 AI agent CLI 传递额外参数。
+
 ### 示例
 
 ```bash
@@ -280,14 +277,14 @@ linthis hook install --type git-with-agent --provider claude
 # 项目级：prek hook，使用 Gemini 修复兜底
 linthis hook install --type prek-with-agent --provider gemini
 
-# 项目级：pre-commit hook，使用 Codex 修复兜底
-linthis hook install --type pre-commit-with-agent --provider codex
+# 使用 provider/model 语法（向 agent CLI 传递 --model）
+linthis hook install --type git-with-agent --provider claude/opus
+
+# 使用显式 provider-args
+linthis hook install --type git-with-agent --provider claude --provider-args "--model opus"
 
 # 全局：git hook，使用 Claude 修复兜底
 linthis hook install --global --type git-with-agent --provider claude
-
-# 全局：pre-commit hook，使用 Gemini 修复兜底
-linthis hook install --global --type pre-commit-with-agent --provider gemini
 ```
 
 ---
@@ -337,7 +334,7 @@ Global Hooks (~/.config/git/hooks/):
 | 可提交到仓库 | 否 | 否（`.git/` 不被追踪） |
 | 团队共享 | 否 | 需要 prek 或 pre-commit 类型 |
 | Hook 共存 | 策略 B（自动委托） | 手动链式调用 |
-| 支持的类型 | 全部六种类型 | 全部六种类型 |
+| 支持的类型 | 所有类型 | 所有类型 |
 
 ---
 
@@ -386,10 +383,9 @@ linthis hook uninstall --event pre-push
 linthis hook install                                               # git pre-commit
 linthis hook install --event pre-push                             # git pre-push
 linthis hook install --type prek                                   # prek
-linthis hook install --type pre-commit                             # pre-commit 框架
 linthis hook install --type git-with-agent --provider claude       # git + agent 修复
+linthis hook install --type git-with-agent --provider claude/opus  # git + agent 修复（指定 model）
 linthis hook install --type prek-with-agent --provider gemini      # prek + agent 修复
-linthis hook install --type pre-commit-with-agent --provider codex # pre-commit + agent 修复
 
 # 全局安装
 linthis hook install --global                                      # 全局 git pre-commit
@@ -435,7 +431,7 @@ hook 首先运行 `linthis`。如果 `linthis` 成功退出，agent 永远不会
 
 ### Q6：`--type prek` 或 `--type pre-commit` 可以与 `--global` 一起使用吗？
 
-可以。所有六种 hook 类型都支持 `--global`。写入 `~/.config/git/hooks/<event>` 的 hook 脚本会调用相应的运行器（`prek` 或 `pre-commit`）而非直接调用 `linthis`。策略 B 委托逻辑同样适用。
+可以。所有 hook 类型都支持 `--global`。写入 `~/.config/git/hooks/<event>` 的 hook 脚本会调用相应的运行器（`prek` 或 `pre-commit`）而非直接调用 `linthis`。策略 B 委托逻辑同样适用。
 
 ### Q7：如何查看当前生效的 `core.hooksPath`？
 

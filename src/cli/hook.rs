@@ -257,7 +257,6 @@ fn deduplicate_hook_types(types: Vec<HookTool>) -> Vec<HookTool> {
         let base_already_upgraded = match &t {
             HookTool::Git => result.iter().any(|r| matches!(r, HookTool::GitWithAgent)),
             HookTool::Prek => result.iter().any(|r| matches!(r, HookTool::PrekWithAgent)),
-            HookTool::PreCommit => result.iter().any(|r| matches!(r, HookTool::PreCommitWithAgent)),
             _ => false,
         };
         if base_already_upgraded {
@@ -267,7 +266,6 @@ fn deduplicate_hook_types(types: Vec<HookTool>) -> Vec<HookTool> {
         match &t {
             HookTool::GitWithAgent => result.retain(|r| !matches!(r, HookTool::Git)),
             HookTool::PrekWithAgent => result.retain(|r| !matches!(r, HookTool::Prek)),
-            HookTool::PreCommitWithAgent => result.retain(|r| !matches!(r, HookTool::PreCommit)),
             _ => {}
         }
         result.push(t);
@@ -572,7 +570,7 @@ fn handle_hook_install_single(
         let base = hook_type.as_ref().unwrap().base_tool().clone();
         return match &base {
             HookTool::Git => handle_git_with_agent_install(&hook_event, force, global, yes, &fix_provider, &args, provider_args.as_deref()),
-            HookTool::Prek | HookTool::PreCommit => {
+            HookTool::Prek => {
                 handle_precommit_with_agent_install(&base, &hook_event, force, &fix_provider, &args)
             }
             _ => ExitCode::from(1),
@@ -1662,9 +1660,8 @@ fn install_hooks(tool: &HookTool, hook_event: &HookEvent) -> Result<(), String> 
 
     let (cmd, tool_name) = match tool {
         HookTool::Prek => ("prek", "prek"),
-        HookTool::PreCommit => ("pre-commit", "pre-commit"),
         HookTool::Git | HookTool::Agent
-        | HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent => {
+        | HookTool::GitWithAgent | HookTool::PrekWithAgent => {
             return Ok(()) // handled separately
         }
     };
@@ -1749,8 +1746,6 @@ fn describe_hook_source(tool: &HookTool, hook_event: &HookEvent) -> String {
         HookTool::GitWithAgent => "git-with-agent",
         HookTool::Prek => "prek",
         HookTool::PrekWithAgent => "prek-with-agent",
-        HookTool::PreCommit => "pre-commit-tool",
-        HookTool::PreCommitWithAgent => "pre-commit-tool-with-agent",
         HookTool::Agent => return "built-in (agent)".to_string(),
     };
 
@@ -1771,7 +1766,6 @@ fn describe_hook_source(tool: &HookTool, hook_event: &HookEvent) -> String {
         HookTool::GitWithAgent => hook_cfg.git_with_agent.get(event_key),
         HookTool::Prek => hook_cfg.prek.get(event_key),
         HookTool::PrekWithAgent => hook_cfg.prek_with_agent.get(event_key),
-        HookTool::PreCommit | HookTool::PreCommitWithAgent => None,
         HookTool::Agent => unreachable!(),
     };
 
@@ -1800,8 +1794,6 @@ fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> Result<Opti
         HookTool::GitWithAgent => "git-with-agent",
         HookTool::Prek => "prek",
         HookTool::PrekWithAgent => "prek-with-agent",
-        HookTool::PreCommit => "pre-commit-tool",
-        HookTool::PreCommitWithAgent => "pre-commit-tool-with-agent",
         HookTool::Agent => return Ok(None), // agent handled separately
     };
 
@@ -1828,7 +1820,6 @@ fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> Result<Opti
         HookTool::GitWithAgent => hook_cfg.git_with_agent.get(event_key),
         HookTool::Prek => hook_cfg.prek.get(event_key),
         HookTool::PrekWithAgent => hook_cfg.prek_with_agent.get(event_key),
-        HookTool::PreCommit | HookTool::PreCommitWithAgent => None,
         HookTool::Agent => return Ok(None),
     };
 
@@ -1855,11 +1846,11 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
 
     match tool {
         HookTool::Agent
-        | HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent => {
+        | HookTool::GitWithAgent | HookTool::PrekWithAgent => {
             // Handled separately before create_hook_config is called
             return Ok(());
         }
-        HookTool::Prek | HookTool::PreCommit => {
+        HookTool::Prek => {
             let config_path = std::path::PathBuf::from(".pre-commit-config.yaml");
 
             if config_path.exists() && !force {
@@ -1909,11 +1900,7 @@ fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args
 
             match fs::write(&config_path, content) {
                 Ok(_) => {
-                    let tool_name = match tool {
-                        HookTool::Prek => "prek",
-                        HookTool::PreCommit => "pre-commit",
-                        _ => unreachable!(),
-                    };
+                    let tool_name = "prek";
                     println!(
                         "{} Created {} ({}/pre-commit compatible)",
                         "✓".green(),
@@ -2809,7 +2796,6 @@ fn handle_precommit_with_agent_install(
 
     let tool_cmd = match base_tool {
         HookTool::Prek       => "prek run",
-        HookTool::PreCommit  => "pre-commit run --all-files",
         _ => return ExitCode::from(1),
     };
 
@@ -4850,12 +4836,8 @@ fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, p
                 HookTool::Agent
             } else if content.contains("--type prek-with-agent") {
                 HookTool::PrekWithAgent
-            } else if content.contains("--type pre-commit-with-agent") {
-                HookTool::PreCommitWithAgent
             } else if content.contains("--type prek") {
                 HookTool::Prek
-            } else if content.contains("--type pre-commit") {
-                HookTool::PreCommit
             } else {
                 HookTool::Git
             };
@@ -5013,7 +4995,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
     }
 
     // Group entries by hook_type for structured output
-    let type_order = ["agent", "git-with-agent", "prek-with-agent", "pre-commit-with-agent", "git", "prek", "pre-commit"];
+    let type_order = ["agent", "git-with-agent", "prek-with-agent", "git", "prek"];
     let mut grouped: Vec<(&str, Vec<&&InstalledHook>)> = Vec::new();
     for ht in &type_order {
         let group: Vec<&&InstalledHook> = filtered.iter().filter(|h| h.hook_type == *ht).collect();
@@ -5060,8 +5042,6 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
             "agent"                => HookTool::Agent,
             "prek"                 => HookTool::Prek,
             "prek-with-agent"      => HookTool::PrekWithAgent,
-            "pre-commit"           => HookTool::PreCommit,
-            "pre-commit-with-agent"=> HookTool::PreCommitWithAgent,
             other => {
                 eprintln!("  {} Unknown hook type '{}', skipping", "✗".red(), other);
                 errors += 1;
@@ -5089,7 +5069,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
         };
 
         // Only re-write thin wrapper for types that have one
-        if !matches!(hook_type, HookTool::Agent | HookTool::Prek | HookTool::PreCommit) {
+        if !matches!(hook_type, HookTool::Agent | HookTool::Prek) {
             let hook_file = hook_dir.join(event.hook_filename());
             let pa_opt: Option<&str> = if hook.provider_args.is_empty() { None } else { Some(&hook.provider_args) };
             let thin_script = build_thin_wrapper_script(&event, &hook_type, provider_opt, global, pa_opt);
@@ -5229,7 +5209,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
             let provider_name_lower = format!("{}", scan_provider).to_lowercase();
             let already_registered = filtered.iter().any(|h| {
                 h.event == scan_event.as_str()
-                    && matches!(h.hook_type.as_str(), "git-with-agent" | "agent" | "prek-with-agent" | "pre-commit-with-agent")
+                    && matches!(h.hook_type.as_str(), "git-with-agent" | "agent" | "prek-with-agent")
                     && h.skill_providers.iter().any(|sp| sp.to_lowercase() == provider_name_lower)
             });
             if already_registered {

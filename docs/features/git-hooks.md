@@ -9,7 +9,7 @@ linthis integrates with Git's hook system to run lint checks and formatting auto
 
 Global hooks use **Strategy B**: a local project hook takes priority. If the local `.git/hooks/<event>` already calls `linthis`, the global hook delegates to it entirely. If a local hook exists but does not call `linthis`, the global hook runs `linthis` first and then chains to the local hook. If there is no local hook at all, the global hook runs `linthis` directly. This design guarantees zero interference with other hook tools.
 
-All six hook types — `git`, `prek`, `pre-commit`, `git-with-agent`, `prek-with-agent`, `pre-commit-with-agent` — are supported at both scopes.
+All hook types — `git`, `prek`, `git-with-agent`, `prek-with-agent` — are supported at both scopes.
 
 ---
 
@@ -29,9 +29,6 @@ linthis hook install --event commit-msg
 
 # prek hook (for projects using prek)
 linthis hook install --type prek
-
-# pre-commit hook (for projects using pre-commit framework)
-linthis hook install --type pre-commit
 ```
 
 ### Global hooks
@@ -62,10 +59,8 @@ Every repository on the machine will now run that hook. No `git init` re-run is 
 |------|--------|---------|-------|
 | `git` | Git native | `.git/hooks/<event>` | Default type; no extra tooling required |
 | `prek` | [prek](https://github.com/prek-dev/prek) | prek's runner | Requires prek installed; config committed to repo |
-| `pre-commit` | [pre-commit framework](https://pre-commit.com) | pre-commit runner | Requires pre-commit installed; config committed |
 | `git-with-agent` | Git native | `.git/hooks/<event>` | Same as `git`, plus AI agent fix fallback on lint failure |
 | `prek-with-agent` | prek | prek's runner | Same as `prek`, plus AI agent fix fallback |
-| `pre-commit-with-agent` | pre-commit framework | pre-commit runner | Same as `pre-commit`, plus AI agent fix fallback |
 
 ---
 
@@ -258,7 +253,7 @@ This means adding a team plugin is all it takes for everyone to get the team's c
 
 ## *-with-agent Hook Types
 
-The `git-with-agent`, `prek-with-agent`, and `pre-commit-with-agent` types add an AI agent fix fallback. When `linthis` exits with a non-zero status (lint failure), the hook invokes the chosen agent CLI in headless mode to attempt an automatic fix, then re-runs `linthis` to verify the result.
+The `git-with-agent` and `prek-with-agent` types add an AI agent fix fallback. When `linthis` exits with a non-zero status (lint failure), the hook invokes the chosen agent CLI in headless mode to attempt an automatic fix, then re-runs `linthis` to verify the result.
 
 ### Supported providers
 
@@ -271,6 +266,8 @@ The `git-with-agent`, `prek-with-agent`, and `pre-commit-with-agent` types add a
 | `droid` | Droid | `droid exec --auto low '<prompt>'` |
 | `auggie` | Auggie | `auggie --print '<prompt>'` |
 
+The `--provider` flag supports `provider/model` syntax (e.g. `claude/opus`) which is equivalent to `--provider claude --provider-args "--model opus"`. Use `--provider-args` to pass additional arguments to the AI agent CLI.
+
 ### Examples
 
 ```bash
@@ -280,14 +277,14 @@ linthis hook install --type git-with-agent --provider claude
 # Project-level: prek hook with Gemini fix fallback
 linthis hook install --type prek-with-agent --provider gemini
 
-# Project-level: pre-commit hook with Codex fix fallback
-linthis hook install --type pre-commit-with-agent --provider codex
+# With provider/model syntax (passes --model to agent CLI)
+linthis hook install --type git-with-agent --provider claude/opus
+
+# With explicit provider-args
+linthis hook install --type git-with-agent --provider claude --provider-args "--model opus"
 
 # Global: git hook with Claude fix fallback
 linthis hook install --global --type git-with-agent --provider claude
-
-# Global: pre-commit hook with Gemini fix fallback
-linthis hook install --global --type pre-commit-with-agent --provider gemini
 ```
 
 ---
@@ -337,7 +334,7 @@ The status output shows:
 | Committable to repo | No | No (`.git/` is not tracked) |
 | Team sharing | No | Requires prek or pre-commit type |
 | Hook coexistence | Strategy B (auto-delegation) | Manual chaining |
-| Supported types | All six types | All six types |
+| Supported types | All types | All types |
 
 ---
 
@@ -386,10 +383,9 @@ linthis hook uninstall --event pre-push
 linthis hook install                                               # git pre-commit
 linthis hook install --event pre-push                             # git pre-push
 linthis hook install --type prek                                   # prek
-linthis hook install --type pre-commit                             # pre-commit framework
 linthis hook install --type git-with-agent --provider claude       # git + agent fix
+linthis hook install --type git-with-agent --provider claude/opus  # git + agent fix (with model)
 linthis hook install --type prek-with-agent --provider gemini      # prek + agent fix
-linthis hook install --type pre-commit-with-agent --provider codex # pre-commit + agent fix
 
 # Global install
 linthis hook install --global                                      # global git pre-commit
@@ -444,7 +440,7 @@ The hook first runs `linthis`. If `linthis` exits cleanly, the agent is never in
 
 ### Q6: Can I use `--type prek` or `--type pre-commit` with `--global`?
 
-Yes. All six hook types are supported with `--global`. The hook script written to `~/.config/git/hooks/<event>` will invoke the appropriate runner (`prek` or `pre-commit`) rather than `linthis` directly. The same Strategy B delegation logic applies.
+Yes. All hook types are supported with `--global`. The hook script written to `~/.config/git/hooks/<event>` will invoke the appropriate runner (`prek` or `pre-commit`) rather than `linthis` directly. The same Strategy B delegation logic applies.
 
 ### Q7: How do I check which `core.hooksPath` is active?
 
