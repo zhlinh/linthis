@@ -829,19 +829,24 @@ fn build_global_hook_script_for_event(
                 let prompt = agent_fix_prompt_for_event(hook_event);
                 agent_fix_headless_cmd(p, &prompt, None)
             };
+            let agent_check = shell_agent_availability_check(p);
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-                 \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
-                 \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
-                 \x20\x20\x20 {agent}\n\
-                 \x20\x20\x20 stop_timer\n\
-                 \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-                 \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
-                 \x20\x20\x20 LINTHIS_EXIT=$?\n\
+                 \x20\x20\x20 {agent_check}\
+                 \x20\x20\x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
+                 \x20\x20\x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+                 \x20\x20\x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
+                 \x20\x20\x20\x20\x20 {agent}\n\
+                 \x20\x20\x20\x20\x20 stop_timer\n\
+                 \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+                 \x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
+                 \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
+                 \x20\x20\x20 fi\n\
                  {new_msg_print}\
                  \x20 fi\n",
                 provider = p,
                 agent = agent_cmd,
+                agent_check = agent_check,
                 error_msg = error_msg,
                 new_msg_print = new_msg_print,
             )
@@ -856,19 +861,24 @@ fn build_global_hook_script_for_event(
                 let prompt = agent_fix_prompt_for_event(hook_event);
                 agent_fix_headless_cmd(p, &prompt, None)
             };
+            let agent_check = shell_agent_availability_check(p);
             format!(
                 "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-                 \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
-                 \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
-                 \x20\x20\x20 {agent}\n\
-                 \x20\x20\x20 stop_timer\n\
-                 \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-                 \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
-                 \x20\x20\x20 LINTHIS_EXIT=$?\n\
+                 \x20\x20\x20 {agent_check}\
+                 \x20\x20\x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
+                 \x20\x20\x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+                 \x20\x20\x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
+                 \x20\x20\x20\x20\x20 {agent}\n\
+                 \x20\x20\x20\x20\x20 stop_timer\n\
+                 \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+                 \x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
+                 \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
+                 \x20\x20\x20 fi\n\
                  {new_msg_print}\
                  \x20 fi\n",
                 provider = p,
                 agent = agent_cmd,
+                agent_check = agent_check,
                 error_msg = error_msg,
                 new_msg_print = new_msg_print,
             )
@@ -1118,7 +1128,7 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
         }
 
         let has_linthis = fs::read_to_string(&hook_path)
-            .map(|c| c.contains("# linthis-hook"))
+            .map(|c| c.contains("# linthis-hook") || c.contains("linthis hook run"))
             .unwrap_or(false);
 
         if !has_linthis {
@@ -1158,7 +1168,7 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
         .iter()
         .any(|e| {
             let p = hooks_dir.join(e.hook_filename());
-            p.exists() && fs::read_to_string(&p).map(|c| c.contains("# linthis-hook")).unwrap_or(false)
+            p.exists() && fs::read_to_string(&p).map(|c| c.contains("# linthis-hook") || c.contains("linthis hook run")).unwrap_or(false)
         });
 
     if !remaining {
@@ -1254,7 +1264,7 @@ fn handle_hook_status() -> ExitCode {
             if hook_path.exists() {
                 any_global_hook = true;
                 if let Ok(content) = std::fs::read_to_string(&hook_path) {
-                    let has_linthis = content.contains("# linthis-hook");
+                    let has_linthis = content.contains("# linthis-hook") || content.contains("linthis hook run");
                     if has_linthis {
                         println!("{} {} [global]", "✓".green(), hook_path.display());
                         println!("    {} Strategy B: local hook takes priority", "ℹ".dimmed());
@@ -2255,6 +2265,27 @@ fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str, provider_ar
     }
 }
 
+/// Generate a shell snippet that checks whether the provider binary exists in PATH.
+///
+/// If the binary is not found, prints a friendly message suggesting installation
+/// or provider change, then gracefully degrades (skips the agent invocation).
+/// The snippet sets `_LINTHIS_AGENT_OK=1` if available, `_LINTHIS_AGENT_OK=0` otherwise.
+fn shell_agent_availability_check(provider: &AgentFixProvider) -> String {
+    let bin = agent_fix_bin(provider);
+    format!(
+        "if command -v {bin} >/dev/null 2>&1; then\n\
+         \x20 _LINTHIS_AGENT_OK=1\n\
+         else\n\
+         \x20 _LINTHIS_AGENT_OK=0\n\
+         \x20 echo \"[linthis] ⚠ '{bin}' not found in PATH — skipping AI auto-fix\" >&2\n\
+         \x20 echo \"[linthis]   To install: https://docs.anthropic.com/en/docs/claude-code\" >&2\n\
+         \x20 echo \"[linthis]   To change provider: linthis hook install -g --type git-with-agent --provider <name> --event <event> --force\" >&2\n\
+         \x20 echo \"[linthis]   Please fix the issues manually and retry.\" >&2\n\
+         fi\n",
+        bin = bin,
+    )
+}
+
 /// Detect which AgentFixProvider CLIs are available in PATH
 fn detect_agent_fix_providers() -> Vec<AgentFixProvider> {
     ALL_AGENT_FIX_PROVIDERS
@@ -2543,6 +2574,12 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
          \x20 exit 0\n\
          fi\n\
          \n\
+         # Check if agent provider is available before review\n\
+         {agent_check}\
+         if [ \"$_LINTHIS_AGENT_OK\" = \"0\" ]; then\n\
+         \x20 exit 0\n\
+         fi\n\
+         \n\
          # Invoke agent code review before push\n\
          echo \"[linthis] Invoking {provider} code review...\" >&2\n\
          start_timer \"Reviewing with {provider}\"\n\
@@ -2571,6 +2608,7 @@ fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFi
         linthis = linthis_cmd,
         provider = fix_provider,
         agent = agent_cmd,
+        agent_check = shell_agent_availability_check(fix_provider),
     )
 }
 
@@ -2594,6 +2632,7 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
     } else {
         String::new()
     };
+    let agent_check = shell_agent_availability_check(fix_provider);
     format!(
         "#!/bin/sh\n\
          {timer}\
@@ -2613,24 +2652,29 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
          fi\n\
          \n\
          if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-         \x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
-         \x20 start_timer \"Fixing with {provider}\"\n\
-         \x20 {agent}\n\
-         \x20 stop_timer\n\
-         \x20 # Re-stage files modified by agent fix\n\
-         \x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20   echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20 # Check if agent provider is available before attempting fix\n\
+         \x20 {agent_check}\
+         \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
+         \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+         \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
+         \x20\x20\x20 {agent}\n\
+         \x20\x20\x20 stop_timer\n\
+         \x20\x20\x20 # Re-stage files modified by agent fix\n\
+         \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20 fi\n\
+         \x20\x20\x20 # Re-verify after agent fix\n\
+         \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+         \x20\x20\x20 $LINTHIS_CMD\n\
+         \x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20 fi\n\
-         \x20 # Re-verify after agent fix\n\
-         \x20 echo \"[linthis] Re-verifying...\" >&2\n\
-         \x20 $LINTHIS_CMD\n\
-         \x20 LINTHIS_EXIT=$?\n\
          {new_msg_print}\
          fi\n\
          \n\
          exit $LINTHIS_EXIT\n",
         timer = timer_fns,
         linthis = linthis_cmd,
+        agent_check = agent_check,
         provider = fix_provider,
         agent = agent_cmd,
         error_msg = error_msg,
@@ -2808,6 +2852,7 @@ fn handle_precommit_with_agent_install(
     );
     let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt, None);
     let timer_fns = shell_timer_functions();
+    let agent_check = shell_agent_availability_check(fix_provider);
     let wrapper = format!(
         "#!/bin/sh\n\
          {timer}\
@@ -2815,13 +2860,17 @@ fn handle_precommit_with_agent_install(
          EXIT=$?\n\
          \n\
          if [ $EXIT -ne 0 ]; then\n\
-         \x20 echo \"[linthis] Errors detected. Invoking {provider} to fix...\" >&2\n\
-         \x20 start_timer \"Fixing with {provider}\"\n\
-         \x20 {agent}\n\
-         \x20 stop_timer\n\
-         \x20 echo \"[linthis] Re-verifying...\" >&2\n\
-         \x20 {tool_cmd}\n\
-         \x20 EXIT=$?\n\
+         \x20 # Check if agent provider is available before attempting fix\n\
+         \x20 {agent_check}\
+         \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
+         \x20\x20\x20 echo \"[linthis] Errors detected. Invoking {provider} to fix...\" >&2\n\
+         \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
+         \x20\x20\x20 {agent}\n\
+         \x20\x20\x20 stop_timer\n\
+         \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+         \x20\x20\x20 {tool_cmd}\n\
+         \x20\x20\x20 EXIT=$?\n\
+         \x20 fi\n\
          fi\n\
          \n\
          exit $EXIT\n",
@@ -2829,6 +2878,7 @@ fn handle_precommit_with_agent_install(
         tool_cmd = tool_cmd,
         provider = fix_provider,
         agent = agent_cmd,
+        agent_check = agent_check,
     );
 
     let hook_filename = hook_event.hook_filename();
@@ -2888,7 +2938,7 @@ fn agent_event_content_generic(event: &HookEvent) -> String {
 fn agent_lint_body() -> String {
     r#"## Companion Skills
 
-When the user asks to commit, if the **lt-cmsg** skill is also available, invoke both lt-lint and lt-cmsg. Run lt-lint first (to fix code issues), then lt-cmsg (to validate the commit message).
+When the user asks to commit, if the **lt-cmsg** skill is also available, both lt-lint and lt-cmsg should be invoked together. Run lt-lint first (to fix code issues), then lt-cmsg (to validate the commit message).
 
 ## Goal
 
@@ -2935,7 +2985,7 @@ Fix line 15 by adding a doc comment, and line 23 by handling the error return va
 fn agent_cmsg_body() -> String {
     r#"## Companion Skills
 
-When the user asks to commit, if the **lt-lint** skill is also available, invoke both lt-lint and lt-cmsg. Run lt-lint first (to fix code issues), then lt-cmsg (to validate the commit message).
+When the user asks to commit, if the **lt-lint** skill is also available, both lt-lint and lt-cmsg should be invoked together. Run lt-lint first (to fix code issues), then lt-cmsg (to validate the commit message).
 
 ## Goal
 
@@ -3704,11 +3754,11 @@ fn agent_event_skill_metadata(
     match event {
         HookEvent::PreCommit => (
             custom_name.unwrap_or("lt-lint").to_string(),
-            "对暂存/修改的代码文件运行 linthis 代码检查，提交前修复所有问题。使用 `linthis -i <file> -c` 按项目编码规范检查，必须手动编辑修复（不能用 linthis --fix）。提交时若 lt-cmsg skill 也存在则一起触发。Run linthis lint checks on staged/modified code files and fix all issues before committing. Uses `linthis -i <file> -c`. Issues must be fixed by editing code directly. If the lt-cmsg skill also exists, invoke both when committing.",
+            "对暂存/修改的代码文件运行 linthis 代码检查，提交前修复所有问题。使用 `linthis -i <file> -c` 按项目编码规范检查，必须手动编辑修复（不能用 linthis --fix）。提交时若 lt-cmsg skill 也存在应一起触发。Run linthis lint checks on staged/modified code files and fix all issues before committing. Uses `linthis -i <file> -c`. Issues must be fixed by editing code directly. If the lt-cmsg skill also exists, both should be invoked together when committing.",
         ),
         HookEvent::CommitMsg => (
             custom_name.unwrap_or("lt-cmsg").to_string(),
-            "验证并自动修复 git 提交信息，使其符合 Conventional Commits 规范。分析暂存区 diff 选择正确的 type 前缀（feat/fix/refactor 等），检查标题格式，自动改写不合规的提交信息。提交时若 lt-lint skill 也存在则一起触发。Validate and auto-fix git commit messages to comply with Conventional Commits. Analyzes staged diff to select correct type prefix, checks format, auto-rewrites malformed messages. If the lt-lint skill also exists, invoke both when committing.",
+            "验证并自动修复 git 提交信息，使其符合 Conventional Commits 规范。分析暂存区 diff 选择正确的 type 前缀（feat/fix/refactor 等），检查标题格式，自动改写不合规的提交信息。提交时若 lt-lint skill 也存在应一起触发。Validate and auto-fix git commit messages to comply with Conventional Commits. Analyzes staged diff to select correct type prefix, checks format, auto-rewrites malformed messages. If the lt-lint skill also exists, both should be invoked together when committing.",
         ),
         HookEvent::PrePush => (
             custom_name.unwrap_or("lt-review").to_string(),
