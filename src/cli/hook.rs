@@ -2886,7 +2886,11 @@ fn agent_event_content_generic(event: &HookEvent) -> String {
 }
 
 fn agent_lint_body() -> String {
-    r#"## Goal
+    r#"## Companion Skills
+
+When the user asks to commit, if the **lt-cmsg** skill is also available, invoke both lt-lint and lt-cmsg. Run lt-lint first (to fix code issues), then lt-cmsg (to validate the commit message).
+
+## Goal
 
 Catch and fix code quality issues before they enter the repository. Running lint at pre-commit ensures every committed file meets project coding standards, preventing style debt from accumulating over time.
 
@@ -2929,7 +2933,11 @@ Fix line 15 by adding a doc comment, and line 23 by handling the error return va
 }
 
 fn agent_cmsg_body() -> String {
-    r#"## Goal
+    r#"## Companion Skills
+
+When the user asks to commit, if the **lt-lint** skill is also available, invoke both lt-lint and lt-cmsg. Run lt-lint first (to fix code issues), then lt-cmsg (to validate the commit message).
+
+## Goal
 
 Ensure every commit message follows Conventional Commits format and accurately reflects the actual code changes. A well-structured commit history makes code review, changelog generation, and git bisect much easier.
 
@@ -3696,11 +3704,11 @@ fn agent_event_skill_metadata(
     match event {
         HookEvent::PreCommit => (
             custom_name.unwrap_or("lt-lint").to_string(),
-            "对暂存/修改的代码文件运行 linthis 代码检查，提交前修复所有问题。使用 `linthis -i <file> -c` 按项目编码规范检查，必须手动编辑修复（不能用 linthis --fix）。由 pre-commit hook 触发。Run linthis lint checks on staged/modified code files and fix all issues before committing. Uses `linthis -i <file> -c`. Issues must be fixed by editing code directly. Triggered by pre-commit hook.",
+            "对暂存/修改的代码文件运行 linthis 代码检查，提交前修复所有问题。使用 `linthis -i <file> -c` 按项目编码规范检查，必须手动编辑修复（不能用 linthis --fix）。提交时若 lt-cmsg skill 也存在则一起触发。Run linthis lint checks on staged/modified code files and fix all issues before committing. Uses `linthis -i <file> -c`. Issues must be fixed by editing code directly. If the lt-cmsg skill also exists, invoke both when committing.",
         ),
         HookEvent::CommitMsg => (
             custom_name.unwrap_or("lt-cmsg").to_string(),
-            "验证并自动修复 git 提交信息，使其符合 Conventional Commits 规范。分析暂存区 diff 选择正确的 type 前缀（feat/fix/refactor 等），检查标题格式，自动改写不合规的提交信息。由 commit-msg hook 触发。Validate and auto-fix git commit messages to comply with Conventional Commits. Analyzes staged diff to select correct type prefix, checks format, auto-rewrites malformed messages. Triggered by commit-msg hook.",
+            "验证并自动修复 git 提交信息，使其符合 Conventional Commits 规范。分析暂存区 diff 选择正确的 type 前缀（feat/fix/refactor 等），检查标题格式，自动改写不合规的提交信息。提交时若 lt-lint skill 也存在则一起触发。Validate and auto-fix git commit messages to comply with Conventional Commits. Analyzes staged diff to select correct type prefix, checks format, auto-rewrites malformed messages. If the lt-lint skill also exists, invoke both when committing.",
         ),
         HookEvent::PrePush => (
             custom_name.unwrap_or("lt-review").to_string(),
