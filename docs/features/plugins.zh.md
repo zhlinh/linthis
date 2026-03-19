@@ -33,7 +33,7 @@ my-linthis-plugin/
 │           └── claude/                       # Provider 特定覆盖（可选）
 │               └── lt/
 │                   ├── skills/lt-lint/SKILL.md
-│                   └── settings.json         # Provider 设置（如 stop hook）
+│                   └── hooks/hooks.json      # Provider hooks（如 stop hook）
 ├── rules/                        # 可选：额外规则配置
 │   ├── strict.toml
 │   └── relaxed.toml

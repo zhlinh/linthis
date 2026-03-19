@@ -33,7 +33,7 @@ my-linthis-plugin/
 │           └── claude/                       # Provider-specific override (optional)
 │               └── lt/
 │                   ├── skills/lt-lint/SKILL.md
-│                   └── settings.json         # Provider settings (e.g. stop hook)
+│                   └── hooks/hooks.json      # Provider hooks (e.g. stop hook)
 ├── rules/                        # Optional: Additional rule configs
 │   ├── strict.toml
 │   └── relaxed.toml
