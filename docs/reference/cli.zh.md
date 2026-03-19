@@ -72,11 +72,12 @@ linthis hook install [OPTIONS]
 
 | 选项 | 描述 |
 |-----|------|
-| `--type` | Hook 类型：`git`（默认）、`git-with-agent`、`agent`、`prek`、`prek-with-agent`、`pre-commit`、`pre-commit-with-agent` |
+| `--type` | Hook 类型：`git`（默认）、`git-with-agent`、`agent`、`prek`、`prek-with-agent` |
 | `--event` | Hook 事件：`pre-commit`（默认）、`pre-push`、`commit-msg` |
 | `--args` | Hook 脚本中 linthis 命令的额外参数（默认：`-c -f`，检查 + 格式化） |
 | `-g, --global` | 全局安装：agent 类型 → 用户主目录；其他类型 → `~/.config/git/hooks/` + `core.hooksPath` |
-| `--provider` | AI 提供商：`claude`、`codex`、`gemini`、`cursor`、`droid`、`auggie`、`codebuddy`。用于 `--type agent`：安装规则/设置文件。用于 `*-with-agent`：使用无头 CLI 自动修复。 |
+| `--provider` | AI 提供商：`claude`、`codex`、`gemini`、`cursor`、`droid`、`auggie`、`codebuddy`。支持 `provider/model` 语法（如 `claude/opus`）。用于 `--type agent`：安装规则/设置文件。用于 `*-with-agent`：使用无头 CLI 自动修复。 |
+| `--provider-args` | 传递给 AI agent CLI 的额外参数（如 `"--model opus"`）。与 `provider/model` 语法中的 model 合并（若同时指定）。 |
 | `--force` | 强制覆盖现有 hook |
 | `-y, --yes` | 非交互模式 |
 

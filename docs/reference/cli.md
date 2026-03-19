@@ -72,11 +72,12 @@ linthis hook install [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--type` | Hook type: `git` (default), `git-with-agent`, `agent`, `prek`, `prek-with-agent`, `pre-commit`, `pre-commit-with-agent` |
+| `--type` | Hook type: `git` (default), `git-with-agent`, `agent`, `prek`, `prek-with-agent` |
 | `--event` | Hook event: `pre-commit` (default), `pre-push`, `commit-msg` |
 | `--args` | Extra arguments for the linthis command in hook script (default: `-c -f`, check + format) |
 | `-g, --global` | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath` |
-| `--provider` | AI provider: `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy`. For `--type agent`: installs rules/settings files. For `*-with-agent`: uses headless CLI to auto-fix. |
+| `--provider` | AI provider: `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy`. Supports `provider/model` syntax (e.g. `claude/opus`). For `--type agent`: installs rules/settings files. For `*-with-agent`: uses headless CLI to auto-fix. |
+| `--provider-args` | Extra arguments passed to the AI agent CLI (e.g. `"--model opus"`). Merged with model from `provider/model` syntax if both specified. |
 | `--force` | Force overwrite existing |
 | `-y, --yes` | Non-interactive mode |
 

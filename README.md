@@ -576,10 +576,11 @@ All modifications preserve TOML file format and comments.
 
 | Command          | Short | Long            | Description                                                                                                                                             |
 | ---------------- | ----- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hook install`   |       | `--type`        | Hook type (git/git-with-agent/agent/prek/prek-with-agent/pre-commit/pre-commit-with-agent)                                                              |
+| `hook install`   |       | `--type`        | Hook type (git/git-with-agent/agent/prek/prek-with-agent)                                                                                               |
 |                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg)                                                                                                             |
 |                  | `-g`  | `--global`      | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath`                                                        |
-|                  |       | `--provider`    | AI provider: `claude`/`codex`/`gemini`/`cursor`/`droid`/`auggie`/`codebuddy`. For `--type agent`: installs rules files. For `*-with-agent`: uses headless CLI to auto-fix. |
+|                  |       | `--provider`    | AI provider: `claude`/`codex`/`gemini`/`cursor`/`droid`/`auggie`/`codebuddy`. Supports `provider/model` shorthand (e.g. `claude/opus`). For `--type agent`: installs rules files. For `*-with-agent`: uses headless CLI to auto-fix. |
+|                  |       | `--provider-args` | Extra arguments passed to the AI agent CLI (e.g. `"--model opus"`)                                                                                    |
 |                  | `-c`  | `--check-only`  | Hook only runs check                                                                                                                                    |
 |                  | `-f`  | `--format-only` | Hook only runs format                                                                                                                                   |
 |                  |       | `--force`       | Force overwrite existing hook                                                                                                                           |
@@ -600,8 +601,6 @@ All modifications preserve TOML file format and comments.
 - `agent`: AI agent hook (Claude, Cursor, Windsurf, etc.)
 - `prek`: Rust-based pre-commit tool (faster)
 - `prek-with-agent`: prek hook + AI agent auto-fix on failure
-- `pre-commit`: Python-based standard tool
-- `pre-commit-with-agent`: pre-commit hook + AI agent auto-fix on failure
 
 **Global hooks**: Use `-g` / `--global` with any hook type. For `agent` type, installs rules to the user home directory. For all other types, installs to `~/.config/git/hooks/` and sets `git config --global core.hooksPath`. Local hooks take priority over global hooks (Strategy B).
 

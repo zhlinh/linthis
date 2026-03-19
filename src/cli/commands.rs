@@ -201,12 +201,6 @@ pub enum HookTool {
     Prek,
     /// Prek with AI agent fix fallback on failure
     PrekWithAgent,
-    /// Pre-commit (Python-based, standard) — hidden to avoid confusion with --event pre-commit
-    #[value(hide = true)]
-    PreCommit,
-    /// Pre-commit with AI agent fix fallback on failure — hidden
-    #[value(hide = true)]
-    PreCommitWithAgent,
 }
 
 impl HookTool {
@@ -215,7 +209,6 @@ impl HookTool {
         match self {
             HookTool::GitWithAgent => &HookTool::Git,
             HookTool::PrekWithAgent => &HookTool::Prek,
-            HookTool::PreCommitWithAgent => &HookTool::PreCommit,
             other => other,
         }
     }
@@ -224,7 +217,7 @@ impl HookTool {
     pub fn has_agent_fix(&self) -> bool {
         matches!(
             self,
-            HookTool::GitWithAgent | HookTool::PrekWithAgent | HookTool::PreCommitWithAgent
+            HookTool::GitWithAgent | HookTool::PrekWithAgent
         )
     }
 
@@ -236,8 +229,6 @@ impl HookTool {
             HookTool::Agent => "agent",
             HookTool::Prek => "prek",
             HookTool::PrekWithAgent => "prek-with-agent",
-            HookTool::PreCommit => "pre-commit",
-            HookTool::PreCommitWithAgent => "pre-commit-with-agent",
         }
     }
 }
