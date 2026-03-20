@@ -3236,26 +3236,32 @@ Catch and fix code quality issues before they enter the repository. Running lint
 
 If no code files were modified in this session, approve immediately.
 
+## Key Commands
+
+| Scope | Command | Description |
+|-------|---------|-------------|
+| Staged files | `linthis -s` | Check & format all files in the git staging area (`git add`ed) |
+| Modified files | `linthis -m` | Check & format all locally modified files (staged + unstaged) |
+| Specific files | `linthis -i <f1> -i <f2>` | Check & format listed files — one `-i` per file |
+| Check only | append `-c` | Lint only, no formatting (e.g. `linthis -s -c`) |
+
 ## Steps
 
 1. Identify modified code files in this session (files written or edited via Write/Edit tools, or via Bash)
-2. Run `linthis -i <file1> -i <file2>` on all modified files — use separate `-i` flags for each file
-3. Before any `git commit`, also run `linthis -s` to check all staged files
-   - **Note**: Running `linthis -i <file>` (without `-c`) or `linthis -s` (without `-c`) may auto-format files. If any files were already staged (`git add`), you must re-stage them after formatting: `git add <formatted files>`
-4. Read the lint output carefully — each issue includes file path, line number, and rule name
-5. If issues are found, fix them by editing the code directly
+2. Run lint + format on those files:
+   - `linthis -m` to cover all modified files at once, or
+   - `linthis -i <file1> -i <file2>` to target specific files
+   - **Note**: linthis may auto-format files (whitespace, trailing newlines, etc.) in addition to reporting lint errors
+3. Read the lint output carefully — each issue includes file path, line number, and rule name
+4. If issues are found, fix them by editing the code directly
    - Do **NOT** use `linthis --fix` or `linthis fix` — fixing manually ensures you understand the issue and don't introduce regressions from blind automated transforms
-6. Re-run `linthis -i <files>` to confirm all issues are resolved
-7. If any files were re-formatted or fixed, re-stage them: `git add <files>`
+5. Re-run linthis to confirm all issues are resolved
+6. **Re-stage**: if any files were already staged before step 2, linting/formatting may have changed them on disk. You must re-stage those files so the index matches the working tree:
+   ```
+   git add <formatted or fixed files>
+   ```
+7. Final check: run `linthis -s -c` (check-only on staged files) to verify the staging area is clean
 8. Only approve the commit once lint passes with zero errors
-
-## Key Commands
-
-| Action | Command |
-|--------|---------|
-| Lint and format staged files | `linthis -s` |
-| Lint and format specific files | `linthis -i <file>` |
-| Format only | `linthis -s -f` |
 
 ## Example
 
@@ -3268,7 +3274,7 @@ src/handler.go:23:4: error return value not checked (errcheck)
 2 issues found
 ```
 
-Fix line 15 by adding a doc comment, and line 23 by handling the error return value. Then re-run to confirm zero errors."#
+Fix line 15 by adding a doc comment, and line 23 by handling the error return value. Then re-run to confirm zero errors. If files were staged, re-stage: `git add src/handler.go`."#
         .to_string()
 }
 
