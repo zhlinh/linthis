@@ -107,7 +107,10 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
 
     items.push(ListItem::new(Line::from(vec![
         Span::styled("  ✓ ", Style::default().fg(Color::Green)),
-        Span::styled(format!("{} clean", clean_count), Style::default().fg(Color::Gray)),
+        Span::styled(
+            format!("{} clean", clean_count),
+            Style::default().fg(Color::Gray),
+        ),
     ])));
 
     if issue_count > 0 {
@@ -175,6 +178,9 @@ mod tests {
     #[test]
     fn test_truncate_path() {
         assert_eq!(truncate_path("short.rs", 20), "short.rs");
-        assert_eq!(truncate_path("very/long/path/file.rs", 15), "...path/file.rs");
+        assert_eq!(
+            truncate_path("very/long/path/file.rs", 15),
+            "...path/file.rs"
+        );
     }
 }

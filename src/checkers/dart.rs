@@ -125,7 +125,8 @@ mod tests {
     #[test]
     fn test_parse_analyze_output() {
         let checker = DartChecker::new();
-        let output = "ERROR|LINT|undefined_identifier|/path/to/file.dart|10|5|3|Undefined name 'foo'";
+        let output =
+            "ERROR|LINT|undefined_identifier|/path/to/file.dart|10|5|3|Undefined name 'foo'";
         let issues = checker.parse_analyze_output(output);
 
         assert_eq!(issues.len(), 1);

@@ -220,10 +220,7 @@ fn generate_issues_html(result: &RunResult) -> String {
             "{}:{}{}",
             issue.file_path.display(),
             issue.line,
-            issue
-                .column
-                .map(|c| format!(":{}", c))
-                .unwrap_or_default()
+            issue.column.map(|c| format!(":{}", c)).unwrap_or_default()
         );
 
         let rule_code = issue

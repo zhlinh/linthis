@@ -33,7 +33,7 @@ impl TypeScriptChecker {
         };
 
         let config_names = [
-            ".linthis/configs/javascript/.eslintrc.js",  // Plugin config (highest priority)
+            ".linthis/configs/javascript/.eslintrc.js", // Plugin config (highest priority)
             ".linthis/configs/javascript/.eslintrc.json",
             ".linthis/configs/typescript/.eslintrc.js",
             ".linthis/configs/typescript/.eslintrc.json",
@@ -152,12 +152,9 @@ impl Checker for TypeScriptChecker {
             cmd.arg("-c").arg(config_path);
         }
 
-        let output = cmd
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::checker("eslint", path, format!("Failed to run: {}", e))
-            })?;
+        let output = cmd.arg(path).output().map_err(|e| {
+            crate::LintisError::checker("eslint", path, format!("Failed to run: {}", e))
+        })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let issues = self.parse_eslint_output(&stdout, path);

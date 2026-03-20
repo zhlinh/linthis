@@ -87,12 +87,9 @@ impl Formatter for KotlinFormatter {
 
     fn check(&self, path: &Path) -> Result<bool> {
         // Run ktlint without --format to check
-        let output = Command::new("ktlint")
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::formatter("ktlint", path, format!("Failed to run: {}", e))
-            })?;
+        let output = Command::new("ktlint").arg(path).output().map_err(|e| {
+            crate::LintisError::formatter("ktlint", path, format!("Failed to run: {}", e))
+        })?;
 
         // Exit code 0 means file is formatted, non-zero means needs formatting
         Ok(!output.status.success())

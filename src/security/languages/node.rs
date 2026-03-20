@@ -63,7 +63,8 @@ impl NodeSecurityScanner {
                         version: vuln.range.clone(),
                         ecosystem: "npm".to_string(),
                         affected_versions: vec![adv.range.clone()],
-                        patched_versions: vuln.fix_available
+                        patched_versions: vuln
+                            .fix_available
                             .as_ref()
                             .map(|f| vec![f.version.clone()])
                             .unwrap_or_default(),
@@ -144,7 +145,9 @@ impl LanguageSecurityScanner for NodeSecurityScanner {
         result.commands.push("npm audit fix".to_string());
 
         if output.status.success() {
-            result.messages.push("Run 'npm audit fix' to apply fixes".to_string());
+            result
+                .messages
+                .push("Run 'npm audit fix' to apply fixes".to_string());
             for vuln in vulnerabilities {
                 if vuln.fix_available {
                     result.fixed.push(vuln.advisory.id.clone());
@@ -154,7 +157,9 @@ impl LanguageSecurityScanner for NodeSecurityScanner {
             }
         } else {
             result.needs_review = true;
-            result.messages.push("Some fixes may require '--force' flag or manual intervention".to_string());
+            result
+                .messages
+                .push("Some fixes may require '--force' flag or manual intervention".to_string());
             result.commands.push("npm audit fix --force".to_string());
         }
 

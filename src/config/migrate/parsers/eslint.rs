@@ -161,7 +161,10 @@ fn extract_config_from_value(value: &serde_json::Value) -> Result<ESLintConfig, 
     }
 
     // Extract parser
-    config.parser = value.get("parser").and_then(|p| p.as_str()).map(String::from);
+    config.parser = value
+        .get("parser")
+        .and_then(|p| p.as_str())
+        .map(String::from);
 
     // Extract ignorePatterns
     if let Some(ignores) = value.get("ignorePatterns").and_then(|i| i.as_array()) {

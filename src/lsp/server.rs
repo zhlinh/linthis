@@ -59,7 +59,10 @@ pub struct LinthisLanguageServer {
 
 impl LinthisLanguageServer {
     /// Create a new language server instance with a config resolver.
-    pub fn with_config_resolver(client: Client, config_resolver: Option<SharedConfigResolver>) -> Self {
+    pub fn with_config_resolver(
+        client: Client,
+        config_resolver: Option<SharedConfigResolver>,
+    ) -> Self {
         Self {
             client,
             documents: Arc::new(DocumentManager::new()),
@@ -81,9 +84,7 @@ impl LinthisLanguageServer {
         // Check if the file has a supported language
         if Language::from_path(&path).is_none() {
             // Not a supported file, clear any existing diagnostics
-            self.client
-                .publish_diagnostics(uri, vec![], None)
-                .await;
+            self.client.publish_diagnostics(uri, vec![], None).await;
             return;
         }
 
@@ -135,9 +136,7 @@ impl LinthisLanguageServer {
 
     /// Clear diagnostics for a document.
     async fn clear_diagnostics(&self, uri: Url) {
-        self.client
-            .publish_diagnostics(uri, vec![], None)
-            .await;
+        self.client.publish_diagnostics(uri, vec![], None).await;
     }
 }
 
@@ -261,7 +260,10 @@ async fn run_stdio_server(config_resolver: Option<SharedConfigResolver>) -> anyh
 }
 
 /// Run the LSP server over TCP.
-async fn run_tcp_server(port: u16, config_resolver: Option<SharedConfigResolver>) -> anyhow::Result<()> {
+async fn run_tcp_server(
+    port: u16,
+    config_resolver: Option<SharedConfigResolver>,
+) -> anyhow::Result<()> {
     use tokio::net::TcpListener;
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await?;

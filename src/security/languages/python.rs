@@ -50,9 +50,10 @@ impl PythonSecurityScanner {
                     severity: Severity::Unknown, // pip-audit doesn't provide severity directly
                     cvss_score: None,
                     cvss_vector: None,
-                    url: vuln.fix_versions.first().map(|_| {
-                        format!("https://pypi.org/project/{}/", dep.name)
-                    }),
+                    url: vuln
+                        .fix_versions
+                        .first()
+                        .map(|_| format!("https://pypi.org/project/{}/", dep.name)),
                     published: None,
                     updated: None,
                     cwe_ids: Vec::new(),
@@ -137,7 +138,9 @@ impl LanguageSecurityScanner for PythonSecurityScanner {
         let mut result = FixResult::default();
 
         result.commands.push("pip-audit --fix".to_string());
-        result.messages.push("Run 'pip-audit --fix' to attempt automatic fixes".to_string());
+        result
+            .messages
+            .push("Run 'pip-audit --fix' to attempt automatic fixes".to_string());
 
         for vuln in vulnerabilities {
             if vuln.fix_available {

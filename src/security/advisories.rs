@@ -45,8 +45,7 @@ impl AdvisoryDatabase {
         let content = std::fs::read_to_string(&cache_path)
             .map_err(|e| format!("Failed to read advisory cache: {}", e))?;
 
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse advisory cache: {}", e))
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse advisory cache: {}", e))
     }
 
     /// Save database to cache
@@ -171,8 +170,7 @@ impl SuppressionList {
 
         // Support both JSON and TOML formats
         if path.extension().map(|e| e == "toml").unwrap_or(false) {
-            toml::from_str(&content)
-                .map_err(|e| format!("Failed to parse suppression TOML: {}", e))
+            toml::from_str(&content).map_err(|e| format!("Failed to parse suppression TOML: {}", e))
         } else {
             serde_json::from_str(&content)
                 .map_err(|e| format!("Failed to parse suppression JSON: {}", e))
@@ -203,7 +201,8 @@ impl SuppressionList {
 
     /// Add a suppression
     pub fn add(&mut self, suppression: Suppression) {
-        self.suppressions.insert(suppression.id.clone(), suppression);
+        self.suppressions
+            .insert(suppression.id.clone(), suppression);
     }
 
     /// Remove a suppression

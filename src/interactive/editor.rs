@@ -10,10 +10,10 @@
 
 //! Cross-platform editor integration for opening files at specific lines.
 
+use similar::{ChangeTag, TextDiff};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use similar::{ChangeTag, TextDiff};
 
 /// Result of opening a file in an editor
 #[derive(Debug)]

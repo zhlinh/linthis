@@ -10,9 +10,9 @@
 
 //! Code context extraction for AI-assisted fixes.
 
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
 
 /// Options for context extraction
 #[derive(Debug, Clone)]
@@ -92,8 +92,7 @@ pub fn extract_context(
     line_number: u32,
     options: &ContextOptions,
 ) -> Result<CodeContext, String> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let content = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
@@ -108,11 +107,7 @@ pub fn extract_context(
     let idx = line_number as usize - 1;
     let language = detect_language(path);
 
-    let mut context = CodeContext::new(
-        &path.to_string_lossy(),
-        &language,
-        line_number,
-    );
+    let mut context = CodeContext::new(&path.to_string_lossy(), &language, line_number);
 
     // Extract issue line
     context.issue_lines = lines[idx].to_string();
@@ -132,9 +127,7 @@ pub fn extract_context(
     // Build full snippet
     context.full_snippet = format!(
         "{}\n>>> {} <<<\n{}",
-        context.before,
-        context.issue_lines,
-        context.after
+        context.before, context.issue_lines, context.after
     );
 
     // Extract imports if requested
@@ -244,7 +237,10 @@ fn find_scope_start(lines: &[&str], idx: usize, language: &str) -> Option<usize>
 
     for i in (0..=idx).rev() {
         let trimmed = lines[i].trim();
-        if function_patterns.iter().any(|p| trimmed.starts_with(p) || trimmed.contains(p)) {
+        if function_patterns
+            .iter()
+            .any(|p| trimmed.starts_with(p) || trimmed.contains(p))
+        {
             return Some(i);
         }
     }
@@ -358,12 +354,7 @@ mod tests {
 
     #[test]
     fn test_extract_imports() {
-        let lines = vec![
-            "use std::io;",
-            "use std::path::Path;",
-            "",
-            "fn main() {",
-        ];
+        let lines = vec!["use std::io;", "use std::path::Path;", "", "fn main() {"];
         let imports = extract_imports(&lines, "rust");
         assert!(imports.contains("use std::io"));
         assert!(imports.contains("use std::path::Path"));

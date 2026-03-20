@@ -34,7 +34,7 @@ impl JavaFormatter {
         };
 
         let config_names = [
-            ".linthis/configs/java/.clang-format",  // Plugin config (highest priority)
+            ".linthis/configs/java/.clang-format", // Plugin config (highest priority)
             ".clang-format",
         ];
 
@@ -73,7 +73,11 @@ impl Formatter for JavaFormatter {
     fn format(&self, path: &Path) -> Result<FormatResult> {
         // Read original content for comparison
         let original = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::formatter("clang-format", path, format!("Failed to read file: {}", e))
+            crate::LintisError::formatter(
+                "clang-format",
+                path,
+                format!("Failed to read file: {}", e),
+            )
         })?;
 
         // Build clang-format command
@@ -119,7 +123,11 @@ impl Formatter for JavaFormatter {
     fn check(&self, path: &Path) -> Result<bool> {
         // Read current content
         let current = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::formatter("clang-format", path, format!("Failed to read file: {}", e))
+            crate::LintisError::formatter(
+                "clang-format",
+                path,
+                format!("Failed to read file: {}", e),
+            )
         })?;
 
         // Build clang-format command (without -i to output to stdout)

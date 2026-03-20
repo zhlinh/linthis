@@ -65,12 +65,36 @@ impl SecurityReport {
     pub fn from_result(result: ScanResult) -> Self {
         let summary = ReportSummary {
             total_vulnerabilities: result.vulnerabilities.len(),
-            critical: result.vulnerabilities.iter().filter(|v| v.severity() == Severity::Critical).count(),
-            high: result.vulnerabilities.iter().filter(|v| v.severity() == Severity::High).count(),
-            medium: result.vulnerabilities.iter().filter(|v| v.severity() == Severity::Medium).count(),
-            low: result.vulnerabilities.iter().filter(|v| v.severity() == Severity::Low).count(),
-            unknown: result.vulnerabilities.iter().filter(|v| v.severity() == Severity::Unknown).count(),
-            fixable: result.vulnerabilities.iter().filter(|v| v.fix_available).count(),
+            critical: result
+                .vulnerabilities
+                .iter()
+                .filter(|v| v.severity() == Severity::Critical)
+                .count(),
+            high: result
+                .vulnerabilities
+                .iter()
+                .filter(|v| v.severity() == Severity::High)
+                .count(),
+            medium: result
+                .vulnerabilities
+                .iter()
+                .filter(|v| v.severity() == Severity::Medium)
+                .count(),
+            low: result
+                .vulnerabilities
+                .iter()
+                .filter(|v| v.severity() == Severity::Low)
+                .count(),
+            unknown: result
+                .vulnerabilities
+                .iter()
+                .filter(|v| v.severity() == Severity::Unknown)
+                .count(),
+            fixable: result
+                .vulnerabilities
+                .iter()
+                .filter(|v| v.fix_available)
+                .count(),
             languages_scanned: result.languages_scanned.len(),
         };
 
@@ -121,13 +145,32 @@ fn format_human(result: &ScanResult) -> String {
 
     // Summary
     if result.vulnerabilities.is_empty() {
-        output.push_str(&format!("{}\n", "✅ No vulnerabilities found!".green().bold()));
+        output.push_str(&format!(
+            "{}\n",
+            "✅ No vulnerabilities found!".green().bold()
+        ));
     } else {
         // Count by severity
-        let critical = result.vulnerabilities.iter().filter(|v| v.severity() == Severity::Critical).count();
-        let high = result.vulnerabilities.iter().filter(|v| v.severity() == Severity::High).count();
-        let medium = result.vulnerabilities.iter().filter(|v| v.severity() == Severity::Medium).count();
-        let low = result.vulnerabilities.iter().filter(|v| v.severity() == Severity::Low).count();
+        let critical = result
+            .vulnerabilities
+            .iter()
+            .filter(|v| v.severity() == Severity::Critical)
+            .count();
+        let high = result
+            .vulnerabilities
+            .iter()
+            .filter(|v| v.severity() == Severity::High)
+            .count();
+        let medium = result
+            .vulnerabilities
+            .iter()
+            .filter(|v| v.severity() == Severity::Medium)
+            .count();
+        let low = result
+            .vulnerabilities
+            .iter()
+            .filter(|v| v.severity() == Severity::Low)
+            .count();
 
         output.push_str(&format!("{}\n", "Vulnerability Summary:".bold()));
         if critical > 0 {
@@ -196,14 +239,13 @@ fn format_vulnerability(vuln: &Vulnerability) -> String {
     output.push_str(&format!("  {}\n", vuln.advisory.title));
 
     for pkg in &vuln.affected_packages {
-        output.push_str(&format!(
-            "  📦 {} @ {}\n",
-            pkg.name.cyan(),
-            pkg.version
-        ));
+        output.push_str(&format!("  📦 {} @ {}\n", pkg.name.cyan(), pkg.version));
 
         if let Some(ref recommended) = pkg.recommended_version {
-            output.push_str(&format!("     └─ Fix: Upgrade to {}\n", recommended.green()));
+            output.push_str(&format!(
+                "     └─ Fix: Upgrade to {}\n",
+                recommended.green()
+            ));
         } else if !pkg.patched_versions.is_empty() {
             output.push_str(&format!(
                 "     └─ Fix: Upgrade to one of: {}\n",

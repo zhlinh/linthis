@@ -236,11 +236,26 @@ impl App {
 
         // Try common editors in order of preference
         let editors = [
-            ("code", vec!["-g".to_string(), format!("{}:{}", path.display(), line)]),
-            ("cursor", vec!["-g".to_string(), format!("{}:{}", path.display(), line)]),
-            ("vim", vec![format!("+{}", line), path.display().to_string()]),
-            ("nvim", vec![format!("+{}", line), path.display().to_string()]),
-            ("nano", vec![format!("+{}", line), path.display().to_string()]),
+            (
+                "code",
+                vec!["-g".to_string(), format!("{}:{}", path.display(), line)],
+            ),
+            (
+                "cursor",
+                vec!["-g".to_string(), format!("{}:{}", path.display(), line)],
+            ),
+            (
+                "vim",
+                vec![format!("+{}", line), path.display().to_string()],
+            ),
+            (
+                "nvim",
+                vec![format!("+{}", line), path.display().to_string()],
+            ),
+            (
+                "nano",
+                vec![format!("+{}", line), path.display().to_string()],
+            ),
         ];
 
         for (editor, args) in editors {

@@ -91,7 +91,8 @@ impl JavaLicenseScanner {
 
         for line in stdout.lines() {
             // Parse Maven dependency tree format
-            let trimmed = line.trim_start_matches(|c| c == '+' || c == '|' || c == '\\' || c == '-' || c == ' ');
+            let trimmed = line
+                .trim_start_matches(|c| c == '+' || c == '|' || c == '\\' || c == '-' || c == ' ');
             let parts: Vec<&str> = trimmed.split(':').collect();
 
             if parts.len() >= 4 {
@@ -166,16 +167,14 @@ impl JavaLicenseScanner {
 
         for line in stdout.lines() {
             // Parse Gradle dependency format: group:name:version
-            let trimmed = line.trim_start_matches(|c| c == '+' || c == '|' || c == '\\' || c == '-' || c == ' ');
+            let trimmed = line
+                .trim_start_matches(|c| c == '+' || c == '|' || c == '\\' || c == '-' || c == ' ');
 
             if trimmed.contains(':') && !trimmed.starts_with("project") {
                 let parts: Vec<&str> = trimmed.split(':').collect();
                 if parts.len() >= 3 {
                     // Remove (*) or (c) markers
-                    let version = parts[2]
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or(parts[2]);
+                    let version = parts[2].split_whitespace().next().unwrap_or(parts[2]);
 
                     let name = format!("{}:{}", parts[0], parts[1]);
                     packages.push(PackageLicense::new(&name, version, "", "maven"));

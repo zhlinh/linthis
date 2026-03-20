@@ -65,15 +65,11 @@ impl PhpChecker {
                         _ => Severity::Info,
                     };
 
-                    let mut issue = LintIssue::new(
-                        path.to_path_buf(),
-                        msg.line,
-                        msg.message.clone(),
-                        severity,
-                    )
-                    .with_source("phpcs".to_string())
-                    .with_code(msg.source.clone())
-                    .with_column(msg.column);
+                    let mut issue =
+                        LintIssue::new(path.to_path_buf(), msg.line, msg.message.clone(), severity)
+                            .with_source("phpcs".to_string())
+                            .with_code(msg.source.clone())
+                            .with_column(msg.column);
 
                     // Add fixable hint if applicable
                     if msg.fixable {

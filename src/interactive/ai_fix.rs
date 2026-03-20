@@ -24,8 +24,8 @@ use colored::Colorize;
 use rayon::prelude::*;
 
 use crate::ai::{
-    AiProvider, AiProviderConfig, AiProviderKind, AiSuggester, FixSuggestion, SuggestionOptions,
-    SuggestionResult, get_custom_provider,
+    get_custom_provider, AiProvider, AiProviderConfig, AiProviderKind, AiSuggester, FixSuggestion,
+    SuggestionOptions, SuggestionResult,
 };
 use crate::utils::types::{LintIssue, RunResult, Severity};
 
@@ -144,9 +144,7 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
         AiProviderKind::CodeBuddy => std::env::var("CODEBUDDY_API_KEY").ok(),
-        AiProviderKind::OpenAi | AiProviderKind::CodexCli => {
-            std::env::var("OPENAI_API_KEY").ok()
-        }
+        AiProviderKind::OpenAi | AiProviderKind::CodexCli => std::env::var("OPENAI_API_KEY").ok(),
         AiProviderKind::Gemini => std::env::var("GEMINI_API_KEY")
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
             .ok(),
@@ -173,10 +171,14 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
 
     if !suggester.is_available() {
         let hint = match &config.provider {
-            AiProviderKind::Claude => "Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable",
+            AiProviderKind::Claude => {
+                "Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable"
+            }
             AiProviderKind::ClaudeCli => "Install Claude CLI (claude command must be available)",
             AiProviderKind::CodeBuddy => "Set CODEBUDDY_API_KEY environment variable",
-            AiProviderKind::CodeBuddyCli => "Install CodeBuddy CLI (codebuddy command must be available)",
+            AiProviderKind::CodeBuddyCli => {
+                "Install CodeBuddy CLI (codebuddy command must be available)"
+            }
             AiProviderKind::OpenAi => "Set OPENAI_API_KEY environment variable",
             AiProviderKind::CodexCli => "Install Codex CLI (npm install -g @openai/codex)",
             AiProviderKind::Gemini => "Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable",
@@ -207,18 +209,22 @@ fn is_cli_provider(kind: &AiProviderKind) -> bool {
         | AiProviderKind::CodeBuddyCli
         | AiProviderKind::CodexCli
         | AiProviderKind::GeminiCli => true,
-        AiProviderKind::Custom(_) => {
-            get_custom_provider().map(|cp| cp.is_cli).unwrap_or(false)
-        }
+        AiProviderKind::Custom(_) => get_custom_provider().map(|cp| cp.is_cli).unwrap_or(false),
         _ => false,
     }
 }
 
 /// Group issues by file path
-fn group_issues_by_file(issues: &[LintIssue]) -> std::collections::HashMap<PathBuf, Vec<&LintIssue>> {
-    let mut groups: std::collections::HashMap<PathBuf, Vec<&LintIssue>> = std::collections::HashMap::new();
+fn group_issues_by_file(
+    issues: &[LintIssue],
+) -> std::collections::HashMap<PathBuf, Vec<&LintIssue>> {
+    let mut groups: std::collections::HashMap<PathBuf, Vec<&LintIssue>> =
+        std::collections::HashMap::new();
     for issue in issues {
-        groups.entry(issue.file_path.clone()).or_default().push(issue);
+        groups
+            .entry(issue.file_path.clone())
+            .or_default()
+            .push(issue);
     }
     groups
 }
@@ -291,7 +297,13 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
         // Prepare issues for CLI
         let issues_data: Vec<(usize, String, String)> = file_issues
             .iter()
-            .map(|i| (i.line, i.message.clone(), i.code.clone().unwrap_or_default()))
+            .map(|i| {
+                (
+                    i.line,
+                    i.message.clone(),
+                    i.code.clone().unwrap_or_default(),
+                )
+            })
             .collect();
 
         println!("    {} issues to fix", issues_data.len());
@@ -458,13 +470,13 @@ fn run_cli_file_fix_parallel(
 
     let mut fix_result = AiFixResult::default();
     let cli_name = match &config.provider {
-            AiProviderKind::ClaudeCli => "Claude",
-            AiProviderKind::CodeBuddyCli => "CodeBuddy",
-            AiProviderKind::CodexCli => "Codex",
-            AiProviderKind::GeminiCli => "Gemini",
-            AiProviderKind::Custom(name) => name.as_str(),
-            _ => "CLI",
-        };
+        AiProviderKind::ClaudeCli => "Claude",
+        AiProviderKind::CodeBuddyCli => "CodeBuddy",
+        AiProviderKind::CodexCli => "Codex",
+        AiProviderKind::GeminiCli => "Gemini",
+        AiProviderKind::Custom(name) => name.as_str(),
+        _ => "CLI",
+    };
 
     // Prepare file data
     let file_data: Vec<(PathBuf, Vec<(usize, String, String)>, usize)> = file_list
@@ -472,7 +484,13 @@ fn run_cli_file_fix_parallel(
         .map(|(path, issues)| {
             let issues_data: Vec<(usize, String, String)> = issues
                 .iter()
-                .map(|i| (i.line, i.message.clone(), i.code.clone().unwrap_or_default()))
+                .map(|i| {
+                    (
+                        i.line,
+                        i.message.clone(),
+                        i.code.clone().unwrap_or_default(),
+                    )
+                })
                 .collect();
             let count = issues.len();
             (path.clone(), issues_data, count)
@@ -610,20 +628,14 @@ fn run_cli_file_fix_parallel(
         if let Some(ref error) = batch_result.error {
             for (file_path, issue_count) in &batch_result.files {
                 file_idx += 1;
-                println!(
-                    "  [{}/{}] {}",
-                    file_idx, total_files, file_path.display()
-                );
+                println!("  [{}/{}] {}", file_idx, total_files, file_path.display());
                 eprintln!("    {} CLI error: {}", "✗".red(), error);
                 fix_result.errors += issue_count;
             }
         } else {
             for (file_path, issue_count) in &batch_result.files {
                 file_idx += 1;
-                println!(
-                    "  [{}/{}] {}",
-                    file_idx, total_files, file_path.display()
-                );
+                println!("  [{}/{}] {}", file_idx, total_files, file_path.display());
 
                 if let Some(diff) = batch_result.diffs.get(file_path) {
                     for line in diff.lines() {
@@ -661,8 +673,14 @@ fn print_cli_fix_summary(fix_result: &AiFixResult, total_files: usize) {
     println!("  {}", "CLI Fix Summary".bold());
     println!("{}", "─".repeat(60).dimmed());
     println!("  Files processed: {}", total_files.to_string().cyan());
-    println!("  Issues applied:  {}", fix_result.applied.to_string().green());
-    println!("  Issues skipped:  {}", fix_result.skipped.to_string().yellow());
+    println!(
+        "  Issues applied:  {}",
+        fix_result.applied.to_string().green()
+    );
+    println!(
+        "  Issues skipped:  {}",
+        fix_result.skipped.to_string().yellow()
+    );
     println!("  Errors:          {}", fix_result.errors.to_string().red());
     println!("{}", "═".repeat(60).dimmed());
 
@@ -670,13 +688,28 @@ fn print_cli_fix_summary(fix_result: &AiFixResult, total_files: usize) {
     if fix_result.applied > 0 {
         println!();
         println!("{}", "  ⚠ Important for C/C++ projects:".yellow().bold());
-        println!("  {}", "If function signatures were changed, verify that:".dimmed());
-        println!("  {}", "- All declarations and definitions are updated".dimmed());
-        println!("  {}", "- All call sites use correct argument types".dimmed());
+        println!(
+            "  {}",
+            "If function signatures were changed, verify that:".dimmed()
+        );
+        println!(
+            "  {}",
+            "- All declarations and definitions are updated".dimmed()
+        );
+        println!(
+            "  {}",
+            "- All call sites use correct argument types".dimmed()
+        );
         println!("  {}", "- The code still compiles successfully".dimmed());
         println!();
-        println!("  {}", "Recommended: Run your build command to verify:".cyan());
-        println!("  {}", "  make        # or cmake --build build, etc.".dimmed());
+        println!(
+            "  {}",
+            "Recommended: Run your build command to verify:".cyan()
+        );
+        println!(
+            "  {}",
+            "  make        # or cmake --build build, etc.".dimmed()
+        );
     }
     println!();
 }
@@ -727,7 +760,10 @@ pub fn show_ai_suggestions(
     }
 
     if result.suggestions.is_empty() {
-        println!("  {}", "No AI suggestions available for this issue.".yellow());
+        println!(
+            "  {}",
+            "No AI suggestions available for this issue.".yellow()
+        );
         return (false, false);
     }
 
@@ -735,7 +771,11 @@ pub fn show_ai_suggestions(
         "  {} {} suggestion{}",
         "AI Generated".green().bold(),
         result.suggestions.len(),
-        if result.suggestions.len() == 1 { "" } else { "s" }
+        if result.suggestions.len() == 1 {
+            ""
+        } else {
+            "s"
+        }
     );
     println!();
 
@@ -819,7 +859,11 @@ pub fn show_ai_suggestions(
     let input = read_line().trim().to_lowercase();
 
     // Empty input (Enter) applies suggestion #1 by default
-    let input = if input.is_empty() { "1".to_string() } else { input };
+    let input = if input.is_empty() {
+        "1".to_string()
+    } else {
+        input
+    };
 
     match input.as_str() {
         "s" | "skip" => (false, false),
@@ -856,7 +900,11 @@ pub fn show_ai_suggestions(
 }
 
 /// Validate that a suggestion is reasonable before applying
-fn validate_suggestion(issue: &LintIssue, suggestion: &FixSuggestion, original_lines: &[&str]) -> bool {
+fn validate_suggestion(
+    issue: &LintIssue,
+    suggestion: &FixSuggestion,
+    original_lines: &[&str],
+) -> bool {
     let suggestion_lines: Vec<&str> = suggestion.code.lines().collect();
     let lines_to_replace = suggestion.end_line.saturating_sub(issue.line) + 1;
 
@@ -880,7 +928,9 @@ fn validate_suggestion(issue: &LintIssue, suggestion: &FixSuggestion, original_l
         // Check for new function/class definitions that weren't in original
         let def_patterns = ["def ", "class ", "fn ", "func ", "function "];
         let orig_has_def = def_patterns.iter().any(|p| original_line.starts_with(p));
-        let sugg_has_def = def_patterns.iter().any(|p| first_suggestion_line.starts_with(p));
+        let sugg_has_def = def_patterns
+            .iter()
+            .any(|p| first_suggestion_line.starts_with(p));
 
         if sugg_has_def && !orig_has_def {
             eprintln!(
@@ -977,11 +1027,7 @@ fn print_suggestion_diff(
     // Show removed lines (old content)
     for i in start_line..=end_line {
         if let Some(old_line) = original_lines.get(i - 1) {
-            println!(
-                "  {} {}",
-                format!("-{:>4} |", i).red(),
-                old_line.red()
-            );
+            println!("  {} {}", format!("-{:>4} |", i).red(), old_line.red());
         }
     }
 
@@ -1031,11 +1077,7 @@ fn print_suggestion_preview(issue: &LintIssue, suggestion: &FixSuggestion) {
             let lines: Vec<&str> = content.lines().collect();
             for i in start_line..=end_line {
                 if let Some(old_line) = lines.get(i - 1) {
-                    println!(
-                        "    {} {}",
-                        format!("-{:>4} |", i).red(),
-                        old_line.red()
-                    );
+                    println!("    {} {}", format!("-{:>4} |", i).red(), old_line.red());
                 }
             }
         }
@@ -1137,7 +1179,12 @@ fn collect_suggestions_parallel(
 
             // Only print if progress changed
             if current != last_printed {
-                print!("\r  [{}/{}] Analyzing in parallel...{}", current, total_clone, " ".repeat(30));
+                print!(
+                    "\r  [{}/{}] Analyzing in parallel...{}",
+                    current,
+                    total_clone,
+                    " ".repeat(30)
+                );
                 io::stdout().flush().ok();
                 last_printed = current;
             }
@@ -1222,7 +1269,10 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     );
     println!("  Issues: {}", issues.len());
     if config.accept_all {
-        println!("  Mode: {} (will apply automatically)", "Auto-apply".yellow());
+        println!(
+            "  Mode: {} (will apply automatically)",
+            "Auto-apply".yellow()
+        );
     } else {
         println!("  Mode: Batch collect, then review");
     }
@@ -1254,7 +1304,10 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
             config.parallel_jobs
         );
     } else {
-        println!("  {} Collecting AI suggestions...", "Phase 1:".cyan().bold());
+        println!(
+            "  {} Collecting AI suggestions...",
+            "Phase 1:".cyan().bold()
+        );
     }
     println!("{}", "─".repeat(60).dimmed());
 
@@ -1291,7 +1344,10 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     // Phase 2: Interactive review (no waiting)
     // ═══════════════════════════════════════════════════════════
     println!("{}", "─".repeat(60).dimmed());
-    println!("  {} Review suggestions (no more waiting)", "Phase 2:".cyan().bold());
+    println!(
+        "  {} Review suggestions (no more waiting)",
+        "Phase 2:".cyan().bold()
+    );
     println!("{}", "─".repeat(60).dimmed());
     println!();
     println!("  Navigation: [p]revious, [g]o to #N, [q]uit");
@@ -1457,15 +1513,18 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
                                 current_issue.file_path.display(),
                                 current_issue.line
                             );
-                            print_suggestion_diff(&original_lines, suggestion, start_line, end_line);
-                            fix_result.applied += 1;
-                            fix_result.modified_files.insert(current_issue.file_path.clone());
-                        } else {
-                            println!(
-                                "  {} Failed to apply issue #{}",
-                                "✗".red(),
-                                idx + 1
+                            print_suggestion_diff(
+                                &original_lines,
+                                suggestion,
+                                start_line,
+                                end_line,
                             );
+                            fix_result.applied += 1;
+                            fix_result
+                                .modified_files
+                                .insert(current_issue.file_path.clone());
+                        } else {
+                            println!("  {} Failed to apply issue #{}", "✗".red(), idx + 1);
                             fix_result.skipped += 1;
                         }
                     }
@@ -1506,9 +1565,16 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
                                 remaining_issue.file_path.display(),
                                 remaining_issue.line
                             );
-                            print_suggestion_diff(&original_lines, suggestion, start_line, end_line);
+                            print_suggestion_diff(
+                                &original_lines,
+                                suggestion,
+                                start_line,
+                                end_line,
+                            );
                             fix_result.applied += 1;
-                            fix_result.modified_files.insert(remaining_issue.file_path.clone());
+                            fix_result
+                                .modified_files
+                                .insert(remaining_issue.file_path.clone());
                         } else {
                             println!(
                                 "  {} Failed to apply issue #{}",
@@ -1542,7 +1608,10 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     println!("{}", "═".repeat(60).dimmed());
     println!("  {}", "AI Fix Summary".bold());
     println!("{}", "─".repeat(60).dimmed());
-    println!("  Suggestions collected: {}", fix_result.suggested.to_string().cyan());
+    println!(
+        "  Suggestions collected: {}",
+        fix_result.suggested.to_string().cyan()
+    );
     println!("  Applied:  {}", fix_result.applied.to_string().green());
     println!("  Skipped:  {}", fix_result.skipped.to_string().yellow());
     println!("  Errors:   {}", fix_result.errors.to_string().red());
@@ -1581,7 +1650,10 @@ fn show_cached_suggestions(
     }
 
     if result.suggestions.is_empty() {
-        println!("  {}", "No AI suggestions available for this issue.".yellow());
+        println!(
+            "  {}",
+            "No AI suggestions available for this issue.".yellow()
+        );
         return prompt_navigation(issue, current, total, false);
     }
 
@@ -1589,7 +1661,11 @@ fn show_cached_suggestions(
         "  {} {} suggestion{}",
         "AI Generated".green().bold(),
         result.suggestions.len(),
-        if result.suggestions.len() == 1 { "" } else { "s" }
+        if result.suggestions.len() == 1 {
+            ""
+        } else {
+            "s"
+        }
     );
     println!();
 
@@ -1627,7 +1703,10 @@ fn show_cached_suggestions(
 
     // Show options
     let nolint_desc = describe_nolint_action(issue);
-    println!("  {}", format!("Issue {}/{}", current + 1, total).bold().cyan());
+    println!(
+        "  {}",
+        format!("Issue {}/{}", current + 1, total).bold().cyan()
+    );
     println!();
     for i in 1..=result.suggestions.len() {
         if i == 1 {
@@ -1644,7 +1723,11 @@ fn show_cached_suggestions(
     println!("    [{}] Ignore - {}", "i".cyan(), nolint_desc.dimmed());
     println!("    [{}] Skip", "s".cyan());
     if current > 0 {
-        println!("    [{}] Previous - go back to issue #{}", "p".cyan(), current);
+        println!(
+            "    [{}] Previous - go back to issue #{}",
+            "p".cyan(),
+            current
+        );
     }
     println!("    [{}] Go to #N - jump to specific issue", "g".cyan());
     println!(
@@ -1718,15 +1801,27 @@ fn show_cached_suggestions(
 }
 
 /// Prompt for navigation only (when no suggestions available)
-fn prompt_navigation(issue: &LintIssue, current: usize, total: usize, _applied: bool) -> (bool, ReviewAction) {
+fn prompt_navigation(
+    issue: &LintIssue,
+    current: usize,
+    total: usize,
+    _applied: bool,
+) -> (bool, ReviewAction) {
     let nolint_desc = describe_nolint_action(issue);
     println!();
-    println!("  {}", format!("Issue {}/{}", current + 1, total).bold().cyan());
+    println!(
+        "  {}",
+        format!("Issue {}/{}", current + 1, total).bold().cyan()
+    );
     println!();
     println!("    [{}] Ignore - {}", "i".cyan(), nolint_desc.dimmed());
     println!("    [{}] Skip", "s".cyan());
     if current > 0 {
-        println!("    [{}] Previous - go back to issue #{}", "p".cyan(), current);
+        println!(
+            "    [{}] Previous - go back to issue #{}",
+            "p".cyan(),
+            current
+        );
     }
     println!("    [{}] Go to #N - jump to specific issue", "g".cyan());
     println!(
@@ -1819,7 +1914,10 @@ fn apply_all_suggestions(
     println!("{}", "═".repeat(60).dimmed());
     println!("  {}", "AI Fix Summary".bold());
     println!("{}", "─".repeat(60).dimmed());
-    println!("  Suggestions collected: {}", fix_result.suggested.to_string().cyan());
+    println!(
+        "  Suggestions collected: {}",
+        fix_result.suggested.to_string().cyan()
+    );
     println!("  Applied:  {}", fix_result.applied.to_string().green());
     println!("  Skipped:  {}", fix_result.skipped.to_string().yellow());
     println!("  Errors:   {}", fix_result.errors.to_string().red());

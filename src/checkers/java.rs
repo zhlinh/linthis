@@ -34,7 +34,7 @@ impl JavaChecker {
 
         // Look for checkstyle configuration files
         let config_names = [
-            ".linthis/configs/java/checkstyle.xml",  // Plugin config (highest priority)
+            ".linthis/configs/java/checkstyle.xml", // Plugin config (highest priority)
             "checkstyle.xml",
             ".checkstyle.xml",
             "config/checkstyle/checkstyle.xml",

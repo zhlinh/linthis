@@ -36,13 +36,13 @@
 //! println!("Found {} vulnerabilities", result.vulnerabilities.len());
 //! ```
 
-mod scanner;
-mod vulnerability;
 mod advisories;
 mod languages;
 pub mod report;
+mod scanner;
+mod vulnerability;
 
-pub use scanner::{SecurityScanner, ScanOptions, ScanResult};
-pub use vulnerability::{Vulnerability, Severity, AffectedPackage, Advisory};
 pub use advisories::AdvisoryDatabase;
-pub use report::{SecurityReport, format_security_report};
+pub use report::{format_security_report, SecurityReport};
+pub use scanner::{ScanOptions, ScanResult, SecurityScanner};
+pub use vulnerability::{Advisory, AffectedPackage, Severity, Vulnerability};

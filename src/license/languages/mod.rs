@@ -10,14 +10,14 @@
 
 //! Language-specific license scanners.
 
-mod rust;
-mod node;
-mod python;
 mod go;
 mod java;
+mod node;
+mod python;
+mod rust;
 
-pub use rust::RustLicenseScanner;
-pub use node::NodeLicenseScanner;
-pub use python::PythonLicenseScanner;
 pub use go::GoLicenseScanner;
 pub use java::JavaLicenseScanner;
+pub use node::NodeLicenseScanner;
+pub use python::PythonLicenseScanner;
+pub use rust::RustLicenseScanner;

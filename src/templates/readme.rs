@@ -151,82 +151,130 @@ pub fn generate_plugin_manifest_filtered(name: &str, languages: &[&str]) -> Stri
 
     // Language config templates
     let lang_configs: &[(&str, &str)] = &[
-        ("rust", r#"[configs.rust]
+        (
+            "rust",
+            r#"[configs.rust]
 # Clippy linter configuration
 clippy = "rust/clippy.toml"
 # Rustfmt formatter configuration
 rustfmt = "rust/rustfmt.toml"
-"#),
-        ("python", r#"[configs.python]
+"#,
+        ),
+        (
+            "python",
+            r#"[configs.python]
 # Ruff linter and formatter configuration
 ruff = "python/ruff.toml"
-"#),
-        ("typescript", r#"[configs.typescript]
+"#,
+        ),
+        (
+            "typescript",
+            r#"[configs.typescript]
 # ESLint linter configuration (also works for JavaScript)
 eslint = "typescript/.eslintrc.json"
 # Prettier formatter configuration
 prettier = "typescript/.prettierrc"
-"#),
-        ("go", r#"[configs.go]
+"#,
+        ),
+        (
+            "go",
+            r#"[configs.go]
 # golangci-lint configuration
 golangci-lint = "go/.golangci.yml"
-"#),
-        ("java", r#"[configs.java]
+"#,
+        ),
+        (
+            "java",
+            r#"[configs.java]
 # Checkstyle configuration
 checkstyle = "java/checkstyle.xml"
-"#),
-        ("cpp", r#"[configs.cpp]
+"#,
+        ),
+        (
+            "cpp",
+            r#"[configs.cpp]
 # Clang-Format configuration
 clang-format = "cpp/.clang-format"
 # CPPLint configuration
 cpplint = "cpp/CPPLINT.cfg"
-"#),
-        ("swift", r#"[configs.swift]
+"#,
+        ),
+        (
+            "swift",
+            r#"[configs.swift]
 # SwiftLint linter configuration
 swiftlint = "swift/.swiftlint.yml"
-"#),
-        ("oc", r#"[configs.oc]
+"#,
+        ),
+        (
+            "oc",
+            r#"[configs.oc]
 # Clang-Format configuration
 clang-format = "oc/.clang-format"
-"#),
-        ("sql", r#"[configs.sql]
+"#,
+        ),
+        (
+            "sql",
+            r#"[configs.sql]
 # SQLFluff linter and formatter configuration
 sqlfluff = "sql/.sqlfluff"
-"#),
-        ("csharp", r#"[configs.csharp]
+"#,
+        ),
+        (
+            "csharp",
+            r#"[configs.csharp]
 # dotnet-format configuration via .editorconfig
 editorconfig = "csharp/.editorconfig"
-"#),
-        ("lua", r#"[configs.lua]
+"#,
+        ),
+        (
+            "lua",
+            r#"[configs.lua]
 # Luacheck linter configuration
 luacheck = "lua/.luacheckrc"
 # StyLua formatter configuration
 stylua = "lua/stylua.toml"
-"#),
-        ("css", r#"[configs.css]
+"#,
+        ),
+        (
+            "css",
+            r#"[configs.css]
 # Stylelint linter configuration
 stylelint = "css/.stylelintrc.json"
 # Prettier formatter configuration
 prettier = "css/.prettierrc"
-"#),
-        ("kotlin", r#"[configs.kotlin]
+"#,
+        ),
+        (
+            "kotlin",
+            r#"[configs.kotlin]
 # EditorConfig for Kotlin
 editorconfig = "kotlin/.editorconfig"
 # Detekt linter configuration
 detekt = "kotlin/detekt.yml"
-"#),
-        ("dockerfile", r#"[configs.dockerfile]
+"#,
+        ),
+        (
+            "dockerfile",
+            r#"[configs.dockerfile]
 # Hadolint linter configuration
 hadolint = "dockerfile/.hadolint.yaml"
-"#),
-        ("scala", r#"[configs.scala]
+"#,
+        ),
+        (
+            "scala",
+            r#"[configs.scala]
 # Scalafmt formatter configuration
 scalafmt = "scala/.scalafmt.conf"
-"#),
-        ("dart", r#"[configs.dart]
+"#,
+        ),
+        (
+            "dart",
+            r#"[configs.dart]
 # Dart analyzer configuration
 analyzer = "dart/analysis_options.yaml"
-"#),
+"#,
+        ),
     ];
 
     // Add only selected languages

@@ -73,23 +73,24 @@ impl PythonLicenseScanner {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let packages: Vec<PipPackage> = serde_json::from_str(&stdout)
-            .unwrap_or_default();
+        let packages: Vec<PipPackage> = serde_json::from_str(&stdout).unwrap_or_default();
 
         let mut result = Vec::new();
         for pkg in packages {
             let license = self.get_package_license(&pkg.name).unwrap_or_default();
-            result.push(PackageLicense::new(&pkg.name, &pkg.version, &license, "pypi"));
+            result.push(PackageLicense::new(
+                &pkg.name,
+                &pkg.version,
+                &license,
+                "pypi",
+            ));
         }
 
         Ok(result)
     }
 
     fn get_package_license(&self, name: &str) -> Option<String> {
-        let output = Command::new("pip")
-            .args(["show", name])
-            .output()
-            .ok()?;
+        let output = Command::new("pip").args(["show", name]).output().ok()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {

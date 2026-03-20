@@ -35,12 +35,12 @@
 //! ```
 
 mod analyzer;
+mod languages;
 mod metrics;
 pub mod report;
-mod languages;
 mod thresholds;
 
-pub use analyzer::{ComplexityAnalyzer, AnalysisOptions, AnalysisResult};
+pub use analyzer::{AnalysisOptions, AnalysisResult, ComplexityAnalyzer};
 pub use metrics::{ComplexityMetrics, FileMetrics, FunctionMetrics, MetricLevel};
-pub use thresholds::{Thresholds, ThresholdConfig};
 pub use report::{format_complexity_report, ComplexityReportFormat};
+pub use thresholds::{ThresholdConfig, Thresholds};

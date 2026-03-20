@@ -85,15 +85,11 @@ fn marketplace_plugin_dir(marketplace_url: &str, plugin_name: &str) -> Result<Pa
     if marketplace_cache.exists() {
         fetcher
             .update_plugin(marketplace_url, &marketplace_cache, None)
-            .map_err(|e| {
-                format!("Failed to update marketplace '{}': {}", marketplace_url, e)
-            })?;
+            .map_err(|e| format!("Failed to update marketplace '{}': {}", marketplace_url, e))?;
     } else {
         fetcher
             .clone_plugin(marketplace_url, &marketplace_cache, None)
-            .map_err(|e| {
-                format!("Failed to clone marketplace '{}': {}", marketplace_url, e)
-            })?;
+            .map_err(|e| format!("Failed to clone marketplace '{}': {}", marketplace_url, e))?;
     }
 
     let plugin_dir = marketplace_cache.join(plugin_name);
@@ -118,8 +114,8 @@ fn git_clone_temp(
 ) -> Result<(tempfile::TempDir, PathBuf), String> {
     use crate::plugin::fetcher::PluginFetcher;
 
-    let tmp = tempfile::TempDir::new()
-        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+    let tmp =
+        tempfile::TempDir::new().map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
     let fetcher = PluginFetcher::new();
     fetcher
@@ -137,7 +133,10 @@ fn git_clone_temp(
     Ok((tmp, resolved))
 }
 
-fn resolve_marketplace_url(name: &str, marketplaces: &HashMap<String, String>) -> Result<String, String> {
+fn resolve_marketplace_url(
+    name: &str,
+    marketplaces: &HashMap<String, String>,
+) -> Result<String, String> {
     marketplaces.get(name).cloned().ok_or_else(|| {
         format!(
             "Marketplace '{}' is not defined in [hook.marketplaces]",
@@ -169,12 +168,15 @@ pub fn resolve_to_string(
         HookSource::Plugin { plugin, file } => {
             let cache_dir = plugin_cache_dir(plugin)?;
             let path = cache_dir.join(file);
-            std::fs::read_to_string(&path).map_err(|e| {
-                format!("File '{}' not found in plugin '{}': {}", file, plugin, e)
-            })
+            std::fs::read_to_string(&path)
+                .map_err(|e| format!("File '{}' not found in plugin '{}': {}", file, plugin, e))
         }
 
-        HookSource::Marketplace { marketplace, plugin, file } => {
+        HookSource::Marketplace {
+            marketplace,
+            plugin,
+            file,
+        } => {
             let mkt_url = resolve_marketplace_url(marketplace, marketplaces)?;
             let plugin_dir = marketplace_plugin_dir(&mkt_url, plugin)?;
             let path = plugin_dir.join(file);
@@ -193,9 +195,8 @@ pub fn resolve_to_string(
 
         HookSource::Git { git, git_ref, path } => {
             let (_tmp, resolved) = git_clone_temp(git, git_ref.as_deref(), path)?;
-            std::fs::read_to_string(&resolved).map_err(|e| {
-                format!("Failed to read '{}' from git repo '{}': {}", path, git, e)
-            })
+            std::fs::read_to_string(&resolved)
+                .map_err(|e| format!("Failed to read '{}' from git repo '{}': {}", path, git, e))
             // _tmp dropped here → temp dir deleted
         }
     }
@@ -207,7 +208,10 @@ pub fn resolve_to_string(
 /// value to delete the temporary clone.
 pub enum ResolvedDir {
     Persistent(PathBuf),
-    Temporary { _tmp: tempfile::TempDir, path: PathBuf },
+    Temporary {
+        _tmp: tempfile::TempDir,
+        path: PathBuf,
+    },
 }
 
 impl ResolvedDir {
@@ -255,7 +259,11 @@ pub fn resolve_to_dir(
             Ok(ResolvedDir::Persistent(path))
         }
 
-        HookSource::Marketplace { marketplace, plugin, file } => {
+        HookSource::Marketplace {
+            marketplace,
+            plugin,
+            file,
+        } => {
             let mkt_url = resolve_marketplace_url(marketplace, marketplaces)?;
             let plugin_dir = marketplace_plugin_dir(&mkt_url, plugin)?;
             let path = plugin_dir.join(file);
@@ -281,7 +289,10 @@ pub fn resolve_to_dir(
                     path, git
                 ));
             }
-            Ok(ResolvedDir::Temporary { _tmp: tmp, path: resolved })
+            Ok(ResolvedDir::Temporary {
+                _tmp: tmp,
+                path: resolved,
+            })
         }
     }
 }
@@ -303,7 +314,11 @@ pub fn fixed_git_hook_path(
         .join("hooks")
         .join(tool_type_dir)
         .join(event_filename);
-    if path.is_file() { Some(path) } else { None }
+    if path.is_file() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 /// Tier-1: Check whether a fixed-path agent plugin directory exists.
@@ -335,6 +350,9 @@ pub fn fixed_agent_plugin_dir(
         .join("plugins")
         .join("_default")
         .join(plugin_id);
-    if default_path.is_dir() { Some(default_path) } else { None }
+    if default_path.is_dir() {
+        Some(default_path)
+    } else {
+        None
+    }
 }
-

@@ -44,13 +44,11 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             );
 
             // File location
-            let location = format!(
-                "{}:{}",
-                app.display_path(&issue.file_path),
-                issue.line
-            );
+            let location = format!("{}:{}", app.display_path(&issue.file_path), issue.line);
             let location_style = if is_selected && focused {
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
@@ -72,10 +70,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 issue.message.clone()
             };
-            let line2 = Line::from(vec![
-                Span::raw("    "),
-                Span::styled(msg, msg_style),
-            ]);
+            let line2 = Line::from(vec![Span::raw("    "), Span::styled(msg, msg_style)]);
 
             // Rule code if present
             let lines = if let Some(ref code) = issue.code {
@@ -121,9 +116,10 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     // Create list widget
     let list = if issues.is_empty() {
         // Show "No issues" message
-        List::new(vec![ListItem::new(Line::from(vec![
-            Span::styled("  ✓ No issues found", Style::default().fg(Color::Green)),
-        ]))])
+        List::new(vec![ListItem::new(Line::from(vec![Span::styled(
+            "  ✓ No issues found",
+            Style::default().fg(Color::Green),
+        )]))])
         .block(block)
     } else {
         List::new(items).block(block)

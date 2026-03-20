@@ -167,14 +167,8 @@ impl TrendAnalysis {
         let average_issues_per_run = total as f64 / data_points.len() as f64;
 
         // Find best and worst runs
-        let best_run = data_points
-            .iter()
-            .min_by_key(|dp| dp.total_issues)
-            .cloned();
-        let worst_run = data_points
-            .iter()
-            .max_by_key(|dp| dp.total_issues)
-            .cloned();
+        let best_run = data_points.iter().min_by_key(|dp| dp.total_issues).cloned();
+        let worst_run = data_points.iter().max_by_key(|dp| dp.total_issues).cloned();
 
         // Calculate trend direction and change percentage
         let (trend_direction, issue_change_percentage) = if data_points.len() >= 2 {
@@ -443,7 +437,7 @@ mod tests {
     fn test_trend_analysis_degrading() {
         // Higher days_offset = older (further back in time)
         let data_points = vec![
-            make_data_point(40, 3),  // Oldest: 40 issues (3 days ago)
+            make_data_point(40, 3), // Oldest: 40 issues (3 days ago)
             make_data_point(60, 2),
             make_data_point(80, 1),
             make_data_point(100, 0), // Newest: 100 issues (today) - 150% increase

@@ -35,9 +35,10 @@ pub fn draw(frame: &mut Frame) {
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Navigation", Style::default().add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Navigation",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  ↑/k     ", Style::default().fg(Color::Yellow)),
             Span::raw("Move up"),
@@ -67,9 +68,10 @@ pub fn draw(frame: &mut Frame) {
             Span::raw("Switch panel focus"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Actions", Style::default().add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Actions",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  Enter   ", Style::default().fg(Color::Yellow)),
             Span::raw("Open file in editor"),
@@ -83,9 +85,10 @@ pub fn draw(frame: &mut Frame) {
             Span::raw("Clear all results"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("General", Style::default().add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "General",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  ?       ", Style::default().fg(Color::Yellow)),
             Span::raw("Toggle this help"),

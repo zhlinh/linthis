@@ -28,18 +28,18 @@
 //! let suggestion = suggester.suggest_fix(&issue, &source_code, &options);
 //! ```
 
-pub mod provider;
-mod suggestions;
 mod context;
 mod prompts;
+pub mod provider;
+mod suggestions;
 
+pub use context::{extract_context, CodeContext, ContextOptions};
+pub use prompts::{PromptBuilder, PromptTemplate};
 pub use provider::{
-    AiProvider, AiProviderConfig, AiProviderKind, AiProviderTrait, ALL_AI_PROVIDERS,
-    CustomProviderResolved, detect_available_providers, get_custom_provider, is_provider_available,
-    resolve_custom_provider, set_custom_provider, try_fallback_provider,
+    detect_available_providers, get_custom_provider, is_provider_available,
+    resolve_custom_provider, set_custom_provider, try_fallback_provider, AiProvider,
+    AiProviderConfig, AiProviderKind, AiProviderTrait, CustomProviderResolved, ALL_AI_PROVIDERS,
 };
 pub use suggestions::{
     AiSuggester, FixSuggestion, SuggestionOptions, SuggestionResult, SuggestionsReport,
 };
-pub use context::{CodeContext, ContextOptions, extract_context};
-pub use prompts::{PromptTemplate, PromptBuilder};

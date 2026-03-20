@@ -61,8 +61,8 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         watched, file_count
     );
 
-    let header = Paragraph::new(header_text)
-        .style(Style::default().bg(Color::Blue).fg(Color::White));
+    let header =
+        Paragraph::new(header_text).style(Style::default().bg(Color::Blue).fg(Color::White));
 
     frame.render_widget(header, area);
 }

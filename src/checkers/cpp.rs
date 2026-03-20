@@ -17,15 +17,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Cpplint configuration for different languages
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CpplintConfig {
     /// Line length limit
     pub linelength: Option<u32>,
     /// Filter rules (e.g., "-build/c++11,-build/header_guard")
     pub filter: Option<String>,
 }
-
 
 /// C/C++ checker using clang-tidy (preferred) or cpplint.
 pub struct CppChecker {
@@ -480,9 +478,7 @@ impl CppChecker {
         let abs_path = if path.is_absolute() {
             path.to_path_buf()
         } else {
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join(path)
+            std::env::current_dir().unwrap_or_default().join(path)
         };
         let project_root = crate::utils::get_project_root();
 
@@ -507,11 +503,9 @@ impl CppChecker {
             cmd.arg("--");
         }
 
-        let output = cmd
-            .output()
-            .map_err(|e| {
-                crate::LintisError::checker("clang-tidy", path, format!("Failed to run: {}", e))
-            })?;
+        let output = cmd.output().map_err(|e| {
+            crate::LintisError::checker("clang-tidy", path, format!("Failed to run: {}", e))
+        })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -557,11 +551,9 @@ impl CppChecker {
 
         cmd.arg(path);
 
-        let output = cmd
-            .output()
-            .map_err(|e| {
-                crate::LintisError::checker("cpplint", path, format!("Failed to run: {}", e))
-            })?;
+        let output = cmd.output().map_err(|e| {
+            crate::LintisError::checker("cpplint", path, format!("Failed to run: {}", e))
+        })?;
 
         // cpplint outputs to stderr
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -620,7 +612,8 @@ impl CppChecker {
             || path_str.contains("external")
             || path_str.contains("externals")
             || path_str.contains("vendor")
-            || path_str.contains("node_modules") {
+            || path_str.contains("node_modules")
+        {
             return None;
         }
 
@@ -775,9 +768,8 @@ impl CppChecker {
             }
         }
 
-        let mut issue =
-            LintIssue::new(file_path.clone(), line_num, message, severity)
-                .with_source("cpplint".to_string());
+        let mut issue = LintIssue::new(file_path.clone(), line_num, message, severity)
+            .with_source("cpplint".to_string());
 
         if let Some(c) = code {
             issue = issue.with_code(c);
@@ -915,8 +907,10 @@ impl CppChecker {
         let mut method_starts: Vec<(usize, String)> = Vec::new();
         for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            if (trimmed.starts_with("- (") || trimmed.starts_with("+ (")
-                || trimmed.starts_with("-(") || trimmed.starts_with("+("))
+            if (trimmed.starts_with("- (")
+                || trimmed.starts_with("+ (")
+                || trimmed.starts_with("-(")
+                || trimmed.starts_with("+("))
                 && !trimmed.ends_with(';')
             {
                 let name = Self::extract_method_name(trimmed);
@@ -945,14 +939,10 @@ impl CppChecker {
                     "Method '{}' has {} lines of code (limit is {}) [readability/fn_size]",
                     name, sloc, threshold
                 );
-                let issue = LintIssue::new(
-                    path.to_path_buf(),
-                    *start_line,
-                    message,
-                    Severity::Warning,
-                )
-                .with_code("readability/fn_size".to_string())
-                .with_source("objc-method-length".to_string());
+                let issue =
+                    LintIssue::new(path.to_path_buf(), *start_line, message, Severity::Warning)
+                        .with_code("readability/fn_size".to_string())
+                        .with_source("objc-method-length".to_string());
                 issues.push(issue);
             }
         }
@@ -969,7 +959,11 @@ impl CppChecker {
                 format!("Failed to read file: {}", e),
             )
         })?;
-        Ok(Self::check_objc_method_lengths(&content, path, self.oc_fn_length))
+        Ok(Self::check_objc_method_lengths(
+            &content,
+            path,
+            self.oc_fn_length,
+        ))
     }
 }
 
@@ -1431,7 +1425,9 @@ mod tests {
     #[test]
     fn test_extract_method_name_multi_arg() {
         assert_eq!(
-            CppChecker::extract_method_name("- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {"),
+            CppChecker::extract_method_name(
+                "- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {"
+            ),
             "tableView:didSelectRowAtIndexPath:"
         );
     }
@@ -1450,28 +1446,37 @@ mod tests {
     #[test]
     fn test_check_objc_method_lengths_under_threshold_no_issue() {
         let content = make_objc_content_with_sloc("shortMethod", 5);
-        let issues = CppChecker::check_objc_method_lengths(
-            &content,
-            std::path::Path::new("test.m"),
-            80,
+        let issues =
+            CppChecker::check_objc_method_lengths(&content, std::path::Path::new("test.m"), 80);
+        assert!(
+            issues.is_empty(),
+            "Expected no issues for 5 SLOC, got: {:?}",
+            issues
         );
-        assert!(issues.is_empty(), "Expected no issues for 5 SLOC, got: {:?}", issues);
     }
 
     #[test]
     fn test_check_objc_method_lengths_over_threshold_reports_issue() {
         let content = make_objc_content_with_sloc("longMethod", 85);
-        let issues = CppChecker::check_objc_method_lengths(
-            &content,
-            std::path::Path::new("test.m"),
-            80,
-        );
+        let issues =
+            CppChecker::check_objc_method_lengths(&content, std::path::Path::new("test.m"), 80);
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].line, 1);
-        assert!(issues[0].message.contains("longMethod"), "message: {}", issues[0].message);
-        assert!(issues[0].message.contains("readability/fn_size"), "message: {}", issues[0].message);
-        assert!(issues[0].message.contains("85 lines of code"),
-            "Expected '85 lines of code' in message: {}", issues[0].message);
+        assert!(
+            issues[0].message.contains("longMethod"),
+            "message: {}",
+            issues[0].message
+        );
+        assert!(
+            issues[0].message.contains("readability/fn_size"),
+            "message: {}",
+            issues[0].message
+        );
+        assert!(
+            issues[0].message.contains("85 lines of code"),
+            "Expected '85 lines of code' in message: {}",
+            issues[0].message
+        );
         assert_eq!(issues[0].code.as_deref(), Some("readability/fn_size"));
         assert_eq!(issues[0].source.as_deref(), Some("objc-method-length"));
     }
@@ -1480,12 +1485,13 @@ mod tests {
     fn test_check_objc_method_lengths_exactly_at_threshold_no_issue() {
         // 80 SLOC at threshold 80: sloc > threshold is false, no issue
         let content = make_objc_content_with_sloc("boundaryMethod", 80);
-        let issues = CppChecker::check_objc_method_lengths(
-            &content,
-            std::path::Path::new("test.m"),
-            80,
+        let issues =
+            CppChecker::check_objc_method_lengths(&content, std::path::Path::new("test.m"), 80);
+        assert!(
+            issues.is_empty(),
+            "Expected no issue at exactly threshold, got: {:?}",
+            issues
         );
-        assert!(issues.is_empty(), "Expected no issue at exactly threshold, got: {:?}", issues);
     }
 
     #[test]
@@ -1502,12 +1508,13 @@ mod tests {
         lines.push("}".to_string());
         let content = lines.join("\n");
 
-        let issues = CppChecker::check_objc_method_lengths(
-            &content,
-            std::path::Path::new("test.mm"),
-            80,
+        let issues =
+            CppChecker::check_objc_method_lengths(&content, std::path::Path::new("test.mm"), 80);
+        assert!(
+            issues.is_empty(),
+            "Expected no issues (79 SLOC), got: {:?}",
+            issues
         );
-        assert!(issues.is_empty(), "Expected no issues (79 SLOC), got: {:?}", issues);
     }
 
     #[test]
@@ -1527,24 +1534,26 @@ mod tests {
         lines.push("}".to_string());
 
         let content = lines.join("\n");
-        let issues = CppChecker::check_objc_method_lengths(
-            &content,
-            std::path::Path::new("test.m"),
-            80,
-        );
+        let issues =
+            CppChecker::check_objc_method_lengths(&content, std::path::Path::new("test.m"), 80);
         assert_eq!(issues.len(), 1, "Expected 1 issue, got: {:?}", issues);
-        assert!(issues[0].message.contains("longMethod"), "message: {}", issues[0].message);
-        assert_eq!(issues[0].line, long_method_line, "Expected issue at line {}", long_method_line);
+        assert!(
+            issues[0].message.contains("longMethod"),
+            "message: {}",
+            issues[0].message
+        );
+        assert_eq!(
+            issues[0].line, long_method_line,
+            "Expected issue at line {}",
+            long_method_line
+        );
     }
 
     #[test]
     fn test_check_objc_method_lengths_custom_threshold() {
         let content = make_objc_content_with_sloc("mediumMethod", 50);
-        let issues = CppChecker::check_objc_method_lengths(
-            &content,
-            std::path::Path::new("test.mm"),
-            30,
-        );
+        let issues =
+            CppChecker::check_objc_method_lengths(&content, std::path::Path::new("test.mm"), 30);
         assert_eq!(issues.len(), 1);
         assert!(issues[0].message.contains("mediumMethod"));
         assert_eq!(issues[0].code.as_deref(), Some("readability/fn_size"));

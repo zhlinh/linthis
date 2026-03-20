@@ -62,7 +62,11 @@ impl PythonComplexityAnalyzer {
 
         metrics.returns = func_content.matches("\n    return ").count() as u32
             + func_content.matches("\nreturn ").count() as u32
-            + if func_content.starts_with("return ") { 1 } else { 0 };
+            + if func_content.starts_with("return ") {
+                1
+            } else {
+                0
+            };
 
         metrics
     }
@@ -72,9 +76,20 @@ impl PythonComplexityAnalyzer {
 
         // Python control flow keywords
         let keywords = [
-            " if ", "\nif ", " elif ", "\nelif ", " else:", "\nelse:",
-            " for ", "\nfor ", " while ", "\nwhile ", " except:", "\nexcept ",
-            " and ", " or ",
+            " if ",
+            "\nif ",
+            " elif ",
+            "\nelif ",
+            " else:",
+            "\nelse:",
+            " for ",
+            "\nfor ",
+            " while ",
+            "\nwhile ",
+            " except:",
+            "\nexcept ",
+            " and ",
+            " or ",
         ];
 
         for keyword in keywords {
@@ -82,9 +97,10 @@ impl PythonComplexityAnalyzer {
         }
 
         // Comprehension conditions
-        complexity += content.matches(" if ").count().saturating_sub(
-            content.matches(" elif ").count() + content.matches("\nif ").count()
-        ) as u32;
+        complexity +=
+            content.matches(" if ").count().saturating_sub(
+                content.matches(" elif ").count() + content.matches("\nif ").count(),
+            ) as u32;
 
         complexity
     }
@@ -366,7 +382,9 @@ def complex_func(x):
     else:
         return "zero"
 "#;
-        let result = analyzer.analyze_file(Path::new("test.py"), content).unwrap();
+        let result = analyzer
+            .analyze_file(Path::new("test.py"), content)
+            .unwrap();
         assert!(!result.functions.is_empty());
         assert!(result.functions[0].metrics.cyclomatic > 1);
     }

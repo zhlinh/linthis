@@ -10,14 +10,14 @@
 
 //! Language-specific complexity analyzers.
 
-mod rust;
-mod typescript;
-mod python;
 mod go;
 mod java;
+mod python;
+mod rust;
+mod typescript;
 
-pub use rust::RustComplexityAnalyzer;
-pub use typescript::TypeScriptComplexityAnalyzer;
-pub use python::PythonComplexityAnalyzer;
 pub use go::GoComplexityAnalyzer;
 pub use java::JavaComplexityAnalyzer;
+pub use python::PythonComplexityAnalyzer;
+pub use rust::RustComplexityAnalyzer;
+pub use typescript::TypeScriptComplexityAnalyzer;

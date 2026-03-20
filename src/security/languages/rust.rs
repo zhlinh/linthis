@@ -26,7 +26,9 @@ pub struct RustSecurityScanner {
 
 impl RustSecurityScanner {
     pub fn new() -> Self {
-        Self { tool_available: None }
+        Self {
+            tool_available: None,
+        }
     }
 
     fn check_tool(&self) -> bool {
@@ -138,7 +140,9 @@ impl LanguageSecurityScanner for RustSecurityScanner {
 
         if output.status.success() {
             result.commands.push("cargo audit fix".to_string());
-            result.messages.push("Run 'cargo audit fix' to apply fixes".to_string());
+            result
+                .messages
+                .push("Run 'cargo audit fix' to apply fixes".to_string());
 
             for vuln in vulnerabilities {
                 if vuln.fix_available {
@@ -149,7 +153,9 @@ impl LanguageSecurityScanner for RustSecurityScanner {
             }
         } else {
             result.needs_review = true;
-            result.messages.push("Some vulnerabilities require manual review".to_string());
+            result
+                .messages
+                .push("Some vulnerabilities require manual review".to_string());
             for vuln in vulnerabilities {
                 result.unfixed.push(vuln.advisory.id.clone());
             }

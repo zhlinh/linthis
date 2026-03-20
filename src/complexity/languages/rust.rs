@@ -78,8 +78,8 @@ impl RustComplexityAnalyzer {
 
         // Control flow keywords
         let keywords = [
-            "if ", "if(", "else if", "else {", "match ", "for ", "for(",
-            "while ", "while(", "loop ", "loop{", "&&", "||", "?",
+            "if ", "if(", "else if", "else {", "match ", "for ", "for(", "while ", "while(",
+            "loop ", "loop{", "&&", "||", "?",
         ];
 
         for keyword in keywords {
@@ -389,8 +389,14 @@ mod tests {
 
     #[test]
     fn test_detect_function() {
-        assert_eq!(detect_rust_function("fn main() {"), Some("main".to_string()));
-        assert_eq!(detect_rust_function("pub fn foo() {"), Some("foo".to_string()));
+        assert_eq!(
+            detect_rust_function("fn main() {"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            detect_rust_function("pub fn foo() {"),
+            Some("foo".to_string())
+        );
         assert_eq!(
             detect_rust_function("pub async fn bar() {"),
             Some("bar".to_string())
@@ -430,7 +436,9 @@ fn complex() {
     }
 }
 "#;
-        let result = analyzer.analyze_file(Path::new("test.rs"), content).unwrap();
+        let result = analyzer
+            .analyze_file(Path::new("test.rs"), content)
+            .unwrap();
         assert!(!result.functions.is_empty());
         // Should have complexity > 1 due to if/else/for
         assert!(result.functions[0].metrics.cyclomatic > 1);

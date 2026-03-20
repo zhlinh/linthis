@@ -171,10 +171,7 @@ impl LicensePolicy {
     pub fn permissive() -> Self {
         Self {
             allow: vec![],
-            deny: vec![
-                "GPL-*".to_string(),
-                "AGPL-*".to_string(),
-            ],
+            deny: vec!["GPL-*".to_string(), "AGPL-*".to_string()],
             warn: vec!["LGPL-*".to_string()],
             allow_unknown: true,
             allow_copyleft: false,
@@ -184,8 +181,7 @@ impl LicensePolicy {
 
     /// Load policy from TOML string
     pub fn from_toml(content: &str) -> Result<Self, String> {
-        toml::from_str(content)
-            .map_err(|e| format!("Failed to parse license policy: {}", e))
+        toml::from_str(content).map_err(|e| format!("Failed to parse license policy: {}", e))
     }
 
     /// Check a scan result against this policy
@@ -218,8 +214,13 @@ impl LicensePolicy {
                     version: pkg.version.clone(),
                     license: license_str.to_string(),
                     violation_type: ViolationType::Denied,
-                    reason: format!("License '{}' matches denied pattern '{}'", license_str, pattern),
-                    suggestion: Some("Find an alternative package with a compatible license".to_string()),
+                    reason: format!(
+                        "License '{}' matches denied pattern '{}'",
+                        license_str, pattern
+                    ),
+                    suggestion: Some(
+                        "Find an alternative package with a compatible license".to_string(),
+                    ),
                 });
             }
         }
@@ -244,7 +245,9 @@ impl LicensePolicy {
                 license: license_str.to_string(),
                 violation_type: ViolationType::Denied,
                 reason: format!("Copyleft license '{}' is not allowed", license_str),
-                suggestion: Some("Find an alternative package with a permissive license".to_string()),
+                suggestion: Some(
+                    "Find an alternative package with a permissive license".to_string(),
+                ),
             });
         }
 
@@ -256,7 +259,10 @@ impl LicensePolicy {
                     version: pkg.version.clone(),
                     license: license_str.to_string(),
                     violation_type: ViolationType::Warning,
-                    reason: format!("License '{}' matches warning pattern '{}'", license_str, pattern),
+                    reason: format!(
+                        "License '{}' matches warning pattern '{}'",
+                        license_str, pattern
+                    ),
                     suggestion: Some("Review license terms for compliance".to_string()),
                 });
             }
@@ -264,7 +270,10 @@ impl LicensePolicy {
 
         // Check allow list (if not empty)
         if !self.allow.is_empty() {
-            let allowed = self.allow.iter().any(|pattern| pkg.license.matches_pattern(pattern));
+            let allowed = self
+                .allow
+                .iter()
+                .any(|pattern| pkg.license.matches_pattern(pattern));
             if !allowed {
                 return Some(PolicyViolation {
                     package: pkg.name.clone(),
@@ -272,7 +281,9 @@ impl LicensePolicy {
                     license: license_str.to_string(),
                     violation_type: ViolationType::NotAllowed,
                     reason: format!("License '{}' is not in allow list", license_str),
-                    suggestion: Some("Add license to allow list or find alternative package".to_string()),
+                    suggestion: Some(
+                        "Add license to allow list or find alternative package".to_string(),
+                    ),
                 });
             }
         }

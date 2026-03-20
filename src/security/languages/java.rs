@@ -70,8 +70,16 @@ impl JavaSecurityScanner {
                     title: vuln.description.lines().next().unwrap_or("").to_string(),
                     description: vuln.description.clone(),
                     severity: map_cvss_to_severity(vuln.cvss_v3.as_ref().or(vuln.cvss_v2.as_ref())),
-                    cvss_score: vuln.cvss_v3.as_ref().or(vuln.cvss_v2.as_ref()).and_then(|c| c.base_score),
-                    cvss_vector: vuln.cvss_v3.as_ref().or(vuln.cvss_v2.as_ref()).and_then(|c| c.vector.clone()),
+                    cvss_score: vuln
+                        .cvss_v3
+                        .as_ref()
+                        .or(vuln.cvss_v2.as_ref())
+                        .and_then(|c| c.base_score),
+                    cvss_vector: vuln
+                        .cvss_v3
+                        .as_ref()
+                        .or(vuln.cvss_v2.as_ref())
+                        .and_then(|c| c.vector.clone()),
                     url: vuln.references.first().map(|r| r.url.clone()),
                     published: None,
                     updated: None,
@@ -112,9 +120,12 @@ impl JavaSecurityScanner {
         // Try dependency-check CLI first
         let cli_result = Command::new("dependency-check")
             .args([
-                "--scan", path.to_str().unwrap_or("."),
-                "--format", "JSON",
-                "--out", report_dir.to_str().unwrap_or("."),
+                "--scan",
+                path.to_str().unwrap_or("."),
+                "--format",
+                "JSON",
+                "--out",
+                report_dir.to_str().unwrap_or("."),
             ])
             .current_dir(path)
             .output();
@@ -162,7 +173,10 @@ impl JavaSecurityScanner {
             }
         }
 
-        Err("Failed to run dependency-check. Install it via: brew install dependency-check".to_string())
+        Err(
+            "Failed to run dependency-check. Install it via: brew install dependency-check"
+                .to_string(),
+        )
     }
 }
 
@@ -200,8 +214,12 @@ impl LanguageSecurityScanner for JavaSecurityScanner {
         let mut result = FixResult::default();
 
         result.needs_review = true;
-        result.messages.push("Java dependency fixes require manual version updates".to_string());
-        result.messages.push("Update versions in pom.xml or build.gradle".to_string());
+        result
+            .messages
+            .push("Java dependency fixes require manual version updates".to_string());
+        result
+            .messages
+            .push("Update versions in pom.xml or build.gradle".to_string());
 
         for vuln in vulnerabilities {
             result.unfixed.push(vuln.advisory.id.clone());

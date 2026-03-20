@@ -17,8 +17,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use super::languages::{
-    GoSecurityScanner, JavaSecurityScanner, NodeSecurityScanner,
-    PythonSecurityScanner, RustSecurityScanner,
+    GoSecurityScanner, JavaSecurityScanner, NodeSecurityScanner, PythonSecurityScanner,
+    RustSecurityScanner,
 };
 use super::vulnerability::{Severity, Vulnerability};
 
@@ -232,10 +232,9 @@ impl SecurityScanner {
         // Check which scanners are available and applicable
         for scanner in &self.scanners {
             let is_available = scanner.is_available();
-            result.scanner_status.insert(
-                scanner.name().to_string(),
-                is_available,
-            );
+            result
+                .scanner_status
+                .insert(scanner.name().to_string(), is_available);
 
             if !is_available {
                 continue;
@@ -245,7 +244,9 @@ impl SecurityScanner {
                 continue;
             }
 
-            result.languages_scanned.push(scanner.language().to_string());
+            result
+                .languages_scanned
+                .push(scanner.language().to_string());
 
             match scanner.scan(path, options) {
                 Ok(vulns) => {
@@ -256,14 +257,13 @@ impl SecurityScanner {
                         }
 
                         // Count by severity
-                        *result.by_severity
+                        *result
+                            .by_severity
                             .entry(vuln.severity().to_string())
                             .or_insert(0) += 1;
 
                         // Count by language
-                        *result.by_language
-                            .entry(vuln.language.clone())
-                            .or_insert(0) += 1;
+                        *result.by_language.entry(vuln.language.clone()).or_insert(0) += 1;
 
                         result.vulnerabilities.push(vuln);
                     }
@@ -275,7 +275,8 @@ impl SecurityScanner {
         }
 
         result.duration_ms = start.elapsed().as_millis() as u64;
-        result.vulnerable_packages = result.vulnerabilities
+        result.vulnerable_packages = result
+            .vulnerabilities
             .iter()
             .flat_map(|v| &v.affected_packages)
             .map(|p| format!("{}@{}", p.name, p.version))
@@ -313,7 +314,9 @@ impl SecurityScanner {
                         }
                     }
                     Err(e) => {
-                        fix_result.messages.push(format!("Failed to fix {} vulnerabilities: {}", language, e));
+                        fix_result
+                            .messages
+                            .push(format!("Failed to fix {} vulnerabilities: {}", language, e));
                     }
                 }
             }

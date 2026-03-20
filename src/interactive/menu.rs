@@ -118,9 +118,18 @@ enum MainMenuChoice {
 /// Show the main menu with issue summary
 fn show_main_menu(result: &RunResult) -> MainMenuChoice {
     let issues = &result.issues;
-    let error_count = issues.iter().filter(|i| i.severity == Severity::Error).count();
-    let warning_count = issues.iter().filter(|i| i.severity == Severity::Warning).count();
-    let info_count = issues.iter().filter(|i| i.severity == Severity::Info).count();
+    let error_count = issues
+        .iter()
+        .filter(|i| i.severity == Severity::Error)
+        .count();
+    let warning_count = issues
+        .iter()
+        .filter(|i| i.severity == Severity::Warning)
+        .count();
+    let info_count = issues
+        .iter()
+        .filter(|i| i.severity == Severity::Info)
+        .count();
 
     println!();
     println!("{}", "═".repeat(60).dimmed());
@@ -144,7 +153,12 @@ fn show_main_menu(result: &RunResult) -> MainMenuChoice {
     println!("  [{}] Exit", "4".cyan());
     println!();
     println!("  {}", "Vim quickfix shortcuts:".dimmed());
-    println!("    {} - next issue  {} - previous  {} - list all", ":cn".cyan(), ":cp".cyan(), ":copen".cyan());
+    println!(
+        "    {} - next issue  {} - previous  {} - list all",
+        ":cn".cyan(),
+        ":cp".cyan(),
+        ":copen".cyan()
+    );
     println!();
     print!("  > ");
     io::stdout().flush().ok();
@@ -367,10 +381,17 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
     let nolint_desc = describe_nolint_action(issue);
     println!("    [{}] Edit - open $EDITOR at this line", "e".cyan());
     println!("    [{}] Ignore - {}", "i".cyan(), nolint_desc.dimmed());
-    println!("    [{}] AI fix - get AI suggestion for this issue", "a".cyan());
+    println!(
+        "    [{}] AI fix - get AI suggestion for this issue",
+        "a".cyan()
+    );
     println!("    [{}] Skip", "s".cyan());
     if current > 1 {
-        println!("    [{}] Previous - go back to issue #{}", "p".cyan(), current - 1);
+        println!(
+            "    [{}] Previous - go back to issue #{}",
+            "p".cyan(),
+            current - 1
+        );
     }
     println!("    [{}] Go to #N - jump to specific issue", "g".cyan());
     println!("    [{}] Quit", "q".cyan());
@@ -533,15 +554,18 @@ fn show_manual_quickfix_instructions(path: &std::path::Path) {
 fn detect_quickfix_editor() -> Option<String> {
     // Check for vim-compatible editors in order of preference
     let vim_editors = [
-        "nvim",      // Neovim (best vim compatibility)
-        "vim",       // Vim
-        "vi",        // Vi (basic but widely available)
+        "nvim", // Neovim (best vim compatibility)
+        "vim",  // Vim
+        "vi",   // Vi (basic but widely available)
     ];
 
     // Check $EDITOR first if it's a vim variant
     if let Ok(editor) = std::env::var("EDITOR") {
         let editor_lower = editor.to_lowercase();
-        if editor_lower.contains("vim") || editor_lower.contains("nvim") || editor_lower.contains("vi") {
+        if editor_lower.contains("vim")
+            || editor_lower.contains("nvim")
+            || editor_lower.contains("vi")
+        {
             return Some(editor);
         }
     }

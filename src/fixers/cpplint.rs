@@ -401,9 +401,10 @@ impl CpplintFixer {
                             modified = true;
                         }
                     } else if self.config.header_guard_mode == HeaderGuardMode::PragmaOnce
-                        && self.convert_to_pragma_once(&mut lines) {
-                            modified = true;
-                        }
+                        && self.convert_to_pragma_once(&mut lines)
+                    {
+                        modified = true;
+                    }
                 }
                 "readability/todo" => {
                     if self.fix_todo_from_error(&mut lines, error) {

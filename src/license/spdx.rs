@@ -215,7 +215,9 @@ impl SpdxExpression {
 
     /// Check if any license in this expression matches a pattern
     pub fn any_matches(&self, pattern: &str) -> bool {
-        self.all_licenses().iter().any(|l| l.matches_pattern(pattern))
+        self.all_licenses()
+            .iter()
+            .any(|l| l.matches_pattern(pattern))
     }
 }
 

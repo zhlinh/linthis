@@ -10,14 +10,14 @@
 
 //! Language-specific security scanners.
 
-mod rust;
-mod node;
-mod python;
 mod go;
 mod java;
+mod node;
+mod python;
+mod rust;
 
-pub use rust::RustSecurityScanner;
-pub use node::NodeSecurityScanner;
-pub use python::PythonSecurityScanner;
 pub use go::GoSecurityScanner;
 pub use java::JavaSecurityScanner;
+pub use node::NodeSecurityScanner;
+pub use python::PythonSecurityScanner;
+pub use rust::RustSecurityScanner;

@@ -140,7 +140,8 @@ impl ConfigResolver {
     /// Supports tool aliases (e.g., "ruff" matches "ruff-from-flake8").
     pub fn get_plugin_config(&self, lang: &str, tool: &str) -> Option<PathBuf> {
         // First try exact match
-        if let Some(config) = self.configs
+        if let Some(config) = self
+            .configs
             .iter()
             .find(|c| c.language == lang && c.tool == tool)
         {
@@ -150,7 +151,8 @@ impl ConfigResolver {
         // Try alias match (e.g., "ruff" matches "ruff-from-flake8")
         let aliases = get_tool_aliases(tool);
         for alias in aliases {
-            if let Some(config) = self.configs
+            if let Some(config) = self
+                .configs
                 .iter()
                 .find(|c| c.language == lang && c.tool == alias)
             {
@@ -243,11 +245,7 @@ fn get_tool_aliases(tool: &str) -> Vec<&'static str> {
 /// Get the list of config file names to search for a given language/tool
 fn get_config_names(lang: &str, tool: &str) -> Vec<&'static str> {
     match (lang, tool) {
-        ("python", "ruff") => vec![
-            "ruff.toml",
-            ".ruff.toml",
-            "pyproject.toml",
-        ],
+        ("python", "ruff") => vec!["ruff.toml", ".ruff.toml", "pyproject.toml"],
         ("typescript" | "javascript", "eslint") => vec![
             ".eslintrc.js",
             ".eslintrc.cjs",
@@ -274,56 +272,25 @@ fn get_config_names(lang: &str, tool: &str) -> Vec<&'static str> {
             ".golangci.toml",
             ".golangci.json",
         ],
-        ("cpp" | "oc", "clang-tidy") => vec![
-            ".clang-tidy",
-        ],
-        ("cpp" | "oc", "clang-format") => vec![
-            ".clang-format",
-            "_clang-format",
-        ],
-        ("rust", "clippy") => vec![
-            "clippy.toml",
-            ".clippy.toml",
-        ],
-        ("rust", "rustfmt") => vec![
-            "rustfmt.toml",
-            ".rustfmt.toml",
-        ],
-        ("java", "checkstyle") => vec![
-            "checkstyle.xml",
-        ],
-        ("kotlin", "ktlint") => vec![
-            ".editorconfig",
-        ],
-        ("swift", "swiftlint") => vec![
-            ".swiftlint.yml",
-            ".swiftlint.yaml",
-        ],
-        ("dart", "analysis_options") => vec![
-            "analysis_options.yaml",
-        ],
-        ("lua", "luacheck") => vec![
-            ".luacheckrc",
-        ],
-        ("lua", "stylua") => vec![
-            "stylua.toml",
-            ".stylua.toml",
-        ],
-        ("shell", "shellcheck") => vec![
-            ".shellcheckrc",
-        ],
-        ("ruby", "rubocop") => vec![
-            ".rubocop.yml",
-        ],
+        ("cpp" | "oc", "clang-tidy") => vec![".clang-tidy"],
+        ("cpp" | "oc", "clang-format") => vec![".clang-format", "_clang-format"],
+        ("rust", "clippy") => vec!["clippy.toml", ".clippy.toml"],
+        ("rust", "rustfmt") => vec!["rustfmt.toml", ".rustfmt.toml"],
+        ("java", "checkstyle") => vec!["checkstyle.xml"],
+        ("kotlin", "ktlint") => vec![".editorconfig"],
+        ("swift", "swiftlint") => vec![".swiftlint.yml", ".swiftlint.yaml"],
+        ("dart", "analysis_options") => vec!["analysis_options.yaml"],
+        ("lua", "luacheck") => vec![".luacheckrc"],
+        ("lua", "stylua") => vec!["stylua.toml", ".stylua.toml"],
+        ("shell", "shellcheck") => vec![".shellcheckrc"],
+        ("ruby", "rubocop") => vec![".rubocop.yml"],
         ("php", "phpcs") => vec![
             "phpcs.xml",
             "phpcs.xml.dist",
             ".phpcs.xml",
             ".phpcs.xml.dist",
         ],
-        ("scala", "scalafmt") => vec![
-            ".scalafmt.conf",
-        ],
+        ("scala", "scalafmt") => vec![".scalafmt.conf"],
         _ => vec![],
     }
 }
@@ -341,7 +308,10 @@ impl ConfigResolverBuilder {
     }
 
     /// Add configs from CLI plugins (--use-plugin)
-    pub fn with_cli_plugins(mut self, plugin_configs: Vec<(String, String, PathBuf, String)>) -> Self {
+    pub fn with_cli_plugins(
+        mut self,
+        plugin_configs: Vec<(String, String, PathBuf, String)>,
+    ) -> Self {
         for (lang, tool, path, plugin_name) in plugin_configs {
             self.configs.push(ResolvedConfig::new(
                 lang,
@@ -355,7 +325,10 @@ impl ConfigResolverBuilder {
     }
 
     /// Add configs from project plugins (.linthis/config.toml)
-    pub fn with_project_plugins(mut self, plugin_configs: Vec<(String, String, PathBuf, String)>) -> Self {
+    pub fn with_project_plugins(
+        mut self,
+        plugin_configs: Vec<(String, String, PathBuf, String)>,
+    ) -> Self {
         for (lang, tool, path, plugin_name) in plugin_configs {
             self.configs.push(ResolvedConfig::new(
                 lang,
@@ -369,7 +342,10 @@ impl ConfigResolverBuilder {
     }
 
     /// Add configs from global plugins (~/.linthis/)
-    pub fn with_global_plugins(mut self, plugin_configs: Vec<(String, String, PathBuf, String)>) -> Self {
+    pub fn with_global_plugins(
+        mut self,
+        plugin_configs: Vec<(String, String, PathBuf, String)>,
+    ) -> Self {
         for (lang, tool, path, plugin_name) in plugin_configs {
             self.configs.push(ResolvedConfig::new(
                 lang,
@@ -411,9 +387,27 @@ mod tests {
     #[test]
     fn test_config_resolver_sorting() {
         let resolver = ConfigResolver::with_configs(vec![
-            ResolvedConfig::new("python", "ruff", PathBuf::from("/global/ruff.toml"), ConfigSource::GlobalPlugin, "global"),
-            ResolvedConfig::new("python", "ruff", PathBuf::from("/cli/ruff.toml"), ConfigSource::CliPlugin, "cli"),
-            ResolvedConfig::new("python", "ruff", PathBuf::from("/project/ruff.toml"), ConfigSource::ProjectPlugin, "project"),
+            ResolvedConfig::new(
+                "python",
+                "ruff",
+                PathBuf::from("/global/ruff.toml"),
+                ConfigSource::GlobalPlugin,
+                "global",
+            ),
+            ResolvedConfig::new(
+                "python",
+                "ruff",
+                PathBuf::from("/cli/ruff.toml"),
+                ConfigSource::CliPlugin,
+                "cli",
+            ),
+            ResolvedConfig::new(
+                "python",
+                "ruff",
+                PathBuf::from("/project/ruff.toml"),
+                ConfigSource::ProjectPlugin,
+                "project",
+            ),
         ]);
 
         // Should be sorted: CLI (2) < Project (3) < Global (4)
@@ -426,8 +420,20 @@ mod tests {
     #[test]
     fn test_get_plugin_config() {
         let resolver = ConfigResolver::with_configs(vec![
-            ResolvedConfig::new("python", "ruff", PathBuf::from("/cli/ruff.toml"), ConfigSource::CliPlugin, "cli"),
-            ResolvedConfig::new("python", "ruff", PathBuf::from("/project/ruff.toml"), ConfigSource::ProjectPlugin, "project"),
+            ResolvedConfig::new(
+                "python",
+                "ruff",
+                PathBuf::from("/cli/ruff.toml"),
+                ConfigSource::CliPlugin,
+                "cli",
+            ),
+            ResolvedConfig::new(
+                "python",
+                "ruff",
+                PathBuf::from("/project/ruff.toml"),
+                ConfigSource::ProjectPlugin,
+                "project",
+            ),
         ]);
 
         // Should return CLI plugin config (higher priority)
@@ -453,9 +459,13 @@ mod tests {
         fs::write(&test_file, "# test").unwrap();
 
         // Create resolver with plugin config
-        let resolver = ConfigResolver::with_configs(vec![
-            ResolvedConfig::new("python", "ruff", PathBuf::from("/plugin/ruff.toml"), ConfigSource::CliPlugin, "plugin"),
-        ]);
+        let resolver = ConfigResolver::with_configs(vec![ResolvedConfig::new(
+            "python",
+            "ruff",
+            PathBuf::from("/plugin/ruff.toml"),
+            ConfigSource::CliPlugin,
+            "plugin",
+        )]);
 
         // Should return local config (priority 1) over plugin config (priority 2)
         let config = resolver.get_config("python", "ruff", &test_file);
@@ -471,9 +481,13 @@ mod tests {
 
         // Create resolver with plugin config
         let plugin_path = PathBuf::from("/plugin/ruff.toml");
-        let resolver = ConfigResolver::with_configs(vec![
-            ResolvedConfig::new("python", "ruff", plugin_path.clone(), ConfigSource::CliPlugin, "plugin"),
-        ]);
+        let resolver = ConfigResolver::with_configs(vec![ResolvedConfig::new(
+            "python",
+            "ruff",
+            plugin_path.clone(),
+            ConfigSource::CliPlugin,
+            "plugin",
+        )]);
 
         // Should return plugin config when no local config exists
         let config = resolver.get_config("python", "ruff", &test_file);
@@ -482,10 +496,16 @@ mod tests {
 
     #[test]
     fn test_is_plugin_config_path() {
-        assert!(is_plugin_config_path(Path::new("/project/.linthis/configs/python/ruff.toml")));
-        assert!(is_plugin_config_path(Path::new("C:\\project\\.linthis\\configs\\python\\ruff.toml")));
+        assert!(is_plugin_config_path(Path::new(
+            "/project/.linthis/configs/python/ruff.toml"
+        )));
+        assert!(is_plugin_config_path(Path::new(
+            "C:\\project\\.linthis\\configs\\python\\ruff.toml"
+        )));
         assert!(!is_plugin_config_path(Path::new("/project/ruff.toml")));
-        assert!(!is_plugin_config_path(Path::new("/project/.linthis/config.toml")));
+        assert!(!is_plugin_config_path(Path::new(
+            "/project/.linthis/config.toml"
+        )));
     }
 
     #[test]
@@ -506,12 +526,18 @@ mod tests {
     #[test]
     fn test_builder() {
         let resolver = ConfigResolverBuilder::new()
-            .with_cli_plugins(vec![
-                ("python".to_string(), "ruff".to_string(), PathBuf::from("/cli/ruff.toml"), "cli-plugin".to_string()),
-            ])
-            .with_project_plugins(vec![
-                ("python".to_string(), "ruff".to_string(), PathBuf::from("/project/ruff.toml"), "project-plugin".to_string()),
-            ])
+            .with_cli_plugins(vec![(
+                "python".to_string(),
+                "ruff".to_string(),
+                PathBuf::from("/cli/ruff.toml"),
+                "cli-plugin".to_string(),
+            )])
+            .with_project_plugins(vec![(
+                "python".to_string(),
+                "ruff".to_string(),
+                PathBuf::from("/project/ruff.toml"),
+                "project-plugin".to_string(),
+            )])
             .build();
 
         assert_eq!(resolver.len(), 2);
@@ -528,9 +554,13 @@ mod tests {
         assert!(resolver.is_empty());
         assert_eq!(resolver.len(), 0);
 
-        let resolver = ConfigResolver::with_configs(vec![
-            ResolvedConfig::new("python", "ruff", PathBuf::from("/ruff.toml"), ConfigSource::CliPlugin, "test"),
-        ]);
+        let resolver = ConfigResolver::with_configs(vec![ResolvedConfig::new(
+            "python",
+            "ruff",
+            PathBuf::from("/ruff.toml"),
+            ConfigSource::CliPlugin,
+            "test",
+        )]);
         assert!(!resolver.is_empty());
         assert_eq!(resolver.len(), 1);
     }

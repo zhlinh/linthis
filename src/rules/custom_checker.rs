@@ -85,10 +85,7 @@ impl CustomRulesChecker {
         }
 
         // Get file extension
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         // Read file content
         let content = match fs::read_to_string(path) {
@@ -217,8 +214,10 @@ mod tests {
 
     #[test]
     fn test_custom_checker_with_severity() {
-        let rules = vec![CustomRule::new("custom/no-fixme", "FIXME|XXX", "Found FIXME/XXX")
-            .with_severity(Severity::Error)];
+        let rules = vec![
+            CustomRule::new("custom/no-fixme", "FIXME|XXX", "Found FIXME/XXX")
+                .with_severity(Severity::Error),
+        ];
 
         let checker = CustomRulesChecker::new(&rules).unwrap();
 
@@ -300,12 +299,11 @@ mod tests {
 
     #[test]
     fn test_custom_checker_with_suggestion() {
-        let rules = vec![CustomRule::new(
-            "custom/no-print",
-            r"println!\(",
-            "Direct println! found",
-        )
-        .with_suggestion("Use log::info! or log::debug! instead")];
+        let rules =
+            vec![
+                CustomRule::new("custom/no-print", r"println!\(", "Direct println! found")
+                    .with_suggestion("Use log::info! or log::debug! instead"),
+            ];
 
         let checker = CustomRulesChecker::new(&rules).unwrap();
 
@@ -336,8 +334,7 @@ mod tests {
             CustomRule::new("custom/rule1", "pattern1", "Message 1")
                 .with_suggestion("Fix 1")
                 .with_extensions(vec!["rs".to_string()]),
-            CustomRule::new("custom/rule2", "pattern2", "Message 2")
-                .with_severity(Severity::Error),
+            CustomRule::new("custom/rule2", "pattern2", "Message 2").with_severity(Severity::Error),
         ];
 
         let checker = CustomRulesChecker::new(&rules).unwrap();
