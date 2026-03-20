@@ -201,12 +201,7 @@ mod tests {
     fn test_generate_eslint_js() {
         let config = ESLintConfig {
             extends: vec!["eslint:recommended".to_string()],
-            rules: vec![
-                (
-                    "semi".to_string(),
-                    eslint::RuleValue::Error,
-                ),
-            ],
+            rules: vec![("semi".to_string(), eslint::RuleValue::Error)],
             env: vec!["browser".to_string(), "node".to_string()],
             plugins: vec![],
             parser: None,

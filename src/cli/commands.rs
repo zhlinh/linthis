@@ -215,10 +215,7 @@ impl HookTool {
 
     /// Returns true if this type includes an AI agent fix fallback
     pub fn has_agent_fix(&self) -> bool {
-        matches!(
-            self,
-            HookTool::GitWithAgent | HookTool::PrekWithAgent
-        )
+        matches!(self, HookTool::GitWithAgent | HookTool::PrekWithAgent)
     }
 
     /// Get the CLI string representation (kebab-case, matches clap ValueEnum)

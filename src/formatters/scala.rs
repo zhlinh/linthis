@@ -48,12 +48,9 @@ impl Formatter for ScalaFormatter {
         })?;
 
         // Run scalafmt (formats in-place by default)
-        let output = Command::new("scalafmt")
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::formatter("scalafmt", path, format!("Failed to run: {}", e))
-            })?;
+        let output = Command::new("scalafmt").arg(path).output().map_err(|e| {
+            crate::LintisError::formatter("scalafmt", path, format!("Failed to run: {}", e))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

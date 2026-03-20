@@ -126,7 +126,10 @@ fn format_human(result: &ScanResult, violations: &[PolicyViolation]) -> String {
     output.push_str(&format!("{}\n", "Summary:".bold()));
     output.push_str(&format!("  Total packages: {}\n", result.packages.len()));
     output.push_str(&format!("  ✅ Permissive: {}\n", result.permissive_count()));
-    output.push_str(&format!("  ⚠️  Weak copyleft: {}\n", result.weak_copyleft_count()));
+    output.push_str(&format!(
+        "  ⚠️  Weak copyleft: {}\n",
+        result.weak_copyleft_count()
+    ));
     output.push_str(&format!("  🔴 Copyleft: {}\n", result.copyleft_count()));
     output.push_str(&format!("  ❓ Unknown: {}\n", result.unknown_count()));
     output.push('\n');
@@ -230,10 +233,7 @@ fn format_spdx(result: &ScanResult) -> String {
         "Creator: Tool: linthis-{}\n",
         env!("CARGO_PKG_VERSION")
     ));
-    output.push_str(&format!(
-        "Created: {}\n",
-        chrono::Utc::now().to_rfc3339()
-    ));
+    output.push_str(&format!("Created: {}\n", chrono::Utc::now().to_rfc3339()));
     output.push('\n');
 
     for (i, pkg) in result.packages.iter().enumerate() {
@@ -241,18 +241,13 @@ fn format_spdx(result: &ScanResult) -> String {
         output.push_str(&format!("PackageName: {}\n", pkg.name));
         output.push_str(&format!("SPDXID: SPDXRef-Package-{}\n", i + 1));
         output.push_str(&format!("PackageVersion: {}\n", pkg.version));
-        output.push_str(&format!(
-            "PackageDownloadLocation: NOASSERTION\n"
-        ));
+        output.push_str(&format!("PackageDownloadLocation: NOASSERTION\n"));
         output.push_str(&format!("FilesAnalyzed: false\n"));
         output.push_str(&format!(
             "PackageLicenseConcluded: {}\n",
             pkg.license.to_spdx()
         ));
-        output.push_str(&format!(
-            "PackageLicenseDeclared: {}\n",
-            pkg.license_text
-        ));
+        output.push_str(&format!("PackageLicenseDeclared: {}\n", pkg.license_text));
         output.push_str(&format!("PackageCopyrightText: NOASSERTION\n"));
         output.push('\n');
     }

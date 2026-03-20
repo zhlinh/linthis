@@ -10,9 +10,9 @@
 
 //! AI-assisted fix suggestion generation.
 
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Instant;
-use serde::{Deserialize, Serialize};
 
 use super::context::{extract_context, CodeContext, ContextOptions};
 use super::prompts::{IssueCategory, PromptBuilder, PromptVariables};
@@ -403,7 +403,8 @@ impl AiSuggester {
         let file_path_str = file_path.to_string_lossy().to_string();
 
         // Extract context from file
-        let context = match extract_context(file_path, line_number as u32, &options.context_options) {
+        let context = match extract_context(file_path, line_number as u32, &options.context_options)
+        {
             Ok(ctx) => ctx,
             Err(e) => {
                 return SuggestionResult::failure(
@@ -494,10 +495,7 @@ fn extract_context_from_source(
         context.issue_lines = "(file-level issue)".to_string();
         context.before = String::new();
         context.after = lines[..context_lines].join("\n");
-        context.full_snippet = format!(
-            ">>> File-level issue <<<\n{}",
-            context.after
-        );
+        context.full_snippet = format!(">>> File-level issue <<<\n{}", context.after);
         return Ok(context);
     }
 
@@ -554,24 +552,37 @@ fn categorize_issue(issue: &LintIssue) -> IssueCategory {
     let code_lower = issue.code.as_deref().unwrap_or("").to_lowercase();
     let msg_lower = issue.message.to_lowercase();
 
-    if code_lower.contains("security") || code_lower.contains("vuln")
-        || msg_lower.contains("security") || msg_lower.contains("vulnerability")
-        || msg_lower.contains("injection") || msg_lower.contains("xss") {
+    if code_lower.contains("security")
+        || code_lower.contains("vuln")
+        || msg_lower.contains("security")
+        || msg_lower.contains("vulnerability")
+        || msg_lower.contains("injection")
+        || msg_lower.contains("xss")
+    {
         return IssueCategory::Security;
     }
 
-    if code_lower.contains("perf") || msg_lower.contains("performance")
-        || msg_lower.contains("slow") || msg_lower.contains("optimize") {
+    if code_lower.contains("perf")
+        || msg_lower.contains("performance")
+        || msg_lower.contains("slow")
+        || msg_lower.contains("optimize")
+    {
         return IssueCategory::Performance;
     }
 
-    if code_lower.contains("complex") || msg_lower.contains("complexity")
-        || msg_lower.contains("cyclomatic") || msg_lower.contains("cognitive") {
+    if code_lower.contains("complex")
+        || msg_lower.contains("complexity")
+        || msg_lower.contains("cyclomatic")
+        || msg_lower.contains("cognitive")
+    {
         return IssueCategory::Complexity;
     }
 
-    if code_lower.contains("style") || code_lower.contains("format")
-        || msg_lower.contains("naming") || msg_lower.contains("indent") {
+    if code_lower.contains("style")
+        || code_lower.contains("format")
+        || msg_lower.contains("naming")
+        || msg_lower.contains("indent")
+    {
         return IssueCategory::Style;
     }
 
@@ -579,13 +590,17 @@ fn categorize_issue(issue: &LintIssue) -> IssueCategory {
         return IssueCategory::Deprecation;
     }
 
-    if code_lower.contains("type") || msg_lower.contains("type mismatch")
-        || msg_lower.contains("type error") {
+    if code_lower.contains("type")
+        || msg_lower.contains("type mismatch")
+        || msg_lower.contains("type error")
+    {
         return IssueCategory::Type;
     }
 
-    if code_lower.contains("doc") || msg_lower.contains("documentation")
-        || msg_lower.contains("missing doc") {
+    if code_lower.contains("doc")
+        || msg_lower.contains("documentation")
+        || msg_lower.contains("missing doc")
+    {
         return IssueCategory::Documentation;
     }
 
@@ -837,9 +852,27 @@ fn limit_code_block_size(code: &str, max_lines: usize) -> String {
 /// Check if text looks like code
 fn looks_like_code(text: &str) -> bool {
     let code_indicators = [
-        "fn ", "let ", "const ", "var ", "function ", "def ", "class ",
-        "if ", "for ", "while ", "return ", "import ", "from ", "use ",
-        "{", "}", "(", ")", ";", "=>", "->",
+        "fn ",
+        "let ",
+        "const ",
+        "var ",
+        "function ",
+        "def ",
+        "class ",
+        "if ",
+        "for ",
+        "while ",
+        "return ",
+        "import ",
+        "from ",
+        "use ",
+        "{",
+        "}",
+        "(",
+        ")",
+        ";",
+        "=>",
+        "->",
     ];
 
     let trimmed = text.trim();
@@ -888,14 +921,9 @@ mod tests {
 
     #[test]
     fn test_fix_suggestion() {
-        let suggestion = FixSuggestion::new(
-            "let x = 5;".to_string(),
-            10,
-            10,
-            "rust",
-        )
-        .with_explanation("Fixed unused variable")
-        .with_confidence(0.9);
+        let suggestion = FixSuggestion::new("let x = 5;".to_string(), 10, 10, "rust")
+            .with_explanation("Fixed unused variable")
+            .with_confidence(0.9);
 
         assert_eq!(suggestion.start_line, 10);
         assert_eq!(suggestion.confidence, Some(0.9));
@@ -904,14 +932,8 @@ mod tests {
 
     #[test]
     fn test_suggestion_result() {
-        let result = SuggestionResult::success(
-            "W0001",
-            "src/main.rs",
-            10,
-            "unused variable",
-            vec![],
-            100,
-        );
+        let result =
+            SuggestionResult::success("W0001", "src/main.rs", 10, "unused variable", vec![], 100);
 
         assert!(!result.is_success()); // No suggestions
 
@@ -920,7 +942,12 @@ mod tests {
             "src/main.rs",
             10,
             "unused variable",
-            vec![FixSuggestion::new("let _x = 5;".to_string(), 10, 10, "rust")],
+            vec![FixSuggestion::new(
+                "let _x = 5;".to_string(),
+                10,
+                10,
+                "rust",
+            )],
             100,
         );
 
@@ -940,13 +967,7 @@ mod tests {
             10,
         );
 
-        let failure = SuggestionResult::failure(
-            "W0002",
-            "test.rs",
-            2,
-            "test",
-            "error",
-        );
+        let failure = SuggestionResult::failure("W0002", "test.rs", 2, "test", "error");
 
         report.add_result(success);
         report.add_result(failure);

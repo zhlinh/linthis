@@ -127,9 +127,7 @@ mod tests {
         assert_eq!(state.content, "print('hello')");
 
         // Update document
-        manager
-            .change(&uri, "print('world')".to_string(), 2)
-            .await;
+        manager.change(&uri, "print('world')".to_string(), 2).await;
 
         let state = manager.get(&uri).await.unwrap();
         assert_eq!(state.version, 2);

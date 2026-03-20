@@ -94,8 +94,10 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
     let current_line = lines[line_idx];
 
     // Debug: Print line information
-    eprintln!("[DEBUG] issue.line = {}, line_idx = {}, current_line = {:?}",
-              line_num, line_idx, current_line);
+    eprintln!(
+        "[DEBUG] issue.line = {}, line_idx = {}, current_line = {:?}",
+        line_num, line_idx, current_line
+    );
     eprintln!("[DEBUG] issue.code_line = {:?}", issue.code_line);
 
     // Verify the line content matches what was recorded during check
@@ -106,7 +108,10 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
 
         // Check if current line matches expected content
         if current_trimmed == expected_trimmed {
-            eprintln!("[DEBUG] Line content matches expected, using line {}", line_num);
+            eprintln!(
+                "[DEBUG] Line content matches expected, using line {}",
+                line_num
+            );
             line_idx
         } else {
             // Line content doesn't match - file was modified or line numbers shifted
@@ -122,21 +127,29 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
             let mut found_idx = None;
             let mut best_match_score: i32 = 0;
 
-            for (i, line) in lines.iter().enumerate().skip(search_start).take(search_end - search_start) {
+            for (i, line) in lines
+                .iter()
+                .enumerate()
+                .skip(search_start)
+                .take(search_end - search_start)
+            {
                 let line_trimmed = line.trim();
 
                 // Calculate base similarity score
                 let base_score: i32 = if line_trimmed == expected_trimmed {
                     // Exact match is best
                     1000
-                } else if line_trimmed.contains(expected_trimmed) || expected_trimmed.contains(line_trimmed) {
+                } else if line_trimmed.contains(expected_trimmed)
+                    || expected_trimmed.contains(line_trimmed)
+                {
                     // Substring match
                     500
                 } else {
                     // Check common tokens
                     let line_tokens: Vec<&str> = line_trimmed.split_whitespace().collect();
                     let expected_tokens: Vec<&str> = expected_trimmed.split_whitespace().collect();
-                    let common_tokens = line_tokens.iter()
+                    let common_tokens = line_tokens
+                        .iter()
                         .filter(|t| expected_tokens.contains(t))
                         .count() as i32;
                     common_tokens * 50
@@ -156,16 +169,26 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
             }
 
             if let Some(idx) = found_idx {
-                eprintln!("[DEBUG] Using matched line {} instead of {}", idx + 1, line_num);
+                eprintln!(
+                    "[DEBUG] Using matched line {} instead of {}",
+                    idx + 1,
+                    line_num
+                );
                 idx
             } else {
-                eprintln!("[DEBUG] No good match found, using original line {}", line_num);
+                eprintln!(
+                    "[DEBUG] No good match found, using original line {}",
+                    line_num
+                );
                 line_idx
             }
         }
     } else {
         // No code_line recorded, use original line number
-        eprintln!("[DEBUG] No code_line recorded, using original line {}", line_num);
+        eprintln!(
+            "[DEBUG] No code_line recorded, using original line {}",
+            line_num
+        );
         line_idx
     };
 
@@ -173,9 +196,9 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
     let current_line = lines[line_idx];
 
     // Determine language and generate appropriate comment
-    let lang = issue.language.unwrap_or_else(|| {
-        Language::from_path(file_path).unwrap_or(Language::Cpp)
-    });
+    let lang = issue
+        .language
+        .unwrap_or_else(|| Language::from_path(file_path).unwrap_or(Language::Cpp));
 
     let source = issue.source.as_deref().unwrap_or("");
     let code = issue.code.as_deref().unwrap_or("");
@@ -210,9 +233,7 @@ fn has_nolint_comment(line: &str, lang: Language, _source: &str) -> bool {
         Language::Cpp | Language::ObjectiveC => {
             line_upper.contains("NOLINT") || line_upper.contains("NOLINTNEXTLINE")
         }
-        Language::Python => {
-            line.contains("# noqa") || line.contains("# type: ignore")
-        }
+        Language::Python => line.contains("# noqa") || line.contains("# type: ignore"),
         Language::Rust => {
             // Rust uses attributes, check if line above has #[allow(...)]
             // This is a simple check; the insertion logic handles the full case
@@ -221,39 +242,23 @@ fn has_nolint_comment(line: &str, lang: Language, _source: &str) -> bool {
         Language::TypeScript | Language::JavaScript => {
             line.contains("eslint-disable") || line.contains("@ts-ignore")
         }
-        Language::Go => {
-            line.contains("//nolint") || line.contains("// nolint")
-        }
+        Language::Go => line.contains("//nolint") || line.contains("// nolint"),
         Language::Java => {
             line.contains("@SuppressWarnings")
                 || line_upper.contains("NOPMD")
                 || line_upper.contains("CHECKSTYLE")
         }
         // New languages - use generic ignore comment pattern
-        Language::Dart => {
-            line.contains("// ignore:") || line.contains("//ignore:")
-        }
-        Language::Swift => {
-            line.contains("swiftlint:disable") || line.contains("// swiftlint:")
-        }
-        Language::Kotlin => {
-            line.contains("@Suppress") || line_upper.contains("KTLINT-DISABLE")
-        }
-        Language::Lua => {
-            line.contains("-- luacheck:") || line.contains("--luacheck:")
-        }
+        Language::Dart => line.contains("// ignore:") || line.contains("//ignore:"),
+        Language::Swift => line.contains("swiftlint:disable") || line.contains("// swiftlint:"),
+        Language::Kotlin => line.contains("@Suppress") || line_upper.contains("KTLINT-DISABLE"),
+        Language::Lua => line.contains("-- luacheck:") || line.contains("--luacheck:"),
         Language::Shell => {
             line.contains("# shellcheck disable") || line.contains("#shellcheck disable")
         }
-        Language::Ruby => {
-            line.contains("# rubocop:disable") || line.contains("#rubocop:disable")
-        }
-        Language::Php => {
-            line.contains("// phpcs:ignore") || line.contains("//phpcs:ignore")
-        }
-        Language::Scala => {
-            line.contains("// scalafix:ok") || line.contains("//scalafix:ok")
-        }
+        Language::Ruby => line.contains("# rubocop:disable") || line.contains("#rubocop:disable"),
+        Language::Php => line.contains("// phpcs:ignore") || line.contains("//phpcs:ignore"),
+        Language::Scala => line.contains("// scalafix:ok") || line.contains("//scalafix:ok"),
         Language::CSharp => {
             line.contains("#pragma warning disable") || line.contains("// ReSharper disable")
         }
@@ -888,9 +893,9 @@ fn generate_scala_ok(code: &str) -> String {
 
 /// Get a human-readable description of what NOLINT comment will be added
 pub fn describe_nolint_action(issue: &LintIssue) -> String {
-    let lang = issue.language.unwrap_or_else(|| {
-        Language::from_path(&issue.file_path).unwrap_or(Language::Cpp)
-    });
+    let lang = issue
+        .language
+        .unwrap_or_else(|| Language::from_path(&issue.file_path).unwrap_or(Language::Cpp));
     let source = issue.source.as_deref().unwrap_or("");
     let code = issue.code.as_deref().unwrap_or("");
 
@@ -946,8 +951,8 @@ pub fn describe_nolint_action(issue: &LintIssue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::utils::types::Severity;
+    use std::path::PathBuf;
 
     #[test]
     fn test_generate_cpp_nolint_clang_tidy() {

@@ -44,7 +44,11 @@ impl Formatter for DartFormatter {
     fn format(&self, path: &Path) -> Result<FormatResult> {
         // Read original content for comparison
         let original = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::formatter("dart format", path, format!("Failed to read file: {}", e))
+            crate::LintisError::formatter(
+                "dart format",
+                path,
+                format!("Failed to read file: {}", e),
+            )
         })?;
 
         // Run dart format (in-place formatting)

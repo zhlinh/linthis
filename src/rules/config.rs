@@ -98,7 +98,11 @@ fn default_true() -> bool {
 
 impl CustomRule {
     /// Create a new custom rule with required fields.
-    pub fn new(code: impl Into<String>, pattern: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn new(
+        code: impl Into<String>,
+        pattern: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             code: code.into(),
             pattern: pattern.into(),
@@ -199,7 +203,9 @@ mod tests {
 
         let mut config2 = RulesConfig::default();
         config2.disable.push("W001".to_string());
-        config2.custom.push(CustomRule::new("custom/test", "TODO", "Found TODO"));
+        config2
+            .custom
+            .push(CustomRule::new("custom/test", "TODO", "Found TODO"));
 
         config1.merge(config2);
 
@@ -238,7 +244,10 @@ mod tests {
     #[test]
     fn test_severity_override_to_severity() {
         assert_eq!(SeverityOverride::Error.to_severity(), Some(Severity::Error));
-        assert_eq!(SeverityOverride::Warning.to_severity(), Some(Severity::Warning));
+        assert_eq!(
+            SeverityOverride::Warning.to_severity(),
+            Some(Severity::Warning)
+        );
         assert_eq!(SeverityOverride::Info.to_severity(), Some(Severity::Info));
         assert_eq!(SeverityOverride::Off.to_severity(), None);
     }

@@ -73,8 +73,8 @@ impl JavaComplexityAnalyzer {
         let mut complexity = 1;
 
         let keywords = [
-            "if ", "if(", "else if", "else {", "switch ", "case ", "for ", "for(",
-            "while ", "while(", "do ", "catch ", "&&", "||", " ? ", // ternary
+            "if ", "if(", "else if", "else {", "switch ", "case ", "for ", "for(", "while ",
+            "while(", "do ", "catch ", "&&", "||", " ? ", // ternary
         ];
 
         for keyword in keywords {
@@ -242,11 +242,8 @@ impl LanguageComplexityAnalyzer for JavaComplexityAnalyzer {
                     let metrics =
                         self.analyze_function(content, method_start as u32, end_line as u32);
 
-                    let mut func = FunctionMetrics::new(
-                        &method_name,
-                        method_start as u32,
-                        end_line as u32,
-                    );
+                    let mut func =
+                        FunctionMetrics::new(&method_name, method_start as u32, end_line as u32);
                     func.metrics = metrics;
                     func.parent = current_class.clone();
                     func.kind = "method".to_string();

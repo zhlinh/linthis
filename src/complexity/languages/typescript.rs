@@ -73,9 +73,8 @@ impl TypeScriptComplexityAnalyzer {
         let mut complexity = 1;
 
         let keywords = [
-            "if ", "if(", "else if", "else {", "switch ", "case ", "for ", "for(",
-            "while ", "while(", "do ", "catch ", "&&", "||", "??", "?.",
-            " ? ", // ternary
+            "if ", "if(", "else if", "else {", "switch ", "case ", "for ", "for(", "while ",
+            "while(", "do ", "catch ", "&&", "||", "??", "?.", " ? ", // ternary
         ];
 
         for keyword in keywords {
@@ -197,8 +196,7 @@ impl LanguageComplexityAnalyzer for TypeScriptComplexityAnalyzer {
             .filter(|line| {
                 let trimmed = line.trim();
                 trimmed.starts_with("import ")
-                    || trimmed.starts_with("const ")
-                        && trimmed.contains("require(")
+                    || trimmed.starts_with("const ") && trimmed.contains("require(")
             })
             .count() as u32;
 

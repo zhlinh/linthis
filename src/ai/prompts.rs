@@ -10,8 +10,8 @@
 
 //! Prompt templates for AI-assisted fix suggestions.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Categories of lint issues for specialized prompts
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -186,7 +186,9 @@ impl PromptBuilder {
 
     /// Get template for a specific category
     pub fn get_template(&self, category: IssueCategory) -> &PromptTemplate {
-        self.templates.get(&category).unwrap_or(&self.default_template)
+        self.templates
+            .get(&category)
+            .unwrap_or(&self.default_template)
     }
 
     /// Build a prompt for an issue
@@ -612,10 +614,22 @@ mod tests {
 
     #[test]
     fn test_issue_category_parsing() {
-        assert_eq!("style".parse::<IssueCategory>().unwrap(), IssueCategory::Style);
-        assert_eq!("security".parse::<IssueCategory>().unwrap(), IssueCategory::Security);
-        assert_eq!("performance".parse::<IssueCategory>().unwrap(), IssueCategory::Performance);
-        assert_eq!("unknown".parse::<IssueCategory>().unwrap(), IssueCategory::General);
+        assert_eq!(
+            "style".parse::<IssueCategory>().unwrap(),
+            IssueCategory::Style
+        );
+        assert_eq!(
+            "security".parse::<IssueCategory>().unwrap(),
+            IssueCategory::Security
+        );
+        assert_eq!(
+            "performance".parse::<IssueCategory>().unwrap(),
+            IssueCategory::Performance
+        );
+        assert_eq!(
+            "unknown".parse::<IssueCategory>().unwrap(),
+            IssueCategory::General
+        );
     }
 
     #[test]
@@ -641,12 +655,8 @@ mod tests {
 
     #[test]
     fn test_prompt_template() {
-        let template = PromptTemplate::new(
-            "test",
-            IssueCategory::Style,
-            "System prompt",
-            "User prompt",
-        );
+        let template =
+            PromptTemplate::new("test", IssueCategory::Style, "System prompt", "User prompt");
 
         assert_eq!(template.name, "test");
         assert_eq!(template.category, IssueCategory::Style);

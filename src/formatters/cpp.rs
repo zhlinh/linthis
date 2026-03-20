@@ -316,7 +316,11 @@ impl Formatter for CppFormatter {
 
         // Read original content for comparison
         let original = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::formatter("clang-format", path, format!("Failed to read file: {}", e))
+            crate::LintisError::formatter(
+                "clang-format",
+                path,
+                format!("Failed to read file: {}", e),
+            )
         })?;
 
         // Step 1: Run cpplint fixer (fixes header guards, TODOs, copyright)
@@ -401,7 +405,11 @@ impl Formatter for CppFormatter {
 
         // Read current content
         let current = fs::read_to_string(path).map_err(|e| {
-            crate::LintisError::formatter("clang-format", path, format!("Failed to read file: {}", e))
+            crate::LintisError::formatter(
+                "clang-format",
+                path,
+                format!("Failed to read file: {}", e),
+            )
         })?;
 
         // Run clang-format to get formatted output (without -i)

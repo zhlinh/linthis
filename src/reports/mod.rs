@@ -26,6 +26,6 @@ pub use consistency::{ConsistencyAnalysis, OutlierFile, RepeatedPattern};
 pub use html::{generate_html_report, HtmlReportOptions};
 pub use statistics::{FileStats, ReportStatistics, RuleStats, SeverityCounts, SummaryMetrics};
 pub use trends::{
-    analyze_trends, get_last_result, load_historical_results, load_result_from_file,
-    TrendAnalysis, TrendDataPoint, TrendDirection,
+    analyze_trends, get_last_result, load_historical_results, load_result_from_file, TrendAnalysis,
+    TrendDataPoint, TrendDirection,
 };

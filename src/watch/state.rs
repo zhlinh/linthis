@@ -244,7 +244,10 @@ impl WatchState {
 
     /// Get issues for a specific file
     pub fn issues_for_file(&self, path: &PathBuf) -> Vec<&LintIssue> {
-        self.issues.iter().filter(|i| &i.file_path == path).collect()
+        self.issues
+            .iter()
+            .filter(|i| &i.file_path == path)
+            .collect()
     }
 
     /// Get file info

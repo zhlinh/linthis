@@ -18,8 +18,8 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::languages::{
-    GoComplexityAnalyzer, JavaComplexityAnalyzer, PythonComplexityAnalyzer,
-    RustComplexityAnalyzer, TypeScriptComplexityAnalyzer,
+    GoComplexityAnalyzer, JavaComplexityAnalyzer, PythonComplexityAnalyzer, RustComplexityAnalyzer,
+    TypeScriptComplexityAnalyzer,
 };
 use super::metrics::{FileMetrics, MetricLevel, SummaryStats};
 use super::thresholds::Thresholds;
@@ -145,20 +145,38 @@ impl AnalysisResult {
 
             self.summary.avg_cyclomatic = cyclo_sum as f64 / self.files.len() as f64;
             self.summary.avg_cognitive = cogn_sum as f64 / self.files.len() as f64;
-            self.summary.max_cyclomatic = self.files.iter().map(|f| f.metrics.cyclomatic).max().unwrap_or(0);
-            self.summary.max_cognitive = self.files.iter().map(|f| f.metrics.cognitive).max().unwrap_or(0);
+            self.summary.max_cyclomatic = self
+                .files
+                .iter()
+                .map(|f| f.metrics.cyclomatic)
+                .max()
+                .unwrap_or(0);
+            self.summary.max_cognitive = self
+                .files
+                .iter()
+                .map(|f| f.metrics.cognitive)
+                .max()
+                .unwrap_or(0);
         }
 
         // Count high complexity
-        self.summary.high_complexity_files = self.files
+        self.summary.high_complexity_files = self
+            .files
             .iter()
-            .filter(|f| f.metrics.overall_level() == MetricLevel::High || f.metrics.overall_level() == MetricLevel::Critical)
+            .filter(|f| {
+                f.metrics.overall_level() == MetricLevel::High
+                    || f.metrics.overall_level() == MetricLevel::Critical
+            })
             .count();
 
-        self.summary.high_complexity_functions = self.files
+        self.summary.high_complexity_functions = self
+            .files
             .iter()
             .flat_map(|f| &f.functions)
-            .filter(|func| func.metrics.overall_level() == MetricLevel::High || func.metrics.overall_level() == MetricLevel::Critical)
+            .filter(|func| {
+                func.metrics.overall_level() == MetricLevel::High
+                    || func.metrics.overall_level() == MetricLevel::Critical
+            })
             .count();
 
         // Calculate by language
@@ -177,7 +195,11 @@ impl AnalysisResult {
             if !files.is_empty() {
                 let cyclo_sum: u32 = files.iter().map(|f| f.metrics.cyclomatic).sum();
                 stats.avg_cyclomatic = cyclo_sum as f64 / files.len() as f64;
-                stats.max_cyclomatic = files.iter().map(|f| f.metrics.cyclomatic).max().unwrap_or(0);
+                stats.max_cyclomatic = files
+                    .iter()
+                    .map(|f| f.metrics.cyclomatic)
+                    .max()
+                    .unwrap_or(0);
             }
 
             self.by_language.insert(lang, stats);
@@ -299,7 +321,15 @@ impl ComplexityAnalyzer {
                 }
 
                 if path.is_dir() {
-                    let skip_dirs = ["node_modules", "target", "build", "dist", "__pycache__", ".git", "vendor"];
+                    let skip_dirs = [
+                        "node_modules",
+                        "target",
+                        "build",
+                        "dist",
+                        "__pycache__",
+                        ".git",
+                        "vendor",
+                    ];
                     if skip_dirs.contains(&name) {
                         return false;
                     }

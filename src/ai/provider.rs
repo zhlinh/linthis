@@ -159,10 +159,7 @@ pub fn resolve_custom_provider(
     let is_cli = config.kind != "api";
 
     // Start from cli_style defaults if specified
-    let template = config
-        .cli_style
-        .as_deref()
-        .and_then(resolve_cli_style);
+    let template = config.cli_style.as_deref().and_then(resolve_cli_style);
 
     let (prompt_args, fix_args, sys_arg) = if let Some(tmpl) = template {
         (
@@ -338,7 +335,8 @@ pub fn try_fallback_provider(kind: &AiProviderKind) -> Option<(AiProviderKind, S
             AiProviderKind::OpenAi,
             "codex-cli",
             "openai (API)",
-            "Install Codex CLI (npm install -g @openai/codex) to use codex-cli provider".to_string(),
+            "Install Codex CLI (npm install -g @openai/codex) to use codex-cli provider"
+                .to_string(),
         ),
         AiProviderKind::Gemini => (
             AiProviderKind::GeminiCli,
@@ -350,7 +348,8 @@ pub fn try_fallback_provider(kind: &AiProviderKind) -> Option<(AiProviderKind, S
             AiProviderKind::Gemini,
             "gemini-cli",
             "gemini (API)",
-            "Install Gemini CLI (npm install -g @google/gemini-cli) to use gemini-cli provider".to_string(),
+            "Install Gemini CLI (npm install -g @google/gemini-cli) to use gemini-cli provider"
+                .to_string(),
         ),
         AiProviderKind::Custom(name) => {
             // Check custom provider's fallback field
@@ -581,29 +580,25 @@ impl AiProvider {
                 .or_else(|_| env::var("ANTHROPIC_API_KEY"))
                 .ok(),
             AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").ok(),
-            AiProviderKind::OpenAi | AiProviderKind::CodexCli => {
-                env::var("OPENAI_API_KEY").ok()
-            }
+            AiProviderKind::OpenAi | AiProviderKind::CodexCli => env::var("OPENAI_API_KEY").ok(),
             AiProviderKind::Gemini => env::var("GEMINI_API_KEY")
                 .or_else(|_| env::var("GOOGLE_API_KEY"))
                 .ok(),
             _ => None,
         };
 
-        let model = env::var("LINTHIS_AI_MODEL").unwrap_or_else(|_| {
-            match &kind {
-                AiProviderKind::Claude => "claude-sonnet-4-20250514".to_string(),
-                AiProviderKind::ClaudeCli => "claude-cli".to_string(),
-                AiProviderKind::CodeBuddy => "deepseek-v3.1".to_string(),
-                AiProviderKind::CodeBuddyCli => "codebuddy-cli".to_string(),
-                AiProviderKind::OpenAi => "gpt-4o".to_string(),
-                AiProviderKind::CodexCli => "codex-cli".to_string(),
-                AiProviderKind::Gemini => "gemini-2.5-flash".to_string(),
-                AiProviderKind::GeminiCli => "gemini-cli".to_string(),
-                AiProviderKind::Local => "codellama:7b".to_string(),
-                AiProviderKind::Custom(name) => name.clone(),
-                AiProviderKind::Mock => "mock".to_string(),
-            }
+        let model = env::var("LINTHIS_AI_MODEL").unwrap_or_else(|_| match &kind {
+            AiProviderKind::Claude => "claude-sonnet-4-20250514".to_string(),
+            AiProviderKind::ClaudeCli => "claude-cli".to_string(),
+            AiProviderKind::CodeBuddy => "deepseek-v3.1".to_string(),
+            AiProviderKind::CodeBuddyCli => "codebuddy-cli".to_string(),
+            AiProviderKind::OpenAi => "gpt-4o".to_string(),
+            AiProviderKind::CodexCli => "codex-cli".to_string(),
+            AiProviderKind::Gemini => "gemini-2.5-flash".to_string(),
+            AiProviderKind::GeminiCli => "gemini-cli".to_string(),
+            AiProviderKind::Local => "codellama:7b".to_string(),
+            AiProviderKind::Custom(name) => name.clone(),
+            AiProviderKind::Mock => "mock".to_string(),
         });
 
         // Get endpoint based on provider type
@@ -712,12 +707,10 @@ impl AiProvider {
             .build()
             .map_err(|e| e.to_string())?;
 
-        let messages = vec![
-            serde_json::json!({
-                "role": "user",
-                "content": prompt
-            })
-        ];
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": prompt
+        })];
 
         let mut body = serde_json::json!({
             "model": self.config.model,
@@ -744,7 +737,8 @@ impl AiProvider {
             return Err(format!("API error ({}): {}", status, text));
         }
 
-        let result: serde_json::Value = response.json()
+        let result: serde_json::Value = response
+            .json()
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         result["content"][0]["text"]
@@ -753,14 +747,16 @@ impl AiProvider {
             .ok_or_else(|| "No content in response".to_string())
     }
 
-    fn complete_claude_cli(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+    fn complete_claude_cli(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
         use std::process::{Command, Stdio};
 
         // Build the command with optional system prompt
         let mut cmd = Command::new("claude");
-        cmd.arg("-p")
-            .arg("--output-format")
-            .arg("text");
+        cmd.arg("-p").arg("--output-format").arg("text");
 
         // Add system prompt if provided
         if let Some(sys) = system_prompt {
@@ -807,7 +803,14 @@ impl AiProvider {
         use std::process::Stdio;
 
         // Only works with CLI providers
-        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli | AiProviderKind::CodexCli | AiProviderKind::GeminiCli | AiProviderKind::Custom(_)) {
+        if !matches!(
+            self.config.kind,
+            AiProviderKind::ClaudeCli
+                | AiProviderKind::CodeBuddyCli
+                | AiProviderKind::CodexCli
+                | AiProviderKind::GeminiCli
+                | AiProviderKind::Custom(_)
+        ) {
             return Err("fix_file_with_cli only works with CLI providers".to_string());
         }
 
@@ -900,7 +903,14 @@ If you're unsure about related locations, use Grep to search for the function na
     ) -> Result<std::collections::HashMap<std::path::PathBuf, String>, String> {
         use std::process::Stdio;
 
-        if !matches!(self.config.kind, AiProviderKind::ClaudeCli | AiProviderKind::CodeBuddyCli | AiProviderKind::CodexCli | AiProviderKind::GeminiCli | AiProviderKind::Custom(_)) {
+        if !matches!(
+            self.config.kind,
+            AiProviderKind::ClaudeCli
+                | AiProviderKind::CodeBuddyCli
+                | AiProviderKind::CodexCli
+                | AiProviderKind::GeminiCli
+                | AiProviderKind::Custom(_)
+        ) {
             return Err("fix_files_batch_with_cli only works with CLI providers".to_string());
         }
 
@@ -999,12 +1009,18 @@ If unsure about impact, use Grep extensively to find all references first."#,
         Ok(diffs)
     }
 
-    fn complete_codebuddy(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+    fn complete_codebuddy(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
         // Try CODEBUDDY_API_KEY from env, then config
         let api_key = env::var("CODEBUDDY_API_KEY")
             .ok()
             .or_else(|| self.config.api_key.clone())
-            .ok_or_else(|| "CodeBuddy API key not set. Set CODEBUDDY_API_KEY environment variable.".to_string())?;
+            .ok_or_else(|| {
+                "CodeBuddy API key not set. Set CODEBUDDY_API_KEY environment variable.".to_string()
+            })?;
 
         // Try CODEBUDDY_BASE_URL first, then config endpoint
         let base_url = env::var("CODEBUDDY_BASE_URL")
@@ -1064,7 +1080,8 @@ If unsure about impact, use Grep extensively to find all references first."#,
             return Err(format!("API error ({}): {}", status, text));
         }
 
-        let result: serde_json::Value = response.json()
+        let result: serde_json::Value = response
+            .json()
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         result["choices"][0]["message"]["content"]
@@ -1073,14 +1090,16 @@ If unsure about impact, use Grep extensively to find all references first."#,
             .ok_or_else(|| "No content in response".to_string())
     }
 
-    fn complete_codebuddy_cli(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+    fn complete_codebuddy_cli(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
         use std::process::{Command, Stdio};
 
         // Build the command with optional system prompt
         let mut cmd = Command::new("codebuddy");
-        cmd.arg("-p")
-            .arg("--output-format")
-            .arg("text");
+        cmd.arg("-p").arg("--output-format").arg("text");
 
         // Add system prompt if provided
         if let Some(sys) = system_prompt {
@@ -1118,10 +1137,14 @@ If unsure about impact, use Grep extensively to find all references first."#,
     }
 
     fn complete_openai(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
-        let api_key = self.config.api_key.as_ref()
-            .ok_or_else(|| "OpenAI API key not set. Set OPENAI_API_KEY environment variable.".to_string())?;
+        let api_key = self.config.api_key.as_ref().ok_or_else(|| {
+            "OpenAI API key not set. Set OPENAI_API_KEY environment variable.".to_string()
+        })?;
 
-        let endpoint = self.config.endpoint.as_deref()
+        let endpoint = self
+            .config
+            .endpoint
+            .as_deref()
             .unwrap_or("https://api.openai.com/v1/chat/completions");
 
         let client = reqwest::blocking::Client::builder()
@@ -1162,7 +1185,8 @@ If unsure about impact, use Grep extensively to find all references first."#,
             return Err(format!("API error ({}): {}", status, text));
         }
 
-        let result: serde_json::Value = response.json()
+        let result: serde_json::Value = response
+            .json()
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         result["choices"][0]["message"]["content"]
@@ -1171,7 +1195,11 @@ If unsure about impact, use Grep extensively to find all references first."#,
             .ok_or_else(|| "No content in response".to_string())
     }
 
-    fn complete_codex_cli(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+    fn complete_codex_cli(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
         use std::process::{Command, Stdio};
 
         let mut cmd = Command::new("codex");
@@ -1217,9 +1245,15 @@ If unsure about impact, use Grep extensively to find all references first."#,
             .or_else(|_| env::var("GOOGLE_API_KEY"))
             .ok()
             .or_else(|| self.config.api_key.clone())
-            .ok_or_else(|| "Gemini API key not set. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.".to_string())?;
+            .ok_or_else(|| {
+                "Gemini API key not set. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
+                    .to_string()
+            })?;
 
-        let endpoint = self.config.endpoint.as_deref()
+        let endpoint = self
+            .config
+            .endpoint
+            .as_deref()
             .unwrap_or("https://generativelanguage.googleapis.com");
         let endpoint = endpoint.trim_end_matches('/');
 
@@ -1262,7 +1296,8 @@ If unsure about impact, use Grep extensively to find all references first."#,
             return Err(format!("API error ({}): {}", status, text));
         }
 
-        let result: serde_json::Value = response.json()
+        let result: serde_json::Value = response
+            .json()
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         result["candidates"][0]["content"]["parts"][0]["text"]
@@ -1271,7 +1306,11 @@ If unsure about impact, use Grep extensively to find all references first."#,
             .ok_or_else(|| "No content in response".to_string())
     }
 
-    fn complete_gemini_cli(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
+    fn complete_gemini_cli(
+        &self,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
         use std::process::{Command, Stdio};
 
         let mut cmd = Command::new("gemini");
@@ -1312,8 +1351,9 @@ If unsure about impact, use Grep extensively to find all references first."#,
     }
 
     fn complete_local(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
-        let endpoint = self.config.endpoint.as_deref()
-            .ok_or_else(|| "Local LLM endpoint not set. Set LINTHIS_AI_ENDPOINT environment variable.".to_string())?;
+        let endpoint = self.config.endpoint.as_deref().ok_or_else(|| {
+            "Local LLM endpoint not set. Set LINTHIS_AI_ENDPOINT environment variable.".to_string()
+        })?;
 
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
@@ -1352,7 +1392,8 @@ If unsure about impact, use Grep extensively to find all references first."#,
             return Err(format!("API error ({}): {}", status, text));
         }
 
-        let result: serde_json::Value = response.json()
+        let result: serde_json::Value = response
+            .json()
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         result["response"]
@@ -1362,8 +1403,9 @@ If unsure about impact, use Grep extensively to find all references first."#,
     }
 
     fn complete_custom(&self, prompt: &str, system_prompt: Option<&str>) -> Result<String, String> {
-        let cp = get_custom_provider()
-            .ok_or_else(|| "Custom provider not configured. Define it in [ai.custom_providers] config.".to_string())?;
+        let cp = get_custom_provider().ok_or_else(|| {
+            "Custom provider not configured. Define it in [ai.custom_providers] config.".to_string()
+        })?;
 
         if cp.is_cli {
             // CLI custom provider: spawn command with prompt_args + prompt
@@ -1388,9 +1430,11 @@ If unsure about impact, use Grep extensively to find all references first."#,
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
 
-            let child = cmd.spawn()
+            let child = cmd
+                .spawn()
                 .map_err(|e| format!("Failed to spawn '{}': {}", cmd_name, e))?;
-            let output = child.wait_with_output()
+            let output = child
+                .wait_with_output()
                 .map_err(|e| format!("Failed to wait for '{}': {}", cmd_name, e))?;
 
             if !output.status.success() {
@@ -1405,7 +1449,9 @@ If unsure about impact, use Grep extensively to find all references first."#,
             Ok(response)
         } else {
             // API custom provider: dispatch based on api_style
-            let api_key = cp.api_key_env.as_ref()
+            let api_key = cp
+                .api_key_env
+                .as_ref()
                 .and_then(|env_name| env::var(env_name).ok())
                 .or_else(|| self.config.api_key.clone())
                 .ok_or_else(|| format!("API key not set for custom provider '{}'", cp.name))?;
@@ -1417,7 +1463,9 @@ If unsure about impact, use Grep extensively to find all references first."#,
 
             match cp.api_style.as_deref() {
                 Some("openai") => {
-                    let endpoint = cp.endpoint.as_deref()
+                    let endpoint = cp
+                        .endpoint
+                        .as_deref()
                         .unwrap_or("https://api.openai.com/v1/chat/completions");
                     let model = cp.model.as_deref().unwrap_or("gpt-4");
 
@@ -1434,10 +1482,12 @@ If unsure about impact, use Grep extensively to find all references first."#,
                         "messages": messages
                     });
 
-                    let response = client.post(endpoint)
+                    let response = client
+                        .post(endpoint)
                         .header("Authorization", format!("Bearer {}", api_key))
                         .header("content-type", "application/json")
-                        .json(&body).send()
+                        .json(&body)
+                        .send()
                         .map_err(|e| format!("Request failed: {}", e))?;
 
                     if !response.status().is_success() {
@@ -1446,14 +1496,18 @@ If unsure about impact, use Grep extensively to find all references first."#,
                         return Err(format!("API error ({}): {}", status, text));
                     }
 
-                    let result: serde_json::Value = response.json()
+                    let result: serde_json::Value = response
+                        .json()
                         .map_err(|e| format!("Failed to parse response: {}", e))?;
-                    result["choices"][0]["message"]["content"].as_str()
+                    result["choices"][0]["message"]["content"]
+                        .as_str()
                         .map(|s| s.to_string())
                         .ok_or_else(|| "No content in response".to_string())
                 }
                 Some("anthropic") => {
-                    let endpoint = cp.endpoint.as_deref()
+                    let endpoint = cp
+                        .endpoint
+                        .as_deref()
                         .unwrap_or("https://api.anthropic.com/v1/messages");
                     let model = cp.model.as_deref().unwrap_or("claude-sonnet-4-20250514");
 
@@ -1466,11 +1520,13 @@ If unsure about impact, use Grep extensively to find all references first."#,
                         body["system"] = serde_json::json!(sys);
                     }
 
-                    let response = client.post(endpoint)
+                    let response = client
+                        .post(endpoint)
                         .header("x-api-key", &api_key)
                         .header("anthropic-version", "2023-06-01")
                         .header("content-type", "application/json")
-                        .json(&body).send()
+                        .json(&body)
+                        .send()
                         .map_err(|e| format!("Request failed: {}", e))?;
 
                     if !response.status().is_success() {
@@ -1479,9 +1535,11 @@ If unsure about impact, use Grep extensively to find all references first."#,
                         return Err(format!("API error ({}): {}", status, text));
                     }
 
-                    let result: serde_json::Value = response.json()
+                    let result: serde_json::Value = response
+                        .json()
                         .map_err(|e| format!("Failed to parse response: {}", e))?;
-                    result["content"][0]["text"].as_str()
+                    result["content"][0]["text"]
+                        .as_str()
                         .map(|s| s.to_string())
                         .ok_or_else(|| "No content in response".to_string())
                 }
@@ -1505,9 +1563,11 @@ If unsure about impact, use Grep extensively to find all references first."#,
                         body["systemInstruction"] = serde_json::json!({"parts": [{"text": sys}]});
                     }
 
-                    let response = client.post(&url)
+                    let response = client
+                        .post(&url)
                         .header("content-type", "application/json")
-                        .json(&body).send()
+                        .json(&body)
+                        .send()
                         .map_err(|e| format!("Request failed: {}", e))?;
 
                     if !response.status().is_success() {
@@ -1516,14 +1576,22 @@ If unsure about impact, use Grep extensively to find all references first."#,
                         return Err(format!("API error ({}): {}", status, text));
                     }
 
-                    let result: serde_json::Value = response.json()
+                    let result: serde_json::Value = response
+                        .json()
                         .map_err(|e| format!("Failed to parse response: {}", e))?;
-                    result["candidates"][0]["content"]["parts"][0]["text"].as_str()
+                    result["candidates"][0]["content"]["parts"][0]["text"]
+                        .as_str()
                         .map(|s| s.to_string())
                         .ok_or_else(|| "No content in response".to_string())
                 }
-                Some(other) => Err(format!("Unknown api_style '{}' for custom provider '{}'", other, cp.name)),
-                None => Err(format!("Custom API provider '{}' requires 'api_style'", cp.name)),
+                Some(other) => Err(format!(
+                    "Unknown api_style '{}' for custom provider '{}'",
+                    other, cp.name
+                )),
+                None => Err(format!(
+                    "Custom API provider '{}' requires 'api_style'",
+                    cp.name
+                )),
             }
         }
     }
@@ -1665,19 +1733,58 @@ mod tests {
 
     #[test]
     fn test_provider_kind_parsing() {
-        assert_eq!("claude".parse::<AiProviderKind>().unwrap(), AiProviderKind::Claude);
-        assert_eq!("claude-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::ClaudeCli);
-        assert_eq!("codebuddy".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodeBuddy);
-        assert_eq!("codebuddy-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodeBuddyCli);
-        assert_eq!("cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodeBuddyCli);
-        assert_eq!("openai".parse::<AiProviderKind>().unwrap(), AiProviderKind::OpenAi);
-        assert_eq!("codex-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodexCli);
-        assert_eq!("codex".parse::<AiProviderKind>().unwrap(), AiProviderKind::CodexCli);
-        assert_eq!("gemini".parse::<AiProviderKind>().unwrap(), AiProviderKind::Gemini);
-        assert_eq!("google".parse::<AiProviderKind>().unwrap(), AiProviderKind::Gemini);
-        assert_eq!("gemini-cli".parse::<AiProviderKind>().unwrap(), AiProviderKind::GeminiCli);
-        assert_eq!("local".parse::<AiProviderKind>().unwrap(), AiProviderKind::Local);
-        assert_eq!("mock".parse::<AiProviderKind>().unwrap(), AiProviderKind::Mock);
+        assert_eq!(
+            "claude".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::Claude
+        );
+        assert_eq!(
+            "claude-cli".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::ClaudeCli
+        );
+        assert_eq!(
+            "codebuddy".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::CodeBuddy
+        );
+        assert_eq!(
+            "codebuddy-cli".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::CodeBuddyCli
+        );
+        assert_eq!(
+            "cli".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::CodeBuddyCli
+        );
+        assert_eq!(
+            "openai".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::OpenAi
+        );
+        assert_eq!(
+            "codex-cli".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::CodexCli
+        );
+        assert_eq!(
+            "codex".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::CodexCli
+        );
+        assert_eq!(
+            "gemini".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::Gemini
+        );
+        assert_eq!(
+            "google".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::Gemini
+        );
+        assert_eq!(
+            "gemini-cli".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::GeminiCli
+        );
+        assert_eq!(
+            "local".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::Local
+        );
+        assert_eq!(
+            "mock".parse::<AiProviderKind>().unwrap(),
+            AiProviderKind::Mock
+        );
     }
 
     #[test]

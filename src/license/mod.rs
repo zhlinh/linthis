@@ -37,13 +37,13 @@
 //! }
 //! ```
 
-mod scanner;
-pub mod policy;
-mod spdx;
-pub mod report;
 mod languages;
+pub mod policy;
+pub mod report;
+mod scanner;
+mod spdx;
 
-pub use scanner::{LicenseScanner, ScanOptions, ScanResult, PackageLicense};
-pub use policy::{LicensePolicy, PolicyViolation, LicenseCategory};
-pub use spdx::{SpdxLicense, parse_spdx_expression};
+pub use policy::{LicenseCategory, LicensePolicy, PolicyViolation};
 pub use report::{format_license_report, LicenseReportFormat};
+pub use scanner::{LicenseScanner, PackageLicense, ScanOptions, ScanResult};
+pub use spdx::{parse_spdx_expression, SpdxLicense};

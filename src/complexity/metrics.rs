@@ -30,9 +30,9 @@ impl MetricLevel {
     /// Get color code for terminal output
     pub fn color_code(&self) -> &'static str {
         match self {
-            MetricLevel::Good => "\x1b[32m",     // Green
-            MetricLevel::Warning => "\x1b[33m",  // Yellow
-            MetricLevel::High => "\x1b[31m",     // Red
+            MetricLevel::Good => "\x1b[32m",       // Green
+            MetricLevel::Warning => "\x1b[33m",    // Yellow
+            MetricLevel::High => "\x1b[31m",       // Red
             MetricLevel::Critical => "\x1b[1;31m", // Bold red
         }
     }
@@ -114,12 +114,15 @@ impl ComplexityMetrics {
             self.nesting_level(),
         ];
 
-        levels.into_iter().max_by_key(|l| match l {
-            MetricLevel::Good => 0,
-            MetricLevel::Warning => 1,
-            MetricLevel::High => 2,
-            MetricLevel::Critical => 3,
-        }).unwrap_or(MetricLevel::Good)
+        levels
+            .into_iter()
+            .max_by_key(|l| match l {
+                MetricLevel::Good => 0,
+                MetricLevel::Warning => 1,
+                MetricLevel::High => 2,
+                MetricLevel::Critical => 3,
+            })
+            .unwrap_or(MetricLevel::Good)
     }
 }
 

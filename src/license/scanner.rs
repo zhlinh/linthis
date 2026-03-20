@@ -17,8 +17,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use super::languages::{
-    GoLicenseScanner, JavaLicenseScanner, NodeLicenseScanner,
-    PythonLicenseScanner, RustLicenseScanner,
+    GoLicenseScanner, JavaLicenseScanner, NodeLicenseScanner, PythonLicenseScanner,
+    RustLicenseScanner,
 };
 use super::spdx::SpdxLicense;
 
@@ -129,10 +129,7 @@ impl ScanResult {
 
     /// Get all unique licenses
     pub fn unique_licenses(&self) -> Vec<&SpdxLicense> {
-        let mut licenses: Vec<_> = self.packages
-            .iter()
-            .map(|p| &p.license)
-            .collect();
+        let mut licenses: Vec<_> = self.packages.iter().map(|p| &p.license).collect();
         licenses.sort_by(|a, b| a.to_spdx().cmp(b.to_spdx()));
         licenses.dedup_by(|a, b| a.to_spdx() == b.to_spdx());
         licenses
@@ -148,17 +145,26 @@ impl ScanResult {
 
     /// Get count of permissive licenses
     pub fn permissive_count(&self) -> usize {
-        self.packages.iter().filter(|p| p.license.is_permissive()).count()
+        self.packages
+            .iter()
+            .filter(|p| p.license.is_permissive())
+            .count()
     }
 
     /// Get count of copyleft licenses
     pub fn copyleft_count(&self) -> usize {
-        self.packages.iter().filter(|p| p.license.is_copyleft()).count()
+        self.packages
+            .iter()
+            .filter(|p| p.license.is_copyleft())
+            .count()
     }
 
     /// Get count of weak copyleft licenses
     pub fn weak_copyleft_count(&self) -> usize {
-        self.packages.iter().filter(|p| p.license.is_weak_copyleft()).count()
+        self.packages
+            .iter()
+            .filter(|p| p.license.is_weak_copyleft())
+            .count()
     }
 
     /// Get count of unknown licenses
@@ -215,18 +221,22 @@ impl LicenseScanner {
                 continue;
             }
 
-            result.languages_scanned.push(scanner.language().to_string());
+            result
+                .languages_scanned
+                .push(scanner.language().to_string());
 
             match scanner.scan(path) {
                 Ok(packages) => {
                     for pkg in packages {
                         // Count by license
-                        *result.by_license
+                        *result
+                            .by_license
                             .entry(pkg.license.to_spdx().to_string())
                             .or_insert(0) += 1;
 
                         // Count by ecosystem
-                        *result.by_ecosystem
+                        *result
+                            .by_ecosystem
                             .entry(pkg.ecosystem.clone())
                             .or_insert(0) += 1;
 

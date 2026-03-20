@@ -26,8 +26,9 @@ impl SourceFixer {
     /// NOTE: This only modifies actual comments, not `//` inside string literals
     /// Uses the same detection logic as cpplint's IsCppString function
     pub fn fix_comment_spacing(path: &Path) -> Result<()> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e)))?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e))
+        })?;
 
         let mut modified = false;
         let mut result_lines = Vec::new();
@@ -47,7 +48,11 @@ impl SourceFixer {
                 result.push('\n');
             }
             fs::write(path, result).map_err(|e| {
-                crate::LintisError::formatter("source-fixer", path, format!("Failed to write: {}", e))
+                crate::LintisError::formatter(
+                    "source-fixer",
+                    path,
+                    format!("Failed to write: {}", e),
+                )
             })?;
         }
 
@@ -128,8 +133,9 @@ impl SourceFixer {
     /// Fix TODO comments using git blame for author
     /// Converts "TODO:" or "TODO(user):" to "TODO(blame_author):"
     pub fn fix_todo_comments(path: &Path) -> Result<()> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e)))?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e))
+        })?;
 
         let mut result = Vec::new();
         let mut modified = false;
@@ -188,7 +194,11 @@ impl SourceFixer {
                 new_content
             };
             fs::write(path, final_content).map_err(|e| {
-                crate::LintisError::formatter("source-fixer", path, format!("Failed to write: {}", e))
+                crate::LintisError::formatter(
+                    "source-fixer",
+                    path,
+                    format!("Failed to write: {}", e),
+                )
             })?;
         }
 
@@ -244,8 +254,9 @@ impl SourceFixer {
     /// Fix lone semicolons: remove lines that contain only whitespace and a semicolon
     /// cpplint warns: "Line contains only semicolon."
     pub fn fix_lone_semicolon(path: &Path) -> Result<()> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e)))?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e))
+        })?;
 
         let mut result = String::with_capacity(content.len());
         let mut modified = false;
@@ -269,7 +280,11 @@ impl SourceFixer {
         // Only write if changed
         if modified {
             fs::write(path, result).map_err(|e| {
-                crate::LintisError::formatter("source-fixer", path, format!("Failed to write: {}", e))
+                crate::LintisError::formatter(
+                    "source-fixer",
+                    path,
+                    format!("Failed to write: {}", e),
+                )
             })?;
         }
 
@@ -279,8 +294,9 @@ impl SourceFixer {
     /// Fix long comment lines by breaking them at appropriate points
     /// Handles Chinese comments which clang-format can't reflow properly
     pub fn fix_long_comments(path: &Path, max_length: usize) -> Result<()> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e)))?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e))
+        })?;
 
         let mut result = String::with_capacity(content.len());
         let mut modified = false;
@@ -312,7 +328,11 @@ impl SourceFixer {
 
         if modified {
             fs::write(path, result).map_err(|e| {
-                crate::LintisError::formatter("source-fixer", path, format!("Failed to write: {}", e))
+                crate::LintisError::formatter(
+                    "source-fixer",
+                    path,
+                    format!("Failed to write: {}", e),
+                )
             })?;
         }
 
@@ -425,8 +445,9 @@ impl SourceFixer {
     /// Fix pragma separator lines: convert "-- -- --" style to standard "#pragma mark -" format
     /// cpplint warns about "Extra space for operator --" but these are visual separators
     pub fn fix_pragma_separators(path: &Path) -> Result<()> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e)))?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            crate::LintisError::formatter("source-fixer", path, format!("Failed to read: {}", e))
+        })?;
 
         let mut result = String::with_capacity(content.len());
         let mut modified = false;
@@ -490,7 +511,11 @@ impl SourceFixer {
 
         if modified {
             fs::write(path, result).map_err(|e| {
-                crate::LintisError::formatter("source-fixer", path, format!("Failed to write: {}", e))
+                crate::LintisError::formatter(
+                    "source-fixer",
+                    path,
+                    format!("Failed to write: {}", e),
+                )
             })?;
         }
 

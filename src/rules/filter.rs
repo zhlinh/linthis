@@ -133,9 +133,15 @@ impl RuleFilter {
                 if let Some(override_severity) = self.get_severity_override(code) {
                     match override_severity {
                         SeverityOverride::Off => return None,
-                        SeverityOverride::Error => issue.severity = crate::utils::types::Severity::Error,
-                        SeverityOverride::Warning => issue.severity = crate::utils::types::Severity::Warning,
-                        SeverityOverride::Info => issue.severity = crate::utils::types::Severity::Info,
+                        SeverityOverride::Error => {
+                            issue.severity = crate::utils::types::Severity::Error
+                        }
+                        SeverityOverride::Warning => {
+                            issue.severity = crate::utils::types::Severity::Warning
+                        }
+                        SeverityOverride::Info => {
+                            issue.severity = crate::utils::types::Severity::Info
+                        }
                     }
                 }
 
@@ -212,15 +218,30 @@ mod tests {
     #[test]
     fn test_filter_severity_override() {
         let mut config = RulesConfig::default();
-        config.severity.insert("W001".to_string(), SeverityOverride::Error);
-        config.severity.insert("E001".to_string(), SeverityOverride::Info);
-        config.severity.insert("W002".to_string(), SeverityOverride::Off);
+        config
+            .severity
+            .insert("W001".to_string(), SeverityOverride::Error);
+        config
+            .severity
+            .insert("E001".to_string(), SeverityOverride::Info);
+        config
+            .severity
+            .insert("W002".to_string(), SeverityOverride::Off);
 
         let filter = RuleFilter::from_config(&config);
 
-        assert_eq!(filter.get_severity_override("W001"), Some(SeverityOverride::Error));
-        assert_eq!(filter.get_severity_override("E001"), Some(SeverityOverride::Info));
-        assert_eq!(filter.get_severity_override("W002"), Some(SeverityOverride::Off));
+        assert_eq!(
+            filter.get_severity_override("W001"),
+            Some(SeverityOverride::Error)
+        );
+        assert_eq!(
+            filter.get_severity_override("E001"),
+            Some(SeverityOverride::Info)
+        );
+        assert_eq!(
+            filter.get_severity_override("W002"),
+            Some(SeverityOverride::Off)
+        );
         assert_eq!(filter.get_severity_override("X001"), None);
 
         // Off should also count as disabled
@@ -231,16 +252,20 @@ mod tests {
     fn test_filter_issues() {
         let mut config = RulesConfig::default();
         config.disable.push("E501".to_string());
-        config.severity.insert("W001".to_string(), SeverityOverride::Error);
-        config.severity.insert("W002".to_string(), SeverityOverride::Off);
+        config
+            .severity
+            .insert("W001".to_string(), SeverityOverride::Error);
+        config
+            .severity
+            .insert("W002".to_string(), SeverityOverride::Off);
 
         let filter = RuleFilter::from_config(&config);
 
         let issues = vec![
-            make_issue("E501", Severity::Error),   // Should be filtered out (disabled)
+            make_issue("E501", Severity::Error), // Should be filtered out (disabled)
             make_issue("W001", Severity::Warning), // Should become Error
             make_issue("W002", Severity::Warning), // Should be filtered out (off)
-            make_issue("E001", Severity::Error),   // Should remain unchanged
+            make_issue("E001", Severity::Error), // Should remain unchanged
         ];
 
         let filtered = filter.filter_issues(issues);
@@ -256,11 +281,15 @@ mod tests {
     fn test_merge_language_config() {
         let mut global_config = RulesConfig::default();
         global_config.disable.push("E501".to_string());
-        global_config.severity.insert("W001".to_string(), SeverityOverride::Info);
+        global_config
+            .severity
+            .insert("W001".to_string(), SeverityOverride::Info);
 
         let mut lang_config = RulesConfig::default();
         lang_config.disable.push("E502".to_string());
-        lang_config.severity.insert("W001".to_string(), SeverityOverride::Error); // Override global
+        lang_config
+            .severity
+            .insert("W001".to_string(), SeverityOverride::Error); // Override global
 
         let mut filter = RuleFilter::from_config(&global_config);
         filter.merge_language_config(Some(&lang_config));
@@ -269,7 +298,10 @@ mod tests {
         assert!(filter.is_disabled("E502")); // From language
 
         // Language override should take precedence
-        assert_eq!(filter.get_severity_override("W001"), Some(SeverityOverride::Error));
+        assert_eq!(
+            filter.get_severity_override("W001"),
+            Some(SeverityOverride::Error)
+        );
     }
 
     #[test]
@@ -277,7 +309,9 @@ mod tests {
         let mut config = RulesConfig::default();
         config.disable.push("E501".to_string());
         config.disable.push("whitespace/*".to_string());
-        config.severity.insert("W001".to_string(), SeverityOverride::Error);
+        config
+            .severity
+            .insert("W001".to_string(), SeverityOverride::Error);
 
         let filter = RuleFilter::from_config(&config);
         let stats = filter.stats();

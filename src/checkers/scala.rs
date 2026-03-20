@@ -58,15 +58,11 @@ impl ScalaChecker {
                     _ => Severity::Info,
                 };
 
-                let issue = LintIssue::new(
-                    path.to_path_buf(),
-                    line_num,
-                    message.to_string(),
-                    severity,
-                )
-                .with_source("scalafix".to_string())
-                .with_code(rule.to_string())
-                .with_column(col);
+                let issue =
+                    LintIssue::new(path.to_path_buf(), line_num, message.to_string(), severity)
+                        .with_source("scalafix".to_string())
+                        .with_code(rule.to_string())
+                        .with_column(col);
 
                 issues.push(issue);
             } else if let Some(caps) = re_simple.captures(line) {

@@ -54,11 +54,13 @@ impl CSharpChecker {
 
         // Regex to match dotnet format diagnostic output
         // Example: Program.cs(10,5): warning IDE0005: Using directive is unnecessary
-        let re = Regex::new(r"^(.+?)\((\d+),(\d+)\):\s*(error|warning|info)?\s*([A-Z]+\d+):\s*(.+)$")
-            .unwrap();
+        let re =
+            Regex::new(r"^(.+?)\((\d+),(\d+)\):\s*(error|warning|info)?\s*([A-Z]+\d+):\s*(.+)$")
+                .unwrap();
 
         // Alternative format without position
-        let re_simple = Regex::new(r"^(.+?):\s*(error|warning|info)?\s*([A-Z]+\d+):\s*(.+)$").unwrap();
+        let re_simple =
+            Regex::new(r"^(.+?):\s*(error|warning|info)?\s*([A-Z]+\d+):\s*(.+)$").unwrap();
 
         for line in output.lines() {
             if let Some(caps) = re.captures(line) {
@@ -87,15 +89,11 @@ impl CSharpChecker {
                     _ => Severity::Info,
                 };
 
-                let issue = LintIssue::new(
-                    path.to_path_buf(),
-                    line_num,
-                    message.to_string(),
-                    severity,
-                )
-                .with_source("dotnet-format".to_string())
-                .with_code(code.to_string())
-                .with_column(col);
+                let issue =
+                    LintIssue::new(path.to_path_buf(), line_num, message.to_string(), severity)
+                        .with_source("dotnet-format".to_string())
+                        .with_code(code.to_string())
+                        .with_column(col);
 
                 issues.push(issue);
             } else if let Some(caps) = re_simple.captures(line) {
@@ -150,12 +148,7 @@ impl Checker for CSharpChecker {
         let output = if let Some(ref proj) = project_file {
             // Run dotnet format on the project with verify-no-changes
             Command::new("dotnet")
-                .args([
-                    "format",
-                    "--verify-no-changes",
-                    "--verbosity",
-                    "diagnostic",
-                ])
+                .args(["format", "--verify-no-changes", "--verbosity", "diagnostic"])
                 .arg(proj)
                 .output()
                 .map_err(|e| {

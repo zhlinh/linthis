@@ -139,9 +139,7 @@ mod system_time_serde {
     where
         S: Serializer,
     {
-        let duration = time
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO);
+        let duration = time.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO);
         (duration.as_secs(), duration.subsec_nanos()).serialize(serializer)
     }
 

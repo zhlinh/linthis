@@ -60,9 +60,7 @@ impl PluginConfigManager {
 
         let content = std::fs::read_to_string(&self.config_path)?;
 
-        content
-            .parse::<DocumentMut>()
-            .map_err(PluginError::from)
+        content.parse::<DocumentMut>().map_err(PluginError::from)
     }
 
     /// Write configuration document to file
@@ -95,22 +93,24 @@ impl PluginConfigManager {
             doc["plugin"] = Item::Table(Table::new());
         }
 
-        let plugin_table = doc["plugin"]
-            .as_table_mut()
-            .ok_or_else(|| PluginError::ConfigError {
-                message: "'plugin' is not a table".to_string(),
-            })?;
+        let plugin_table =
+            doc["plugin"]
+                .as_table_mut()
+                .ok_or_else(|| PluginError::ConfigError {
+                    message: "'plugin' is not a table".to_string(),
+                })?;
 
         // Ensure sources array exists
         if !plugin_table.contains_key("sources") {
             plugin_table["sources"] = value(Array::new());
         }
 
-        let sources = plugin_table["sources"]
-            .as_array_mut()
-            .ok_or_else(|| PluginError::ConfigError {
-                message: "'plugin.sources' is not an array".to_string(),
-            })?;
+        let sources =
+            plugin_table["sources"]
+                .as_array_mut()
+                .ok_or_else(|| PluginError::ConfigError {
+                    message: "'plugin.sources' is not an array".to_string(),
+                })?;
 
         // Check if alias already exists
         if self.alias_exists(sources, alias) {

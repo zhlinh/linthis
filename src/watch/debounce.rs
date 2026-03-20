@@ -119,10 +119,7 @@ impl Debouncer {
 
     /// Force all pending events to be ready
     pub fn flush(&mut self) -> Vec<WatchEvent> {
-        self.pending
-            .drain()
-            .map(|(_, (event, _))| event)
-            .collect()
+        self.pending.drain().map(|(_, (event, _))| event).collect()
     }
 }
 

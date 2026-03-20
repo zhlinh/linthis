@@ -201,7 +201,10 @@ impl ReportStatistics {
 
         // File summary
         output.push_str("File Summary:\n");
-        output.push_str(&format!("  Total files:       {}\n", self.summary.total_files));
+        output.push_str(&format!(
+            "  Total files:       {}\n",
+            self.summary.total_files
+        ));
         output.push_str(&format!(
             "  Files with issues: {}\n",
             self.summary.files_with_issues
@@ -243,7 +246,10 @@ impl ReportStatistics {
             let mut rules: Vec<_> = self.by_rule.values().collect();
             rules.sort_by(|a, b| b.count.cmp(&a.count));
             for rule in rules.iter().take(5) {
-                output.push_str(&format!("  {} ({}): {} occurrences\n", rule.code, rule.severity, rule.count));
+                output.push_str(&format!(
+                    "  {} ({}): {} occurrences\n",
+                    rule.code, rule.severity, rule.count
+                ));
             }
             output.push('\n');
         }

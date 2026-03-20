@@ -79,7 +79,7 @@ impl PythonChecker {
             "ruff.toml",
             ".ruff.toml",
             "pyproject.toml",
-            ".linthis/configs/python/ruff.toml",  // Plugin config (lower priority)
+            ".linthis/configs/python/ruff.toml", // Plugin config (lower priority)
             ".linthis/configs/python/.ruff.toml",
         ];
 
@@ -110,11 +110,7 @@ impl PythonChecker {
         };
 
         // Only search for local configs (not in .linthis/configs/)
-        let config_names = [
-            "ruff.toml",
-            ".ruff.toml",
-            "pyproject.toml",
-        ];
+        let config_names = ["ruff.toml", ".ruff.toml", "pyproject.toml"];
 
         loop {
             for config_name in &config_names {
@@ -122,7 +118,9 @@ impl PythonChecker {
                 if config_path.exists() {
                     // Skip configs in .linthis/configs/ directory (those are plugin configs)
                     let path_str = config_path.to_string_lossy();
-                    if !path_str.contains(".linthis/configs/") && !path_str.contains(".linthis\\configs\\") {
+                    if !path_str.contains(".linthis/configs/")
+                        && !path_str.contains(".linthis\\configs\\")
+                    {
                         return Some(config_path);
                     }
                 }
@@ -261,24 +259,25 @@ impl Checker for PythonChecker {
             cmd.args(["--select", "E,W,F"]);
         }
 
-        let output = cmd
-            .arg(path)
-            .output()
-            .map_err(|e| crate::LintisError::checker("ruff", path, format!("Failed to run: {}", e)))?;
+        let output = cmd.arg(path).output().map_err(|e| {
+            crate::LintisError::checker("ruff", path, format!("Failed to run: {}", e))
+        })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         // If ruff failed to parse config (exit code 2 with empty stdout), retry without config
-        if output.status.code() == Some(2) && stdout.is_empty() && stderr.contains("Failed to parse") {
+        if output.status.code() == Some(2)
+            && stdout.is_empty()
+            && stderr.contains("Failed to parse")
+        {
             let mut retry_cmd = Command::new("ruff");
             retry_cmd.args(["check", "--output-format", "json"]);
             // Use default rules instead of broken config
             retry_cmd.args(["--select", "E,W,F"]);
-            let retry_output = retry_cmd
-                .arg(path)
-                .output()
-                .map_err(|e| crate::LintisError::checker("ruff", path, format!("Failed to run: {}", e)))?;
+            let retry_output = retry_cmd.arg(path).output().map_err(|e| {
+                crate::LintisError::checker("ruff", path, format!("Failed to run: {}", e))
+            })?;
 
             let retry_stdout = String::from_utf8_lossy(&retry_output.stdout);
             return Ok(self.parse_ruff_json_output(&retry_stdout, path));

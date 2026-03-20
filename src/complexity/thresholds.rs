@@ -167,8 +167,7 @@ impl Thresholds {
 
     /// Load from TOML string
     pub fn from_toml(content: &str) -> Result<Self, String> {
-        toml::from_str(content)
-            .map_err(|e| format!("Failed to parse thresholds: {}", e))
+        toml::from_str(content).map_err(|e| format!("Failed to parse thresholds: {}", e))
     }
 
     /// Check if cyclomatic complexity exceeds threshold

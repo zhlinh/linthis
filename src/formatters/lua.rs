@@ -48,12 +48,9 @@ impl Formatter for LuaFormatter {
         })?;
 
         // Run stylua (formats in-place by default)
-        let output = Command::new("stylua")
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::formatter("stylua", path, format!("Failed to run: {}", e))
-            })?;
+        let output = Command::new("stylua").arg(path).output().map_err(|e| {
+            crate::LintisError::formatter("stylua", path, format!("Failed to run: {}", e))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

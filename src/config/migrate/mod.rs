@@ -183,10 +183,7 @@ fn convert_config(
 /// Backup original config file
 fn backup_original(path: &Path) -> Result<Option<PathBuf>, String> {
     if path.exists() {
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let backup_path = if ext.is_empty() {
             path.with_extension("backup")
         } else {

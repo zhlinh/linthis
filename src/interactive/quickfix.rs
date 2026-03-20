@@ -81,13 +81,11 @@ pub fn write_quickfix_file(issues: &[LintIssue], path: &Path) -> super::Interact
 
     let content = generate_quickfix(issues);
 
-    let mut file = File::create(path).map_err(|e| {
-        InteractiveError::QuickfixWrite(format!("Failed to create file: {}", e))
-    })?;
+    let mut file = File::create(path)
+        .map_err(|e| InteractiveError::QuickfixWrite(format!("Failed to create file: {}", e)))?;
 
-    file.write_all(content.as_bytes()).map_err(|e| {
-        InteractiveError::QuickfixWrite(format!("Failed to write content: {}", e))
-    })?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| InteractiveError::QuickfixWrite(format!("Failed to write content: {}", e)))?;
 
     // Ensure trailing newline
     if !content.is_empty() && !content.ends_with('\n') {
@@ -109,13 +107,15 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn make_issue(file: &str, line: usize, col: Option<usize>, severity: Severity, msg: &str, code: Option<&str>) -> LintIssue {
-        let mut issue = LintIssue::new(
-            PathBuf::from(file),
-            line,
-            msg.to_string(),
-            severity,
-        );
+    fn make_issue(
+        file: &str,
+        line: usize,
+        col: Option<usize>,
+        severity: Severity,
+        msg: &str,
+        code: Option<&str>,
+    ) -> LintIssue {
+        let mut issue = LintIssue::new(PathBuf::from(file), line, msg.to_string(), severity);
         if let Some(c) = col {
             issue = issue.with_column(c);
         }
@@ -127,21 +127,45 @@ mod tests {
 
     #[test]
     fn test_format_issue_quickfix_basic() {
-        let issue = make_issue("src/main.rs", 42, Some(10), Severity::Error, "unused variable", Some("W0612"));
+        let issue = make_issue(
+            "src/main.rs",
+            42,
+            Some(10),
+            Severity::Error,
+            "unused variable",
+            Some("W0612"),
+        );
         let formatted = format_issue_quickfix(&issue);
-        assert_eq!(formatted, "src/main.rs:42:10:unused variable (W0612) [error]");
+        assert_eq!(
+            formatted,
+            "src/main.rs:42:10:unused variable (W0612) [error]"
+        );
     }
 
     #[test]
     fn test_format_issue_quickfix_no_column() {
-        let issue = make_issue("test.py", 100, None, Severity::Warning, "line too long", Some("E501"));
+        let issue = make_issue(
+            "test.py",
+            100,
+            None,
+            Severity::Warning,
+            "line too long",
+            Some("E501"),
+        );
         let formatted = format_issue_quickfix(&issue);
         assert_eq!(formatted, "test.py:100:1:line too long (E501) [warning]");
     }
 
     #[test]
     fn test_format_issue_quickfix_no_code() {
-        let issue = make_issue("file.cpp", 5, Some(1), Severity::Info, "consider using const", None);
+        let issue = make_issue(
+            "file.cpp",
+            5,
+            Some(1),
+            Severity::Info,
+            "consider using const",
+            None,
+        );
         let formatted = format_issue_quickfix(&issue);
         assert_eq!(formatted, "file.cpp:5:1:consider using const [info]");
     }
@@ -150,7 +174,14 @@ mod tests {
     fn test_generate_quickfix_multiple() {
         let issues = vec![
             make_issue("a.rs", 1, Some(1), Severity::Error, "error 1", Some("E001")),
-            make_issue("b.rs", 2, Some(5), Severity::Warning, "warning 1", Some("W001")),
+            make_issue(
+                "b.rs",
+                2,
+                Some(5),
+                Severity::Warning,
+                "warning 1",
+                Some("W001"),
+            ),
         ];
         let output = generate_quickfix(&issues);
         let lines: Vec<&str> = output.lines().collect();
@@ -168,7 +199,14 @@ mod tests {
 
     #[test]
     fn test_format_issue_quickfix_escapes_newlines() {
-        let issue = make_issue("test.rs", 1, Some(1), Severity::Error, "line1\nline2\rline3", None);
+        let issue = make_issue(
+            "test.rs",
+            1,
+            Some(1),
+            Severity::Error,
+            "line1\nline2\rline3",
+            None,
+        );
         let formatted = format_issue_quickfix(&issue);
         assert!(!formatted.contains('\n'));
         assert!(!formatted.contains('\r'));

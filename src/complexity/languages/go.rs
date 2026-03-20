@@ -71,8 +71,7 @@ impl GoComplexityAnalyzer {
         let mut complexity = 1;
 
         let keywords = [
-            "if ", "else if", "else {", "switch ", "case ", "for ", "select {",
-            "&&", "||",
+            "if ", "else if", "else {", "switch ", "case ", "for ", "select {", "&&", "||",
         ];
 
         for keyword in keywords {
@@ -369,7 +368,9 @@ func complex(x int) string {
     return "zero"
 }
 "#;
-        let result = analyzer.analyze_file(Path::new("test.go"), content).unwrap();
+        let result = analyzer
+            .analyze_file(Path::new("test.go"), content)
+            .unwrap();
         assert!(!result.functions.is_empty());
         assert!(result.functions[0].metrics.cyclomatic > 1);
     }

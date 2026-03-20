@@ -61,7 +61,7 @@ impl GoChecker {
     /// Find golangci-lint configuration file
     fn find_golangci_config(module_root: &Path) -> Option<std::path::PathBuf> {
         let config_names = [
-            ".linthis/configs/go/.golangci.yml",  // Plugin config (highest priority)
+            ".linthis/configs/go/.golangci.yml", // Plugin config (highest priority)
             ".linthis/configs/go/.golangci.yaml",
             ".golangci.yml",
             ".golangci.yaml",
@@ -87,16 +87,13 @@ impl GoChecker {
             cmd.arg("-c").arg(config_path);
         }
 
-        let output = cmd
-            .current_dir(module_root)
-            .output()
-            .map_err(|e| {
-                crate::LintisError::checker(
-                    "golangci-lint",
-                    module_root,
-                    format!("Failed to run: {}", e),
-                )
-            })?;
+        let output = cmd.current_dir(module_root).output().map_err(|e| {
+            crate::LintisError::checker(
+                "golangci-lint",
+                module_root,
+                format!("Failed to run: {}", e),
+            )
+        })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let issues = Self::parse_golangci_output(&stdout, module_root);

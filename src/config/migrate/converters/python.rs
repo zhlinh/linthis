@@ -93,7 +93,10 @@ pub(crate) fn convert_isort(
     let black_config = python::parse_black(&detected.path).ok();
 
     // Generate the converted config content
-    let ruff_toml = generate_ruff_toml(black_config.as_ref().unwrap_or(&BlackConfig::default()), Some(&isort_config));
+    let ruff_toml = generate_ruff_toml(
+        black_config.as_ref().unwrap_or(&BlackConfig::default()),
+        Some(&isort_config),
+    );
 
     let config_dir = project_root.join(".linthis/configs/python");
     let config_path = config_dir.join("ruff.toml");

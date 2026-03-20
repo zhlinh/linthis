@@ -57,31 +57,39 @@ impl GoSecurityScanner {
                             url: osv.references.first().map(|r| r.url.clone()),
                             published: osv.published.clone(),
                             updated: osv.modified.clone(),
-                            cwe_ids: osv.database_specific
+                            cwe_ids: osv
+                                .database_specific
                                 .as_ref()
                                 .and_then(|d| d.cwe_ids.clone())
                                 .unwrap_or_default(),
                             references: osv.references.iter().map(|r| r.url.clone()).collect(),
                         };
 
-                        let affected_packages: Vec<AffectedPackage> = osv.affected
+                        let affected_packages: Vec<AffectedPackage> = osv
+                            .affected
                             .iter()
                             .map(|a| {
-                                let fixed = a.ranges.iter()
+                                let fixed = a
+                                    .ranges
+                                    .iter()
                                     .flat_map(|r| r.events.iter())
                                     .filter_map(|e| e.fixed.clone())
                                     .collect::<Vec<_>>();
 
                                 AffectedPackage {
                                     name: a.package.name.clone(),
-                                    version: finding.trace.first()
+                                    version: finding
+                                        .trace
+                                        .first()
                                         .map(|t| t.version.clone().unwrap_or_default())
                                         .unwrap_or_default(),
                                     ecosystem: a.package.ecosystem.clone(),
                                     affected_versions: vec![],
                                     patched_versions: fixed.clone(),
                                     recommended_version: fixed.first().cloned(),
-                                    path: finding.trace.iter()
+                                    path: finding
+                                        .trace
+                                        .iter()
                                         .filter_map(|t| t.module.clone())
                                         .collect(),
                                     is_direct: finding.trace.len() <= 2,
@@ -149,7 +157,9 @@ impl LanguageSecurityScanner for GoSecurityScanner {
         let mut result = FixResult::default();
 
         result.commands.push("go get -u ./...".to_string());
-        result.messages.push("Run 'go get -u ./...' to update dependencies".to_string());
+        result
+            .messages
+            .push("Run 'go get -u ./...' to update dependencies".to_string());
         result.needs_review = true;
 
         for vuln in vulnerabilities {
@@ -157,7 +167,9 @@ impl LanguageSecurityScanner for GoSecurityScanner {
                 // Suggest specific upgrade commands
                 for pkg in &vuln.affected_packages {
                     if let Some(ref version) = pkg.recommended_version {
-                        result.commands.push(format!("go get {}@{}", pkg.name, version));
+                        result
+                            .commands
+                            .push(format!("go get {}@{}", pkg.name, version));
                     }
                 }
                 result.fixed.push(vuln.advisory.id.clone());

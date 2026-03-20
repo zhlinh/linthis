@@ -51,7 +51,14 @@ impl RustLicenseScanner {
 
         Ok(entries
             .into_iter()
-            .map(|e| PackageLicense::new(&e.name, &e.version, &e.license.unwrap_or_default(), "crates.io"))
+            .map(|e| {
+                PackageLicense::new(
+                    &e.name,
+                    &e.version,
+                    &e.license.unwrap_or_default(),
+                    "crates.io",
+                )
+            })
             .collect())
     }
 

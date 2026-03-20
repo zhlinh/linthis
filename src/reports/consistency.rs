@@ -149,8 +149,11 @@ impl ConsistencyAnalysis {
                 }
                 let mut primary: Vec<_> = rule_counts_file.into_iter().collect();
                 primary.sort_by(|a, b| b.1.cmp(&a.1));
-                let primary_issues: Vec<String> =
-                    primary.into_iter().take(3).map(|(r, _)| r.clone()).collect();
+                let primary_issues: Vec<String> = primary
+                    .into_iter()
+                    .take(3)
+                    .map(|(r, _)| r.clone())
+                    .collect();
 
                 OutlierFile {
                     path: path.clone(),
@@ -212,7 +215,10 @@ impl ConsistencyAnalysis {
             total_files,
             files_with_issues,
             outlier_files.len(),
-            repeated_patterns.iter().filter(|p| p.affected_files.len() >= 3).count(),
+            repeated_patterns
+                .iter()
+                .filter(|p| p.affected_files.len() >= 3)
+                .count(),
         );
 
         Self {
@@ -268,7 +274,10 @@ impl ConsistencyAnalysis {
                     file.path, file.issue_count, file.deviation_score
                 ));
                 if !file.primary_issues.is_empty() {
-                    output.push_str(&format!("    Primary issues: {}\n", file.primary_issues.join(", ")));
+                    output.push_str(&format!(
+                        "    Primary issues: {}\n",
+                        file.primary_issues.join(", ")
+                    ));
                 }
             }
             output.push('\n');

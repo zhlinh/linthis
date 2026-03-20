@@ -55,7 +55,10 @@ impl GoLicenseScanner {
                 // Extract name and version from module path
                 let (name, version) = if module.contains('@') {
                     let split: Vec<&str> = module.split('@').collect();
-                    (split[0].to_string(), split.get(1).unwrap_or(&"").to_string())
+                    (
+                        split[0].to_string(),
+                        split.get(1).unwrap_or(&"").to_string(),
+                    )
                 } else {
                     (module.to_string(), String::new())
                 };

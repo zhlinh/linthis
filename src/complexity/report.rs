@@ -60,8 +60,14 @@ fn format_human(result: &AnalysisResult) -> String {
 
     // Summary
     output.push_str("Summary:\n");
-    output.push_str(&format!("  Files analyzed: {}\n", result.summary.total_files));
-    output.push_str(&format!("  Functions analyzed: {}\n", result.summary.total_functions));
+    output.push_str(&format!(
+        "  Files analyzed: {}\n",
+        result.summary.total_files
+    ));
+    output.push_str(&format!(
+        "  Functions analyzed: {}\n",
+        result.summary.total_functions
+    ));
     output.push_str(&format!("  Total SLOC: {}\n", result.summary.total_sloc));
     output.push_str(&format!(
         "  Average cyclomatic complexity: {:.2}\n",
@@ -183,7 +189,10 @@ fn format_markdown(result: &AnalysisResult) -> String {
     output.push_str("## Summary\n\n");
     output.push_str("| Metric | Value |\n");
     output.push_str("|--------|-------|\n");
-    output.push_str(&format!("| Files analyzed | {} |\n", result.summary.total_files));
+    output.push_str(&format!(
+        "| Files analyzed | {} |\n",
+        result.summary.total_files
+    ));
     output.push_str(&format!(
         "| Functions analyzed | {} |\n",
         result.summary.total_functions
@@ -281,7 +290,8 @@ fn format_html(result: &AnalysisResult) -> String {
 
     output.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
     output.push_str("  <meta charset=\"UTF-8\">\n");
-    output.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+    output
+        .push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
     output.push_str("  <title>Code Complexity Analysis Report</title>\n");
     output.push_str("  <style>\n");
     output.push_str("    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 20px; }\n");

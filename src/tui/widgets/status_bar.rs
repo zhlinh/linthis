@@ -37,7 +37,9 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
 
     spans.push(Span::styled(
         format!(" {} ", status_symbol),
-        Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(status_color)
+            .add_modifier(Modifier::BOLD),
     ));
 
     // Status message
@@ -108,8 +110,8 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray),
     ));
 
-    let status = Paragraph::new(Line::from(spans))
-        .style(Style::default().bg(Color::Rgb(30, 30, 30)));
+    let status =
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::Rgb(30, 30, 30)));
 
     frame.render_widget(status, area);
 }
