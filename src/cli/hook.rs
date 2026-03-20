@@ -1359,22 +1359,15 @@ fn handle_hook_status() -> ExitCode {
 
 /// List all installed linthis hooks.
 ///
+/// When `global` is false (default), shows project-level hooks only.
+/// When `global` is true (`-g`), shows global-level hooks only.
+///
 /// Combines two data sources:
 /// 1. **TOML registry** (`~/.linthis/installed-hooks.toml`) — authoritative record written at
 ///    install time, contains hook_type, event, provider, scope, etc.
-/// 2. **Live detection** — agent skill files on disk, global/project git hooks.
-///
-/// Output groups:
-/// - Project-level shell hooks  (git / git-with-agent / prek / prek-with-agent)
-/// - Global shell hooks
-/// - Agent skills per provider  (project + global)
-fn handle_hook_list(include_global: bool) -> ExitCode {
+/// 2. **Live detection** — agent skill files on disk, git hook scripts.
+fn handle_hook_list(global: bool) -> ExitCode {
     let toml = load_installed_hooks();
-
-    // ── resolve project root (optional — may run outside a repo) ─────────
-    let git_root = find_git_root();
-    let project_root_display = git_root.as_ref().map(|r| r.display().to_string())
-        .unwrap_or_else(|| "(not in a git repository)".to_string());
 
     // ── load configured skill name aliases ───────────────────────────────
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -1382,56 +1375,18 @@ fn handle_hook_list(include_global: bool) -> ExitCode {
     let skill_names = Some(&skill_names_cfg);
 
     let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
+    let scope_label = if global { "Global" } else { "Project" };
 
-    println!("{}", "Installed Hooks".bold());
+    println!("{}", format!("Installed Hooks ({})", scope_label).bold());
     println!();
 
     let mut count: usize = 0;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // 1. Project-level shell hooks
-    // ═══════════════════════════════════════════════════════════════════════
-    println!("{}", "Project Shell Hooks".bold());
-    if let Some(ref root) = git_root {
-        println!("  Repository: {}", root.display());
-        let mut any = false;
-        for event in &hook_events {
-            let hook_path = root.join(".git/hooks").join(event.hook_filename());
-            if !hook_path.exists() {
-                continue;
-            }
-            let content = std::fs::read_to_string(&hook_path).unwrap_or_default();
-            if !content.contains("linthis") {
-                continue;
-            }
-            any = true;
-            count += 1;
-
-            // Determine hook type from content or TOML
-            let hook_type = detect_hook_type_from_content(&content, &toml, "local", root, event);
-            let provider = detect_provider_from_content(&content, &toml, "local", root, event);
-
-            println!(
-                "  {} {} {} {}",
-                "✓".green(),
-                event.hook_filename(),
-                format!("[{}]", hook_type).dimmed(),
-                if provider.is_empty() { String::new() } else { format!("(provider: {})", provider) }
-            );
-        }
-        if !any {
-            println!("  {} No linthis shell hooks installed", "—".dimmed());
-        }
-    } else {
-        println!("  {} {}", "—".dimmed(), project_root_display);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // 2. Global shell hooks
-    // ═══════════════════════════════════════════════════════════════════════
-    if include_global {
-        println!();
-        println!("{}", "Global Shell Hooks".bold());
+    if global {
+        // ═══════════════════════════════════════════════════════════════════
+        // Global shell hooks
+        // ═══════════════════════════════════════════════════════════════════
+        println!("{}", "Shell Hooks (~/.config/git/hooks/)".bold());
         let global_dir = global_hooks_dir();
         let mut any_global = false;
         if let Some(ref ghooks) = global_dir {
@@ -1462,52 +1417,12 @@ fn handle_hook_list(include_global: bool) -> ExitCode {
         if !any_global {
             println!("  {} No global linthis shell hooks installed", "—".dimmed());
         }
-    }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // 3. Agent skills (project-level)
-    // ═══════════════════════════════════════════════════════════════════════
-    println!();
-    println!("{}", "Agent Skills (project)".bold());
-    if let Some(ref root) = git_root {
-        let mut any_agent = false;
-        for p in ALL_AGENT_PROVIDERS {
-            if !agent_is_installed(root, p, false, skill_names) {
-                continue;
-            }
-            any_agent = true;
-            let mut event_tags: Vec<&str> = Vec::new();
-            for event in &hook_events {
-                let path = agent_skill_path(root, p, false, event, skill_names);
-                if path.exists() {
-                    count += 1;
-                    event_tags.push(event.hook_filename());
-                }
-            }
-            let stop_hook = agent_stop_hook_settings_path(root, p)
-                .map(|sp| sp.exists() && std::fs::read_to_string(&sp).map(|c| c.contains("linthis")).unwrap_or(false))
-                .unwrap_or(false);
-            println!(
-                "  {} {} [{}]{}",
-                "✓".green(),
-                p,
-                event_tags.join(", "),
-                if stop_hook { format!(" + {}", "stop-hook".dimmed()) } else { String::new() }
-            );
-        }
-        if !any_agent {
-            println!("  {} No agent skills installed", "—".dimmed());
-        }
-    } else {
-        println!("  {} {}", "—".dimmed(), project_root_display);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // 4. Agent skills (global)
-    // ═══════════════════════════════════════════════════════════════════════
-    if include_global {
+        // ═══════════════════════════════════════════════════════════════════
+        // Global agent skills
+        // ═══════════════════════════════════════════════════════════════════
         println!();
-        println!("{}", "Agent Skills (global)".bold());
+        println!("{}", "Agent Skills (~/)".bold());
         let home = dirs::home_dir();
         if let Some(ref home_dir) = home {
             let mut any_global_agent = false;
@@ -1539,49 +1454,94 @@ fn handle_hook_list(include_global: bool) -> ExitCode {
                 println!("  {} No global agent skills installed", "—".dimmed());
             }
         }
-    }
+    } else {
+        // ═══════════════════════════════════════════════════════════════════
+        // Project-level shell hooks
+        // ═══════════════════════════════════════════════════════════════════
+        let git_root = find_git_root();
+        let project_root_display = git_root.as_ref().map(|r| r.display().to_string())
+            .unwrap_or_else(|| "(not in a git repository)".to_string());
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // 5. TOML registry entries (extra info)
-    // ═══════════════════════════════════════════════════════════════════════
-    if !toml.hooks.is_empty() {
-        println!();
-        println!("{}", "Registry (~/.linthis/installed-hooks.toml)".bold());
-        for hook in &toml.hooks {
-            if !include_global && hook.scope == "global" {
-                continue;
+        println!("{}", "Shell Hooks (.git/hooks/)".bold());
+        if let Some(ref root) = git_root {
+            println!("  Repository: {}", root.display());
+            let mut any = false;
+            for event in &hook_events {
+                let hook_path = root.join(".git/hooks").join(event.hook_filename());
+                if !hook_path.exists() {
+                    continue;
+                }
+                let content = std::fs::read_to_string(&hook_path).unwrap_or_default();
+                if !content.contains("linthis") {
+                    continue;
+                }
+                any = true;
+                count += 1;
+
+                let hook_type = detect_hook_type_from_content(&content, &toml, "local", root, event);
+                let provider = detect_provider_from_content(&content, &toml, "local", root, event);
+
+                println!(
+                    "  {} {} {} {}",
+                    "✓".green(),
+                    event.hook_filename(),
+                    format!("[{}]", hook_type).dimmed(),
+                    if provider.is_empty() { String::new() } else { format!("(provider: {})", provider) }
+                );
             }
-            let provider_info = if hook.provider.is_empty() {
-                String::new()
-            } else {
-                format!(" provider={}", hook.provider)
-            };
-            let skills_info = if hook.skill_providers.is_empty() {
-                String::new()
-            } else {
-                format!(" skills=[{}]", hook.skill_providers.join(","))
-            };
-            let project_info = if hook.project.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", hook.project)
-            };
-            println!(
-                "  {} {} {} [{}]{}{}{}",
-                "·".dimmed(),
-                hook.event,
-                hook.hook_type,
-                hook.scope,
-                project_info,
-                provider_info,
-                skills_info,
-            );
+            if !any {
+                println!("  {} No linthis shell hooks installed", "—".dimmed());
+            }
+        } else {
+            println!("  {} {}", "—".dimmed(), project_root_display);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Project-level agent skills
+        // ═══════════════════════════════════════════════════════════════════
+        println!();
+        println!("{}", "Agent Skills".bold());
+        if let Some(ref root) = git_root {
+            let mut any_agent = false;
+            for p in ALL_AGENT_PROVIDERS {
+                if !agent_is_installed(root, p, false, skill_names) {
+                    continue;
+                }
+                any_agent = true;
+                let mut event_tags: Vec<&str> = Vec::new();
+                for event in &hook_events {
+                    let path = agent_skill_path(root, p, false, event, skill_names);
+                    if path.exists() {
+                        count += 1;
+                        event_tags.push(event.hook_filename());
+                    }
+                }
+                let stop_hook = agent_stop_hook_settings_path(root, p)
+                    .map(|sp| sp.exists() && std::fs::read_to_string(&sp).map(|c| c.contains("linthis")).unwrap_or(false))
+                    .unwrap_or(false);
+                println!(
+                    "  {} {} [{}]{}",
+                    "✓".green(),
+                    p,
+                    event_tags.join(", "),
+                    if stop_hook { format!(" + {}", "stop-hook".dimmed()) } else { String::new() }
+                );
+            }
+            if !any_agent {
+                println!("  {} No agent skills installed", "—".dimmed());
+            }
+        } else {
+            println!("  {} {}", "—".dimmed(), project_root_display);
         }
     }
 
     println!();
-    println!("{} {} hook entries found{}", "Total:".bold(), count,
-        if !include_global { format!(" (use {} to include global)", "-g".cyan()) } else { String::new() });
+    let hint = if global {
+        format!(" (omit {} for project hooks)", "-g".cyan())
+    } else {
+        format!(" (use {} for global hooks)", "-g".cyan())
+    };
+    println!("{} {} hook entries found{}", "Total:".bold(), count, hint);
 
     ExitCode::SUCCESS
 }
