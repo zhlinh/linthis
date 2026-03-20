@@ -89,11 +89,14 @@ pub fn sync_plugins(plugins: &[(String, String, Option<String>)]) -> Result<(), 
     }
 }
 
-/// After `plugin add`, fetch the plugin and merge its bundled `linthis-config.toml`
-/// into the project's `.linthis/config.toml`, replacing every `plugin = "self"` with
-/// the user-specified alias.
+/// After `plugin add`, fetch the plugin and merge its bundled config files
+/// into the user's `.linthis/config.toml`:
 ///
-/// If the plugin has no `linthis-config.toml`, this is a silent no-op.
+/// - `linthis-hook.toml` — `[hook.*]` sections (with `plugin = "self"` → alias replacement)
+/// - `linthis.toml` — top-level config keys (`plugin_auto_sync`, `self_auto_update`, etc.)
+///
+/// Both files are optional; missing files are silently skipped.
+/// Merge is non-overwriting: existing user settings take priority.
 fn merge_plugin_linthis_config(
     alias: &str,
     url: &str,
@@ -113,22 +116,12 @@ fn merge_plugin_linthis_config(
     let fetcher = PluginFetcher::new();
     let cached = fetcher.fetch(&source, &cache, false).map_err(|e| e.to_string())?;
 
-    // Look for linthis-hook.toml in the plugin root.
-    let plugin_config_path = cached.cache_path.join("linthis-hook.toml");
-    if !plugin_config_path.exists() {
+    let hook_config_path = cached.cache_path.join("linthis-hook.toml");
+    let general_config_path = cached.cache_path.join("linthis.toml");
+
+    if !hook_config_path.exists() && !general_config_path.exists() {
         return Ok(()); // No bundled config — silently skip
     }
-
-    let raw = std::fs::read_to_string(&plugin_config_path)
-        .map_err(|e| format!("Failed to read plugin linthis-hook.toml: {}", e))?;
-
-    // Replace `plugin = "self"` with `plugin = "<alias>"`.
-    let resolved = raw.replace("\"self\"", &format!("\"{}\"", alias));
-
-    // Parse the resolved TOML.
-    let plugin_doc: DocumentMut = resolved
-        .parse()
-        .map_err(|e| format!("Failed to parse plugin linthis-hook.toml: {}", e))?;
 
     // Load (or create) the target user config.
     let target_manager = if global {
@@ -150,19 +143,55 @@ fn merge_plugin_linthis_config(
         .parse()
         .map_err(|e| format!("Failed to parse {}: {}", config_path.display(), e))?;
 
-    // Ensure [hook] table exists in user doc.
-    if !user_doc.contains_key("hook") {
-        user_doc["hook"] = Item::Table(Table::new());
+    let mut merged_count = 0usize;
+
+    // ── Merge linthis-hook.toml: [hook.*] sections ───────────────────────
+    if hook_config_path.exists() {
+        let raw = std::fs::read_to_string(&hook_config_path)
+            .map_err(|e| format!("Failed to read plugin linthis-hook.toml: {}", e))?;
+
+        // Replace `plugin = "self"` with `plugin = "<alias>"`.
+        let resolved = raw.replace("\"self\"", &format!("\"{}\"", alias));
+
+        let plugin_doc: DocumentMut = resolved
+            .parse()
+            .map_err(|e| format!("Failed to parse plugin linthis-hook.toml: {}", e))?;
+
+        // Ensure [hook] table exists in user doc.
+        if !user_doc.contains_key("hook") {
+            user_doc["hook"] = Item::Table(Table::new());
+        }
+
+        // Merge top-level keys from plugin doc's [hook] into user doc's [hook].
+        // Only add keys that don't already exist in the user's config (non-overwriting merge).
+        if let Some(plugin_hooks) = plugin_doc.get("hook").and_then(|h| h.as_table()) {
+            if let Some(user_hooks) = user_doc["hook"].as_table_mut() {
+                for (key, value) in plugin_hooks.iter() {
+                    if !user_hooks.contains_key(key) {
+                        user_hooks.insert(key, value.clone());
+                        merged_count += 1;
+                    }
+                }
+            }
+        }
     }
 
-    // Merge top-level keys from plugin doc's [hook] into user doc's [hook].
-    // Only add keys that don't already exist in the user's config (non-overwriting merge).
-    let mut merged_count = 0usize;
-    if let Some(plugin_hooks) = plugin_doc.get("hook").and_then(|h| h.as_table()) {
-        if let Some(user_hooks) = user_doc["hook"].as_table_mut() {
-            for (key, value) in plugin_hooks.iter() {
-                if !user_hooks.contains_key(key) {
-                    user_hooks.insert(key, value.clone());
+    // ── Merge linthis.toml: allowed top-level config keys ────────────────
+    if general_config_path.exists() {
+        let raw = std::fs::read_to_string(&general_config_path)
+            .map_err(|e| format!("Failed to read plugin linthis.toml: {}", e))?;
+
+        let general_doc: DocumentMut = raw
+            .parse()
+            .map_err(|e| format!("Failed to parse plugin linthis.toml: {}", e))?;
+
+        const MERGEABLE_TOP_KEYS: &[&str] = &[
+            "plugin_auto_sync", "self_auto_update", "tool_auto_install",
+        ];
+        for key in MERGEABLE_TOP_KEYS {
+            if let Some(value) = general_doc.get(key) {
+                if !user_doc.contains_key(key) {
+                    user_doc[key] = value.clone();
                     merged_count += 1;
                 }
             }
