@@ -134,6 +134,9 @@ pub struct UnavailableTool {
     pub tool_type: String,
     /// Installation hint for the user
     pub install_hint: String,
+    /// Whether auto-install was attempted and failed
+    #[serde(default)]
+    pub auto_install_failed: bool,
 }
 
 impl UnavailableTool {
@@ -143,7 +146,13 @@ impl UnavailableTool {
             language: language.to_string(),
             tool_type: tool_type.to_string(),
             install_hint: install_hint.to_string(),
+            auto_install_failed: false,
         }
+    }
+
+    pub fn with_auto_install_failed(mut self) -> Self {
+        self.auto_install_failed = true;
+        self
     }
 }
 
