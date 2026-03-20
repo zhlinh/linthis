@@ -1010,6 +1010,12 @@ pub enum HookCommands {
     },
     /// Show git hook status
     Status,
+    /// List all installed hooks (git, agent, with-agent) and their providers
+    List {
+        /// Include global hooks
+        #[arg(short = 'g', long)]
+        global: bool,
+    },
     /// Check for hook conflicts
     Check,
     /// Validate commit message format (used by commit-msg hook)
