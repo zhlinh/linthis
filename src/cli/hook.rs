@@ -1464,7 +1464,6 @@ fn handle_hook_list(global: bool) -> ExitCode {
 
         println!("{}", "Shell Hooks (.git/hooks/)".bold());
         if let Some(ref root) = git_root {
-            println!("  Repository: {}", root.display());
             let mut any = false;
             for event in &hook_events {
                 let hook_path = root.join(".git/hooks").join(event.hook_filename());
@@ -1536,12 +1535,22 @@ fn handle_hook_list(global: bool) -> ExitCode {
     }
 
     println!();
-    let hint = if global {
-        format!(" (omit {} for project hooks)", "-g".cyan())
+    if count == 0 {
+        if global {
+            println!("No global hooks installed.");
+            println!("  Use {} to view project hooks.", "linthis hook list".cyan());
+        } else {
+            println!("No project hooks installed.");
+            println!("  Use {} to view global hooks.", "linthis hook list -g".cyan());
+        }
     } else {
-        format!(" (use {} for global hooks)", "-g".cyan())
-    };
-    println!("{} {} hook entries found{}", "Total:".bold(), count, hint);
+        let hint = if global {
+            format!(" (use {} for project hooks)", "linthis hook list".cyan())
+        } else {
+            format!(" (use {} for global hooks)", "linthis hook list -g".cyan())
+        };
+        println!("{} {} hook entries found{}", "Total:".bold(), count, hint);
+    }
 
     ExitCode::SUCCESS
 }
