@@ -266,10 +266,25 @@ pub enum HookSource {
     File { file: String },
 }
 
+/// Custom target paths for agent plugin installation.
+///
+/// When present in a `HookSourceEntry`, overrides the provider-hardcoded
+/// paths so that new providers (e.g. OpenClaw) can be supported without
+/// changing linthis source code.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentTargetConfig {
+    pub skills: Option<String>,
+    pub memory: Option<String>,
+    pub commands: Option<String>,
+    pub settings: Option<String>,
+}
+
 /// A single source-mapped entry (wraps `HookSource`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookSourceEntry {
     pub source: HookSource,
+    #[serde(default)]
+    pub target: Option<AgentTargetConfig>,
 }
 
 /// Hook configuration section — `[hook]` in TOML.

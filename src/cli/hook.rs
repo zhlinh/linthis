@@ -3443,35 +3443,38 @@ fn install_agent_plugin_from_dir(
     provider: &AgentProvider,
     event: &HookEvent,
     skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+    target: Option<&linthis::config::AgentTargetConfig>,
 ) -> Result<(), String> {
     use std::fs;
 
-    let skill_path = agent_skill_path(base, provider, false, event, skill_names);
     let (skill_name, _) = agent_event_skill_metadata(event, skill_names);
 
     // ── skill ───────────────────────────────────────────────────────────
-    let skill_src_dir = plugin_dir.join("skills").join(skill_name);
+    let skill_src_dir = plugin_dir.join("skills").join(&skill_name);
     let skill_src = skill_src_dir.join("SKILL.md");
     if skill_src.is_file() {
-        match provider {
-            AgentProvider::Codex => {
-                // Section-based: only read SKILL.md content
-                let content = fs::read_to_string(&skill_src)
-                    .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
-                let section_marker = agent_event_section_marker(event);
-                install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
-            }
-            AgentProvider::Claude | AgentProvider::Codebuddy => {
-                // Skills subdirectory providers: copy the entire skill dir
-                // (SKILL.md + scripts/, references/, etc.)
-                let target_dir = skill_path.parent().unwrap();
-                copy_dir_recursive(&skill_src_dir, target_dir)?;
-            }
-            _ => {
-                // Single-file providers: only copy SKILL.md content
-                let content = fs::read_to_string(&skill_src)
-                    .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
-                install_agent_dedicated_file(&skill_path, &content)?;
+        if let Some(target_skills) = target.and_then(|t| t.skills.as_deref()) {
+            // Custom target: skill-dir style — {base}/{target.skills}/{skill_name}/SKILL.md
+            let custom_skill_dir = base.join(target_skills).join(&skill_name);
+            copy_dir_recursive(&skill_src_dir, &custom_skill_dir)?;
+        } else {
+            let skill_path = agent_skill_path(base, provider, false, event, skill_names);
+            match provider {
+                AgentProvider::Codex => {
+                    let content = fs::read_to_string(&skill_src)
+                        .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
+                    let section_marker = agent_event_section_marker(event);
+                    install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
+                }
+                AgentProvider::Claude | AgentProvider::Codebuddy => {
+                    let target_dir = skill_path.parent().unwrap();
+                    copy_dir_recursive(&skill_src_dir, target_dir)?;
+                }
+                _ => {
+                    let content = fs::read_to_string(&skill_src)
+                        .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
+                    install_agent_dedicated_file(&skill_path, &content)?;
+                }
             }
         }
     }
@@ -3479,15 +3482,20 @@ fn install_agent_plugin_from_dir(
     // ── command ─────────────────────────────────────────────────────────
     let cmd_src_dir = plugin_dir.join("commands");
     if cmd_src_dir.is_dir() {
-        if let Some(cmd_dir) = agent_command_dir(base, provider) {
+        let cmd_dir_opt = if let Some(target_commands) = target.and_then(|t| t.commands.as_deref()) {
+            Some(base.join(target_commands))
+        } else {
+            agent_command_dir(base, provider)
+        };
+        if let Some(cmd_dir) = cmd_dir_opt {
             if let Ok(entries) = fs::read_dir(&cmd_src_dir) {
                 for entry in entries.flatten() {
                     if entry.path().is_file() {
                         let filename = entry.file_name();
-                        let target = cmd_dir.join(&filename);
+                        let cmd_target = cmd_dir.join(&filename);
                         let content = fs::read_to_string(entry.path())
                             .map_err(|e| format!("Failed to read command file '{}': {}", entry.path().display(), e))?;
-                        install_agent_dedicated_file(&target, &content)?;
+                        install_agent_dedicated_file(&cmd_target, &content)?;
                     }
                 }
             }
@@ -3497,14 +3505,18 @@ fn install_agent_plugin_from_dir(
     // ── memory ──────────────────────────────────────────────────────────
     let mem_src = plugin_dir.join("memories").join("TOPLEVEL.md");
     if mem_src.is_file() {
-        let memory_target = match provider {
-            AgentProvider::Claude    => Some(base.join("CLAUDE.md")),
-            AgentProvider::Codebuddy => Some(base.join("CODEBUDDY.md")),
-            AgentProvider::Gemini    => Some(base.join(".gemini/GEMINI.md")),
-            AgentProvider::Cursor    => Some(base.join(".cursor/CURSOR.md")),
-            AgentProvider::Droid     => Some(base.join(".droid/DROID.md")),
-            AgentProvider::Auggie    => Some(base.join(".augment/AUGMENT.md")),
-            AgentProvider::Codex     => None, // Codex memory goes into AGENTS.md; skip for now
+        let memory_target = if let Some(target_memory) = target.and_then(|t| t.memory.as_deref()) {
+            Some(base.join(target_memory))
+        } else {
+            match provider {
+                AgentProvider::Claude    => Some(base.join("CLAUDE.md")),
+                AgentProvider::Codebuddy => Some(base.join("CODEBUDDY.md")),
+                AgentProvider::Gemini    => Some(base.join(".gemini/GEMINI.md")),
+                AgentProvider::Cursor    => Some(base.join(".cursor/CURSOR.md")),
+                AgentProvider::Droid     => Some(base.join(".droid/DROID.md")),
+                AgentProvider::Auggie    => Some(base.join(".augment/AUGMENT.md")),
+                AgentProvider::Codex     => None,
+            }
         };
         if let Some(mem_target) = memory_target {
             let content = fs::read_to_string(&mem_src)
@@ -3518,7 +3530,12 @@ fn install_agent_plugin_from_dir(
     // ── stop hook (from plugin's hooks/hooks.json) ──────────────────────
     let hooks_json_src = plugin_dir.join("hooks").join("hooks.json");
     if hooks_json_src.is_file() {
-        if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
+        let settings_path_opt = if let Some(target_settings) = target.and_then(|t| t.settings.as_deref()) {
+            Some(base.join(target_settings))
+        } else {
+            agent_stop_hook_settings_path(base, provider)
+        };
+        if let Some(settings_path) = settings_path_opt {
             let override_json = fs::read_to_string(&hooks_json_src)
                 .map_err(|e| format!("Failed to read hooks.json '{}': {}", hooks_json_src.display(), e))?;
             install_agent_stop_hook_from_json(base, &settings_path, &override_json)?;
@@ -3568,7 +3585,7 @@ fn resolve_and_install_agent_plugin_override(
     //   1b: hooks/agent/plugins/<plugin>/              (default fallback)
     if !global {
         if let Some(plugin_dir) = resolver::fixed_agent_plugin_dir(&project_root, &provider_name, plugin_id) {
-            install_agent_plugin_from_dir(&plugin_dir, base, provider, event, skill_names)?;
+            install_agent_plugin_from_dir(&plugin_dir, base, provider, event, skill_names, None)?;
             return Ok(true);
         }
     }
@@ -3578,7 +3595,7 @@ fn resolve_and_install_agent_plugin_override(
     if let Some(entry) = resolve_agent_plugin(&config.hook, plugin_id, &provider_name) {
         let resolved = resolver::resolve_to_dir(&entry.source, &project_root, &config.hook.marketplaces)
             .map_err(|e| format!("Failed to resolve agent plugin '{}': {}", plugin_id, e))?;
-        install_agent_plugin_from_dir(resolved.path(), base, provider, event, skill_names)?;
+        install_agent_plugin_from_dir(resolved.path(), base, provider, event, skill_names, entry.target.as_ref())?;
         return Ok(true);
     }
 
@@ -3607,7 +3624,7 @@ fn resolve_and_install_agent_plugin_override(
                             .join(&provider_name)
                             .join(plugin_id);
                         if provider_dir.is_dir() {
-                            install_agent_plugin_from_dir(&provider_dir, base, provider, event, skill_names)?;
+                            install_agent_plugin_from_dir(&provider_dir, base, provider, event, skill_names, None)?;
                             return Ok(true);
                         }
                         let default_dir = cache_path
@@ -3617,7 +3634,7 @@ fn resolve_and_install_agent_plugin_override(
                             .join("_default")
                             .join(plugin_id);
                         if default_dir.is_dir() {
-                            install_agent_plugin_from_dir(&default_dir, base, provider, event, skill_names)?;
+                            install_agent_plugin_from_dir(&default_dir, base, provider, event, skill_names, None)?;
                             return Ok(true);
                         }
                     }
