@@ -3569,13 +3569,9 @@ fn agent_is_installed(
                     })
                     .unwrap_or(false)
         }
-        // Skill-dir-based: check for section marker in file (current or legacy)
+        // Skill-dir-based: check if any per-event skill file exists
         AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
-            let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit, skill_names);
-            path.exists()
-                && std::fs::read_to_string(&path)
-                    .map(|c| c.contains(AGENT_SECTION_MARKER) || c.contains(AGENT_SECTION_MARKER_LEGACY))
-                    .unwrap_or(false)
+            events.iter().any(|e| agent_skill_path(base, provider, global, e, skill_names).exists())
         }
         // File-based: check if any per-event file exists
         _ => events.iter().any(|e| agent_skill_path(base, provider, global, e, skill_names).exists()),
