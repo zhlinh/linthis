@@ -2,7 +2,7 @@
 
 ## 概述
 
-linthis 可以与 AI 编程助手（Claude Code、Codex、Gemini、Cursor、Droid、Auggie、CodeBuddy）集成，在 AI 辅助开发过程中自动执行代码质量检查。
+linthis 可以与 AI 编程助手（Claude Code、Codex、Gemini、Cursor、Droid、Auggie、CodeBuddy、OpenClaw）集成，在 AI 辅助开发过程中自动执行代码质量检查。
 
 安装后，AI 助手会在修改代码后自动运行 `linthis` 检查，并在提交前修复问题——无需手动干预。
 
@@ -17,6 +17,7 @@ linthis 可以与 AI 编程助手（Claude Code、Codex、Gemini、Cursor、Droi
 | Droid | `.droid/rules/linthis-lint.md`, `.droid/rules/linthis-cmsg.md`, `.droid/rules/linthis-review.md` | `.droid/` 目录 | 每事件独立文件 |
 | Auggie | `.augment/rules/linthis-lint.md`, `.augment/rules/linthis-cmsg.md`, `.augment/rules/linthis-review.md` | `.augment/` 目录 | 每事件独立文件 |
 | CodeBuddy | `.codebuddy/skills/lt-lint/SKILL.md`, `.codebuddy/skills/lt-cmsg/SKILL.md`, `.codebuddy/skills/lt-review/SKILL.md` + `.codebuddy/settings.json` | `.codebuddy/` 目录 | 每事件技能文件 + Stop Hook |
+| OpenClaw | `.openclaw/skills/lt-lint/SKILL.md`, `.openclaw/skills/lt-cmsg/SKILL.md`, `.openclaw/skills/lt-review/SKILL.md` | `.openclaw/` 目录 | 每事件技能文件 |
 
 ## 快速开始
 
@@ -176,9 +177,9 @@ linthis hook install --type agent -g
 
 安装的规则指导 AI 助手执行以下操作：
 
-1. **修改代码后** — 运行 `linthis -i <file1> -i <file2> -c` 检查所有修改的文件
+1. **修改代码后** — 运行 `linthis -i <file1> -i <file2>` 检查所有修改的文件
 2. **手动修复问题** — 阅读 lint 错误并直接修改代码（不使用 `--fix` 或 AI 自动修复）
-3. **提交前** — 运行 `linthis -s -c` 检查暂存文件
+3. **提交前** — 运行 `linthis -s` 检查暂存文件
 4. **重新检查** — 修复后重新运行 linthis，直到通过
 
 这确保 AI 助手生成符合代码规范的代码，具有正确的上下文感知能力，而非依赖自动修复工具。
@@ -275,27 +276,26 @@ linthis hook install --type git-with-agent --provider claude --global
 | `droid` | `droid` | `droid exec --auto high '...'` |
 | `auggie` | `auggie` | `auggie --print '...'` |
 | `codebuddy` | `codebuddy` | `codebuddy -p --dangerously-skip-permissions '...'` |
+| `openclaw` | `openclaw` | `openclaw agent --message '...'` |
 
-### 生成的 Hook 脚本示例
+### 生成的 Hook 脚本（Thin Wrapper）
 
-以下是使用 `--type git-with-agent --provider claude` 时写入 `.git/hooks/pre-commit` 的脚本：
+linthis 在 `.git/hooks/` 中安装一个 **thin wrapper**（薄包装）脚本。该脚本将所有逻辑委托给 `linthis hook run`，由当前安装的 linthis 二进制文件在运行时动态生成并执行完整的 hook 脚本。这意味着升级 linthis 后 hook 逻辑会自动更新，无需重新安装 hook。
+
+示例 `.git/hooks/pre-commit`（`--type git-with-agent --provider claude`）：
 
 ```bash
 #!/bin/sh
+exec linthis hook run --event pre-commit --type git-with-agent --provider claude "$@"
+```
 
-LINTHIS_CMD="linthis -s -c -f --hook-event=pre-commit"
+运行时，`linthis hook run` 在内部生成完整脚本——包括 linthis 检查、AI CLI 可用性检测、自动修复调用、重新暂存和重试逻辑。Wrapper 本身不包含这些逻辑。
 
-$LINTHIS_CMD
-LINTHIS_EXIT=$?
+升级 linthis 后如需更新 hook 行为：
 
-if [ $LINTHIS_EXIT -ne 0 ]; then
-  echo "[linthis] Lint errors detected. Invoking Claude Code to fix..."
-  claude -p --dangerously-skip-permissions 'Staged files have linthis lint errors. Run '\''linthis -s -c'\'' to inspect them. Fix all issues by editing the files directly (do NOT use linthis --fix). Verify with '\''linthis -s -c'\'' until it passes cleanly.'
-  $LINTHIS_CMD
-  LINTHIS_EXIT=$?
-fi
-
-exit $LINTHIS_EXIT
+```bash
+linthis hook sync       # 重新同步本地项目 hook
+linthis hook sync -g    # 重新同步全局 hook
 ```
 
 ### 与 --type agent 的区别
