@@ -2028,7 +2028,7 @@ fn format_hook_source(source: &linthis::config::HookSource) -> String {
 ///
 /// - Tier 1 (fixed path): `"hooks/git-with-agent/pre-push (fixed path)"`
 /// - Tier 2 (TOML entry): `"[hook.git-with-agent]\npre-push = { source = { ... } }"`
-/// - Tier 3 (built-in):   `"built-in → linthis -c --hook-event=pre-push"`
+/// - Tier 3 (built-in):   `"built-in → linthis --hook-event=pre-push"`
 fn describe_hook_source(tool: &HookTool, hook_event: &HookEvent) -> String {
     use linthis::config::Config;
     use linthis::hooks::resolver;
@@ -2651,9 +2651,9 @@ fn resolve_agent_fix_provider(
 /// Note: CommitMsg uses agent_fix_headless_cmd_commit_msg() instead (needs $1 expansion).
 fn agent_fix_prompt_for_event(_hook_event: &HookEvent) -> String {
     "Staged files have linthis lint errors. \
-     Run 'linthis -s -c' to inspect them. \
+     Run 'linthis -s' to inspect them. \
      Fix all issues by editing the files directly (do NOT use linthis --fix). \
-     Verify with 'linthis -s -c' until it passes cleanly."
+     Verify with 'linthis -s' until it passes cleanly."
         .to_string()
 }
 
@@ -3239,26 +3239,28 @@ If no code files were modified in this session, approve immediately.
 ## Steps
 
 1. Identify modified code files in this session (files written or edited via Write/Edit tools, or via Bash)
-2. Run `linthis -i <file1> -i <file2> -c` on all modified files — use separate `-i` flags for each file
-3. Before any `git commit`, also run `linthis -s -c` to check all staged files
+2. Run `linthis -i <file1> -i <file2>` on all modified files — use separate `-i` flags for each file
+3. Before any `git commit`, also run `linthis -s` to check all staged files
+   - **Note**: Running `linthis -i <file>` (without `-c`) or `linthis -s` (without `-c`) may auto-format files. If any files were already staged (`git add`), you must re-stage them after formatting: `git add <formatted files>`
 4. Read the lint output carefully — each issue includes file path, line number, and rule name
 5. If issues are found, fix them by editing the code directly
    - Do **NOT** use `linthis --fix` or `linthis fix` — fixing manually ensures you understand the issue and don't introduce regressions from blind automated transforms
-6. Re-run `linthis -i <files> -c` to confirm all issues are resolved
-7. Only approve the commit once lint passes with zero errors
+6. Re-run `linthis -i <files>` to confirm all issues are resolved
+7. If any files were re-formatted or fixed, re-stage them: `git add <files>`
+8. Only approve the commit once lint passes with zero errors
 
 ## Key Commands
 
 | Action | Command |
 |--------|---------|
-| Lint staged files | `linthis -s -c` |
-| Lint specific files | `linthis -i <file> -c` |
+| Lint and format staged files | `linthis -s` |
+| Lint and format specific files | `linthis -i <file>` |
 | Format only | `linthis -s -f` |
 
 ## Example
 
 ```
-$ linthis -i src/handler.go -c
+$ linthis -i src/handler.go
 
 src/handler.go:15:1: exported function HandleRequest should have comment (golint)
 src/handler.go:23:4: error return value not checked (errcheck)
@@ -3433,7 +3435,7 @@ const AGENT_STOP_HOOK_JSON: &str = r#"{
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Before finishing, check if any code files were modified during this session (Write/Edit/Bash tools). If code was modified:\n1. Run `linthis -i <file1> -i <file2> -c` on all modified files to check for lint issues\n2. If issues are found, fix them yourself by editing the code directly (do NOT use `linthis --fix` or `linthis fix`)\n3. Re-run `linthis -i <files> -c` to confirm all issues are resolved\n4. Only approve stopping once lint passes with no errors\n\nIf no code files were modified, approve stopping immediately.\n\nYou MUST respond with valid JSON: {\"ok\": true} to approve stopping, or {\"ok\": false, \"reason\": \"description of remaining lint issues\"} to block."
+            "prompt": "Before finishing, check if any code files were modified during this session (Write/Edit/Bash tools). If code was modified:\n1. Run `linthis -i <file1> -i <file2>` on all modified files to check for lint issues\n2. If issues are found, fix them yourself by editing the code directly (do NOT use `linthis --fix` or `linthis fix`)\n3. Re-run `linthis -i <files>` to confirm all issues are resolved\n4. Only approve stopping once lint passes with no errors\n\nIf no code files were modified, approve stopping immediately.\n\nYou MUST respond with valid JSON: {\"ok\": true} to approve stopping, or {\"ok\": false, \"reason\": \"description of remaining lint issues\"} to block."
           }
         ]
       }
@@ -4232,7 +4234,7 @@ fn agent_event_skill_metadata(
     match event {
         HookEvent::PreCommit => (
             custom_name.unwrap_or("lt-lint").to_string(),
-            "对暂存/修改的代码文件运行 linthis 代码检查，提交前修复所有问题。使用 `linthis -i <file> -c` 按项目编码规范检查，必须手动编辑修复（不能用 linthis --fix）。提交时若 lt-cmsg skill 也存在应一起触发。Run linthis lint checks on staged/modified code files and fix all issues before committing. Uses `linthis -i <file> -c`. Issues must be fixed by editing code directly. If the lt-cmsg skill also exists, both should be invoked together when committing.",
+            "对暂存/修改的代码文件运行 linthis 代码检查，提交前修复所有问题。使用 `linthis -i <file>` 按项目编码规范检查，必须手动编辑修复（不能用 linthis --fix）。提交时若 lt-cmsg skill 也存在应一起触发。Run linthis lint checks on staged/modified code files and fix all issues before committing. Uses `linthis -i <file>`. Issues must be fixed by editing code directly. If the lt-cmsg skill also exists, both should be invoked together when committing.",
         ),
         HookEvent::CommitMsg => (
             custom_name.unwrap_or("lt-cmsg").to_string(),
@@ -5176,7 +5178,7 @@ fn print_commit_msg_error(first_line: &str) {
 /// Execute hook logic at runtime, called by thin wrapper scripts in .git/hooks/.
 ///
 /// Builds the full hook script content from the current binary and runs it via
-/// `sh -c`, forwarding any passthrough arguments from the original git hook
+/// `sh`, forwarding any passthrough arguments from the original git hook
 /// invocation (e.g. the commit message file path for commit-msg hooks).
 /// Environment variable injected by `handle_hook_run` to detect re-entrant hook calls.
 ///
