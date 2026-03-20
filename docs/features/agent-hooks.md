@@ -2,7 +2,7 @@
 
 ## Overview
 
-linthis can integrate with AI coding agents (Claude Code, Codex, Gemini, Cursor, Droid, Auggie, CodeBuddy) to automatically enforce code quality rules during AI-assisted development.
+linthis can integrate with AI coding agents (Claude Code, Codex, Gemini, Cursor, Droid, Auggie, CodeBuddy, OpenClaw) to automatically enforce code quality rules during AI-assisted development.
 
 When installed, the agent will run `linthis` checks after modifying code and fix any issues before committing — all without manual intervention.
 
@@ -17,6 +17,7 @@ When installed, the agent will run `linthis` checks after modifying code and fix
 | Droid | `.droid/rules/linthis-lint.md`, `.droid/rules/linthis-cmsg.md`, `.droid/rules/linthis-review.md` | `.droid/` dir | Per-event files |
 | Auggie | `.augment/rules/linthis-lint.md`, `.augment/rules/linthis-cmsg.md`, `.augment/rules/linthis-review.md` | `.augment/` dir | Per-event files |
 | CodeBuddy | `.codebuddy/skills/lt-lint/SKILL.md`, `.codebuddy/skills/lt-cmsg/SKILL.md`, `.codebuddy/skills/lt-review/SKILL.md` + `.codebuddy/settings.json` | `.codebuddy/` dir | Per-event skills + Stop Hook |
+| OpenClaw | `.openclaw/skills/lt-lint/SKILL.md`, `.openclaw/skills/lt-cmsg/SKILL.md`, `.openclaw/skills/lt-review/SKILL.md` | `.openclaw/` dir | Per-event skills |
 
 Each provider receives three per-event files corresponding to the hook events:
 
@@ -192,9 +193,9 @@ Three skill files and a Stop Hook are created:
 
 The installed rules instruct the AI agent to:
 
-1. **After modifying code** — Run `linthis -i <file1> -i <file2> -c` on all changed files
+1. **After modifying code** — Run `linthis -i <file1> -i <file2>` on all changed files
 2. **Fix issues manually** — Read lint errors and apply fixes directly (no `--fix` or AI auto-fix)
-3. **Before committing** — Run `linthis -s -c` on staged files
+3. **Before committing** — Run `linthis -s` on staged files
 4. **Re-check** — Re-run linthis after fixes until clean
 
 This ensures the agent produces lint-clean code with proper context awareness, rather than relying on automated fixers.
@@ -299,27 +300,26 @@ linthis hook install --type git-with-agent --provider claude --global
 | `droid` | `droid` | `droid exec --auto high '...'` |
 | `auggie` | `auggie` | `auggie --print '...'` |
 | `codebuddy` | `codebuddy` | `codebuddy -p --dangerously-skip-permissions '...'` |
+| `openclaw` | `openclaw` | `openclaw agent --message '...'` |
 
-### Generated Hook Script
+### Generated Hook Script (Thin Wrapper)
 
-The following is an example of the script written to `.git/hooks/pre-commit` when using `--type git-with-agent --provider claude`:
+linthis installs a **thin wrapper** script into `.git/hooks/`. The wrapper delegates all logic to `linthis hook run`, which dynamically generates and executes the full hook script from the current linthis binary. This means hook logic is always up-to-date after a `cargo install` or binary upgrade — no need to re-install hooks.
+
+Example `.git/hooks/pre-commit` for `--type git-with-agent --provider claude`:
 
 ```bash
 #!/bin/sh
+exec linthis hook run --event pre-commit --type git-with-agent --provider claude "$@"
+```
 
-LINTHIS_CMD="linthis -s -c -f --hook-event=pre-commit"
+At runtime, `linthis hook run` generates the full script internally — including the linthis check, agent CLI availability detection, auto-fix invocation, re-staging, and retry logic. The wrapper never contains this logic directly.
 
-$LINTHIS_CMD
-LINTHIS_EXIT=$?
+To update hook behavior after upgrading linthis, use:
 
-if [ $LINTHIS_EXIT -ne 0 ]; then
-  echo "[linthis] Lint errors detected. Invoking Claude Code to fix..."
-  claude -p --dangerously-skip-permissions 'Staged files have linthis lint errors. Run '\''linthis -s -c'\'' to inspect them. Fix all issues by editing the files directly (do NOT use linthis --fix). Verify with '\''linthis -s -c'\'' until it passes cleanly.'
-  $LINTHIS_CMD
-  LINTHIS_EXIT=$?
-fi
-
-exit $LINTHIS_EXIT
+```bash
+linthis hook sync       # re-sync local project hooks
+linthis hook sync -g    # re-sync global hooks
 ```
 
 ### How It Differs from --type agent
