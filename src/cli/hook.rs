@@ -589,8 +589,9 @@ fn handle_hook_install_single(
                 "droid"     => Some(AgentProvider::Droid),
                 "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
                 "codebuddy" => Some(AgentProvider::Codebuddy),
+                "openclaw"  => Some(AgentProvider::Openclaw),
                 _ => {
-                    eprintln!("{}: Unknown agent provider '{}'. Valid options: claude, codex, gemini, cursor, droid, auggie, codebuddy", "Error".red(), p);
+                    eprintln!("{}: Unknown agent provider '{}'. Valid options: claude, codex, gemini, cursor, droid, auggie, codebuddy, openclaw", "Error".red(), p);
                     None
                 }
             }
@@ -2185,6 +2186,7 @@ const ALL_AGENT_FIX_PROVIDERS: &[AgentFixProvider] = &[
     AgentFixProvider::Droid,
     AgentFixProvider::Auggie,
     AgentFixProvider::Codebuddy,
+    AgentFixProvider::Openclaw,
 ];
 
 /// Split a `provider[/model]` string into (provider_name, Option<model>).
@@ -2234,6 +2236,7 @@ fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
         AgentFixProvider::Droid     => "droid",
         AgentFixProvider::Auggie    => "auggie",
         AgentFixProvider::Codebuddy => "codebuddy",
+        AgentFixProvider::Openclaw => "openclaw",
     }
 }
 
@@ -2262,6 +2265,7 @@ fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str, provider_ar
         AgentFixProvider::Droid     => format!("droid exec{extra} --auto high '{}'", escaped),
         AgentFixProvider::Auggie    => format!("auggie{extra} --print '{}'", escaped),
         AgentFixProvider::Codebuddy => format!("codebuddy -p{extra} --dangerously-skip-permissions '{}'", escaped),
+        AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message '{}'", escaped),
     }
 }
 
@@ -2312,11 +2316,12 @@ fn resolve_agent_fix_provider(
             "droid"              => Some(AgentFixProvider::Droid),
             "auggie" | "aug" | "augment" => Some(AgentFixProvider::Auggie),
             "codebuddy"          => Some(AgentFixProvider::Codebuddy),
+            "openclaw"           => Some(AgentFixProvider::Openclaw),
             _ => None,
         };
         return parsed.ok_or_else(|| {
             eprintln!(
-                "{}: Unknown agent fix provider '{}'. Valid: claude, codex, gemini, cursor, droid, auggie",
+                "{}: Unknown agent fix provider '{}'. Valid: claude, codex, gemini, cursor, droid, auggie, codebuddy, openclaw",
                 "Error".red(), p
             );
             ExitCode::from(1)
@@ -2410,6 +2415,7 @@ fn agent_fix_headless_cmd_commit_msg(provider: &AgentFixProvider, provider_args:
         AgentFixProvider::Droid     => format!("droid exec{extra} --auto high \"{}\"", escaped),
         AgentFixProvider::Auggie    => format!("auggie{extra} --print \"{}\"", escaped),
         AgentFixProvider::Codebuddy => format!("codebuddy -p{extra} --dangerously-skip-permissions \"{}\"", escaped),
+        AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message \"{}\"", escaped),
     };
     // Prepend variable capture so $_MSG_FILE is available in the double-quoted prompt
     format!("_MSG_FILE=\"$1\"; {}", bin_cmd)
@@ -2918,6 +2924,7 @@ const ALL_AGENT_PROVIDERS: &[AgentProvider] = &[
     AgentProvider::Droid,
     AgentProvider::Auggie,
     AgentProvider::Codebuddy,
+    AgentProvider::Openclaw,
 ];
 
 /// The section marker used in append-style files (CLAUDE.md, AGENTS.md)
@@ -3210,6 +3217,10 @@ fn agent_skill_path(
             let dir_name = custom_name.map_or_else(|| format!("lt-{}", event_name), |n| n.to_string());
             base.join(".codebuddy/skills").join(dir_name).join("SKILL.md")
         }
+        AgentProvider::Openclaw => {
+            let dir_name = custom_name.map_or_else(|| format!("lt-{}", event_name), |n| n.to_string());
+            base.join(".openclaw/skills").join(dir_name).join("SKILL.md")
+        }
     }
 }
 
@@ -3221,6 +3232,7 @@ fn agent_stop_hook_settings_path(base: &std::path::Path, provider: &AgentProvide
     match provider {
         AgentProvider::Claude => Some(base.join(".claude/settings.json")),
         AgentProvider::Codebuddy => Some(base.join(".codebuddy/settings.json")),
+        // OpenClaw has its own hooks system; no settings.json needed
         _ => None,
     }
 }
@@ -3285,8 +3297,8 @@ fn agent_is_installed(
                     })
                     .unwrap_or(false)
         }
-        // Append-style: check for section marker in file (current or legacy)
-        AgentProvider::Claude | AgentProvider::Codebuddy => {
+        // Skill-dir-based: check for section marker in file (current or legacy)
+        AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
             let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit, skill_names);
             path.exists()
                 && std::fs::read_to_string(&path)
@@ -3325,6 +3337,9 @@ fn detect_agent_providers(base: &std::path::Path) -> Vec<AgentProvider> {
     if base.join("CODEBUDDY.md").exists() || base.join(".codebuddy").exists() {
         detected.push(AgentProvider::Codebuddy);
     }
+    if base.join(".openclaw").exists() {
+        detected.push(AgentProvider::Openclaw);
+    }
     detected
 }
 
@@ -3345,6 +3360,7 @@ pub fn detect_agent_providers_lightweight() -> Vec<(&'static str, bool)> {
                 AgentProvider::Droid     => "Droid",
                 AgentProvider::Auggie    => "Auggie",
                 AgentProvider::Codebuddy => "CodeBuddy",
+                AgentProvider::Openclaw  => "OpenClaw",
             };
             let detected = match p {
                 AgentProvider::Claude    => root.join(".claude").exists(),
@@ -3354,6 +3370,7 @@ pub fn detect_agent_providers_lightweight() -> Vec<(&'static str, bool)> {
                 AgentProvider::Droid     => root.join(".droid").exists(),
                 AgentProvider::Auggie    => root.join(".augment").exists(),
                 AgentProvider::Codebuddy => root.join("CODEBUDDY.md").exists() || root.join(".codebuddy").exists(),
+                AgentProvider::Openclaw  => root.join(".openclaw").exists(),
             };
             (name, detected)
         })
@@ -3425,6 +3442,7 @@ fn agent_command_dir(base: &std::path::Path, provider: &AgentProvider) -> Option
         AgentProvider::Droid     => Some(base.join(".droid/commands")),
         AgentProvider::Auggie    => Some(base.join(".augment/commands")),
         AgentProvider::Codex     => None, // Codex uses section-based AGENTS.md; no command dir
+        AgentProvider::Openclaw  => Some(base.join(".openclaw/commands")),
     }
 }
 
@@ -3466,9 +3484,12 @@ fn install_agent_plugin_from_dir(
                     let section_marker = agent_event_section_marker(event);
                     install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
                 }
-                AgentProvider::Claude | AgentProvider::Codebuddy => {
+                AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
                     let target_dir = skill_path.parent().unwrap();
                     copy_dir_recursive(&skill_src_dir, target_dir)?;
+                    if matches!(provider, AgentProvider::Openclaw) {
+                        openclaw_post_install_skill(target_dir);
+                    }
                 }
                 _ => {
                     let content = fs::read_to_string(&skill_src)
@@ -3516,6 +3537,7 @@ fn install_agent_plugin_from_dir(
                 AgentProvider::Droid     => Some(base.join(".droid/DROID.md")),
                 AgentProvider::Auggie    => Some(base.join(".augment/AUGMENT.md")),
                 AgentProvider::Codex     => None,
+                AgentProvider::Openclaw  => Some(base.join("AGENTS.md")),
             }
         };
         if let Some(mem_target) = memory_target {
@@ -3530,15 +3552,20 @@ fn install_agent_plugin_from_dir(
     // ── stop hook (from plugin's hooks/hooks.json) ──────────────────────
     let hooks_json_src = plugin_dir.join("hooks").join("hooks.json");
     if hooks_json_src.is_file() {
-        let settings_path_opt = if let Some(target_settings) = target.and_then(|t| t.settings.as_deref()) {
-            Some(base.join(target_settings))
+        if matches!(provider, AgentProvider::Openclaw) {
+            // OpenClaw uses its own event-based hooks system (HOOK.md + handler.ts).
+            // No direct mapping to the stop-hook concept; skip for now.
         } else {
-            agent_stop_hook_settings_path(base, provider)
-        };
-        if let Some(settings_path) = settings_path_opt {
-            let override_json = fs::read_to_string(&hooks_json_src)
-                .map_err(|e| format!("Failed to read hooks.json '{}': {}", hooks_json_src.display(), e))?;
-            install_agent_stop_hook_from_json(base, &settings_path, &override_json)?;
+            let settings_path_opt = if let Some(target_settings) = target.and_then(|t| t.settings.as_deref()) {
+                Some(base.join(target_settings))
+            } else {
+                agent_stop_hook_settings_path(base, provider)
+            };
+            if let Some(settings_path) = settings_path_opt {
+                let override_json = fs::read_to_string(&hooks_json_src)
+                    .map_err(|e| format!("Failed to read hooks.json '{}': {}", hooks_json_src.display(), e))?;
+                install_agent_stop_hook_from_json(base, &settings_path, &override_json)?;
+            }
         }
     }
 
@@ -3647,6 +3674,151 @@ fn resolve_and_install_agent_plugin_override(
     Ok(false)
 }
 
+/// Resolve the OpenClaw global skills directory.
+///
+/// Probes well-known locations in order:
+/// 1. `~/.openclaw/skills/`  (macOS / Linux)
+/// 2. `C:\openclaw\openclaw\source\node_modules\openclaw\skills\`  (Windows)
+///
+/// Returns the first directory that exists, or `None`.
+fn resolve_openclaw_global_skills_dir() -> Option<PathBuf> {
+    // ~/.openclaw/skills/
+    if let Some(home) = dirs::home_dir() {
+        let candidate = home.join(".openclaw/skills");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    // Windows fallback
+    let win_candidate = PathBuf::from(r"C:\openclaw\openclaw\source\node_modules\openclaw\skills");
+    if win_candidate.is_dir() {
+        return Some(win_candidate);
+    }
+    None
+}
+
+/// Register an OpenClaw skill via CLI after files are written.
+///
+/// Strategy:
+/// 1. Try `openclaw skills install <dir>` if the CLI is available.
+/// 2. If the CLI is not in PATH, fallback to copying the skill directory into
+///    OpenClaw's well-known global skills directories
+///    (`~/.openclaw/skills/` or `C:\openclaw\...\skills\`).
+fn openclaw_post_install_skill(skill_dir: &std::path::Path) {
+    use std::process::Command;
+
+    // ── Try CLI first ────────────────────────────────────────────────────
+    if is_command_available("openclaw") {
+        match Command::new("openclaw")
+            .args(["skills", "install", &skill_dir.to_string_lossy()])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                println!("  {} Registered skill via 'openclaw skills install'", "✓".green());
+                println!("  {} Verify with 'openclaw skills list'", "→".dimmed());
+                return;
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                println!(
+                    "  {} 'openclaw skills install' exited with {}: {}",
+                    "Warning".yellow(),
+                    output.status,
+                    stderr.trim()
+                );
+                // Fall through to direct-copy fallback
+            }
+            Err(e) => {
+                println!("  {} Failed to run 'openclaw skills install': {}", "Warning".yellow(), e);
+                // Fall through to direct-copy fallback
+            }
+        }
+    }
+
+    // ── Fallback: copy skill dir into global skills directory ─────────────
+    let skill_name = match skill_dir.file_name() {
+        Some(name) => name,
+        None => {
+            println!(
+                "  {} Could not determine skill name from path '{}'",
+                "Warning".yellow(), skill_dir.display()
+            );
+            return;
+        }
+    };
+
+    if let Some(global_skills) = resolve_openclaw_global_skills_dir() {
+        let target = global_skills.join(skill_name);
+        match copy_dir_recursive(skill_dir, &target) {
+            Ok(()) => {
+                println!(
+                    "  {} Copied skill to {} (CLI unavailable, direct copy fallback)",
+                    "✓".green(), target.display()
+                );
+                println!("  {} When openclaw CLI is available, verify with 'openclaw skills list'", "→".dimmed());
+            }
+            Err(e) => {
+                println!(
+                    "  {} Failed to copy skill to {}: {}",
+                    "Warning".yellow(), target.display(), e
+                );
+            }
+        }
+    } else {
+        println!(
+            "  {} 'openclaw' CLI not found and no known skills directory (~/.openclaw/skills/) detected.",
+            "Notice".cyan()
+        );
+        println!("  {} Run 'openclaw skills install {}' manually after installing OpenClaw.", "→".dimmed(), skill_dir.display());
+    }
+}
+
+/// Unregister an OpenClaw skill via CLI before files are removed.
+///
+/// Strategy mirrors `openclaw_post_install_skill`:
+/// 1. Try `openclaw skills uninstall` if CLI is available.
+/// 2. Fallback: remove skill directory from well-known global locations.
+fn openclaw_post_uninstall_skill(skill_dir: &std::path::Path) {
+    use std::process::Command;
+
+    if is_command_available("openclaw") {
+        match Command::new("openclaw")
+            .args(["skills", "uninstall", &skill_dir.to_string_lossy()])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                println!("  {} Unregistered skill via 'openclaw skills uninstall'", "✓".green());
+                return;
+            }
+            _ => {
+                // Fall through to direct-remove fallback
+            }
+        }
+    }
+
+    // Fallback: remove from global skills directory
+    let skill_name = match skill_dir.file_name() {
+        Some(name) => name,
+        None => return,
+    };
+    if let Some(global_skills) = resolve_openclaw_global_skills_dir() {
+        let target = global_skills.join(skill_name);
+        if target.is_dir() {
+            if let Err(e) = std::fs::remove_dir_all(&target) {
+                println!(
+                    "  {} Failed to remove skill dir {}: {}",
+                    "Warning".yellow(), target.display(), e
+                );
+            } else {
+                println!(
+                    "  {} Removed skill from {} (direct removal fallback)",
+                    "✓".green(), target.display()
+                );
+            }
+        }
+    }
+}
+
 /// Install a single agent skill for a given provider and event.
 fn install_agent_skill(
     base: &std::path::Path,
@@ -3679,13 +3851,19 @@ fn install_agent_skill(
             let section_marker = agent_event_section_marker(event);
             install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
         }
-        AgentProvider::Claude | AgentProvider::Codebuddy => {
+        AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
             // Skills subdirectory: write dedicated file
             install_agent_dedicated_file(&skill_path, &content)?;
             // Stop hook: install if pre-commit event
             if matches!(event, HookEvent::PreCommit) {
                 if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
                     install_agent_stop_hook(base, provider, &settings_path)?;
+                }
+            }
+            // OpenClaw post-install: register skill via CLI
+            if matches!(provider, AgentProvider::Openclaw) {
+                if let Some(skill_dir) = skill_path.parent() {
+                    openclaw_post_install_skill(skill_dir);
                 }
             }
         }
@@ -3713,8 +3891,14 @@ fn uninstall_agent_skill(
                 remove_agent_section_by_marker(&skill_path, section_marker)?;
             }
         }
-        AgentProvider::Claude | AgentProvider::Codebuddy => {
+        AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
             if skill_path.exists() {
+                // OpenClaw: attempt CLI unregister before removing files
+                if matches!(provider, AgentProvider::Openclaw) {
+                    if let Some(skill_dir) = skill_path.parent() {
+                        openclaw_post_uninstall_skill(skill_dir);
+                    }
+                }
                 remove_agent_dedicated_file(&skill_path)?;
             }
             // Stop hook: remove if pre-commit event uninstalled
@@ -3745,7 +3929,7 @@ fn agent_event_content_for_provider(
     let (name, desc) = agent_event_skill_metadata(event, skill_names);
     match provider {
         AgentProvider::Codex => body, // section body only; marker handled separately
-        AgentProvider::Claude | AgentProvider::Codebuddy => {
+        AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
             // Skills file with frontmatter (required for skill discovery)
             format!("---\nname: {}\ndescription: {}\n---\n\n# {}\n\n{}\n", name, desc, name, body)
         }
@@ -5211,6 +5395,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
                     "droid"     => Some(AgentProvider::Droid),
                     "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
                     "codebuddy" => Some(AgentProvider::Codebuddy),
+                    "openclaw"  => Some(AgentProvider::Openclaw),
                     _ => None,
                 }
             }).collect();
@@ -5225,6 +5410,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
                     "droid"     => Some(AgentProvider::Droid),
                     "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
                     "codebuddy" => Some(AgentProvider::Codebuddy),
+                    "openclaw"  => Some(AgentProvider::Openclaw),
                     _ => None,
                 }) {
                     skill_targets.push(fb);

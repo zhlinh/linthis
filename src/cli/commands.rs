@@ -251,6 +251,8 @@ pub enum AgentFixProvider {
     Auggie,
     /// CodeBuddy CLI (codebuddy -p "prompt")
     Codebuddy,
+    /// OpenClaw agent CLI (openclaw agent --message "prompt")
+    Openclaw,
 }
 
 impl AgentFixProvider {
@@ -264,6 +266,7 @@ impl AgentFixProvider {
             AgentFixProvider::Droid => "droid",
             AgentFixProvider::Auggie => "auggie",
             AgentFixProvider::Codebuddy => "codebuddy",
+            AgentFixProvider::Openclaw => "openclaw",
         }
     }
 }
@@ -278,6 +281,7 @@ impl std::fmt::Display for AgentFixProvider {
             AgentFixProvider::Droid => write!(f, "Droid"),
             AgentFixProvider::Auggie => write!(f, "Auggie"),
             AgentFixProvider::Codebuddy => write!(f, "CodeBuddy"),
+            AgentFixProvider::Openclaw => write!(f, "OpenClaw"),
         }
     }
 }
@@ -300,6 +304,8 @@ pub enum AgentProvider {
     Auggie,
     /// CodeBuddy (.codebuddy/)
     Codebuddy,
+    /// OpenClaw (.openclaw/)
+    Openclaw,
 }
 
 impl std::fmt::Display for AgentProvider {
@@ -312,6 +318,7 @@ impl std::fmt::Display for AgentProvider {
             AgentProvider::Droid => write!(f, "Droid"),
             AgentProvider::Auggie => write!(f, "Auggie"),
             AgentProvider::Codebuddy => write!(f, "CodeBuddy"),
+            AgentProvider::Openclaw => write!(f, "OpenClaw"),
         }
     }
 }
