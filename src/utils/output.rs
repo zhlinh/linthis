@@ -103,7 +103,11 @@ pub fn format_issue_human(issue: &LintIssue) -> String {
     if let Some(code_line) = &issue.code_line {
         // Calculate line number width based on max line number (context_after last line or issue line)
         let max_line = if !issue.context_after.is_empty() {
-            issue.context_after.last().map(|(n, _)| *n).unwrap_or(issue.line)
+            issue
+                .context_after
+                .last()
+                .map(|(n, _)| *n)
+                .unwrap_or(issue.line)
         } else {
             issue.line
         };
@@ -117,7 +121,12 @@ pub fn format_issue_human(issue: &LintIssue) -> String {
 
         // Show the issue line (highlighted with >)
         let line_num = format!("{:>width$}", issue.line, width = line_width);
-        output.push_str(&format!("\n{} {} | {}", ">".red().bold(), line_num.cyan().bold(), code_line));
+        output.push_str(&format!(
+            "\n{} {} | {}",
+            ">".red().bold(),
+            line_num.cyan().bold(),
+            code_line
+        ));
 
         // Show column indicator if available
         if let Some(col) = issue.column {
@@ -376,18 +385,30 @@ pub fn format_result_human(result: &RunResult) -> String {
     if !result.unavailable_tools.is_empty() {
         output.push_str("\n\n");
         output.push_str(&format!(
-            "{} {} tool(s) were not available:",
+            "{} {} tool(s) not available:",
             "⚠".yellow(),
             result.unavailable_tools.len()
         ));
         for tool in &result.unavailable_tools {
+            let status = if tool.auto_install_failed {
+                "(auto-install failed)".red().to_string()
+            } else {
+                "(not installed)".yellow().to_string()
+            };
             output.push_str(&format!(
-                "\n  {} {} ({}) - {}",
+                "\n  {} {} ({}) {}",
                 "•".dimmed(),
                 tool.tool,
                 tool.language,
-                tool.install_hint
+                status
             ));
+            output.push_str(&format!("\n    {}", tool.install_hint));
+            if tool.auto_install_failed {
+                output.push_str(&format!(
+                    "\n    {}",
+                    "Ensure pip/uv/brew/choco is in PATH, then retry or install manually.".dimmed()
+                ));
+            }
         }
         output.push_str(&format!(
             "\n\n{}",
@@ -459,9 +480,15 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
         .and_then(|out| {
             if out.status.success() {
                 let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if s.is_empty() { return None; }
+                if s.is_empty() {
+                    return None;
+                }
                 let p = std::path::PathBuf::from(s).join(hook_filename);
-                if p.exists() { Some(p) } else { None }
+                if p.exists() {
+                    Some(p)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -470,7 +497,11 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
         let type_suffix = extract_hook_script_type(&p)
             .map(|t| format!(" (--type {})", t))
             .unwrap_or_default();
-        lines.push(format!("  Global: {}{}", p.display(), type_suffix).dimmed().to_string());
+        lines.push(
+            format!("  Global: {}{}", p.display(), type_suffix)
+                .dimmed()
+                .to_string(),
+        );
     }
 
     // Local: check .git/hooks/{event}
@@ -483,9 +514,17 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
         .and_then(|out| {
             if out.status.success() {
                 let git_dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if git_dir.is_empty() { return None; }
-                let p = std::path::PathBuf::from(git_dir).join("hooks").join(hook_filename);
-                if p.exists() { Some(p) } else { None }
+                if git_dir.is_empty() {
+                    return None;
+                }
+                let p = std::path::PathBuf::from(git_dir)
+                    .join("hooks")
+                    .join(hook_filename);
+                if p.exists() {
+                    Some(p)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -494,7 +533,11 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
         let type_suffix = extract_hook_script_type(&p)
             .map(|t| format!(" (--type {})", t))
             .unwrap_or_default();
-        lines.push(format!("  Local:  {}{}", p.display(), type_suffix).dimmed().to_string());
+        lines.push(
+            format!("  Local:  {}{}", p.display(), type_suffix)
+                .dimmed()
+                .to_string(),
+        );
     }
 
     if lines.is_empty() {
@@ -571,8 +614,17 @@ pub fn format_result_hook_with_width(
         };
         output.push_str(&format!("{}\n", pad_line(checks_msg, 0).green()));
         output.push_str(&format!("{}\n", pad_line("", 0)));
-        output.push_str(&format!("{}\n", pad_line(&format!("Files checked:   {:>3}", result.total_files), 0)));
-        output.push_str(&format!("{}\n", pad_line(&format!("Files formatted: {:>3}", result.files_formatted), 0)));
+        output.push_str(&format!(
+            "{}\n",
+            pad_line(&format!("Files checked:   {:>3}", result.total_files), 0)
+        ));
+        output.push_str(&format!(
+            "{}\n",
+            pad_line(
+                &format!("Files formatted: {:>3}", result.files_formatted),
+                0
+            )
+        ));
         output.push_str(&format!("{}", bot_border.green()));
         output.push_str(&format_hook_paths_footer(hook_type));
         return output;
@@ -594,7 +646,11 @@ pub fn format_result_hook_with_width(
         warning_count,
         if warning_count == 1 { "" } else { "s" },
         result.files_with_issues,
-        if result.files_with_issues == 1 { "" } else { "s" }
+        if result.files_with_issues == 1 {
+            ""
+        } else {
+            "s"
+        }
     );
     output.push_str(&format!("{}\n", pad_line(&summary, 0)));
     output.push_str(&format!("{}\n", pad_line("", 0)));
@@ -608,7 +664,9 @@ pub fn format_result_hook_with_width(
     // List issues (compact format: file:line message)
     let max_issues = 8; // Limit to avoid too long output
     for issue in result.issues.iter().take(max_issues) {
-        let filename = issue.file_path.file_name()
+        let filename = issue
+            .file_path
+            .file_name()
             .unwrap_or_default()
             .to_string_lossy();
         let location = format!("{}:{}", filename, issue.line);
@@ -635,9 +693,14 @@ pub fn format_result_hook_with_width(
     }
 
     if total_issues > max_issues {
-        let more_line = format!(" ... and {} more issue{}",
+        let more_line = format!(
+            " ... and {} more issue{}",
             total_issues - max_issues,
-            if total_issues - max_issues == 1 { "" } else { "s" }
+            if total_issues - max_issues == 1 {
+                ""
+            } else {
+                "s"
+            }
         );
         output.push_str(&format!("{}\n", pad_line(&more_line, 0)));
     }
@@ -645,26 +708,47 @@ pub fn format_result_hook_with_width(
     output.push_str(&format!("{}\n", mid_border.red()));
 
     // Tip section
-    output.push_str(&format!("{}\n", pad_line("Tip: To review and fix issues:", 0)));
-    output.push_str(&format!("{}\n", pad_line("  linthis report show  - view full details", 0)));
-    output.push_str(&format!("{}\n", pad_line("  linthis fix          - interactive fix", 0)));
+    output.push_str(&format!(
+        "{}\n",
+        pad_line("Tip: To review and fix issues:", 0)
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        pad_line("  linthis report show  - view full details", 0)
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        pad_line("  linthis fix          - interactive fix", 0)
+    ));
     output.push_str(&format!("{}\n", pad_line("", 0)));
 
     // clang-tidy skip hint if too many clang-tidy issues
-    let clang_tidy_count = result.issues.iter()
+    let clang_tidy_count = result
+        .issues
+        .iter()
         .filter(|i| i.source.as_deref() == Some("clang-tidy"))
         .count();
     if clang_tidy_count >= 10 {
-        output.push_str(&format!("{}\n", pad_line(
-            &format!("Too many clang-tidy issues ({})? Skip with:", clang_tidy_count), 0)));
-        output.push_str(&format!("{}\n", pad_line(
-            "  LINTHIS_SKIP_CLANG_TIDY=1", 0)));
+        output.push_str(&format!(
+            "{}\n",
+            pad_line(
+                &format!(
+                    "Too many clang-tidy issues ({})? Skip with:",
+                    clang_tidy_count
+                ),
+                0
+            )
+        ));
+        output.push_str(&format!("{}\n", pad_line("  LINTHIS_SKIP_CLANG_TIDY=1", 0)));
         output.push_str(&format!("{}\n", pad_line("", 0)));
     }
 
     // Skip check hint
     output.push_str(&format!("{}\n", pad_line("To skip this check:", 0)));
-    output.push_str(&format!("{}\n", pad_line(&format!("  {}", skip_command), 0)));
+    output.push_str(&format!(
+        "{}\n",
+        pad_line(&format!("  {}", skip_command), 0)
+    ));
     output.push_str(&format!("{}", bot_border.red()));
     output.push_str(&format_hook_paths_footer(hook_type));
 
@@ -677,7 +761,11 @@ pub fn format_result(result: &RunResult, format: OutputFormat) -> String {
 }
 
 /// Format result with optional hook type for hook output.
-pub fn format_result_with_hook_type(result: &RunResult, format: OutputFormat, hook_type: Option<&str>) -> String {
+pub fn format_result_with_hook_type(
+    result: &RunResult,
+    format: OutputFormat,
+    hook_type: Option<&str>,
+) -> String {
     match format {
         OutputFormat::Human => format_result_human(result),
         OutputFormat::Json => format_result_json(result),
@@ -739,10 +827,17 @@ pub fn format_review_box(result: &crate::review::ReviewResult) -> String {
         summary.minor_count
     );
     output.push_str(&format!("{}\n", pad_line(&counts, 0)));
-    output.push_str(&format!("{}\n", pad_line(
-        &format!("Files reviewed: {}", summary.files_reviewed), 0
-    )));
-    output.push_str(&format!("{}\n", pad_line(&format!("Diff: {}..{}", result.base_ref, result.head_ref), 0)));
+    output.push_str(&format!(
+        "{}\n",
+        pad_line(&format!("Files reviewed: {}", summary.files_reviewed), 0)
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        pad_line(
+            &format!("Diff: {}..{}", result.base_ref, result.head_ref),
+            0
+        )
+    ));
 
     // Top issues (if any)
     if !result.issues.is_empty() {
@@ -780,7 +875,11 @@ pub fn format_review_box(result: &crate::review::ReviewResult) -> String {
             let more = format!(
                 " ... and {} more issue{}",
                 result.issues.len() - max_issues,
-                if result.issues.len() - max_issues == 1 { "" } else { "s" }
+                if result.issues.len() - max_issues == 1 {
+                    ""
+                } else {
+                    "s"
+                }
             );
             output.push_str(&format!("{}\n", pad_line(&more, 0)));
         }

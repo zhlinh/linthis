@@ -115,28 +115,28 @@
 //! - Tool availability errors (missing linters)
 
 pub mod benchmark;
-pub mod hooks;
 pub mod cache;
 pub mod checkers;
 pub mod config;
+pub mod hooks;
 /// Thin re-export of CLI command types for use in tests and downstream crates.
 pub mod cli {
     #[path = "commands.rs"]
     pub mod commands;
 }
+pub mod ai;
+pub mod complexity;
 pub mod fixers;
 pub mod formatters;
 pub mod interactive;
+pub mod license;
 pub mod lsp;
 pub mod plugin;
 pub mod presets;
 pub mod reports;
+pub mod review;
 pub mod rules;
 pub mod security;
-pub mod license;
-pub mod complexity;
-pub mod ai;
-pub mod review;
 pub mod self_update;
 pub mod templates;
 pub mod tui;
@@ -163,16 +163,19 @@ static WARNED_TOOLS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 /// Track unavailable tools for reporting in RunResult
 static UNAVAILABLE_TOOLS: Mutex<Option<Vec<utils::types::UnavailableTool>>> = Mutex::new(None);
 
+/// Track tools where auto-install was attempted but failed
+static AUTO_INSTALL_FAILED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+use cache::LintCache;
 use checkers::{
     Checker, CppChecker, DartChecker, GoChecker, JavaChecker, KotlinChecker, LuaChecker,
     PythonChecker, RustChecker, SwiftChecker, TypeScriptChecker,
 };
+use config::Config;
 use formatters::{
     CppFormatter, DartFormatter, Formatter, GoFormatter, JavaFormatter, KotlinFormatter,
     LuaFormatter, PythonFormatter, RustFormatter, SwiftFormatter, TypeScriptFormatter,
 };
-use cache::LintCache;
-use config::Config;
 use rules::{CustomRulesChecker, RuleFilter};
 use utils::types::RunResult;
 use utils::walker::{walk_paths, WalkerConfig};
@@ -614,7 +617,13 @@ impl std::fmt::Debug for RunOptions {
             .field("quiet", &self.quiet)
             .field("plugins", &self.plugins)
             .field("no_cache", &self.no_cache)
-            .field("config_resolver", &self.config_resolver.as_ref().map(|r| format!("{} configs", r.len())))
+            .field(
+                "config_resolver",
+                &self
+                    .config_resolver
+                    .as_ref()
+                    .map(|r| format!("{} configs", r.len())),
+            )
             .finish()
     }
 }
@@ -659,7 +668,9 @@ pub fn get_checker(lang: Language) -> Option<Box<dyn Checker>> {
 
 /// Check if the formatter for a given language is available.
 pub fn get_formatter_availability(lang: Language) -> bool {
-    get_formatter(lang).map(|f| f.is_available()).unwrap_or(false)
+    get_formatter(lang)
+        .map(|f| f.is_available())
+        .unwrap_or(false)
 }
 
 /// Get the formatter for a given language.
@@ -718,7 +729,10 @@ fn get_checker_install_hint(lang: Language) -> String {
                 "Install: sudo apt install clang-tidy (Ubuntu/Debian)\n         Or: pip install cpplint".to_string()
             }
         }
-        Language::Dart => "Install: Dart SDK (includes dart analyze)\n         https://dart.dev/get-dart".to_string(),
+        Language::Dart => {
+            "Install: Dart SDK (includes dart analyze)\n         https://dart.dev/get-dart"
+                .to_string()
+        }
         Language::Swift => {
             if cfg!(target_os = "macos") {
                 "Install: brew install swiftlint".to_string()
@@ -738,7 +752,8 @@ fn get_checker_install_hint(lang: Language) -> String {
             if cfg!(target_os = "macos") {
                 "Install: brew install shellcheck".to_string()
             } else if cfg!(target_os = "windows") {
-                "Install: choco install shellcheck\n         Or: scoop install shellcheck".to_string()
+                "Install: choco install shellcheck\n         Or: scoop install shellcheck"
+                    .to_string()
             } else {
                 "Install: sudo apt install shellcheck (Ubuntu/Debian)".to_string()
             }
@@ -749,7 +764,8 @@ fn get_checker_install_hint(lang: Language) -> String {
             if cfg!(target_os = "macos") {
                 "Install: brew install scalafix\n         Or: cs install scalafix".to_string()
             } else {
-                "Install: cs install scalafix\n         https://scalacenter.github.io/scalafix/".to_string()
+                "Install: cs install scalafix\n         https://scalacenter.github.io/scalafix/"
+                    .to_string()
             }
         }
         Language::CSharp => "Install: dotnet tool install -g dotnet-format".to_string(),
@@ -784,7 +800,10 @@ fn get_formatter_install_hint(lang: Language) -> String {
                 "Install: sudo apt install clang-format (Ubuntu/Debian)".to_string()
             }
         }
-        Language::Dart => "Install: Dart SDK (includes dart format)\n         https://dart.dev/get-dart".to_string(),
+        Language::Dart => {
+            "Install: Dart SDK (includes dart format)\n         https://dart.dev/get-dart"
+                .to_string()
+        }
         Language::Swift => {
             if cfg!(target_os = "macos") {
                 "Install: brew install swift-format".to_string()
@@ -830,20 +849,35 @@ fn get_auto_install_commands(lang: Language, is_checker: bool) -> Vec<Vec<String
         ($($s:expr),+) => { vec![$($s.to_string()),+] }
     }
 
+    // Resolve the best pip command: uv pip --system > pip3 > pip
+    fn pip_install_cmd(package: &str) -> Vec<Vec<String>> {
+        let p = package.to_string();
+        vec![
+            // Prefer uv if available
+            vec!["uv".into(), "pip".into(), "install".into(), "--system".into(), p.clone()],
+            vec!["pip3".into(), "install".into(), p.clone()],
+            vec!["pip".into(), "install".into(), p],
+        ]
+    }
+
     match (lang, is_checker) {
         // Rust
         (Language::Rust, true) => vec![cmd!["rustup", "component", "add", "clippy"]],
         (Language::Rust, false) => vec![cmd!["rustup", "component", "add", "rustfmt"]],
 
         // Python (ruff handles both check + format)
-        (Language::Python, _) => vec![cmd!["pip3", "install", "ruff"]],
+        (Language::Python, _) => pip_install_cmd("ruff"),
 
         // Go
         (Language::Go, true) => {
             if cfg!(target_os = "macos") {
                 vec![cmd!["brew", "install", "golangci-lint"]]
             } else {
-                vec![cmd!["go", "install", "github.com/golangci/golangci-lint/cmd/golangci-lint@latest"]]
+                vec![cmd![
+                    "go",
+                    "install",
+                    "github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+                ]]
             }
         }
         (Language::Go, false) => vec![], // gofmt ships with Go
@@ -876,22 +910,15 @@ fn get_auto_install_commands(lang: Language, is_checker: bool) -> Vec<Vec<String
 
         // C / C++ / Objective-C
         (Language::Cpp | Language::ObjectiveC, true) => {
-            if cfg!(target_os = "macos") {
-                vec![
-                    cmd!["brew", "install", "llvm"],
-                    cmd!["pip3", "install", "cpplint"],
-                ]
+            let mut cmds = if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "llvm"]]
             } else if cfg!(target_os = "windows") {
-                vec![
-                    cmd!["choco", "install", "llvm"],
-                    cmd!["pip3", "install", "cpplint"],
-                ]
+                vec![cmd!["choco", "install", "llvm"]]
             } else {
-                vec![
-                    cmd!["sudo", "apt-get", "install", "-y", "clang-tidy"],
-                    cmd!["pip3", "install", "cpplint"],
-                ]
-            }
+                vec![cmd!["sudo", "apt-get", "install", "-y", "clang-tidy"]]
+            };
+            cmds.extend(pip_install_cmd("cpplint"));
+            cmds
         }
         (Language::Cpp | Language::ObjectiveC, false) => {
             if cfg!(target_os = "macos") {
@@ -965,10 +992,20 @@ fn get_auto_install_commands(lang: Language, is_checker: bool) -> Vec<Vec<String
 
         // PHP
         (Language::Php, true) => {
-            vec![cmd!["composer", "global", "require", "squizlabs/php_codesniffer"]]
+            vec![cmd![
+                "composer",
+                "global",
+                "require",
+                "squizlabs/php_codesniffer"
+            ]]
         }
         (Language::Php, false) => {
-            vec![cmd!["composer", "global", "require", "friendsofphp/php-cs-fixer"]]
+            vec![cmd![
+                "composer",
+                "global",
+                "require",
+                "friendsofphp/php-cs-fixer"
+            ]]
         }
 
         // Scala
@@ -1057,7 +1094,9 @@ fn pre_flight_install(
             let available = if is_checker {
                 get_checker(lang).map(|c| c.is_available()).unwrap_or(true)
             } else {
-                get_formatter(lang).map(|f| f.is_available()).unwrap_or(true)
+                get_formatter(lang)
+                    .map(|f| f.is_available())
+                    .unwrap_or(true)
             };
 
             if available {
@@ -1069,9 +1108,7 @@ fn pre_flight_install(
             // Resolve effective mode: Disabled skips, Prompt in non-TTY also skips
             let effective_mode = match install_mode {
                 ToolInstallMode::Disabled => continue,
-                ToolInstallMode::Prompt
-                    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) =>
-                {
+                ToolInstallMode::Prompt if !std::io::IsTerminal::is_terminal(&std::io::stdin()) => {
                     continue
                 }
                 other => other,
@@ -1149,14 +1186,20 @@ fn warn_missing_tool(tool_type: &str, lang: Language, is_checker: bool) {
             get_formatter_install_hint(lang)
         };
 
-        // Record the unavailable tool
+        // Record the unavailable tool, checking if auto-install was attempted
         let tool_name = get_tool_name(lang, is_checker);
-        record_unavailable_tool(utils::types::UnavailableTool::new(
-            &tool_name,
-            lang.name(),
-            tool_type,
-            &hint,
-        ));
+        let auto_failed = {
+            let set = AUTO_INSTALL_FAILED.lock().unwrap();
+            set.as_ref()
+                .map(|s| s.contains(&format!("{}-{}", tool_name, lang.name())))
+                .unwrap_or(false)
+        };
+        let mut tool_info =
+            utils::types::UnavailableTool::new(&tool_name, lang.name(), tool_type, &hint);
+        if auto_failed {
+            tool_info = tool_info.with_auto_install_failed();
+        }
+        record_unavailable_tool(tool_info);
 
         eprintln!();
         eprintln!(
@@ -1210,7 +1253,9 @@ fn record_unavailable_tool(tool: utils::types::UnavailableTool) {
     }
     if let Some(ref mut list) = *tools {
         // Only add if not already present (by tool name + language)
-        let exists = list.iter().any(|t| t.tool == tool.tool && t.language == tool.language);
+        let exists = list
+            .iter()
+            .any(|t| t.tool == tool.tool && t.language == tool.language);
         if !exists {
             list.push(tool);
         }
@@ -1249,9 +1294,8 @@ fn run_checker_on_file(
     if let Some(checker) = get_checker(lang) {
         if checker.is_available() {
             // Get config from resolver if available
-            let config_path = config_resolver.and_then(|r| {
-                r.get_plugin_config(lang.name(), checker.name())
-            });
+            let config_path =
+                config_resolver.and_then(|r| r.get_plugin_config(lang.name(), checker.name()));
 
             let result = if let Some(ref cfg) = config_path {
                 checker.check_with_config(file, Some(cfg.as_path()))
@@ -1363,11 +1407,19 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         for warning in &path_warnings {
             eprintln!("\x1b[33mWarning\x1b[0m: {}", warning);
         }
-        eprint!("\x1b[36m{}\x1b[0m Found {} files, checking...", SPINNER_CHARS[1], files.len());
+        eprint!(
+            "\x1b[36m{}\x1b[0m Found {} files, checking...",
+            SPINNER_CHARS[1],
+            files.len()
+        );
         use std::io::Write;
         let _ = std::io::stderr().flush();
     } else if !options.quiet {
-        eprint!("\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...", SPINNER_CHARS[1], files.len());
+        eprint!(
+            "\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...",
+            SPINNER_CHARS[1],
+            files.len()
+        );
         use std::io::Write;
         let _ = std::io::stderr().flush();
     }
@@ -1388,12 +1440,21 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // Pre-flight: auto-install missing tools
     if !file_langs.is_empty() {
-        let (installed, failed) = pre_flight_install(&file_langs, &options.mode, &options.tool_install_mode, options.quiet);
+        let (installed, failed) = pre_flight_install(
+            &file_langs,
+            &options.mode,
+            &options.tool_install_mode,
+            options.quiet,
+        );
         if !installed.is_empty() || !failed.is_empty() {
             // Re-print scanning line after install output
             if !options.quiet {
                 use std::io::Write;
-                eprint!("\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...", SPINNER_CHARS[1], files.len());
+                eprint!(
+                    "\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...",
+                    SPINNER_CHARS[1],
+                    files.len()
+                );
                 let _ = std::io::stderr().flush();
             }
         }
@@ -1406,13 +1467,23 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 } else {
                     get_formatter_install_hint(*lang)
                 };
+                // Record this tool as auto-install-failed
+                let tool_key = format!("{}-{}", tool_name, lang.name());
+                {
+                    let mut set = AUTO_INSTALL_FAILED.lock().unwrap();
+                    set.get_or_insert_with(HashSet::new).insert(tool_key);
+                }
                 eprintln!(
-                    "\x1b[33mWarning\x1b[0m: Failed to install {} — {}\n  Manual install: {}",
+                    "\x1b[33mWarning\x1b[0m: Auto-install failed for {} — {}\n  Manual install: {}",
                     tool_name, err, hint
                 );
             }
             use std::io::Write;
-            eprint!("\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...", SPINNER_CHARS[1], files.len());
+            eprint!(
+                "\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...",
+                SPINNER_CHARS[1],
+                files.len()
+            );
             let _ = std::io::stderr().flush();
         }
     }
@@ -1478,7 +1549,12 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 if !options.quiet && !options.verbose {
                     let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
                     print_progress_with_time(
-                        &format!("[1/3] Checking {}/{} ({}%)...", count + 1, total_files, percentage),
+                        &format!(
+                            "[1/3] Checking {}/{} ({}%)...",
+                            count + 1,
+                            total_files,
+                            percentage
+                        ),
                         false,
                         step1_start,
                         count,
@@ -1488,11 +1564,9 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 // Check cache first
                 if let Some(ref cache_mutex) = cache {
                     let mut cache_guard = cache_mutex.lock().unwrap();
-                    if let Some(cached_issues) = cache_guard.check_file(
-                        lang.name(),
-                        file,
-                        &project_root,
-                    ) {
+                    if let Some(cached_issues) =
+                        cache_guard.check_file(lang.name(), file, &project_root)
+                    {
                         return ((*file).clone(), cached_issues);
                     }
                 }
@@ -1508,12 +1582,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 // Update cache with results
                 if let Some(ref cache_mutex) = cache {
                     let mut cache_guard = cache_mutex.lock().unwrap();
-                    let _ = cache_guard.update_file(
-                        lang.name(),
-                        file,
-                        &project_root,
-                        &file_issues,
-                    );
+                    let _ = cache_guard.update_file(lang.name(), file, &project_root, &file_issues);
                 }
 
                 ((*file).clone(), file_issues)
@@ -1553,7 +1622,12 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 if !options.quiet && !options.verbose {
                     let percentage = ((count + 1) as f64 / format_total as f64 * 100.0) as usize;
                     print_progress_with_time(
-                        &format!("[2/3] Formatting {}/{} ({}%)...", count + 1, format_total, percentage),
+                        &format!(
+                            "[2/3] Formatting {}/{} ({}%)...",
+                            count + 1,
+                            format_total,
+                            percentage
+                        ),
                         false,
                         step2_start,
                         count,
@@ -1637,9 +1711,15 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                 if formatted_files.contains(*file) {
                     let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
                     if !options.quiet && !options.verbose {
-                        let percentage = ((count + 1) as f64 / recheck_total as f64 * 100.0) as usize;
+                        let percentage =
+                            ((count + 1) as f64 / recheck_total as f64 * 100.0) as usize;
                         print_progress_with_time(
-                            &format!("[3/3] Rechecking {}/{} ({}%)...", count + 1, recheck_total, percentage),
+                            &format!(
+                                "[3/3] Rechecking {}/{} ({}%)...",
+                                count + 1,
+                                recheck_total,
+                                percentage
+                            ),
                             false,
                             step3_start,
                             count,
@@ -1703,7 +1783,13 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     if !options.quiet && !options.verbose {
                         let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
                         print_progress_with_time(
-                            &format!("{} {}/{} ({}%)...", mode_name, count + 1, total_files, percentage),
+                            &format!(
+                                "{} {}/{} ({}%)...",
+                                mode_name,
+                                count + 1,
+                                total_files,
+                                percentage
+                            ),
                             false,
                             check_start,
                             count,
@@ -1716,11 +1802,9 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     // Check cache first
                     if let Some(ref cache_mutex) = cache {
                         let mut cache_guard = cache_mutex.lock().unwrap();
-                        if let Some(cached_issues) = cache_guard.check_file(
-                            lang.name(),
-                            file,
-                            &project_root,
-                        ) {
+                        if let Some(cached_issues) =
+                            cache_guard.check_file(lang.name(), file, &project_root)
+                        {
                             return cached_issues;
                         }
                     }
@@ -1736,12 +1820,7 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     // Update cache with results
                     if let Some(ref cache_mutex) = cache {
                         let mut cache_guard = cache_mutex.lock().unwrap();
-                        let _ = cache_guard.update_file(
-                            lang.name(),
-                            file,
-                            &project_root,
-                            &issues,
-                        );
+                        let _ = cache_guard.update_file(lang.name(), file, &project_root, &issues);
                     }
 
                     issues
@@ -1763,7 +1842,13 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
                     if !options.quiet && !options.verbose {
                         let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
                         print_progress_with_time(
-                            &format!("{} {}/{} ({}%)...", mode_name, count + 1, total_files, percentage),
+                            &format!(
+                                "{} {}/{} ({}%)...",
+                                mode_name,
+                                count + 1,
+                                total_files,
+                                percentage
+                            ),
                             false,
                             format_start,
                             count,
@@ -1832,7 +1917,10 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     result.issues = rule_filter.filter_issues(result.issues);
     let filtered_count = original_count - result.issues.len();
     if options.verbose && filtered_count > 0 {
-        eprintln!("Filtered out {} issues based on rules configuration", filtered_count);
+        eprintln!(
+            "Filtered out {} issues based on rules configuration",
+            filtered_count
+        );
     }
 
     // Calculate final stats
