@@ -3302,7 +3302,13 @@ require_ticket = false          # require ticket reference e.g. [JIRA-123]
 ticket_pattern = "\\[\\w+-\\d+\\]"  # custom ticket regex
 ```
 
-`linthis cmsg` resolves config automatically (project → global → built-in default).
+`linthis cmsg` resolves config automatically (project → global → built-in default). To check the effective pattern quickly:
+
+```bash
+linthis config get cmsg.commit_msg_pattern      # project-level
+linthis config get cmsg.commit_msg_pattern -g   # global
+# "not found" means built-in default (Conventional Commits) applies
+```
 
 ## Steps
 
