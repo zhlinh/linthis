@@ -3293,7 +3293,7 @@ If `linthis cmsg .git/COMMIT_EDITMSG` passes on the first run, approve immediate
 
 ## Configuration
 
-The validation pattern is configurable via `.linthis/config.toml`:
+The validation pattern can be configured in `.linthis/config.toml` (project-level) or the global linthis config. If no config is present, `linthis cmsg` defaults to Conventional Commits format:
 
 ```toml
 [cmsg]
@@ -3302,7 +3302,7 @@ require_ticket = false          # require ticket reference e.g. [JIRA-123]
 ticket_pattern = "\\[\\w+-\\d+\\]"  # custom ticket regex
 ```
 
-`linthis cmsg` reads this config automatically — your validation always reflects the project's actual rules, not hardcoded defaults.
+`linthis cmsg` resolves config automatically (project → global → built-in default).
 
 ## Steps
 
