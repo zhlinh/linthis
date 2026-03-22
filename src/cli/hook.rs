@@ -5003,7 +5003,7 @@ pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Opti
     if errors.is_empty() {
         // Box width matches the failure box (42 chars total, 40 inner dashes)
         println!("{}", "╭────────────────────────────────────────╮".green());
-        println!("{}", "│ ✓ Linthis 📝 [Commit-msg] Hook Passed  │".green());
+        println!("{}", "│ ✓ Linthis 📝 [Commit-msg] Passed       │".green());
         println!("{}", "├────────────────────────────────────────┤".green());
         println!("{}", "│ Commit message is valid                │".green());
         println!("{}", "╰────────────────────────────────────────╯".green());
@@ -5162,7 +5162,7 @@ fn handle_cmsg_auto_fix(
 /// Print commit message validation error
 fn print_commit_msg_error(first_line: &str) {
     eprintln!("{}", "╭────────────────────────────────────────╮".red());
-    eprintln!("{}", "│ X Linthis 📝 [Commit-msg] Hook Failed  │".red());
+    eprintln!("{}", "│ X Linthis 📝 [Commit-msg] Blocked      │".red());
     eprintln!("{}", "├────────────────────────────────────────┤".red());
     eprintln!("{}", "│ Validation Failed!                     │".red());
     eprintln!("│                                        │");

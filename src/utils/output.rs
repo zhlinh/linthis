@@ -604,7 +604,7 @@ pub fn format_result_hook_with_width(
     if total_issues == 0 {
         let mut output = String::new();
         output.push_str(&format!("{}\n", top_border.green()));
-        let header = format!("{} Linthis {} Hook Passed", "✓", hook_name);
+        let header = format!("{} Linthis {} Passed", "✓", hook_name);
         output.push_str(&format!("{}\n", pad_line(&header, 1).green()));
         output.push_str(&format!("{}\n", mid_border.green()));
         let checks_msg = if hook_type == Some("pre-push") {
@@ -634,7 +634,7 @@ pub fn format_result_hook_with_width(
 
     // Header
     output.push_str(&format!("{}\n", top_border.red()));
-    let header = format!("X Linthis {} Hook Failed", hook_name);
+    let header = format!("X Linthis {} Blocked", hook_name);
     output.push_str(&format!("{}\n", pad_line(&header, 1).red()));
     output.push_str(&format!("{}\n", mid_border.red()));
 
