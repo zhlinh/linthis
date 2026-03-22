@@ -5001,13 +5001,7 @@ pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Opti
     }
 
     if errors.is_empty() {
-        // Box width matches the failure box (42 chars total, 40 inner dashes)
-        println!("{}", "╭────────────────────────────────────────╮".green());
-        println!("{}", "│ ✓ Linthis 📝 [Commit-msg] Passed       │".green());
-        println!("{}", "├────────────────────────────────────────┤".green());
-        println!("{}", "│ Commit message is valid                │".green());
-        println!("{}", "╰────────────────────────────────────────╯".green());
-        // Print hook file paths (Global / Local) same as pre-commit success output
+        println!("{}", linthis::utils::output::format_cmsg_result(true, ""));
         let paths = linthis::utils::output::format_hook_paths_footer_pub(Some("commit-msg"));
         if !paths.is_empty() {
             println!("{}", paths);
@@ -5161,30 +5155,7 @@ fn handle_cmsg_auto_fix(
 
 /// Print commit message validation error
 fn print_commit_msg_error(first_line: &str) {
-    eprintln!("{}", "╭────────────────────────────────────────╮".red());
-    eprintln!("{}", "│ X Linthis 📝 [Commit-msg] Blocked      │".red());
-    eprintln!("{}", "├────────────────────────────────────────┤".red());
-    eprintln!("{}", "│ Validation Failed!                     │".red());
-    eprintln!("│                                        │");
-    eprintln!("│ Your message:                          │");
-    eprintln!("│   {}", first_line);
-    eprintln!("│                                        │");
-    eprintln!("│ Expected format (Conventional Commits):│");
-    eprintln!("│   type(scope)?: description            │");
-    eprintln!("│                                        │");
-    eprintln!("│ Valid types:                           │");
-    eprintln!("│   feat, fix, docs, style, refactor,   │");
-    eprintln!("│   perf, test, build, ci, chore, revert │");
-    eprintln!("│                                        │");
-    eprintln!("│ Examples:                              │");
-    eprintln!("│   feat: add user authentication        │");
-    eprintln!("│   fix(api): handle null response       │");
-    eprintln!("│   docs: update README                  │");
-    eprintln!("{}", "├────────────────────────────────────────┤".red());
-    eprintln!("│ To skip this check:                    │");
-    eprintln!("│   git commit --no-verify               │");
-    eprintln!("{}", "╰────────────────────────────────────────╯".red());
-    // Show hook file paths (with type suffix extracted from thin wrapper)
+    eprintln!("{}", linthis::utils::output::format_cmsg_result(false, first_line));
     let paths = linthis::utils::output::format_hook_paths_footer_pub(Some("commit-msg"));
     if !paths.is_empty() {
         eprintln!("{}", paths);
