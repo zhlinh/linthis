@@ -895,6 +895,56 @@ pub fn format_review_box(result: &crate::review::ReviewResult) -> String {
     output
 }
 
+/// Format a commit-msg hook result box (passed or blocked).
+///
+/// Returns the box as a `String` without trailing newline.
+/// The footer (hook file paths) is handled by the caller.
+pub fn format_cmsg_result(passed: bool, first_line: &str) -> String {
+    if passed {
+        let mut out = String::new();
+        out.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".green()));
+        out.push_str(&format!("{}\n", "│ ✓ Linthis 📝 [Commit-msg] Passed       │".green()));
+        out.push_str(&format!("{}\n", "├────────────────────────────────────────┤".green()));
+        out.push_str(&format!("{}\n", "│ Commit message is valid                │".green()));
+        out.push_str(&format!("{}", "╰────────────────────────────────────────╯".green()));
+        out
+    } else {
+        let mut out = String::new();
+        out.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".red()));
+        out.push_str(&format!("{}\n", "│ X Linthis 📝 [Commit-msg] Blocked      │".red()));
+        out.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
+        out.push_str(&format!("{}\n", "│ Validation Failed!                     │".red()));
+        out.push_str("│                                        │\n");
+        out.push_str("│ Your message:                          │\n");
+        // Format: "│   {msg}{padding} │\n"
+        // Inner width = 40: prefix "   " (3) + msg + padding + " " (1) = 40 → padding = 36 - len
+        let truncated = if first_line.chars().count() > 36 {
+            format!("{}...", &first_line.chars().take(33).collect::<String>())
+        } else {
+            first_line.to_string()
+        };
+        let padding = 36usize.saturating_sub(truncated.chars().count());
+        out.push_str(&format!("│   {}{} │\n", truncated, " ".repeat(padding)));
+        out.push_str("│                                        │\n");
+        out.push_str("│ Expected format (Conventional Commits):│\n");
+        out.push_str("│   type(scope)?: description            │\n");
+        out.push_str("│                                        │\n");
+        out.push_str("│ Valid types:                           │\n");
+        out.push_str("│   feat, fix, docs, style, refactor,   │\n");
+        out.push_str("│   perf, test, build, ci, chore, revert │\n");
+        out.push_str("│                                        │\n");
+        out.push_str("│ Examples:                              │\n");
+        out.push_str("│   feat: add user authentication        │\n");
+        out.push_str("│   fix(api): handle null response       │\n");
+        out.push_str("│   docs: update README                  │\n");
+        out.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
+        out.push_str("│ To skip this check:                    │\n");
+        out.push_str("│   git commit --no-verify               │\n");
+        out.push_str(&format!("{}", "╰────────────────────────────────────────╯".red()));
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
