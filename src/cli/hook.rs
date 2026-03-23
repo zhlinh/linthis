@@ -6030,7 +6030,7 @@ mod tests {
 
         // Install into a temp base for Claude
         let base = tempfile::TempDir::new().unwrap();
-        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None).unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None, None).unwrap();
 
         // Verify skill was installed
         let skill_target = base.path().join(".claude/skills/lt-lint/SKILL.md");
@@ -6066,7 +6066,7 @@ mod tests {
 
         // Install for Claude (supports skill subdirectories)
         let base = tempfile::TempDir::new().unwrap();
-        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None).unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None, None).unwrap();
 
         let target_dir = base.path().join(".claude/skills/lt-lint");
         assert!(target_dir.join("SKILL.md").exists(), "SKILL.md should exist");
@@ -6090,7 +6090,7 @@ mod tests {
         std::fs::write(skill_dir.join("scripts/check.sh"), "#!/bin/bash\n").unwrap();
 
         let base = tempfile::TempDir::new().unwrap();
-        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Gemini, &HookEvent::PreCommit, None).unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Gemini, &HookEvent::PreCommit, None, None).unwrap();
 
         // Gemini: single file at .gemini/linthis-lint.md
         let target = base.path().join(".gemini/linthis-lint.md");
@@ -6119,7 +6119,7 @@ mod tests {
         std::fs::write(hooks_dir.join("hooks.json"), r#"{"hooks":{"Stop":[{"hooks":[{"type":"prompt","prompt":"test stop hook"}]}]}}"#).unwrap();
 
         let base = tempfile::TempDir::new().unwrap();
-        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None).unwrap();
+        install_agent_plugin_from_dir(pd, base.path(), &AgentProvider::Claude, &HookEvent::PreCommit, None, None).unwrap();
 
         // Verify .claude/settings.json was created with stop hook
         let settings = base.path().join(".claude/settings.json");
