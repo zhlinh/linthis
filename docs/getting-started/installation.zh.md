@@ -52,7 +52,7 @@ linthis 封装了现有的语言特定工具。对于您想要检查/格式化�
 | Python | `ruff` 或 `black`、`flake8`、`pylint` |
 | JavaScript/TypeScript | `eslint`、`prettier` |
 | Go | `gofmt`、`golangci-lint` |
-| Java | `checkstyle`、`google-java-format` |
+| Java | `checkstyle`、`clang-format` |
 | C++ | `clang-format`、`cpplint` |
 
 请参阅[语言支持](../languages/index.md)了解每种语言的详细设置说明。

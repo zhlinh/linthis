@@ -11,7 +11,7 @@ linthis supports 18 programming languages with automatic language detection.
 | [TypeScript](typescript.md) | eslint | prettier | `.ts`, `.tsx` |
 | [JavaScript](javascript.md) | eslint | prettier | `.js`, `.jsx`, `.mjs`, `.cjs` |
 | [Go](go.md) | golangci-lint | gofmt | `.go` |
-| [Java](java.md) | checkstyle | google-java-format | `.java` |
+| [Java](java.md) | checkstyle | clang-format | `.java` |
 | [C](c.md) | clang-tidy, cppcheck | clang-format | `.c`, `.h` |
 | [C++](cpp.md) | clang-tidy, cpplint, cppcheck | clang-format | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` |
 | [Objective-C](objc.md) | clang-tidy | clang-format | `.m`, `.mm` |

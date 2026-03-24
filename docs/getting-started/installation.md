@@ -52,7 +52,7 @@ linthis wraps existing language-specific tools. For each language you want to li
 | Python | `ruff` or `black`, `flake8`, `pylint` |
 | JavaScript/TypeScript | `eslint`, `prettier` |
 | Go | `gofmt`, `golangci-lint` |
-| Java | `checkstyle`, `google-java-format` |
+| Java | `checkstyle`, `clang-format` |
 | C++ | `clang-format`, `cpplint` |
 
 See [Languages](../languages/index.md) for detailed setup instructions for each language.

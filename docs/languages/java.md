@@ -1,6 +1,6 @@
 # Java Language Guide
 
-linthis uses **checkstyle** for linting and **google-java-format** for formatting Java code.
+linthis uses **checkstyle** for linting and **clang-format** for formatting Java code.
 
 ## Supported File Extensions
 
@@ -26,18 +26,23 @@ choco install checkstyle
 checkstyle --version
 ```
 
-### Formatter: google-java-format
+### Formatter: clang-format
 
 ```bash
 # macOS
-brew install google-java-format
+brew install clang-format
 
-# Download JAR
-wget https://github.com/google/google-java-format/releases/download/v1.18.1/google-java-format-1.18.1-all-deps.jar
+# Linux
+sudo apt install clang-format
+
+# Windows
+choco install llvm
 
 # Verify installation
-java -jar google-java-format-1.18.1-all-deps.jar --version
+clang-format --version
 ```
+
+Place a `.clang-format` file in your project root to customize Java formatting style. linthis also checks `.linthis/configs/java/.clang-format` for plugin-provided configs.
 
 ## Configuration
 

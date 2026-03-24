@@ -383,19 +383,28 @@ pub enum Commands {
     },
     /// Security vulnerability scanning
     ///
-    /// Scan project dependencies for known security vulnerabilities.
-    /// Supports Rust (cargo-audit), JavaScript (npm audit), Python (pip-audit),
-    /// Go (govulncheck), and Java (dependency-check).
+    /// Scan project for security vulnerabilities using SCA (dependency scanning)
+    /// and/or SAST (source code analysis).
+    ///
+    /// SCA tools: cargo-audit, npm audit, pip-audit, govulncheck, dependency-check.
+    /// SAST tools: OpenGrep/Semgrep, Bandit, Gosec, Flawfinder.
     ///
     /// Example usage:
-    ///   linthis security                    # Scan current directory
-    ///   linthis security --severity high    # Only show high+ severity
-    ///   linthis security --fix              # Show fix suggestions
-    ///   linthis security --format json      # Output as JSON
+    ///   linthis security                         # Run both SCA and SAST
+    ///   linthis security --scan-type sca         # Only dependency scanning
+    ///   linthis security --scan-type sast        # Only source code analysis
+    ///   linthis security --severity high         # Only show high+ severity
+    ///   linthis security --fix                   # Show fix suggestions
+    ///   linthis security --format json           # Output as JSON
+    ///   linthis security --sast-config rules.yml # Custom SAST rules
     Security {
         /// Path to scan (defaults to current directory)
         #[arg(default_value = ".")]
         path: PathBuf,
+
+        /// Scan type: all (default), sca (dependencies only), sast (source code only)
+        #[arg(long, default_value = "all")]
+        scan_type: String,
 
         /// Minimum severity to report (critical, high, medium, low)
         #[arg(long, short = 's')]
@@ -424,6 +433,10 @@ pub enum Commands {
         /// Exit with error if vulnerabilities meet severity threshold
         #[arg(long)]
         fail_on: Option<String>,
+
+        /// Custom SAST rules/config file path
+        #[arg(long)]
+        sast_config: Option<PathBuf>,
 
         /// Verbose output
         #[arg(long)]

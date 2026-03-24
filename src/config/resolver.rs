@@ -291,6 +291,7 @@ fn get_config_names(lang: &str, tool: &str) -> Vec<&'static str> {
             ".phpcs.xml.dist",
         ],
         ("scala", "scalafmt") => vec![".scalafmt.conf"],
+        ("*", "linthis-secrets") => vec!["secrets.toml", ".secrets.toml"],
         _ => vec![],
     }
 }

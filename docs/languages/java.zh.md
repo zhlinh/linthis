@@ -1,6 +1,6 @@
 # Java 语言指南
 
-linthis 使用 **checkstyle** 进行代码检查，使用 **google-java-format** 进行代码格式化。
+linthis 使用 **checkstyle** 进行代码检查，使用 **clang-format** 进行代码格式化。
 
 ## 支持的文件扩展名
 
@@ -26,18 +26,23 @@ choco install checkstyle
 checkstyle --version
 ```
 
-### 格式化：google-java-format
+### 格式化：clang-format
 
 ```bash
 # macOS
-brew install google-java-format
+brew install clang-format
 
-# 下载 JAR
-wget https://github.com/google/google-java-format/releases/download/v1.18.1/google-java-format-1.18.1-all-deps.jar
+# Linux
+sudo apt install clang-format
+
+# Windows
+choco install llvm
 
 # 验证安装
-java -jar google-java-format-1.18.1-all-deps.jar --version
+clang-format --version
 ```
+
+在项目根目录放置 `.clang-format` 文件可自定义 Java 格式化风格。linthis 也会检查 `.linthis/configs/java/.clang-format` 中的插件配置。
 
 ## 配置
 
