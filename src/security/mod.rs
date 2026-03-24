@@ -13,11 +13,20 @@
 //! This module provides unified security scanning across multiple languages
 //! by integrating with language-specific security tools:
 //!
+//! ## SCA (Dependency Vulnerability Detection)
+//!
 //! - **Rust**: cargo-audit (RustSec Advisory Database)
 //! - **JavaScript/TypeScript**: npm audit
 //! - **Python**: pip-audit / safety
 //! - **Go**: govulncheck
 //! - **Java**: dependency-check (OWASP)
+//!
+//! ## SAST (Source Code Security Analysis)
+//!
+//! - **Multi-language**: OpenGrep / Semgrep (30+ languages)
+//! - **Python**: Bandit
+//! - **Go**: Gosec
+//! - **C/C++**: Flawfinder
 //!
 //! # Example
 //!
@@ -39,10 +48,12 @@
 mod advisories;
 mod languages;
 pub mod report;
+pub mod sast;
 mod scanner;
 mod vulnerability;
 
 pub use advisories::AdvisoryDatabase;
 pub use report::{format_security_report, SecurityReport};
+pub use sast::{SastAggregator, SastResult, SastScanOptions};
 pub use scanner::{ScanOptions, ScanResult, SecurityScanner};
 pub use vulnerability::{Advisory, AffectedPackage, Severity, Vulnerability};

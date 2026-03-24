@@ -137,6 +137,7 @@ fn main() -> ExitCode {
     // Handle security subcommand
     if let Some(Commands::Security {
         path,
+        scan_type,
         severity,
         include_dev,
         fix,
@@ -144,11 +145,13 @@ fn main() -> ExitCode {
         format,
         sbom,
         fail_on,
+        sast_config,
         verbose,
     }) = cli.command
     {
         return handle_security_command(
-            path, severity, include_dev, fix, ignore, format, sbom, fail_on, verbose,
+            path, scan_type, severity, include_dev, fix, ignore, format, sbom, fail_on,
+            sast_config, verbose,
         );
     }
 

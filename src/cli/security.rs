@@ -8,21 +8,21 @@
 // notice shall be included in all copies or
 // substantial portions of the Software.
 
-//! CLI handler for security scanning commands.
+//! CLI handler for security scanning commands (SCA + SAST).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use colored::Colorize;
 
-use linthis::security::{
-    format_security_report, ScanOptions, SecurityScanner, Severity,
-};
 use linthis::security::report::SecurityReportFormat;
+use linthis::security::sast::{format_sast_report, SastAggregator, SastScanOptions};
+use linthis::security::{format_security_report, ScanOptions, SecurityScanner, Severity};
 
 /// Handle the security subcommand
 pub fn handle_security_command(
     path: PathBuf,
+    scan_type: String,
     severity: Option<String>,
     include_dev: bool,
     fix: bool,
@@ -30,119 +30,185 @@ pub fn handle_security_command(
     format: String,
     sbom: bool,
     fail_on: Option<String>,
+    sast_config: Option<PathBuf>,
     verbose: bool,
 ) -> ExitCode {
-    let scanner = SecurityScanner::new();
+    let report_format = SecurityReportFormat::from_str(&format);
+    let run_sca = scan_type == "all" || scan_type == "sca";
+    let run_sast = scan_type == "all" || scan_type == "sast";
+    let mut has_critical_high = false;
 
-    // Show available scanners in verbose mode
-    if verbose {
-        println!("{}", "Available security scanners:".bold());
-        for (name, lang, available) in scanner.available_scanners() {
-            let status = if available {
-                "✓".green()
-            } else {
-                "✗".red()
+    // --- SCA (Dependency Vulnerability Scanning) ---
+    if run_sca {
+        let scanner = SecurityScanner::new();
+
+        if verbose {
+            println!("{}", "Available SCA scanners:".bold());
+            for (name, lang, available) in scanner.available_scanners() {
+                let status = if available {
+                    "✓".green()
+                } else {
+                    "✗".red()
+                };
+                println!("  {} {} ({})", status, name, lang);
+            }
+            println!();
+        }
+
+        let languages = scanner.detect_languages(&path);
+        if languages.is_empty() && !run_sast {
+            println!("{}", "No supported project files detected.".yellow());
+            println!("Supported files: Cargo.toml, package.json, requirements.txt, go.mod, pom.xml, build.gradle");
+            return ExitCode::SUCCESS;
+        }
+
+        if !languages.is_empty() {
+            if verbose {
+                println!("Detected languages: {}", languages.join(", "));
+                println!();
+            }
+
+            let options = ScanOptions {
+                path: path.clone(),
+                severity_threshold: severity.clone(),
+                include_dev,
+                packages: vec![],
+                ignore: ignore.unwrap_or_default(),
+                format: format.clone(),
+                generate_sbom: sbom,
+                fail_on: fail_on.clone(),
+                verbose,
             };
-            println!("  {} {} ({})", status, name, lang);
-        }
-        println!();
-    }
 
-    // Detect languages
-    let languages = scanner.detect_languages(&path);
-    if languages.is_empty() {
-        println!("{}", "No supported project files detected.".yellow());
-        println!("Supported files: Cargo.toml, package.json, requirements.txt, go.mod, pom.xml, build.gradle");
-        return ExitCode::SUCCESS;
-    }
+            if report_format == SecurityReportFormat::Human {
+                println!("{}", "🔍 SCA: Scanning dependencies for vulnerabilities...".bold());
+            } else {
+                eprintln!("🔍 SCA: Scanning dependencies for vulnerabilities...");
+            }
 
-    if verbose {
-        println!("Detected languages: {}", languages.join(", "));
-        println!();
-    }
+            match scanner.scan(&options) {
+                Ok(result) => {
+                    let output = format_security_report(&result, report_format);
+                    println!("{}", output);
 
-    // Build scan options
-    let options = ScanOptions {
-        path: path.clone(),
-        severity_threshold: severity.clone(),
-        include_dev,
-        packages: vec![],
-        ignore: ignore.unwrap_or_default(),
-        format: format.clone(),
-        generate_sbom: sbom,
-        fail_on: fail_on.clone(),
-        verbose,
-    };
+                    if fix && !result.vulnerabilities.is_empty() {
+                        println!("{}", "\n📋 Fix Suggestions:".bold());
+                        println!("{}", "-".repeat(50));
 
-    // Run scan
-    println!("{}", "🔍 Scanning for vulnerabilities...".bold());
-
-    match scanner.scan(&options) {
-        Ok(result) => {
-            // Format and print results
-            let report_format = SecurityReportFormat::from_str(&format);
-            let output = format_security_report(&result, report_format);
-            println!("{}", output);
-
-            // Show fix suggestions if requested
-            if fix && !result.vulnerabilities.is_empty() {
-                println!("{}", "\n📋 Fix Suggestions:".bold());
-                println!("{}", "-".repeat(50));
-
-                match scanner.fix(&path, &result) {
-                    Ok(fix_result) => {
-                        if !fix_result.commands.is_empty() {
-                            println!("\nRecommended commands:");
-                            for cmd in &fix_result.commands {
-                                println!("  $ {}", cmd.cyan());
+                        match scanner.fix(&path, &result) {
+                            Ok(fix_result) => {
+                                if !fix_result.commands.is_empty() {
+                                    println!("\nRecommended commands:");
+                                    for cmd in &fix_result.commands {
+                                        println!("  $ {}", cmd.cyan());
+                                    }
+                                }
+                                if !fix_result.messages.is_empty() {
+                                    println!("\nNotes:");
+                                    for msg in &fix_result.messages {
+                                        println!("  • {}", msg);
+                                    }
+                                }
+                                if fix_result.needs_review {
+                                    println!(
+                                        "\n{}",
+                                        "⚠️  Some vulnerabilities require manual review".yellow()
+                                    );
+                                }
                             }
-                        }
-
-                        if !fix_result.messages.is_empty() {
-                            println!("\nNotes:");
-                            for msg in &fix_result.messages {
-                                println!("  • {}", msg);
+                            Err(e) => {
+                                eprintln!(
+                                    "{}: {}",
+                                    "Failed to generate fix suggestions".red(),
+                                    e
+                                );
                             }
-                        }
-
-                        if fix_result.needs_review {
-                            println!("\n{}", "⚠️  Some vulnerabilities require manual review".yellow());
                         }
                     }
-                    Err(e) => {
-                        eprintln!("{}: {}", "Failed to generate fix suggestions".red(), e);
+
+                    if result.critical_high_count() > 0 {
+                        has_critical_high = true;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{}: {}", "SCA scan failed".red().bold(), e);
+                    if !run_sast {
+                        return ExitCode::from(1);
                     }
                 }
             }
-
-            // Check fail condition
-            if let Some(ref threshold_str) = fail_on {
-                let threshold = Severity::from_str(threshold_str);
-                if result.has_vulnerabilities_above(threshold) {
-                    eprintln!(
-                        "\n{}: Found vulnerabilities with severity >= {}",
-                        "Error".red().bold(),
-                        threshold_str
-                    );
-                    return ExitCode::from(1);
-                }
-            }
-
-            // Return success unless critical/high vulnerabilities found
-            if result.critical_high_count() > 0 && fail_on.is_none() {
-                // Only warn, don't fail by default
-                eprintln!(
-                    "\n{}: {} critical/high vulnerabilities found",
-                    "Warning".yellow().bold(),
-                    result.critical_high_count()
-                );
-            }
-
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("{}: {}", "Security scan failed".red().bold(), e);
-            ExitCode::from(1)
         }
     }
+
+    // --- SAST (Source Code Security Analysis) ---
+    if run_sast {
+        let sast = SastAggregator::with_config(sast_config.as_deref());
+
+        if verbose {
+            println!("{}", "Available SAST scanners:".bold());
+            for (name, available, langs) in sast.available_scanners() {
+                let status = if available {
+                    "✓".green()
+                } else {
+                    "✗".red()
+                };
+                println!("  {} {} ({})", status, name, langs.join(", "));
+            }
+            println!();
+        }
+
+        let sast_options = SastScanOptions {
+            severity_threshold: severity.as_ref().map(|s| Severity::from_str(s)),
+            config_path: sast_config,
+            rules: vec![],
+            exclude: vec![],
+            verbose,
+        };
+
+        // Use stderr for status messages when outputting structured formats
+        if report_format == SecurityReportFormat::Human {
+            println!(
+                "{}",
+                "🔍 SAST: Scanning source code for security issues...".bold()
+            );
+        } else {
+            eprintln!("🔍 SAST: Scanning source code for security issues...");
+        }
+
+        let result = sast.scan(&path, &[], &sast_options);
+
+        let output = format_sast_report(&result, report_format);
+        println!("{}", output);
+
+        if !result.errors.is_empty() {
+            for err in &result.errors {
+                eprintln!("  {}: {}", "Error".red(), err);
+            }
+        }
+
+        if result.critical_high_count() > 0 {
+            has_critical_high = true;
+        }
+    }
+
+    // Check fail condition
+    if let Some(ref threshold_str) = fail_on {
+        if has_critical_high {
+            eprintln!(
+                "\n{}: Found security issues with severity >= {}",
+                "Error".red().bold(),
+                threshold_str
+            );
+            return ExitCode::from(1);
+        }
+    }
+
+    if has_critical_high && fail_on.is_none() {
+        eprintln!(
+            "\n{}: Critical/high security issues found",
+            "Warning".yellow().bold(),
+        );
+    }
+
+    ExitCode::SUCCESS
 }
