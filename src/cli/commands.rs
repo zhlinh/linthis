@@ -492,13 +492,23 @@ pub enum Commands {
     ///
     /// Example usage:
     ///   linthis complexity                  # Analyze current directory
+    ///   linthis complexity -s                # Analyze staged files
+    ///   linthis complexity -m                # Analyze modified files
     ///   linthis complexity src/             # Analyze specific directory
-    ///   linthis complexity --format html    # Generate HTML report
+    ///   linthis complexity --output html    # Generate HTML report
     ///   linthis complexity --threshold 15   # Custom complexity threshold
     Complexity {
         /// Path to analyze (defaults to current directory)
         #[arg(default_value = ".")]
         path: PathBuf,
+
+        /// Analyze only staged files (git cached)
+        #[arg(short = 's', long)]
+        staged: bool,
+
+        /// Analyze only locally modified files (staged + unstaged)
+        #[arg(short = 'm', long, alias = "uncommitted")]
+        modified: bool,
 
         /// File patterns to include (glob patterns)
         #[arg(long, short = 'i')]
@@ -517,7 +527,7 @@ pub enum Commands {
         preset: String,
 
         /// Output format: human, json, markdown, html
-        #[arg(short, long, default_value = "human")]
+        #[arg(short = 'o', long = "output", default_value = "human")]
         format: String,
 
         /// Include trend analysis from previous runs

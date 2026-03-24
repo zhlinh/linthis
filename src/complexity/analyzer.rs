@@ -45,6 +45,8 @@ pub trait LanguageComplexityAnalyzer: Send + Sync {
 pub struct AnalysisOptions {
     /// Path to analyze
     pub path: PathBuf,
+    /// Specific files to analyze (overrides path-based collection when non-empty)
+    pub files: Vec<PathBuf>,
     /// File patterns to include
     pub include: Vec<String>,
     /// File patterns to exclude
@@ -67,6 +69,7 @@ impl Default for AnalysisOptions {
     fn default() -> Self {
         Self {
             path: PathBuf::new(),
+            files: Vec::new(),
             include: Vec::new(),
             exclude: Vec::new(),
             threshold: None,
@@ -186,21 +189,27 @@ impl AnalysisResult {
         }
 
         for (lang, files) in by_lang {
-            let mut stats = SummaryStats::default();
-            stats.total_files = files.len();
-            stats.total_functions = files.iter().map(|f| f.functions.len()).sum();
-            stats.total_loc = files.iter().map(|f| f.metrics.loc as u64).sum();
-            stats.total_sloc = files.iter().map(|f| f.metrics.sloc as u64).sum();
-
-            if !files.is_empty() {
+            let avg_cyclomatic = if !files.is_empty() {
                 let cyclo_sum: u32 = files.iter().map(|f| f.metrics.cyclomatic).sum();
-                stats.avg_cyclomatic = cyclo_sum as f64 / files.len() as f64;
-                stats.max_cyclomatic = files
-                    .iter()
-                    .map(|f| f.metrics.cyclomatic)
-                    .max()
-                    .unwrap_or(0);
-            }
+                cyclo_sum as f64 / files.len() as f64
+            } else {
+                0.0
+            };
+            let max_cyclomatic = files
+                .iter()
+                .map(|f| f.metrics.cyclomatic)
+                .max()
+                .unwrap_or(0);
+
+            let stats = SummaryStats {
+                total_files: files.len(),
+                total_functions: files.iter().map(|f| f.functions.len()).sum(),
+                total_loc: files.iter().map(|f| f.metrics.loc as u64).sum(),
+                total_sloc: files.iter().map(|f| f.metrics.sloc as u64).sum(),
+                avg_cyclomatic,
+                max_cyclomatic,
+                ..SummaryStats::default()
+            };
 
             self.by_language.insert(lang, stats);
         }
@@ -253,7 +262,12 @@ impl ComplexityAnalyzer {
         let mut result = AnalysisResult::new();
 
         // Collect files to analyze
-        let files = self.collect_files(&options.path, &options.include, &options.exclude)?;
+        let files = if !options.files.is_empty() {
+            // Use explicit file list (from --staged / --modified)
+            options.files.clone()
+        } else {
+            self.collect_files(&options.path, &options.include, &options.exclude)?
+        };
 
         // Analyze files
         if options.parallel {

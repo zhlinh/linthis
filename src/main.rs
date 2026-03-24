@@ -175,6 +175,8 @@ fn main() -> ExitCode {
     // Handle complexity subcommand
     if let Some(Commands::Complexity {
         path,
+        staged,
+        modified,
         include,
         exclude,
         threshold,
@@ -191,6 +193,8 @@ fn main() -> ExitCode {
     {
         return handle_complexity_command(ComplexityCommandOptions {
             path,
+            staged,
+            modified,
             include,
             exclude,
             threshold,

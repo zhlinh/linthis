@@ -17,10 +17,13 @@ use linthis::complexity::{
     format_complexity_report, AnalysisOptions, ComplexityAnalyzer, ComplexityReportFormat,
     MetricLevel, Thresholds,
 };
+use linthis::utils::{get_staged_files, get_uncommitted_files};
 
 /// Options for complexity command
 pub struct ComplexityCommandOptions {
     pub path: PathBuf,
+    pub staged: bool,
+    pub modified: bool,
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
     pub threshold: Option<u32>,
@@ -37,15 +40,59 @@ pub struct ComplexityCommandOptions {
 
 /// Handle the complexity analysis command
 pub fn handle_complexity_command(options: ComplexityCommandOptions) -> ExitCode {
-    if options.verbose {
-        println!("Analyzing code complexity in: {}", options.path.display());
-    }
+    // Resolve file list from --staged or --modified
+    let target_files: Option<Vec<PathBuf>> = if options.staged {
+        match get_staged_files() {
+            Ok(files) => {
+                if files.is_empty() {
+                    eprintln!("No staged files found.");
+                    return ExitCode::SUCCESS;
+                }
+                if options.verbose {
+                    println!("Analyzing {} staged file(s)", files.len());
+                }
+                Some(files)
+            }
+            Err(e) => {
+                eprintln!("Failed to get staged files: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else if options.modified {
+        match get_uncommitted_files() {
+            Ok(files) => {
+                if files.is_empty() {
+                    eprintln!("No modified files found.");
+                    return ExitCode::SUCCESS;
+                }
+                if options.verbose {
+                    println!("Analyzing {} modified file(s)", files.len());
+                }
+                Some(files)
+            }
+            Err(e) => {
+                eprintln!("Failed to get modified files: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        if options.verbose {
+            println!("Analyzing code complexity in: {}", options.path.display());
+        }
+        None
+    };
 
     // Create analyzer
     let analyzer = ComplexityAnalyzer::new();
 
     // Build analysis options
     let mut analysis_options = AnalysisOptions::new(options.path.clone());
+
+    // If we have specific files from --staged/--modified, add them as include patterns
+    if let Some(ref files) = target_files {
+        analysis_options.files = files.clone();
+    }
+
     analysis_options.include = options.include.unwrap_or_default();
     analysis_options.exclude = options.exclude.unwrap_or_default();
     analysis_options.threshold = options.threshold;
