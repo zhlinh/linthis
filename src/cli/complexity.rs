@@ -10,13 +10,14 @@
 
 //! CLI handler for complexity analysis command.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use linthis::complexity::{
-    format_complexity_report, AnalysisOptions, ComplexityAnalyzer, ComplexityReportFormat,
-    MetricLevel, Thresholds,
+    format_complexity_report, AnalysisOptions, AnalysisResult, ComplexityAnalyzer,
+    ComplexityReportFormat, MetricLevel, Thresholds,
 };
+use linthis::config::ComplexityChecksConfig;
 use linthis::utils::{get_staged_files, get_uncommitted_files};
 
 /// Options for complexity command
@@ -167,6 +168,21 @@ pub fn handle_complexity_command(options: ComplexityCommandOptions) -> ExitCode 
     }
 
     ExitCode::SUCCESS
+}
+
+/// Run complexity analysis and return results (for integration with main lint flow via --checks).
+pub fn run_complexity_analysis(
+    path: &Path,
+    files: &[PathBuf],
+    config: &ComplexityChecksConfig,
+) -> Result<AnalysisResult, String> {
+    let analyzer = ComplexityAnalyzer::new();
+    let mut options = AnalysisOptions::new(path.to_path_buf());
+    if !files.is_empty() {
+        options.files = files.to_vec();
+    }
+    options.threshold = config.threshold;
+    analyzer.analyze(&options)
 }
 
 #[cfg(test)]

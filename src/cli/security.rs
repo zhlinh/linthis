@@ -15,8 +15,11 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 
+use std::path::Path;
+
+use linthis::config::SecurityChecksConfig;
 use linthis::security::report::SecurityReportFormat;
-use linthis::security::sast::{format_sast_report, SastAggregator, SastScanOptions};
+use linthis::security::sast::{format_sast_report, SastAggregator, SastResult, SastScanOptions};
 use linthis::security::{format_security_report, ScanOptions, SecurityScanner, Severity};
 
 /// Handle the security subcommand
@@ -211,4 +214,22 @@ pub fn handle_security_command(
     }
 
     ExitCode::SUCCESS
+}
+
+/// Run SAST scan and return results (for integration with main lint flow via --checks).
+///
+/// When `files` is non-empty, only those files are scanned.
+/// When empty, scans the entire `path` directory.
+pub fn run_sast_scan(
+    path: &Path,
+    files: &[PathBuf],
+    config: &SecurityChecksConfig,
+) -> SastResult {
+    let sast = SastAggregator::with_config(config.sast_config.as_deref());
+    let sast_options = SastScanOptions {
+        severity_threshold: config.fail_on.as_ref().map(|s| Severity::from_str(s)),
+        config_path: config.sast_config.clone(),
+        ..Default::default()
+    };
+    sast.scan(path, files, &sast_options)
 }

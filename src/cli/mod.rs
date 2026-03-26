@@ -36,7 +36,9 @@ mod watch;
 pub use backup::create_backup;
 pub use cache::handle_cache_command;
 pub use commands::{Cli, Commands};
-pub use complexity::{handle_complexity_command, ComplexityCommandOptions};
+pub use complexity::{
+    handle_complexity_command, run_complexity_analysis, ComplexityCommandOptions,
+};
 pub use doctor::handle_doctor_command;
 pub use fix::{handle_fix_command, FixCommandOptions};
 pub use format::{handle_format_command, FormatCommandOptions};
@@ -52,5 +54,5 @@ pub use plugin::handle_plugin_command;
 pub use report::handle_report_command;
 pub use review::{handle_review_command, ReviewCommandOptions};
 pub use runner::{perform_auto_sync, perform_self_update};
-pub use security::handle_security_command;
+pub use security::{handle_security_command, run_sast_scan};
 pub use watch::run_watch;

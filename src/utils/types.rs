@@ -242,6 +242,15 @@ pub struct RunResult {
     /// Target paths that were scanned (CLI paths before expansion)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub target_paths: Vec<String>,
+    /// SAST security scan results (present when security check is enabled)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<crate::security::sast::SastResult>,
+    /// Complexity analysis results (present when complexity check is enabled)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<crate::complexity::AnalysisResult>,
+    /// Which checks were actually run
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks_run: Vec<String>,
 }
 
 impl RunResult {

@@ -23,8 +23,9 @@ use cli::{
     handle_hook_command, handle_init_command, handle_license_command, handle_plugin_command,
     handle_report_command, handle_review_command, handle_security_command, init_linter_configs,
     perform_auto_sync, perform_self_update, print_fix_hint, run_benchmark, run_watch,
-    strip_ansi_codes, Cli, Commands, ComplexityCommandOptions, FixCommandOptions,
-    FormatCommandOptions, PathCollectionOptions, PathCollectionResult, ReviewCommandOptions,
+    run_complexity_analysis, run_sast_scan, strip_ansi_codes, Cli, Commands,
+    ComplexityCommandOptions, FixCommandOptions, FormatCommandOptions, PathCollectionOptions,
+    PathCollectionResult, ReviewCommandOptions,
 };
 use linthis::config::resolver::{ConfigResolver, ConfigSource, ResolvedConfig};
 use linthis::lsp::{run_lsp_server_with_config, LspMode};
@@ -854,6 +855,99 @@ fn main() -> ExitCode {
             // Record target paths for trend analysis scope tracking
             result.target_paths = cli.paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
 
+            // --- Run additional checks (--checks / config checks.run) ---
+            let checks_list: Vec<String> = if let Some(ref cli_checks) = cli.checks {
+                if cli_checks.iter().any(|c| c == "all") {
+                    vec!["lint".into(), "security".into(), "complexity".into()]
+                } else {
+                    cli_checks.clone()
+                }
+            } else {
+                runtime_config.checks.run.clone()
+            };
+
+            // Mark lint as run (it always runs unless explicitly excluded via --checks)
+            if checks_list.iter().any(|c| c == "lint") {
+                result.checks_run.push("lint".to_string());
+            }
+
+            // Run security check if in checks list
+            if checks_list.iter().any(|c| c == "security") {
+                let security_config = runtime_config
+                    .checks
+                    .security
+                    .clone()
+                    .unwrap_or_default();
+                if !cli.quiet {
+                    eprintln!("🔒 Running security check...");
+                }
+                // Pass specific files if -i was used, otherwise scan project root
+                let security_files: Vec<std::path::PathBuf> = cli
+                    .paths
+                    .iter()
+                    .filter(|p| p.is_file())
+                    .map(|p| p.to_path_buf())
+                    .collect();
+                let sast_result = run_sast_scan(
+                    &runtime_project_root,
+                    &security_files,
+                    &security_config,
+                );
+                if sast_result.critical_high_count() > 0 {
+                    result.exit_code = std::cmp::max(result.exit_code, 1);
+                }
+                result.security = Some(sast_result);
+                result.checks_run.push("security".to_string());
+            }
+
+            // Run complexity check if in checks list
+            if checks_list.iter().any(|c| c == "complexity") {
+                let complexity_config = runtime_config
+                    .checks
+                    .complexity
+                    .clone()
+                    .unwrap_or_default();
+                if !cli.quiet {
+                    eprintln!("📊 Running complexity check...");
+                }
+                // Use CLI-specified files if available
+                let checked_files: Vec<std::path::PathBuf> = cli
+                    .paths
+                    .iter()
+                    .filter(|p| p.is_file())
+                    .map(|p| p.to_path_buf())
+                    .collect();
+                // Catch panics from complexity analyzer (e.g., parser bugs in certain files)
+                let complexity_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_complexity_analysis(
+                        &runtime_project_root,
+                        &checked_files,
+                        &complexity_config,
+                    )
+                }));
+                match complexity_result {
+                    Ok(Ok(analysis)) => {
+                        if complexity_config.fail_on_high.unwrap_or(false)
+                            && analysis.summary.high_complexity_files > 0
+                        {
+                            result.exit_code = std::cmp::max(result.exit_code, 1);
+                        }
+                        result.complexity = Some(analysis);
+                    }
+                    Ok(Err(e)) => {
+                        if !cli.quiet {
+                            eprintln!("Complexity analysis error: {}", e);
+                        }
+                    }
+                    Err(_) => {
+                        if !cli.quiet {
+                            eprintln!("Complexity analysis encountered an internal error");
+                        }
+                    }
+                }
+                result.checks_run.push("complexity".to_string());
+            }
+
             // Output results
             let output = format_result_with_hook_type(&result, output_format, hook_type.as_deref());
 
@@ -902,8 +996,8 @@ fn main() -> ExitCode {
                     // Custom path: use the output format specified by user
                     strip_ansi_codes(&output)
                 } else {
-                    // Default path: always save as JSON for --last/--from-result support
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| output.clone())
+                    // Default path: always save as unified JSON for --last/--from-result support
+                    linthis::utils::output::format_result_json(&result)
                 };
 
                 match File::create(&output_file) {

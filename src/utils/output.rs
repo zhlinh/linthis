@@ -419,9 +419,235 @@ pub fn format_result_human(result: &RunResult) -> String {
     output
 }
 
-/// Format the entire run result as JSON.
+/// Unified JSON output structure for all checks.
+///
+/// Each check (lint, security, complexity) has the same shape:
+/// `{ total_files, total_issues, issues: [{ file, line, severity, message, source, ... }] }`
+#[derive(serde::Serialize)]
+struct UnifiedResult {
+    checks_run: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lint: Option<CheckResultView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    security: Option<CheckResultView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    complexity: Option<CheckResultView>,
+    duration_ms: u64,
+    exit_code: i32,
+    run_mode: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    unavailable_tools: Vec<UnavailableToolView>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    target_paths: Vec<String>,
+}
+
+/// Unified check result — same structure for lint, security, complexity.
+#[derive(serde::Serialize)]
+struct CheckResultView {
+    total_files: usize,
+    total_issues: usize,
+    issues: Vec<IssueView>,
+    /// Extra metadata specific to this check type
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<serde_json::Value>,
+}
+
+/// Unified issue — same fields for all check types.
+#[derive(serde::Serialize)]
+struct IssueView {
+    file: String,
+    line: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_line: Option<usize>,
+    severity: String,
+    message: String,
+    source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggestion: Option<String>,
+    /// Function name (for complexity issues)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct UnavailableToolView {
+    tool: String,
+    language: String,
+    install_hint: String,
+}
+
+/// Build lint check result view from RunResult.
+fn build_lint_view(result: &RunResult) -> CheckResultView {
+    let issues: Vec<IssueView> = result
+        .issues
+        .iter()
+        .map(|i| IssueView {
+            file: i.file_path.to_string_lossy().to_string(),
+            line: i.line,
+            column: i.column,
+            end_line: None,
+            severity: i.severity.to_string(),
+            message: i.message.clone(),
+            source: i.source.clone().unwrap_or_default(),
+            code: i.code.clone(),
+            suggestion: i.suggestion.clone(),
+            function: None,
+        })
+        .collect();
+
+    let extra = serde_json::json!({
+        "files_formatted": result.files_formatted,
+        "issues_before_format": result.issues_before_format,
+        "issues_fixed": result.issues_fixed,
+    });
+
+    CheckResultView {
+        total_files: result.total_files,
+        total_issues: issues.len(),
+        issues,
+        extra: Some(extra),
+    }
+}
+
+/// Build security check result view from SastResult.
+fn build_security_view(sast: &crate::security::sast::SastResult) -> CheckResultView {
+    let issues: Vec<IssueView> = sast
+        .findings
+        .iter()
+        .map(|f| IssueView {
+            file: f.file_path.to_string_lossy().to_string(),
+            line: f.line,
+            column: f.column,
+            end_line: f.end_line,
+            severity: f.severity.to_string(),
+            message: f.message.clone(),
+            source: f.source.clone(),
+            code: Some(f.rule_id.clone()),
+            suggestion: f.fix_suggestion.clone(),
+            function: None,
+        })
+        .collect();
+
+    let total_files = {
+        let mut files: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for f in &sast.findings {
+            files.insert(f.file_path.to_string_lossy().to_string());
+        }
+        files.len()
+    };
+
+    let extra = serde_json::json!({
+        "scanner_status": sast.scanner_status,
+        "by_severity": sast.by_severity,
+    });
+
+    CheckResultView {
+        total_files,
+        total_issues: issues.len(),
+        issues,
+        extra: Some(extra),
+    }
+}
+
+/// Build complexity check result view from AnalysisResult.
+///
+/// Converts per-function metrics into issues (one issue per function exceeding threshold).
+fn build_complexity_view(
+    analysis: &crate::complexity::AnalysisResult,
+) -> CheckResultView {
+    let default_threshold = 15;
+    let threshold = analysis.thresholds.cyclomatic.good;
+    let effective_threshold = if threshold > 0 { threshold } else { default_threshold };
+
+    let mut issues: Vec<IssueView> = Vec::new();
+
+    for file in &analysis.files {
+        for func in &file.functions {
+            if func.metrics.cyclomatic > effective_threshold {
+                let severity = if func.metrics.cyclomatic > effective_threshold * 3 {
+                    "error"
+                } else if func.metrics.cyclomatic > effective_threshold * 2 {
+                    "warning"
+                } else {
+                    "info"
+                };
+
+                issues.push(IssueView {
+                    file: file.path.to_string_lossy().to_string(),
+                    line: func.start_line as usize,
+                    column: None,
+                    end_line: Some(func.end_line as usize),
+                    severity: severity.to_string(),
+                    message: format!(
+                        "function `{}` cyclomatic complexity {} exceeds threshold {}",
+                        func.name, func.metrics.cyclomatic, effective_threshold,
+                    ),
+                    source: "linthis-complexity".to_string(),
+                    code: None,
+                    suggestion: Some("Consider refactoring into smaller functions".to_string()),
+                    function: Some(func.name.clone()),
+                });
+            }
+        }
+    }
+
+    let extra = serde_json::json!({
+        "summary": {
+            "total_functions": analysis.summary.total_functions,
+            "avg_cyclomatic": analysis.summary.avg_cyclomatic,
+            "max_cyclomatic": analysis.summary.max_cyclomatic,
+        },
+    });
+
+    CheckResultView {
+        total_files: analysis.files.len(),
+        total_issues: issues.len(),
+        issues,
+        extra: Some(extra),
+    }
+}
+
+/// Format the entire run result as unified JSON.
 pub fn format_result_json(result: &RunResult) -> String {
-    serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".to_string())
+    let lint_view = if result.checks_run.contains(&"lint".to_string()) || result.checks_run.is_empty() {
+        Some(build_lint_view(result))
+    } else {
+        None
+    };
+
+    let security_view = result.security.as_ref().map(build_security_view);
+    let complexity_view = result.complexity.as_ref().map(build_complexity_view);
+
+    let unavailable: Vec<UnavailableToolView> = result
+        .unavailable_tools
+        .iter()
+        .map(|t| UnavailableToolView {
+            tool: t.tool.clone(),
+            language: t.language.clone(),
+            install_hint: t.install_hint.clone(),
+        })
+        .collect();
+
+    let unified = UnifiedResult {
+        checks_run: if result.checks_run.is_empty() {
+            vec!["lint".to_string()]
+        } else {
+            result.checks_run.clone()
+        },
+        lint: lint_view,
+        security: security_view,
+        complexity: complexity_view,
+        duration_ms: result.duration_ms,
+        exit_code: result.exit_code,
+        run_mode: format!("{:?}", result.run_mode).to_lowercase(),
+        unavailable_tools: unavailable,
+        target_paths: result.target_paths.clone(),
+    };
+    serde_json::to_string_pretty(&unified).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Format the entire run result for GitHub Actions.

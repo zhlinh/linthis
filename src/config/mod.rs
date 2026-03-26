@@ -167,6 +167,76 @@ pub struct Config {
     /// Code review settings
     #[serde(default)]
     pub review: ReviewConfig,
+
+    /// Checks configuration: which checks to run and per-check settings.
+    ///
+    /// ```toml
+    /// [checks]
+    /// run = ["lint"]                    # default: only lint
+    /// # run = ["lint", "security", "complexity"]  # enable all
+    ///
+    /// [checks.security]
+    /// scan_type = "sast"
+    /// fail_on = "high"
+    ///
+    /// [checks.complexity]
+    /// threshold = 15
+    /// ```
+    #[serde(default)]
+    pub checks: ChecksConfig,
+}
+
+/// Configuration for which checks to run and per-check settings — `[checks]` in TOML
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChecksConfig {
+    /// Which checks to run: ["lint"] (default), ["lint", "security"], etc.
+    #[serde(default = "default_checks")]
+    pub run: Vec<String>,
+    /// Security check settings
+    #[serde(default)]
+    pub security: Option<SecurityChecksConfig>,
+    /// Complexity check settings
+    #[serde(default)]
+    pub complexity: Option<ComplexityChecksConfig>,
+}
+
+impl Default for ChecksConfig {
+    fn default() -> Self {
+        Self {
+            run: default_checks(),
+            security: None,
+            complexity: None,
+        }
+    }
+}
+
+fn default_checks() -> Vec<String> {
+    vec!["lint".to_string()]
+}
+
+/// Security check configuration — `[checks.security]` in TOML
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SecurityChecksConfig {
+    /// Scan type: sca, sast, all (default: all)
+    #[serde(default)]
+    pub scan_type: Option<String>,
+    /// Minimum severity to fail on (critical, high, medium, low)
+    #[serde(default)]
+    pub fail_on: Option<String>,
+    /// Custom SAST config path
+    #[serde(default)]
+    pub sast_config: Option<PathBuf>,
+}
+
+/// Complexity check configuration — `[checks.complexity]` in TOML
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ComplexityChecksConfig {
+    /// Cyclomatic complexity threshold
+    #[serde(default)]
+    pub threshold: Option<u32>,
+    /// Fail if any file exceeds threshold
+    #[serde(default)]
+    pub fail_on_high: Option<bool>,
 }
 
 /// Plugin configuration section

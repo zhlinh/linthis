@@ -313,17 +313,52 @@ impl SecretsScanner {
             return findings;
         }
 
-        for (line_num, line) in content.lines().enumerate() {
-            // Skip comment-only lines that look like documentation/examples
-            let trimmed = line.trim();
-            if trimmed.starts_with('#') && trimmed.contains("example") {
-                continue;
+        let lines: Vec<&str> = content.lines().collect();
+        let mut next_line_directive: Option<String> = None;
+
+        for (line_num, line) in lines.iter().enumerate() {
+            // Parse ignore directives:
+            //   # linthis:ignore secrets                   — ignore this line
+            //   # linthis:ignore secrets/sk-prefix-key     — ignore specific rule on this line
+            //   # linthis:ignore-next-line secrets          — ignore next line
+            //   # linthis:ignore-next-line secrets/rule-id  — ignore specific rule on next line
+            let ignore_directive = parse_ignore_directive(line);
+            let ignore_next = parse_ignore_next_line_directive(line);
+
+            // Apply next-line directive carried from previous line
+            let effective_directive = if next_line_directive.is_some() {
+                let d = next_line_directive.take();
+                // Merge with inline directive if both present (inline takes precedence for broader scope)
+                match (&d, &ignore_directive) {
+                    (_, Some(inline)) if inline == "secrets" => Some("secrets".to_string()),
+                    (Some(next), Some(inline)) if next == "secrets" => Some("secrets".to_string()),
+                    (_, Some(inline)) => Some(inline.clone()),
+                    (d, None) => d.clone(),
+                }
+            } else {
+                ignore_directive
+            };
+
+            // Store next-line directive for the following iteration
+            if ignore_next.is_some() {
+                next_line_directive = ignore_next;
             }
 
             for pattern in &self.compiled {
+                // Check if this specific pattern is ignored
+                if let Some(ref directive) = effective_directive {
+                    if directive == "secrets" || *directive == pattern.id {
+                        continue;
+                    }
+                }
+
                 if let Some(m) = pattern.regex.find(line) {
-                    // Mask the secret value for display
                     let matched = m.as_str();
+
+                    // Skip placeholder/dummy values (xxx, XXX, ****, 0000, YOUR_xxx, etc.)
+                    if is_placeholder_value(matched) {
+                        continue;
+                    }
                     let masked = if matched.len() > 12 {
                         format!("{}...{}", &matched[..8], &matched[matched.len() - 4..])
                     } else {
@@ -461,4 +496,119 @@ impl SecretsScanner {
             }
         }
     }
+}
+
+/// Check if a matched value is a placeholder/dummy that should be ignored.
+///
+/// Detects patterns like: "xxx", "XXX", "****", "0000", "YOUR_TOKEN_HERE",
+/// "placeholder", "example", "test", "dummy", "sample", "changeme", etc.
+fn is_placeholder_value(matched: &str) -> bool {
+    // Strip surrounding quotes
+    let val = matched.trim_matches(|c| c == '"' || c == '\'');
+
+    // Too short to be a real secret (after stripping known prefixes)
+    // e.g., "sk-xxx" → strip "sk-" → "xxx" = 3 chars
+    let core = val
+        .trim_start_matches("sk-")
+        .trim_start_matches("sk_test_")
+        .trim_start_matches("sk_live_")
+        .trim_start_matches("pk_test_")
+        .trim_start_matches("pk_live_")
+        .trim_start_matches("ghp_")
+        .trim_start_matches("gho_")
+        .trim_start_matches("glpat-")
+        .trim_start_matches("xoxb-")
+        .trim_start_matches("AKIA")
+        .trim_start_matches("AIza");
+
+    if core.len() < 4 {
+        return true;
+    }
+
+    let lower = val.to_lowercase();
+
+    // All same character (xxx, XXX, ***, 000, aaa, etc.)
+    let chars: Vec<char> = core.chars().collect();
+    if !chars.is_empty() && chars.iter().all(|c| *c == chars[0]) {
+        return true;
+    }
+
+    // Common placeholder words
+    let placeholder_words = [
+        "your_", "my_", "insert", "replace", "change", "update", "put_",
+        "placeholder", "example", "sample", "dummy", "fake", "mock",
+        "test", "demo", "todo", "fixme", "changeme", "redacted",
+        "xxxxxxxx", "abcdef", "123456", "000000",
+    ];
+    for word in &placeholder_words {
+        if lower.contains(word) {
+            return true;
+        }
+    }
+
+    // Repeating pattern like "abcabc" or "xyzxyz"
+    if core.len() >= 6 {
+        let half = core.len() / 2;
+        if core[..half] == core[half..half * 2] {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Parse inline ignore directive from a line.
+///
+/// Syntax: `# linthis:ignore <target>`
+///   - `# linthis:ignore secrets`                — ignore all secrets checks on this line
+///   - `# linthis:ignore secrets/sk-prefix-key`  — ignore specific rule on this line
+///   - `// linthis:ignore secrets`               — C-style comment
+///
+/// Returns the ignore target, or None if not found or no target specified.
+fn parse_ignore_directive(line: &str) -> Option<String> {
+    // Must be "linthis:ignore" NOT followed by "-next-line"
+    let marker = "linthis:ignore";
+    let pos = line.find(marker)?;
+
+    let after_marker = &line[pos + marker.len()..];
+    // Reject "linthis:ignore-next-line" — that's a different directive
+    if after_marker.starts_with("-next-line") {
+        return None;
+    }
+
+    extract_ignore_target(after_marker)
+}
+
+/// Parse ignore-next-line directive from a line.
+///
+/// Syntax: `# linthis:ignore-next-line <target>`
+///   - `# linthis:ignore-next-line secrets`                — ignore all secrets on next line
+///   - `# linthis:ignore-next-line secrets/sk-prefix-key`  — ignore specific rule on next line
+///
+/// Returns the ignore target, or None if not found.
+fn parse_ignore_next_line_directive(line: &str) -> Option<String> {
+    let marker = "linthis:ignore-next-line";
+    let pos = line.find(marker)?;
+    let after_marker = &line[pos + marker.len()..];
+    extract_ignore_target(after_marker)
+}
+
+/// Extract the target from text after a linthis:ignore marker.
+fn extract_ignore_target(after_marker: &str) -> Option<String> {
+    let trimmed = after_marker.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let target = trimmed
+        .split_whitespace()
+        .next()?
+        .trim_end_matches("*/")
+        .trim();
+
+    if target.is_empty() {
+        return None;
+    }
+
+    Some(target.to_string())
 }
