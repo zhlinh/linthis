@@ -898,14 +898,14 @@ fn main() -> ExitCode {
 
                 if changed.is_empty() && cache_hits > 0 {
                     if !cli.quiet {
-                        eprintln!("🔒 Security check (cached)");
+                        eprintln!("Running [security] check ({} cached)", cache_hits);
                     }
                 } else if !cli.quiet {
                     if cache_hits == 0 {
-                        eprintln!("🔒 Running security check...");
+                        eprintln!("Running [security] check...");
                     } else {
                         eprintln!(
-                            "🔒 Running security check ({} cached, {} changed)...",
+                            "Running [security] check ({} cached, {} changed)...",
                             cache_hits,
                             changed.len(),
                         );
@@ -978,14 +978,14 @@ fn main() -> ExitCode {
 
                 if changed.is_empty() && cache_hits > 0 {
                     if !cli.quiet {
-                        eprintln!("📊 Complexity check (cached)");
+                        eprintln!("Running [complexity] check ({} cached)", cache_hits);
                     }
                 } else if !cli.quiet {
                     if cache_hits == 0 {
-                        eprintln!("📊 Running complexity check...");
+                        eprintln!("Running [complexity] check...");
                     } else {
                         eprintln!(
-                            "📊 Running complexity check ({} cached, {} changed)...",
+                            "Running [complexity] check ({} cached, {} changed)...",
                             cache_hits,
                             changed.len(),
                         );

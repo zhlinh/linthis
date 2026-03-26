@@ -8,13 +8,15 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 
 ## Features
 
-- 🚀 **Single Command**: Run both linting and formatting simultaneously
+- 🚀 **Single Command**: Run linting, formatting, security, and complexity checks simultaneously
 - 🌍 **Multi-Language Support**: Rust, Python, TypeScript, JavaScript, Go, Java, C++, Swift, Kotlin, Lua, and more
 - 🎯 **Auto-Detection**: Automatically detect programming languages used in your project
+- 🔒 **Security Scanning (SAST)**: Built-in secrets detection + OpenGrep/Semgrep, Bandit, Gosec, Flawfinder integration
+- 📊 **Complexity Analysis**: Cyclomatic/cognitive complexity per function with threshold enforcement
 - ⚙️ **Flexible Configuration**: Support for project config, global config, and CLI parameters
 - 📦 **Plugin System**: Share and reuse configurations via Git repositories
 - 🎨 **Format Presets**: Support for popular code styles like Google, Airbnb, Standard
-- ⚡ **Parallel Processing**: Leverage multi-core CPU for faster file processing
+- ⚡ **Parallel Processing**: Leverage multi-core CPU for faster file processing with per-file caching
 - 🤖 **AI Code Review**: `linthis review` analyzes diffs with AI and creates PR/MR automatically
 - 💾 **Format with Backup**: `linthis format` creates backups before formatting, supports `--undo`
 - 🔄 **Auto Re-stage**: When running in staged mode (`-s`), formatted files are automatically re-staged
@@ -128,6 +130,11 @@ linthis --staged
 # Check all locally modified files (staged + unstaged)
 linthis -m
 linthis --modified
+
+# Run specific checks (default: lint + security + complexity)
+linthis --checks lint,security     # Only lint + security
+linthis --checks all               # All checks
+linthis --checks lint              # Only lint (no security/complexity)
 ```
 
 ### Specify Languages
@@ -264,6 +271,20 @@ sources = [
     { name = "official" },
     { name = "myplugin", url = "https://github.com/zhlinh/linthis-plugin.git", ref = "main" }
 ]
+
+# Checks to run (default: lint + security + complexity)
+[checks]
+run = ["lint", "security", "complexity"]
+
+# Security check settings
+[checks.security]
+scan_type = "sast"    # sca, sast, all
+fail_on = "high"      # critical, high, medium, low
+
+# Complexity check settings
+[checks.complexity]
+threshold = 15
+fail_on_high = true
 
 # Language-specific configuration
 # [rust]

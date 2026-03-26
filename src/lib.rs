@@ -1938,10 +1938,9 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
         if !options.quiet && stats.total() > 0 {
             eprintln!(
-                "Cache: {} hits, {} misses ({:.1}% hit rate)",
+                "Running [lint] check ({} cached, {} changed)",
                 stats.cache_hits,
                 stats.cache_misses,
-                stats.hit_rate()
             );
         }
 

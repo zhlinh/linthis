@@ -18,6 +18,7 @@ linthis [OPTIONS] [COMMAND]
 | `-f` | `--format-only` | Format only, no checking | `-f` |
 | `-s` | `--staged` | Check Git staged files only | `-s` |
 | `-m` | `--modified` | Check all locally modified files (staged + unstaged) | `-m` |
+| | `--checks` | Checks to run (comma-separated) | `--checks lint,security` |
 | `-l` | `--lang` | Languages (comma-separated) | `-l python,rust` |
 | `-o` | `--output` | Output format | `-o json` |
 | `-v` | `--verbose` | Verbose output | `-v` |
@@ -435,6 +436,86 @@ linthis format --list-backups         # List available backups
 ```
 
 A backup is automatically created before each format operation. Use `--undo` to revert if the result is unwanted.
+
+---
+
+## security
+
+Security vulnerability scanning (SCA + SAST).
+
+```bash
+linthis security [OPTIONS] [PATH]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--scan-type` | Scan type: `all`, `sca`, `sast` | `all` |
+| `-s`, `--severity` | Minimum severity: `critical`, `high`, `medium`, `low` | |
+| `--include-dev` | Include dev dependencies | |
+| `--fix` | Show fix suggestions | |
+| `-f`, `--format` | Output format: `human`, `json`, `sarif` | `human` |
+| `--sast-config` | Custom SAST rules/config file | |
+| `--sbom` | Generate SBOM | |
+| `--fail-on` | Exit with error if severity threshold met | |
+| `--verbose` | Verbose output | |
+
+**SAST tools** (auto-detected by language):
+
+| Tool | Languages | Install |
+|------|-----------|---------|
+| linthis-secrets (built-in) | All | Always available |
+| OpenGrep / Semgrep | 30+ languages | `pip install opengrep` |
+| Bandit | Python | `pip install bandit` |
+| Gosec | Go | `go install github.com/securego/gosec/v2/cmd/gosec@latest` |
+| Flawfinder | C/C++ | `pip install flawfinder` |
+
+**Examples:**
+
+```bash
+linthis security                         # SCA + SAST
+linthis security --scan-type sast        # SAST only
+linthis security --severity high         # High+ only
+linthis security --format json           # JSON output
+```
+
+**Inline ignore directives** (for secrets scanner):
+
+```python
+KEY = "sk-real-key"  # linthis:ignore secrets
+# linthis:ignore-next-line secrets/sk-prefix-key
+KEY = "sk-real-key"
+```
+
+---
+
+## complexity
+
+Code complexity analysis with trend tracking.
+
+```bash
+linthis complexity [OPTIONS] [PATH]
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-s`, `--staged` | Analyze staged files only | |
+| `-m`, `--modified` | Analyze modified files only | |
+| `-t`, `--threshold` | Cyclomatic complexity threshold | |
+| `--preset` | Threshold preset: `default`, `strict`, `lenient` | `default` |
+| `-o`, `--output` | Output format: `human`, `json`, `markdown`, `html` | `human` |
+| `--with-trends` | Include trend analysis | |
+| `--only-high` | Only show high-complexity functions | |
+| `--sort` | Sort by: `cyclomatic`, `cognitive`, `lines`, `name` | `cyclomatic` |
+| `--fail-on-high` | Exit with error if threshold exceeded | |
+
+**Examples:**
+
+```bash
+linthis complexity                       # Analyze current directory
+linthis complexity -s                    # Analyze staged files
+linthis complexity -t 15 --only-high     # Show functions above 15
+linthis complexity --output html         # HTML report
+```
 
 ---
 

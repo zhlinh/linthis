@@ -110,6 +110,65 @@ verbose = true
 
 ---
 
+## 检查配置
+
+控制运行哪些检查及其设置。默认运行 `lint`、`security`、`complexity`。
+
+```toml
+[checks]
+# 运行的检查项（默认：["lint", "security", "complexity"]）
+run = ["lint", "security", "complexity"]
+```
+
+### `[checks.security]`
+
+| 键 | 类型 | 默认值 | 说明 |
+|----|------|--------|------|
+| `scan_type` | 字符串 | `"all"` | `"sca"`（依赖扫描）、`"sast"`（源码分析）、`"all"` |
+| `fail_on` | 字符串 | | 最低失败级别：`"critical"`、`"high"`、`"medium"`、`"low"` |
+| `sast_config` | 字符串 | | 自定义 SAST 规则文件路径 |
+
+```toml
+[checks.security]
+scan_type = "sast"
+fail_on = "high"
+```
+
+### `[checks.complexity]`
+
+| 键 | 类型 | 默认值 | 说明 |
+|----|------|--------|------|
+| `threshold` | 整数 | `10` | 函数圈复杂度阈值 |
+| `fail_on_high` | 布尔 | `false` | 超阈值时返回错误 |
+
+```toml
+[checks.complexity]
+threshold = 15
+fail_on_high = true
+```
+
+### Secrets 扫描器配置
+
+通过 `.linthis/secrets.toml` 自定义 secrets 检测规则：
+
+```toml
+# 添加自定义规则
+[[patterns]]
+id = "secrets/internal-token"
+description = "内部服务 token"
+regex = '"tok_[A-Za-z0-9]{32,}"'
+severity = "high"
+cwe = "CWE-798"
+
+# 禁用内置规则
+[disabled]
+rules = ["secrets/jwt-token"]
+```
+
+配置优先级：`--sast-config` > 项目根目录 `secrets.toml` > `.linthis/secrets.toml` > `~/.linthis/secrets.toml` > 内置规则。
+
+---
+
 ## 插件配置
 
 ### `[plugins]`
