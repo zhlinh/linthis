@@ -86,7 +86,7 @@ pub fn handle_license_command(
             let violations = license_policy.check(&result);
 
             // Format and print results
-            let report_format = LicenseReportFormat::from_str(&format);
+            let report_format = LicenseReportFormat::parse_format(&format);
             let output = format_license_report(&result, &violations, report_format);
             println!("{}", output);
 

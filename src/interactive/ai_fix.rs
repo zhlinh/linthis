@@ -32,6 +32,16 @@ use crate::utils::types::{LintIssue, RunResult, Severity};
 use super::menu::{print_code_context, print_diff};
 use super::nolint::{add_nolint_comment, describe_nolint_action, NolintResult};
 
+/// Type alias for file data used in batch processing: (path, issues as (line, message, code),
+/// issue count).
+type FileIssueData = (PathBuf, Vec<(usize, String, String)>, usize);
+
+/// Type alias for a batch of file references used in parallel processing.
+type FileBatch<'a> = Vec<&'a FileIssueData>;
+
+/// Type alias for batch file entries passed to the AI provider.
+type BatchFileInput<'a> = (&'a std::path::Path, &'a [(usize, String, String)]);
+
 /// Configuration for AI fix operations
 #[derive(Debug, Clone)]
 pub struct AiFixConfig {
@@ -479,7 +489,7 @@ fn run_cli_file_fix_parallel(
     };
 
     // Prepare file data
-    let file_data: Vec<(PathBuf, Vec<(usize, String, String)>, usize)> = file_list
+    let file_data: Vec<FileIssueData> = file_list
         .iter()
         .map(|(path, issues)| {
             let issues_data: Vec<(usize, String, String)> = issues
@@ -498,7 +508,7 @@ fn run_cli_file_fix_parallel(
         .collect();
 
     // Split into batches
-    let batches: Vec<Vec<&(PathBuf, Vec<(usize, String, String)>, usize)>> = file_data
+    let batches: Vec<FileBatch<'_>> = file_data
         .iter()
         .collect::<Vec<_>>()
         .chunks(FILES_PER_BATCH)
@@ -509,7 +519,7 @@ fn run_cli_file_fix_parallel(
     let total_issues: usize = file_data.iter().map(|(_, _, count)| count).sum();
     let actual_parallel = config.parallel_jobs.min(total_batches);
     let actual_files_per_batch = if total_batches > 0 {
-        (total_files + total_batches - 1) / total_batches // ceiling division
+        total_files.div_ceil(total_batches)
     } else {
         total_files
     };
@@ -584,7 +594,7 @@ fn run_cli_file_fix_parallel(
             let provider = AiProvider::new(provider_config_clone.clone());
 
             // Build batch file list for the provider
-            let batch_files: Vec<(&std::path::Path, &[(usize, String, String)])> = batch
+            let batch_files: Vec<BatchFileInput<'_>> = batch
                 .iter()
                 .map(|(path, issues, _count)| (path.as_path(), issues.as_slice()))
                 .collect();
@@ -1353,9 +1363,11 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     println!("  Navigation: [p]revious, [g]o to #N, [q]uit");
     println!();
 
-    let mut fix_result = AiFixResult::default();
-    fix_result.errors = errors;
-    fix_result.suggested = successful;
+    let mut fix_result = AiFixResult {
+        errors,
+        suggested: successful,
+        ..AiFixResult::default()
+    };
 
     let mut idx = 0;
     let mut processed = vec![false; total];

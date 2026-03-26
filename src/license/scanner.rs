@@ -68,7 +68,7 @@ impl PackageLicense {
         Self {
             name: name.to_string(),
             version: version.to_string(),
-            license: SpdxLicense::from_str(license),
+            license: SpdxLicense::parse_license(license),
             license_text: license.to_string(),
             ecosystem: ecosystem.to_string(),
             license_file: None,

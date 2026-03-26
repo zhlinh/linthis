@@ -14,6 +14,10 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::process::{Command, Stdio};
 
+/// Type alias for batch file fix input: each entry is a file path and its associated issues
+/// (line number, message, code).
+type BatchFileEntry<'a> = (&'a std::path::Path, &'a [(usize, String, String)]);
+
 /// Supported AI provider types
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -898,7 +902,7 @@ If you're unsure about related locations, use Grep to search for the function na
     /// Returns a map of file_path -> diff for each file that was modified.
     pub fn fix_files_batch_with_cli(
         &self,
-        files: &[(&std::path::Path, &[(usize, String, String)])],
+        files: &[BatchFileEntry<'_>],
         working_dir: &std::path::Path,
     ) -> Result<std::collections::HashMap<std::path::PathBuf, String>, String> {
         use std::process::Stdio;

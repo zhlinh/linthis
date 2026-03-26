@@ -222,8 +222,8 @@ impl LanguageComplexityAnalyzer for PythonComplexityAnalyzer {
 
                 // Find function end
                 let mut function_end = i;
-                for j in (i + 1)..lines.len() {
-                    let next_line = lines[j];
+                for (offset, next_line) in lines[(i + 1)..].iter().enumerate() {
+                    let j = i + 1 + offset;
                     let next_trimmed = next_line.trim();
 
                     // Empty lines or comments don't end functions
@@ -317,7 +317,7 @@ fn extract_class_name(line: &str) -> Option<String> {
     let line = line.trim();
     let start = line.find("class ")? + 6;
     let rest = &line[start..];
-    let end = rest.find(|c: char| c == '(' || c == ':')?;
+    let end = rest.find(['(', ':'])?;
     let name = rest[..end].trim();
     if !name.is_empty() {
         Some(name.to_string())
