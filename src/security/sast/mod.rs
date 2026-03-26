@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use finding::SastFinding;
 pub use report::format_sast_report;
@@ -39,7 +39,7 @@ pub use tools::{BanditScanner, FlawfinderScanner, GosecScanner, OpenGrepScanner,
 use crate::security::vulnerability::Severity;
 
 /// Aggregated SAST scan result.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SastResult {
     /// All findings from all scanners
     pub findings: Vec<SastFinding>,

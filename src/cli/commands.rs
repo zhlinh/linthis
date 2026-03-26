@@ -44,6 +44,16 @@ pub struct Cli {
     #[arg(short = 'f', long)]
     pub format_only: bool,
 
+    /// Checks to run (comma-separated): lint, security, complexity, all
+    ///
+    /// Overrides the `checks.run` list in config. Default: ["lint"].
+    /// Examples:
+    ///   --checks lint,security        Run lint + security
+    ///   --checks all                  Run lint + security + complexity
+    ///   --checks security             Run only security (no lint)
+    #[arg(long, value_delimiter = ',')]
+    pub checks: Option<Vec<String>>,
+
     /// Check only staged files (git cached)
     #[arg(short = 's', long)]
     pub staged: bool,
