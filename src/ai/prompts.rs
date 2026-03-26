@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Categories of lint issues for specialized prompts
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IssueCategory {
     /// Code style issues (formatting, naming)
@@ -36,13 +36,8 @@ pub enum IssueCategory {
     /// Best practices
     BestPractice,
     /// General/unknown category
+    #[default]
     General,
-}
-
-impl Default for IssueCategory {
-    fn default() -> Self {
-        Self::General
-    }
 }
 
 impl std::str::FromStr for IssueCategory {

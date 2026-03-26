@@ -366,7 +366,7 @@ fn extract_class_name(line: &str) -> Option<String> {
     let keyword_len = if line.contains("class ") { 6 } else { 10 };
 
     let rest = &line[class_pos + keyword_len..];
-    let end = rest.find(|c: char| c == '<' || c == '{' || c == ' ' || c == '(')?;
+    let end = rest.find(['<', '{', ' ', '('])?;
     let name = rest[..end].trim();
 
     if !name.is_empty() {

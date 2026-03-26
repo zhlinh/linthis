@@ -177,6 +177,8 @@ mod tests {
     fn test_complexity_command_options() {
         let options = ComplexityCommandOptions {
             path: PathBuf::from("."),
+            staged: false,
+            modified: false,
             include: None,
             exclude: None,
             threshold: Some(10),

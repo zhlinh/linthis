@@ -26,7 +26,7 @@ pub enum LicenseReportFormat {
 }
 
 impl LicenseReportFormat {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_format(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "json" => LicenseReportFormat::Json,
             "spdx" => LicenseReportFormat::Spdx,
@@ -140,7 +140,7 @@ fn format_human(result: &ScanResult, violations: &[PolicyViolation]) -> String {
     licenses.sort_by(|a, b| b.1.cmp(a.1));
 
     for (license, count) in licenses {
-        let spdx = SpdxLicense::from_str(license);
+        let spdx = SpdxLicense::parse_license(license);
         let icon = if spdx.is_permissive() {
             "✅"
         } else if spdx.is_copyleft() {
@@ -223,8 +223,8 @@ fn format_spdx(result: &ScanResult) -> String {
 
     output.push_str("SPDXVersion: SPDX-2.3\n");
     output.push_str("DataLicense: CC0-1.0\n");
-    output.push_str(&format!("SPDXID: SPDXRef-DOCUMENT\n"));
-    output.push_str(&format!("DocumentName: linthis-license-scan\n"));
+    output.push_str("SPDXID: SPDXRef-DOCUMENT\n");
+    output.push_str("DocumentName: linthis-license-scan\n");
     output.push_str(&format!(
         "DocumentNamespace: https://linthis.io/spdx/{}\n",
         chrono::Utc::now().format("%Y%m%d%H%M%S")
@@ -241,14 +241,14 @@ fn format_spdx(result: &ScanResult) -> String {
         output.push_str(&format!("PackageName: {}\n", pkg.name));
         output.push_str(&format!("SPDXID: SPDXRef-Package-{}\n", i + 1));
         output.push_str(&format!("PackageVersion: {}\n", pkg.version));
-        output.push_str(&format!("PackageDownloadLocation: NOASSERTION\n"));
-        output.push_str(&format!("FilesAnalyzed: false\n"));
+        output.push_str("PackageDownloadLocation: NOASSERTION\n");
+        output.push_str("FilesAnalyzed: false\n");
         output.push_str(&format!(
             "PackageLicenseConcluded: {}\n",
             pkg.license.to_spdx()
         ));
         output.push_str(&format!("PackageLicenseDeclared: {}\n", pkg.license_text));
-        output.push_str(&format!("PackageCopyrightText: NOASSERTION\n"));
+        output.push_str("PackageCopyrightText: NOASSERTION\n");
         output.push('\n');
     }
 
@@ -273,15 +273,15 @@ mod tests {
     #[test]
     fn test_report_format_from_str() {
         assert_eq!(
-            LicenseReportFormat::from_str("json"),
+            LicenseReportFormat::parse_format("json"),
             LicenseReportFormat::Json
         );
         assert_eq!(
-            LicenseReportFormat::from_str("spdx"),
+            LicenseReportFormat::parse_format("spdx"),
             LicenseReportFormat::Spdx
         );
         assert_eq!(
-            LicenseReportFormat::from_str("human"),
+            LicenseReportFormat::parse_format("human"),
             LicenseReportFormat::Human
         );
     }

@@ -52,7 +52,7 @@ pub enum SpdxLicense {
 
 impl SpdxLicense {
     /// Parse SPDX identifier string
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_license(s: &str) -> Self {
         let normalized = s.trim().to_uppercase();
         match normalized.as_str() {
             "MIT" => SpdxLicense::MIT,
@@ -258,7 +258,7 @@ pub fn parse_spdx_expression(s: &str) -> SpdxExpression {
     // Remove parentheses
     let s = s.trim_start_matches('(').trim_end_matches(')').trim();
 
-    SpdxExpression::License(SpdxLicense::from_str(s))
+    SpdxExpression::License(SpdxLicense::parse_license(s))
 }
 
 #[cfg(test)]
@@ -267,9 +267,9 @@ mod tests {
 
     #[test]
     fn test_spdx_from_str() {
-        assert_eq!(SpdxLicense::from_str("MIT"), SpdxLicense::MIT);
-        assert_eq!(SpdxLicense::from_str("Apache-2.0"), SpdxLicense::Apache2);
-        assert_eq!(SpdxLicense::from_str("GPL-3.0"), SpdxLicense::GPL3);
+        assert_eq!(SpdxLicense::parse_license("MIT"), SpdxLicense::MIT);
+        assert_eq!(SpdxLicense::parse_license("Apache-2.0"), SpdxLicense::Apache2);
+        assert_eq!(SpdxLicense::parse_license("GPL-3.0"), SpdxLicense::GPL3);
     }
 
     #[test]

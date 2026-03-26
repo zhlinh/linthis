@@ -282,7 +282,7 @@ fn detect_ts_function(line: &str) -> Option<String> {
     if (line.starts_with("const ") || line.starts_with("let ") || line.starts_with("var "))
         && (line.contains("=>") || line.contains("= function"))
     {
-        let parts: Vec<&str> = line.split(|c| c == '=' || c == ':').collect();
+        let parts: Vec<&str> = line.split(['=', ':']).collect();
         if !parts.is_empty() {
             let name = parts[0]
                 .trim()
@@ -337,7 +337,7 @@ fn detect_ts_function(line: &str) -> Option<String> {
 fn extract_class_name(line: &str) -> Option<String> {
     let start = line.find("class ")? + 6;
     let rest = &line[start..];
-    let end = rest.find(|c: char| c == '<' || c == '{' || c == ' ')?;
+    let end = rest.find(['<', '{', ' '])?;
     let name = rest[..end].trim();
     if !name.is_empty() {
         Some(name.to_string())

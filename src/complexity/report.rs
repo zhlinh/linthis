@@ -96,7 +96,7 @@ fn format_human(result: &AnalysisResult) -> String {
                 lang, stats.total_files, stats.total_functions, stats.avg_cyclomatic
             ));
         }
-        output.push_str("\n");
+        output.push('\n');
     }
 
     // High complexity files
@@ -143,7 +143,7 @@ fn format_human(result: &AnalysisResult) -> String {
                 }
             }
         }
-        output.push_str("\n");
+        output.push('\n');
     }
 
     // Top 10 most complex files
@@ -227,7 +227,7 @@ fn format_markdown(result: &AnalysisResult) -> String {
                 lang, stats.total_files, stats.total_functions, stats.avg_cyclomatic
             ));
         }
-        output.push_str("\n");
+        output.push('\n');
     }
 
     // High complexity files
@@ -256,7 +256,7 @@ fn format_markdown(result: &AnalysisResult) -> String {
                 emoji
             ));
         }
-        output.push_str("\n");
+        output.push('\n');
     }
 
     // Top complex functions

@@ -253,8 +253,7 @@ fn find_scope_end(lines: &[&str], start: usize, language: &str) -> usize {
     // For Python, use indentation
     if language == "python" {
         let base_indent = lines[start].len() - lines[start].trim_start().len();
-        for i in start + 1..lines.len() {
-            let line = lines[i];
+        for (i, line) in lines.iter().enumerate().skip(start + 1) {
             if line.trim().is_empty() {
                 continue;
             }
@@ -270,8 +269,8 @@ fn find_scope_end(lines: &[&str], start: usize, language: &str) -> usize {
     let mut brace_count = 0;
     let mut found_open = false;
 
-    for i in start..lines.len() {
-        for ch in lines[i].chars() {
+    for (i, line) in lines.iter().enumerate().skip(start) {
+        for ch in line.chars() {
             if ch == '{' {
                 brace_count += 1;
                 found_open = true;

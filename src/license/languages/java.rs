@@ -91,8 +91,7 @@ impl JavaLicenseScanner {
 
         for line in stdout.lines() {
             // Parse Maven dependency tree format
-            let trimmed = line
-                .trim_start_matches(|c| c == '+' || c == '|' || c == '\\' || c == '-' || c == ' ');
+            let trimmed = line.trim_start_matches(['+', '|', '\\', '-', ' ']);
             let parts: Vec<&str> = trimmed.split(':').collect();
 
             if parts.len() >= 4 {
@@ -167,8 +166,7 @@ impl JavaLicenseScanner {
 
         for line in stdout.lines() {
             // Parse Gradle dependency format: group:name:version
-            let trimmed = line
-                .trim_start_matches(|c| c == '+' || c == '|' || c == '\\' || c == '-' || c == ' ');
+            let trimmed = line.trim_start_matches(['+', '|', '\\', '-', ' ']);
 
             if trimmed.contains(':') && !trimmed.starts_with("project") {
                 let parts: Vec<&str> = trimmed.split(':').collect();
