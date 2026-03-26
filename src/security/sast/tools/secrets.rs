@@ -292,23 +292,32 @@ impl SecretsScanner {
         Self { compiled }
     }
 
-    fn scan_content(
-        &self,
-        file_path: &Path,
-        content: &str,
-    ) -> Vec<SastFinding> {
+    fn scan_content(&self, file_path: &Path, content: &str) -> Vec<SastFinding> {
         let mut findings = Vec::new();
-        let ext = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         // Skip binary/non-source files
         if matches!(
             ext,
-            "png" | "jpg" | "jpeg" | "gif" | "ico" | "woff" | "woff2" | "ttf"
-                | "eot" | "zip" | "tar" | "gz" | "bin" | "exe" | "dll" | "so"
-                | "dylib" | "pdf" | "lock"
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "ico"
+                | "woff"
+                | "woff2"
+                | "ttf"
+                | "eot"
+                | "zip"
+                | "tar"
+                | "gz"
+                | "bin"
+                | "exe"
+                | "dll"
+                | "so"
+                | "dylib"
+                | "pdf"
+                | "lock"
         ) {
             return findings;
         }
@@ -378,8 +387,8 @@ impl SecretsScanner {
                         "rb" => "ruby",
                         "php" => "php",
                         "swift" => "swift",
-                        "yaml" | "yml" | "toml" | "json" | "env" | "cfg" | "ini"
-                        | "conf" | "properties" => "config",
+                        "yaml" | "yml" | "toml" | "json" | "env" | "cfg" | "ini" | "conf"
+                        | "properties" => "config",
                         _ => "unknown",
                     };
 
@@ -394,8 +403,7 @@ impl SecretsScanner {
                         end_column: Some(m.end() + 1),
                         code_snippet: Some(line.to_string()),
                         fix_suggestion: Some(
-                            "Move secret to environment variable or secrets manager"
-                                .to_string(),
+                            "Move secret to environment variable or secrets manager".to_string(),
                         ),
                         category: "secrets".to_string(),
                         cwe_ids: vec![pattern.cwe.clone()],
@@ -535,10 +543,29 @@ fn is_placeholder_value(matched: &str) -> bool {
 
     // Common placeholder words
     let placeholder_words = [
-        "your_", "my_", "insert", "replace", "change", "update", "put_",
-        "placeholder", "example", "sample", "dummy", "fake", "mock",
-        "test", "demo", "todo", "fixme", "changeme", "redacted",
-        "xxxxxxxx", "abcdef", "123456", "000000",
+        "your_",
+        "my_",
+        "insert",
+        "replace",
+        "change",
+        "update",
+        "put_",
+        "placeholder",
+        "example",
+        "sample",
+        "dummy",
+        "fake",
+        "mock",
+        "test",
+        "demo",
+        "todo",
+        "fixme",
+        "changeme",
+        "redacted",
+        "xxxxxxxx",
+        "abcdef",
+        "123456",
+        "000000",
     ];
     for word in &placeholder_words {
         if lower.contains(word) {

@@ -871,6 +871,19 @@ fn main() -> ExitCode {
                 result.checks_run.push("lint".to_string());
             }
 
+            // Collect target files for security/complexity
+            let target_files: Vec<std::path::PathBuf> = cli
+                .paths
+                .iter()
+                .filter(|p| p.is_file())
+                .map(|p| p.to_path_buf())
+                .collect();
+
+            // Per-file cache paths
+            let cache_dir = runtime_project_root.join(".linthis");
+            let security_cache_path = cache_dir.join("security-cache.json");
+            let complexity_cache_path = cache_dir.join("complexity-cache.json");
+
             // Run security check if in checks list
             if checks_list.iter().any(|c| c == "security") {
                 let security_config = runtime_config
@@ -878,25 +891,76 @@ fn main() -> ExitCode {
                     .security
                     .clone()
                     .unwrap_or_default();
-                if !cli.quiet {
-                    eprintln!("🔒 Running security check...");
+
+                // Per-file cache: only scan files whose content changed
+                let mut cache = PerFileCache::load(&security_cache_path);
+                let (changed, cached_findings, cache_hits) = cache.partition_files(&target_files, cli.no_cache);
+
+                if changed.is_empty() && cache_hits > 0 {
+                    if !cli.quiet {
+                        eprintln!("🔒 Security check (cached)");
+                    }
+                } else if !cli.quiet {
+                    if cache_hits == 0 {
+                        eprintln!("🔒 Running security check...");
+                    } else {
+                        eprintln!(
+                            "🔒 Running security check ({} cached, {} changed)...",
+                            cache_hits,
+                            changed.len(),
+                        );
+                    }
                 }
-                // Pass specific files if -i was used, otherwise scan project root
-                let security_files: Vec<std::path::PathBuf> = cli
-                    .paths
-                    .iter()
-                    .filter(|p| p.is_file())
-                    .map(|p| p.to_path_buf())
-                    .collect();
-                let sast_result = run_sast_scan(
-                    &runtime_project_root,
-                    &security_files,
-                    &security_config,
-                );
-                if sast_result.critical_high_count() > 0 {
+
+                // Scan only changed files
+                let fresh_result = if !changed.is_empty() {
+                    let r = run_sast_scan(&runtime_project_root, &changed, &security_config);
+                    // Update cache for scanned files
+                    cache.update_from_sast(&changed, &r);
+                    cache.save(&security_cache_path);
+                    r
+                } else {
+                    linthis::security::sast::SastResult {
+                        findings: vec![],
+                        by_severity: std::collections::HashMap::new(),
+                        by_tool: std::collections::HashMap::new(),
+                        scanner_status: vec![],
+                        unavailable_tools: vec![],
+                        duration_ms: 0,
+                        errors: vec![],
+                    }
+                };
+
+                // Merge cached + fresh findings
+                let mut merged = fresh_result;
+                let mut all_findings = cached_findings;
+                all_findings.append(&mut merged.findings);
+                merged.findings = all_findings;
+                // Rebuild counts
+                merged.by_severity.clear();
+                for f in &merged.findings {
+                    *merged.by_severity.entry(f.severity.to_string()).or_insert(0) += 1;
+                }
+                merged.by_tool.clear();
+                for f in &merged.findings {
+                    *merged.by_tool.entry(f.source.clone()).or_insert(0) += 1;
+                }
+
+                if merged.critical_high_count() > 0 {
                     result.exit_code = std::cmp::max(result.exit_code, 1);
                 }
-                result.security = Some(sast_result);
+                // Merge SAST unavailable tools into main result
+                for ut in &merged.unavailable_tools {
+                    result.unavailable_tools.push(
+                        linthis::utils::types::UnavailableTool::new(
+                            &ut.tool,
+                            &ut.languages.join(", "),
+                            "sast",
+                            &ut.install_hint,
+                        ),
+                    );
+                }
+                result.security = Some(merged);
                 result.checks_run.push("security".to_string());
             }
 
@@ -907,43 +971,65 @@ fn main() -> ExitCode {
                     .complexity
                     .clone()
                     .unwrap_or_default();
-                if !cli.quiet {
-                    eprintln!("📊 Running complexity check...");
+
+                // Per-file cache: only analyze files whose content changed
+                let mut cache = PerFileCache::load(&complexity_cache_path);
+                let (changed, _cached_findings, cache_hits) = cache.partition_files(&target_files, cli.no_cache);
+
+                if changed.is_empty() && cache_hits > 0 {
+                    if !cli.quiet {
+                        eprintln!("📊 Complexity check (cached)");
+                    }
+                } else if !cli.quiet {
+                    if cache_hits == 0 {
+                        eprintln!("📊 Running complexity check...");
+                    } else {
+                        eprintln!(
+                            "📊 Running complexity check ({} cached, {} changed)...",
+                            cache_hits,
+                            changed.len(),
+                        );
+                    }
                 }
-                // Use CLI-specified files if available
-                let checked_files: Vec<std::path::PathBuf> = cli
-                    .paths
-                    .iter()
-                    .filter(|p| p.is_file())
-                    .map(|p| p.to_path_buf())
-                    .collect();
-                // Catch panics from complexity analyzer (e.g., parser bugs in certain files)
-                let complexity_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run_complexity_analysis(
-                        &runtime_project_root,
-                        &checked_files,
-                        &complexity_config,
-                    )
-                }));
-                match complexity_result {
-                    Ok(Ok(analysis)) => {
-                        if complexity_config.fail_on_high.unwrap_or(false)
-                            && analysis.summary.high_complexity_files > 0
-                        {
-                            result.exit_code = std::cmp::max(result.exit_code, 1);
+
+                // Analyze only changed files
+                if !changed.is_empty() {
+                    let analysis_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        run_complexity_analysis(
+                            &runtime_project_root,
+                            &changed,
+                            &complexity_config,
+                        )
+                    }));
+                    match analysis_result {
+                        Ok(Ok(analysis)) => {
+                            // Update cache for analyzed files
+                            cache.update_from_complexity(&changed, &analysis);
+                            cache.save(&complexity_cache_path);
+
+                            if complexity_config.fail_on_high.unwrap_or(false)
+                                && analysis.summary.high_complexity_files > 0
+                            {
+                                result.exit_code = std::cmp::max(result.exit_code, 1);
+                            }
+                            result.complexity = Some(analysis);
                         }
-                        result.complexity = Some(analysis);
-                    }
-                    Ok(Err(e)) => {
-                        if !cli.quiet {
-                            eprintln!("Complexity analysis error: {}", e);
+                        Ok(Err(e)) => {
+                            if !cli.quiet {
+                                eprintln!("Complexity analysis error: {}", e);
+                            }
+                        }
+                        Err(_) => {
+                            if !cli.quiet {
+                                eprintln!("Complexity analysis encountered an internal error");
+                            }
                         }
                     }
-                    Err(_) => {
-                        if !cli.quiet {
-                            eprintln!("Complexity analysis encountered an internal error");
-                        }
-                    }
+                }
+                // If all files were cached (no changed files to analyze),
+                // set a minimal result to signal complexity was checked
+                if result.complexity.is_none() && cache_hits > 0 {
+                    result.complexity = Some(linthis::complexity::AnalysisResult::new());
                 }
                 result.checks_run.push("complexity".to_string());
             }
@@ -1180,6 +1266,133 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
             ExitCode::from(2)
+        }
+    }
+}
+
+/// Per-file cache for security and complexity checks.
+///
+/// Stores findings per file keyed by content hash (xxHash64).
+/// Only changed files are re-scanned; cached results are reused.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct PerFileCache {
+    /// file_path (relative) → (content_hash, serialized findings JSON)
+    entries: std::collections::HashMap<String, (u64, String)>,
+}
+
+impl PerFileCache {
+    fn load(path: &std::path::Path) -> Self {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self, path: &std::path::Path) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string(self) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+
+    /// Partition files into changed (need scan) and cached (reuse findings).
+    ///
+    /// Returns (changed_files, cached_findings, cache_hit_count).
+    fn partition_files(
+        &self,
+        files: &[std::path::PathBuf],
+        no_cache: bool,
+    ) -> (Vec<std::path::PathBuf>, Vec<linthis::security::sast::SastFinding>, usize) {
+        use linthis::cache::file_hash;
+
+        let mut changed = Vec::new();
+        let mut cached_findings = Vec::new();
+        let mut cache_hits = 0;
+
+        for file in files {
+            let key = file.to_string_lossy().to_string();
+
+            if no_cache {
+                changed.push(file.clone());
+                continue;
+            }
+
+            let current_hash = match file_hash(file) {
+                Ok(h) => h,
+                Err(_) => {
+                    changed.push(file.clone());
+                    continue;
+                }
+            };
+
+            match self.entries.get(&key) {
+                Some((cached_hash, findings_json)) if *cached_hash == current_hash => {
+                    // Cache hit: parse cached findings
+                    cache_hits += 1;
+                    if let Ok(findings) = serde_json::from_str::<Vec<linthis::security::sast::SastFinding>>(findings_json) {
+                        cached_findings.extend(findings);
+                    }
+                    // Even if parse fails, it's still a cache hit (clean file)
+                }
+                _ => {
+                    changed.push(file.clone());
+                }
+            }
+        }
+
+        (changed, cached_findings, cache_hits)
+    }
+
+    /// Update cache entries from SAST scan results.
+    fn update_from_sast(
+        &mut self,
+        files: &[std::path::PathBuf],
+        result: &linthis::security::sast::SastResult,
+    ) {
+        use linthis::cache::file_hash;
+
+        for file in files {
+            let key = file.to_string_lossy().to_string();
+            let hash = file_hash(file).unwrap_or(0);
+
+            // Collect findings for this specific file
+            let file_findings: Vec<&linthis::security::sast::SastFinding> = result
+                .findings
+                .iter()
+                .filter(|f| f.file_path == *file)
+                .collect();
+
+            let json = serde_json::to_string(&file_findings).unwrap_or_else(|_| "[]".to_string());
+            self.entries.insert(key, (hash, json));
+        }
+    }
+
+    /// Update cache entries from complexity analysis results.
+    fn update_from_complexity(
+        &mut self,
+        files: &[std::path::PathBuf],
+        result: &linthis::complexity::AnalysisResult,
+    ) {
+        use linthis::cache::file_hash;
+
+        for file in files {
+            let key = file.to_string_lossy().to_string();
+            let hash = file_hash(file).unwrap_or(0);
+
+            // Find FileMetrics for this file and store slim version
+            let file_metrics: Option<&linthis::complexity::FileMetrics> = result
+                .files
+                .iter()
+                .find(|f| f.path == *file);
+
+            let json = if let Some(metrics) = file_metrics {
+                serde_json::to_string(metrics).unwrap_or_else(|_| "null".to_string())
+            } else {
+                "null".to_string()
+            };
+            self.entries.insert(key, (hash, json));
         }
     }
 }
