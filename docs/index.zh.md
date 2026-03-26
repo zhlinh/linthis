@@ -8,13 +8,15 @@
 
 ## 功能特性
 
-- **单一命令**：同时运行代码检查和格式化
+- **单一命令**：同时运行代码检查、格式化、安全扫描和复杂度分析
 - **多语言支持**：Rust、Python、TypeScript、JavaScript、Go、Java、C++、Swift、Kotlin、Lua、Dart、Shell、Ruby、PHP、Scala、C# 等
 - **自动检测**：自动检测项目中使用的编程语言
+- **安全扫描（SAST）**：内置 secrets 检测 + OpenGrep/Semgrep、Bandit、Gosec、Flawfinder 集成
+- **复杂度分析**：函数级圈复杂度/认知复杂度分析，支持阈值拦截
 - **灵活配置**：支持项目配置、全局配置和 CLI 参数
 - **插件系统**：通过 Git 仓库共享和复用配置
 - **格式化预设**：支持 Google、Airbnb、Standard 等流行代码风格
-- **并行处理**：利用多核 CPU 加速文件处理
+- **并行处理**：利用多核 CPU 加速文件处理，per-file 缓存
 
 ## 快速链接
 

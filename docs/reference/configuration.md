@@ -110,6 +110,65 @@ verbose = true
 
 ---
 
+## Checks Configuration
+
+Control which checks run and their settings. By default, `lint`, `security`, and `complexity` all run.
+
+```toml
+[checks]
+# Which checks to run (default: ["lint", "security", "complexity"])
+run = ["lint", "security", "complexity"]
+```
+
+### `[checks.security]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `scan_type` | string | `"all"` | `"sca"` (dependencies), `"sast"` (source code), `"all"` |
+| `fail_on` | string | | Minimum severity to fail: `"critical"`, `"high"`, `"medium"`, `"low"` |
+| `sast_config` | string | | Path to custom SAST rules file |
+
+```toml
+[checks.security]
+scan_type = "sast"
+fail_on = "high"
+```
+
+### `[checks.complexity]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `threshold` | integer | `10` | Cyclomatic complexity threshold per function |
+| `fail_on_high` | boolean | `false` | Exit with error if any function exceeds threshold |
+
+```toml
+[checks.complexity]
+threshold = 15
+fail_on_high = true
+```
+
+### Secrets Scanner Configuration
+
+Custom secrets patterns via `.linthis/secrets.toml`:
+
+```toml
+# Add custom patterns
+[[patterns]]
+id = "secrets/internal-token"
+description = "Internal service token detected"
+regex = '"tok_[A-Za-z0-9]{32,}"'
+severity = "high"
+cwe = "CWE-798"
+
+# Disable built-in patterns
+[disabled]
+rules = ["secrets/jwt-token"]
+```
+
+Config resolution priority: `--sast-config` > `secrets.toml` in project root > `.linthis/secrets.toml` > `~/.linthis/secrets.toml` > built-in patterns.
+
+---
+
 ## Plugin Configuration
 
 ### `[plugins]`

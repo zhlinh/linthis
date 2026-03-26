@@ -8,13 +8,15 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 
 ## Features
 
-- **Single Command**: Run both linting and formatting simultaneously
+- **Single Command**: Run linting, formatting, security, and complexity checks simultaneously
 - **Multi-Language Support**: Rust, Python, TypeScript, JavaScript, Go, Java, C++, Swift, Kotlin, Lua, Dart, Shell, Ruby, PHP, Scala, C# and more
 - **Auto-Detection**: Automatically detect programming languages used in your project
+- **Security Scanning (SAST)**: Built-in secrets detection + OpenGrep/Semgrep, Bandit, Gosec, Flawfinder
+- **Complexity Analysis**: Cyclomatic/cognitive complexity per function with threshold enforcement
 - **Flexible Configuration**: Support for project config, global config, and CLI parameters
 - **Plugin System**: Share and reuse configurations via Git repositories
 - **Format Presets**: Support for popular code styles like Google, Airbnb, Standard
-- **Parallel Processing**: Leverage multi-core CPU for faster file processing
+- **Parallel Processing**: Leverage multi-core CPU for faster file processing with per-file caching
 
 ## Quick Links
 

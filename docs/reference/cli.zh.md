@@ -18,6 +18,7 @@ linthis [OPTIONS] [COMMAND]
 | `-f` | `--format-only` | 仅格式化，不检查 | `-f` |
 | `-s` | `--staged` | 仅检查 Git 暂存文件 | `-s` |
 | `-m` | `--modified` | 检查所有本地修改文件（暂存 + 未暂存） | `-m` |
+| | `--checks` | 运行的检查项（逗号分隔） | `--checks lint,security` |
 | `-l` | `--lang` | 语言（逗号分隔） | `-l python,rust` |
 | `-o` | `--output` | 输出格式 | `-o json` |
 | `-v` | `--verbose` | 详细输出 | `-v` |
@@ -435,6 +436,64 @@ linthis format --list-backups         # 列出可用备份
 ```
 
 每次格式化操作前会自动创建备份。如果格式化结果不符合预期，可通过 `--undo` 恢复。
+
+---
+
+## security
+
+安全漏洞扫描（SCA 依赖扫描 + SAST 源码分析）。
+
+```bash
+linthis security [OPTIONS] [PATH]
+```
+
+| 选项 | 说明 | 默认值 |
+|------|------|--------|
+| `--scan-type` | 扫描类型：`all`、`sca`、`sast` | `all` |
+| `-s`, `--severity` | 最低报告严重级别 | |
+| `--fix` | 显示修复建议 | |
+| `-f`, `--format` | 输出格式：`human`、`json`、`sarif` | `human` |
+| `--sast-config` | 自定义 SAST 规则文件 | |
+| `--fail-on` | 达到严重级别时返回错误 | |
+
+**SAST 工具**（按语言自动检测）：
+
+| 工具 | 语言 | 安装 |
+|------|------|------|
+| linthis-secrets（内置） | 全语言 | 始终可用 |
+| OpenGrep / Semgrep | 30+ 语言 | `pip install opengrep` |
+| Bandit | Python | `pip install bandit` |
+| Gosec | Go | `go install github.com/securego/gosec/v2/cmd/gosec@latest` |
+| Flawfinder | C/C++ | `pip install flawfinder` |
+
+**行内忽略指令**（secrets 扫描器）：
+
+```python
+KEY = "sk-real-key"  # linthis:ignore secrets
+# linthis:ignore-next-line secrets/sk-prefix-key
+KEY = "sk-real-key"
+```
+
+---
+
+## complexity
+
+代码复杂度分析，支持趋势追踪。
+
+```bash
+linthis complexity [OPTIONS] [PATH]
+```
+
+| 选项 | 说明 | 默认值 |
+|------|------|--------|
+| `-s`, `--staged` | 仅分析暂存文件 | |
+| `-m`, `--modified` | 仅分析修改文件 | |
+| `-t`, `--threshold` | 圈复杂度阈值 | |
+| `--preset` | 阈值预设：`default`、`strict`、`lenient` | `default` |
+| `-o`, `--output` | 输出格式：`human`、`json`、`markdown`、`html` | `human` |
+| `--with-trends` | 包含趋势分析 | |
+| `--only-high` | 仅显示超阈值函数 | |
+| `--fail-on-high` | 超阈值时返回错误 | |
 
 ---
 
