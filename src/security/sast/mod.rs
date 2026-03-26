@@ -29,6 +29,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub use finding::SastFinding;
@@ -37,6 +38,14 @@ pub use scanner::{SastScanOptions, SastScanner};
 pub use tools::{BanditScanner, FlawfinderScanner, GosecScanner, OpenGrepScanner, SecretsScanner};
 
 use crate::security::vulnerability::Severity;
+
+/// Info about a SAST tool that was needed but not installed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SastUnavailableTool {
+    pub tool: String,
+    pub languages: Vec<String>,
+    pub install_hint: String,
+}
 
 /// Aggregated SAST scan result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +58,9 @@ pub struct SastResult {
     pub by_tool: HashMap<String, usize>,
     /// Scanner availability status (name -> available)
     pub scanner_status: Vec<(String, bool)>,
+    /// Tools that were needed (by language) but not installed
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unavailable_tools: Vec<SastUnavailableTool>,
     /// Scan duration in milliseconds
     pub duration_ms: u64,
     /// Any errors that occurred
@@ -110,46 +122,93 @@ impl SastAggregator {
     }
 
     /// Run SAST scan across all available scanners.
-    pub fn scan(
-        &self,
-        path: &Path,
-        files: &[PathBuf],
-        options: &SastScanOptions,
-    ) -> SastResult {
+    ///
+    /// Scanners are filtered by language: only scanners that support at least one
+    /// language present in the target files are invoked. Unavailable but needed
+    /// scanners are reported in `SastResult::unavailable_tools`.
+    #[allow(clippy::unnecessary_to_owned)]
+    pub fn scan(&self, path: &Path, files: &[PathBuf], options: &SastScanOptions) -> SastResult {
         let start = Instant::now();
         let mut all_findings = Vec::new();
         let mut scanner_status = Vec::new();
+        let mut unavailable_tools = Vec::new();
         let mut errors = Vec::new();
 
         // If path is a file, use its parent as the scan directory
-        // and pass the file as a specific target
         let (scan_dir, scan_files) = if path.is_file() {
             let parent = path.parent().unwrap_or(Path::new("."));
-            let file_list = vec![path.to_path_buf()];
-            (parent.to_path_buf(), file_list)
+            (parent.to_path_buf(), vec![path.to_path_buf()])
         } else {
             (path.to_path_buf(), files.to_vec())
         };
 
-        for scanner in &self.scanners {
-            let available = scanner.is_available();
-            scanner_status.push((scanner.name().to_string(), available));
+        // Detect languages from target files
+        let detected_langs = detect_languages_from_files(&scan_files, &scan_dir);
 
-            if !available {
+        // Filter scanners by language relevance and check availability
+        let mut needed_scanners: Vec<&dyn SastScanner> = Vec::new();
+
+        for scanner in &self.scanners {
+            let supported = scanner.supported_languages();
+            let is_universal = supported.contains(&"*");
+            let is_needed = is_universal
+                || supported
+                    .iter()
+                    .any(|lang| detected_langs.contains(&lang.to_string()));
+
+            if !is_needed {
+                // Scanner not relevant for these files — skip silently
                 continue;
             }
 
-            match scanner.scan(&scan_dir, &scan_files, options) {
-                Ok(mut findings) => {
-                    // Apply severity filter if set
-                    if let Some(ref threshold) = options.severity_threshold {
-                        findings.retain(|f| f.meets_severity_threshold(threshold));
+            let available = scanner.is_available();
+            scanner_status.push((scanner.name().to_string(), available));
+
+            if available {
+                needed_scanners.push(scanner.as_ref());
+            } else {
+                // Needed but not installed — report
+                let relevant_langs: Vec<String> = if is_universal {
+                    detected_langs.iter().cloned().collect()
+                } else {
+                    supported
+                        .iter()
+                        .filter(|l| detected_langs.contains(&l.to_string()))
+                        .map(|l| l.to_string())
+                        .collect()
+                };
+                unavailable_tools.push(SastUnavailableTool {
+                    tool: scanner.name().to_string(),
+                    languages: relevant_langs,
+                    install_hint: scanner.install_hint(),
+                });
+            }
+        }
+
+        // Run needed + available scanners in parallel
+        let scan_dir_ref = &scan_dir;
+        let scan_files_ref = &scan_files;
+        let options_ref = options;
+
+        let results: Vec<_> = needed_scanners
+            .into_par_iter()
+            .map(
+                |scanner| match scanner.scan(scan_dir_ref, scan_files_ref, options_ref) {
+                    Ok(mut findings) => {
+                        if let Some(ref threshold) = options_ref.severity_threshold {
+                            findings.retain(|f| f.meets_severity_threshold(threshold));
+                        }
+                        Ok(findings)
                     }
-                    all_findings.append(&mut findings);
-                }
-                Err(e) => {
-                    errors.push(format!("{}: {}", scanner.name(), e));
-                }
+                    Err(e) => Err(format!("{}: {}", scanner.name(), e)),
+                },
+            )
+            .collect();
+
+        for r in results {
+            match r {
+                Ok(mut findings) => all_findings.append(&mut findings),
+                Err(e) => errors.push(e),
             }
         }
 
@@ -180,8 +239,82 @@ impl SastAggregator {
             by_severity,
             by_tool,
             scanner_status,
+            unavailable_tools,
             duration_ms,
             errors,
         }
     }
+}
+
+/// Detect programming languages from a list of files (by extension).
+fn detect_languages_from_files(
+    files: &[PathBuf],
+    scan_dir: &Path,
+) -> std::collections::HashSet<String> {
+    let mut langs = std::collections::HashSet::new();
+
+    let file_list: Vec<PathBuf> = if files.is_empty() {
+        // If no specific files, walk the directory for common extensions
+        walkdir::WalkDir::new(scan_dir)
+            .max_depth(5)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.into_path())
+            .collect()
+    } else {
+        files.to_vec()
+    };
+
+    for file in &file_list {
+        if let Some(ext) = file.extension().and_then(|e| e.to_str()) {
+            match ext {
+                "py" | "pyw" => {
+                    langs.insert("python".to_string());
+                }
+                "js" | "jsx" | "mjs" | "cjs" => {
+                    langs.insert("javascript".to_string());
+                }
+                "ts" | "tsx" => {
+                    langs.insert("typescript".to_string());
+                }
+                "go" => {
+                    langs.insert("go".to_string());
+                }
+                "rs" => {
+                    langs.insert("rust".to_string());
+                }
+                "java" => {
+                    langs.insert("java".to_string());
+                }
+                "kt" | "kts" => {
+                    langs.insert("kotlin".to_string());
+                }
+                "c" | "h" => {
+                    langs.insert("c".to_string());
+                }
+                "cpp" | "cc" | "cxx" | "hpp" | "hh" => {
+                    langs.insert("cpp".to_string());
+                }
+                "rb" => {
+                    langs.insert("ruby".to_string());
+                }
+                "php" => {
+                    langs.insert("php".to_string());
+                }
+                "swift" => {
+                    langs.insert("swift".to_string());
+                }
+                "scala" => {
+                    langs.insert("scala".to_string());
+                }
+                "cs" => {
+                    langs.insert("csharp".to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    langs
 }

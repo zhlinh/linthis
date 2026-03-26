@@ -52,7 +52,9 @@ impl BanditScanner {
                     file_path: PathBuf::from(r.filename),
                     line: r.line_number,
                     column: Some(r.col_offset.unwrap_or(0)),
-                    end_line: r.end_col_offset.map(|_| r.line_range.last().copied().unwrap_or(r.line_number)),
+                    end_line: r
+                        .end_col_offset
+                        .map(|_| r.line_range.last().copied().unwrap_or(r.line_number)),
                     end_column: r.end_col_offset,
                     code_snippet: if r.code.is_empty() {
                         None
@@ -61,7 +63,10 @@ impl BanditScanner {
                     },
                     fix_suggestion: None,
                     category: r.test_name,
-                    cwe_ids: r.issue_cwe.map(|c| vec![format!("CWE-{}", c.id)]).unwrap_or_default(),
+                    cwe_ids: r
+                        .issue_cwe
+                        .map(|c| vec![format!("CWE-{}", c.id)])
+                        .unwrap_or_default(),
                     source: "bandit".to_string(),
                     language: "python".to_string(),
                 }

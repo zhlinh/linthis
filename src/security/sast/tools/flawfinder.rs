@@ -55,9 +55,10 @@ impl FlawfinderScanner {
             let line_num = fields[1].parse::<usize>().unwrap_or(0);
             let column = fields[2].parse::<usize>().ok();
             // Index 4 is the effective Level (index 3 is DefaultLevel)
-            let level = fields.get(4).and_then(|s| s.parse::<u32>().ok()).unwrap_or(
-                fields[3].parse::<u32>().unwrap_or(0),
-            );
+            let level = fields
+                .get(4)
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(fields[3].parse::<u32>().unwrap_or(0));
             let category = fields.get(5).cloned().unwrap_or_default();
             let name = fields.get(6).cloned().unwrap_or_default();
             let warning = fields.get(7).cloned().unwrap_or_default();

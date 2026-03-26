@@ -211,7 +211,11 @@ impl Default for ChecksConfig {
 }
 
 fn default_checks() -> Vec<String> {
-    vec!["lint".to_string()]
+    vec![
+        "lint".to_string(),
+        "security".to_string(),
+        "complexity".to_string(),
+    ]
 }
 
 /// Security check configuration — `[checks.security]` in TOML
