@@ -135,6 +135,69 @@ fn main() -> ExitCode {
         return handle_cache_command(action);
     }
 
+    // Handle lint subcommand → delegate to main flow with check_only + checks=["lint"]
+    if matches!(cli.command, Some(Commands::Lint { .. })) {
+        if let Some(Commands::Lint {
+            paths,
+            staged,
+            modified,
+            since,
+            lang,
+            exclude,
+            output,
+            no_cache,
+            verbose,
+            quiet,
+        }) = cli.command.take()
+        {
+            cli.paths = paths;
+            cli.staged = staged;
+            cli.modified = modified;
+            cli.since = since;
+            cli.lang = lang;
+            cli.exclude = exclude;
+            cli.output = output;
+            cli.no_cache = no_cache;
+            cli.verbose = verbose;
+            cli.quiet = quiet;
+            cli.check_only = true;
+            cli.checks = Some(vec!["lint".to_string()]);
+        }
+        // Fall through to main lint flow below
+    }
+
+    // Handle check subcommand → delegate to main flow with check_only
+    if matches!(cli.command, Some(Commands::Check { .. })) {
+        if let Some(Commands::Check {
+            paths,
+            staged,
+            modified,
+            since,
+            checks,
+            lang,
+            exclude,
+            output,
+            no_cache,
+            verbose,
+            quiet,
+        }) = cli.command.take()
+        {
+            cli.paths = paths;
+            cli.staged = staged;
+            cli.modified = modified;
+            cli.since = since;
+            cli.checks = checks;
+            cli.lang = lang;
+            cli.exclude = exclude;
+            cli.output = output;
+            cli.no_cache = no_cache;
+            cli.verbose = verbose;
+            cli.quiet = quiet;
+            cli.check_only = true;
+        }
+        // Fall through to main lint flow below
+    }
+
     // Handle security subcommand
     if let Some(Commands::Security {
         path,

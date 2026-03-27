@@ -391,6 +391,112 @@ pub enum Commands {
         #[command(subcommand)]
         action: CacheCommands,
     },
+    /// Lint check only (no formatting, no security/complexity)
+    ///
+    /// Run lint checks on files without formatting. Equivalent to `linthis -c --checks lint`.
+    ///
+    /// Example usage:
+    ///   linthis lint                     # Lint current directory
+    ///   linthis lint -i src/main.rs      # Lint specific file
+    ///   linthis lint -s                  # Lint staged files
+    ///   linthis lint -m                  # Lint modified files
+    Lint {
+        /// Files or directories to include
+        #[arg(short = 'i', long = "include")]
+        paths: Vec<PathBuf>,
+
+        /// Lint only staged files (git cached)
+        #[arg(short = 's', long)]
+        staged: bool,
+
+        /// Lint only locally modified files (staged + unstaged)
+        #[arg(short = 'm', long, alias = "uncommitted")]
+        modified: bool,
+
+        /// Lint only files changed since a git ref
+        #[arg(long, value_name = "REF")]
+        since: Option<String>,
+
+        /// Specify languages (comma-separated)
+        #[arg(short, long, value_delimiter = ',')]
+        lang: Option<Vec<String>>,
+
+        /// Exclude patterns (glob patterns)
+        #[arg(short, long)]
+        exclude: Option<Vec<String>>,
+
+        /// Output format: human, json, github-actions
+        #[arg(short = 'o', long, default_value = "human")]
+        output: String,
+
+        /// Ignore cache
+        #[arg(long)]
+        no_cache: bool,
+
+        /// Verbose output
+        #[arg(long)]
+        verbose: bool,
+
+        /// Quiet mode
+        #[arg(short, long)]
+        quiet: bool,
+    },
+    /// Check only (no formatting), with configurable checks
+    ///
+    /// Run checks without formatting. Supports --checks to control which checks run.
+    /// Equivalent to `linthis -c [--checks ...]`.
+    ///
+    /// Example usage:
+    ///   linthis check                              # All checks (lint+security+complexity)
+    ///   linthis check -i src/main.rs               # Check specific file
+    ///   linthis check -s                           # Check staged files
+    ///   linthis check --checks lint,security       # Only lint + security
+    ///   linthis check --checks lint                # Equivalent to `linthis lint`
+    Check {
+        /// Files or directories to include
+        #[arg(short = 'i', long = "include")]
+        paths: Vec<PathBuf>,
+
+        /// Check only staged files (git cached)
+        #[arg(short = 's', long)]
+        staged: bool,
+
+        /// Check only locally modified files (staged + unstaged)
+        #[arg(short = 'm', long, alias = "uncommitted")]
+        modified: bool,
+
+        /// Check only files changed since a git ref
+        #[arg(long, value_name = "REF")]
+        since: Option<String>,
+
+        /// Checks to run (comma-separated): lint, security, complexity, all
+        #[arg(long, value_delimiter = ',')]
+        checks: Option<Vec<String>>,
+
+        /// Specify languages (comma-separated)
+        #[arg(short, long, value_delimiter = ',')]
+        lang: Option<Vec<String>>,
+
+        /// Exclude patterns (glob patterns)
+        #[arg(short, long)]
+        exclude: Option<Vec<String>>,
+
+        /// Output format: human, json, github-actions
+        #[arg(short = 'o', long, default_value = "human")]
+        output: String,
+
+        /// Ignore cache
+        #[arg(long)]
+        no_cache: bool,
+
+        /// Verbose output
+        #[arg(long)]
+        verbose: bool,
+
+        /// Quiet mode
+        #[arg(short, long)]
+        quiet: bool,
+    },
     /// Security vulnerability scanning
     ///
     /// Scan project for security vulnerabilities using SCA (dependency scanning)
