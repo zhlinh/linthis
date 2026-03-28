@@ -64,59 +64,55 @@ fn format_human(result: &SastResult) -> String {
         return output;
     }
 
-    // Group findings by severity
-    let critical: Vec<_> = result
+    // Group findings by unified severity: error (critical+high), warning (medium), info (low)
+    let errors: Vec<_> = result
         .findings
         .iter()
-        .filter(|f| f.severity == Severity::Critical)
+        .filter(|f| matches!(f.severity, Severity::Critical | Severity::High))
         .collect();
-    let high: Vec<_> = result
-        .findings
-        .iter()
-        .filter(|f| f.severity == Severity::High)
-        .collect();
-    let medium: Vec<_> = result
+    let warnings: Vec<_> = result
         .findings
         .iter()
         .filter(|f| f.severity == Severity::Medium)
         .collect();
-    let low: Vec<_> = result
+    let infos: Vec<_> = result
         .findings
         .iter()
-        .filter(|f| f.severity == Severity::Low)
+        .filter(|f| matches!(f.severity, Severity::Low | Severity::None | Severity::Unknown))
         .collect();
 
     // Summary counts
     output.push_str(&format!(
-        "  Found {} issue(s): {} critical, {} high, {} medium, {} low\n\n",
+        "  Found {} issue(s): {} error{}, {} warning{}, {} info\n\n",
         result.findings.len(),
-        critical.len(),
-        high.len(),
-        medium.len(),
-        low.len(),
+        errors.len(),
+        if errors.len() == 1 { "" } else { "s" },
+        warnings.len(),
+        if warnings.len() == 1 { "" } else { "s" },
+        infos.len(),
     ));
 
     // Print findings grouped by severity
     let all_groups: Vec<(&str, &Vec<&SastFinding>)> = vec![
-        ("CRITICAL", &critical),
-        ("HIGH", &high),
-        ("MEDIUM", &medium),
-        ("LOW", &low),
+        ("ERROR", &errors),
+        ("WARN", &warnings),
+        ("INFO", &infos),
     ];
 
+    let mut issue_num = 0usize;
     for (label, findings) in all_groups {
         if findings.is_empty() {
             continue;
         }
         for finding in findings.iter() {
+            issue_num += 1;
             let colored_label = match label {
-                "CRITICAL" => format!("[{}]", label).red().bold().to_string(),
-                "HIGH" => format!("[{}]", label).red().to_string(),
-                "MEDIUM" => format!("[{}]", label).yellow().to_string(),
+                "ERROR" => format!("[{}]", label).red().bold().to_string(),
+                "WARN" => format!("[{}]", label).yellow().to_string(),
                 _ => format!("[{}]", label).cyan().to_string(),
             };
 
-            output.push_str(&format!("  {} {}\n", colored_label, finding.message));
+            output.push_str(&format!("  {}. {} {}\n", issue_num, colored_label, finding.message));
             output.push_str(&format!(
                 "    File: {}:{}\n",
                 finding.file_path.display(),
@@ -145,6 +141,69 @@ fn format_human(result: &SastResult) -> String {
         }
     }
 
+    // Summary line (like lint output)
+    let total = result.findings.len();
+    let files_with_issues = {
+        let mut files: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for f in &result.findings {
+            files.insert(f.file_path.to_string_lossy().to_string());
+        }
+        files.len()
+    };
+    let error_count = errors.len();
+
+    if total > 0 {
+        let duration_str = if result.duration_ms >= 1000 {
+            format!("{:.2}s", result.duration_ms as f64 / 1000.0)
+        } else {
+            format!("{}ms", result.duration_ms)
+        };
+
+        output.push_str(&format!(
+            "  {} {} issue(s) ({} error{}, {} warning{}, {} info) in {} file(s)\n",
+            if error_count > 0 { "✗".red().to_string() } else { "⚠".yellow().to_string() },
+            total,
+            error_count,
+            if error_count == 1 { "" } else { "s" },
+            warnings.len(),
+            if warnings.len() == 1 { "" } else { "s" },
+            infos.len(),
+            files_with_issues,
+        ));
+        output.push_str(&format!("  Done in {}\n", duration_str.cyan()));
+
+        if error_count > 0 {
+            output.push_str(&format!(
+                "\n  {}\n",
+                "✗ Security scan failed due to errors. Fix the issues above.".red().bold()
+            ));
+        }
+    }
+
+    // Save result to .linthis/result/
+    {
+        use chrono::Local;
+        use std::fs::{self, File};
+        use std::io::Write;
+
+        let project_root = crate::utils::get_project_root();
+        let result_dir = project_root.join(".linthis").join("result");
+        if fs::create_dir_all(&result_dir).is_ok() {
+            let timestamp = Local::now().format("%Y%m%d-%H%M%S");
+            let result_file = result_dir.join(format!("security-{}.json", timestamp));
+            if let Ok(json) = serde_json::to_string_pretty(result) {
+                if let Ok(mut f) = File::create(&result_file) {
+                    let _ = writeln!(f, "{}", json);
+                    output.push_str(&format!(
+                        "  {} Results saved to {}\n",
+                        "✓".green(),
+                        result_file.display()
+                    ));
+                }
+            }
+        }
+    }
+
     // Unavailable tools warning
     let unavailable: Vec<_> = result
         .scanner_status
@@ -155,7 +214,7 @@ fn format_human(result: &SastResult) -> String {
 
     if !unavailable.is_empty() {
         output.push_str(&format!(
-            "  {} {} SAST tool(s) not available: {}\n",
+            "\n  {} {} SAST tool(s) not available: {}\n",
             "⚠".yellow(),
             unavailable.len(),
             unavailable.join(", ")

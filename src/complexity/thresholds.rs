@@ -27,9 +27,17 @@ impl Default for ThresholdConfig {
     fn default() -> Self {
         Self {
             good: 10,
-            warning: 20,
-            high: 50,
+            warning: 20,  // good + 10
+            high: 30,     // good + 20
         }
+    }
+}
+
+impl ThresholdConfig {
+    /// Normalize thresholds to ensure good <= warning <= high.
+    pub fn normalize(&mut self) {
+        self.warning = self.warning.max(self.good);
+        self.high = self.high.max(self.warning);
     }
 }
 
@@ -56,7 +64,7 @@ impl Default for Thresholds {
             cyclomatic: ThresholdConfig {
                 good: 10,
                 warning: 20,
-                high: 50,
+                high: 30,
             },
             cognitive: ThresholdConfig {
                 good: 15,
@@ -134,8 +142,8 @@ impl Thresholds {
         Self {
             cyclomatic: ThresholdConfig {
                 good: 15,
-                warning: 30,
-                high: 75,
+                warning: 25,
+                high: 35,
             },
             cognitive: ThresholdConfig {
                 good: 20,

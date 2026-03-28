@@ -274,22 +274,27 @@ impl RunResult {
     /// Exit codes:
     /// - 0: No issues (success)
     /// - 1: Has errors
-    /// - 2: Formatting errors occurred
-    /// - 3: Has warnings only (no errors)
+    /// - 2: Has warnings (no errors)
+    /// - 3: Has info only
+    /// - 4: Formatting errors occurred
     pub fn calculate_exit_code(&mut self) {
-        let has_errors = self.issues.iter().any(|i| i.severity == Severity::Error);
-        let has_warnings = self.issues.iter().any(|i| i.severity == Severity::Warning);
+        self.calculate_exit_code_with_fail_on(&crate::config::FailOn::Warning);
+    }
+
+    /// Calculate exit code with configurable fail_on level.
+    pub fn calculate_exit_code_with_fail_on(&mut self, fail_on: &crate::config::FailOn) {
         let has_format_errors = self.format_results.iter().any(|r| r.error.is_some());
 
         if has_format_errors {
-            self.exit_code = 2;
-        } else if has_errors {
-            self.exit_code = 1;
-        } else if has_warnings {
-            self.exit_code = 3;
-        } else {
-            self.exit_code = 0;
+            self.exit_code = 4;
+            return;
         }
+
+        let error_count = self.issues.iter().filter(|i| i.severity == Severity::Error).count();
+        let warning_count = self.issues.iter().filter(|i| i.severity == Severity::Warning).count();
+        let info_count = self.issues.iter().filter(|i| i.severity == Severity::Info).count();
+
+        self.exit_code = fail_on.exit_code(error_count, warning_count, info_count);
     }
 
     /// Count files with issues
