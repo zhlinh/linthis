@@ -13,10 +13,12 @@
 //! This module provides persistent caching to skip unchanged files,
 //! significantly improving performance for subsequent runs.
 
+pub mod checks_cache;
 mod hash;
 mod storage;
 mod types;
 
+pub use checks_cache::PerFileCache;
 pub use hash::file_hash;
 pub use storage::LintCache;
 pub use types::{CacheEntry, CacheStats, CachedIssue};

@@ -55,113 +55,109 @@ fn format_human(result: &AnalysisResult) -> String {
     let mut output = String::new();
     let reset = "\x1b[0m";
 
-    // Header
-    output.push_str("\n=== Code Complexity Analysis ===\n\n");
+    let threshold = result.thresholds.cyclomatic.good;
+    let warning_threshold = result.thresholds.cyclomatic.warning;
+    let high_threshold = result.thresholds.cyclomatic.high;
 
-    // Summary
-    output.push_str("Summary:\n");
-    output.push_str(&format!(
-        "  Files analyzed: {}\n",
-        result.summary.total_files
-    ));
-    output.push_str(&format!(
-        "  Functions analyzed: {}\n",
-        result.summary.total_functions
-    ));
-    output.push_str(&format!("  Total SLOC: {}\n", result.summary.total_sloc));
-    output.push_str(&format!(
-        "  Average cyclomatic complexity: {:.2}\n",
-        result.summary.avg_cyclomatic
-    ));
-    output.push_str(&format!(
-        "  Maximum cyclomatic complexity: {}\n",
-        result.summary.max_cyclomatic
-    ));
-    output.push_str(&format!(
-        "  High complexity files: {}\n",
-        result.summary.high_complexity_files
-    ));
-    output.push_str(&format!(
-        "  High complexity functions: {}\n",
-        result.summary.high_complexity_functions
-    ));
-    output.push_str(&format!("  Analysis time: {}ms\n\n", result.duration_ms));
-
-    // Language breakdown
-    if !result.by_language.is_empty() {
-        output.push_str("By Language:\n");
-        for (lang, stats) in &result.by_language {
-            output.push_str(&format!(
-                "  {}: {} files, {} functions, avg complexity: {:.2}\n",
-                lang, stats.total_files, stats.total_functions, stats.avg_cyclomatic
-            ));
-        }
-        output.push('\n');
-    }
-
-    // High complexity files
-    let high_complexity: Vec<_> = result
-        .files
-        .iter()
-        .filter(|f| {
-            f.metrics.overall_level() == MetricLevel::High
-                || f.metrics.overall_level() == MetricLevel::Critical
-        })
-        .collect();
-
-    if !high_complexity.is_empty() {
-        output.push_str("High Complexity Files:\n");
-        for file in high_complexity {
-            let level = file.metrics.overall_level();
-            let color = level.color_code();
-            output.push_str(&format!(
-                "  {}{}{} - cyclomatic: {}, cognitive: {}, nesting: {}\n",
-                color,
-                file.path.display(),
-                reset,
-                file.metrics.cyclomatic,
-                file.metrics.cognitive,
-                file.metrics.max_nesting
-            ));
-
-            // Show high complexity functions
-            for func in &file.functions {
-                if func.metrics.overall_level() == MetricLevel::High
-                    || func.metrics.overall_level() == MetricLevel::Critical
-                {
-                    let func_color = func.metrics.overall_level().color_code();
-                    output.push_str(&format!(
-                        "    {}{}(){} (lines {}-{}): cyclomatic={}, cognitive={}\n",
-                        func_color,
-                        func.name,
-                        reset,
-                        func.start_line,
-                        func.end_line,
-                        func.metrics.cyclomatic,
-                        func.metrics.cognitive
-                    ));
-                }
+    // Collect all functions exceeding threshold, sorted by severity
+    let mut issues: Vec<(&FileMetrics, &super::metrics::FunctionMetrics)> = Vec::new();
+    for file in &result.files {
+        for func in &file.functions {
+            if func.metrics.cyclomatic > threshold {
+                issues.push((file, func));
             }
         }
-        output.push('\n');
     }
+    issues.sort_by(|a, b| b.1.metrics.cyclomatic.cmp(&a.1.metrics.cyclomatic));
 
-    // Top 10 most complex files
-    let mut sorted_files: Vec<&FileMetrics> = result.files.iter().collect();
-    sorted_files.sort_by(|a, b| b.metrics.cyclomatic.cmp(&a.metrics.cyclomatic));
+    // Summary line with threshold levels
+    output.push_str(&format!(
+        "\nComplexity: {} file(s) analyzed, {} function(s), {} issue(s)\n",
+        result.summary.total_files,
+        result.summary.total_functions,
+        issues.len(),
+    ));
+    output.push_str(&format!(
+        "  Threshold: info > {}, warning > {}, error > {}\n\n",
+        threshold, warning_threshold, high_threshold,
+    ));
 
-    output.push_str("Top 10 Most Complex Files:\n");
-    for (i, file) in sorted_files.iter().take(10).enumerate() {
-        let level = file.metrics.overall_level();
-        let color = level.color_code();
+    if issues.is_empty() {
+        output.push_str("  All functions within complexity threshold.\n");
+    } else {
+        let mut error_count = 0usize;
+        let mut warn_count = 0usize;
+        let mut info_count = 0usize;
+        let mut files_with_issues: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for (i, (file, func)) in issues.iter().enumerate() {
+            let severity = if func.metrics.cyclomatic > high_threshold {
+                error_count += 1;
+                "error"
+            } else if func.metrics.cyclomatic > warning_threshold {
+                warn_count += 1;
+                "warning"
+            } else {
+                info_count += 1;
+                "info"
+            };
+            files_with_issues.insert(file.path.to_string_lossy().to_string());
+
+            let color = match severity {
+                "error" => "\x1b[1;31m",   // bold red
+                "warning" => "\x1b[33m",   // yellow
+                _ => "\x1b[36m",           // cyan
+            };
+            let severity_label = match severity {
+                "error" => "[ERROR]",
+                "warning" => "[WARN]",
+                _ => "[INFO]",
+            };
+
+            output.push_str(&format!(
+                "  {}. {}{}{} `{}` cyclomatic complexity {} exceeds threshold {}\n",
+                i + 1,
+                color,
+                severity_label,
+                reset,
+                func.name,
+                func.metrics.cyclomatic,
+                threshold,
+            ));
+            output.push_str(&format!(
+                "     {}:{}-{} (cognitive: {}, nesting: {})\n",
+                file.path.display(),
+                func.start_line,
+                func.end_line,
+                func.metrics.cognitive,
+                func.metrics.max_nesting,
+            ));
+        }
+
+        // Summary
+        let duration_str = if result.duration_ms >= 1000 {
+            format!("{:.2}s", result.duration_ms as f64 / 1000.0)
+        } else {
+            format!("{}ms", result.duration_ms)
+        };
+
         output.push_str(&format!(
-            "  {}. {}{}{} - cyclomatic: {}\n",
-            i + 1,
-            color,
-            file.path.display(),
-            reset,
-            file.metrics.cyclomatic
+            "\n\x1b[31m✗\x1b[0m {} issue(s) ({} error, {} warning, {} info) in {} of {} file(s)\n",
+            issues.len(),
+            error_count,
+            warn_count,
+            info_count,
+            files_with_issues.len(),
+            result.summary.total_files,
         ));
+        output.push_str(&format!("Done in {}\n", duration_str));
+
+        if error_count > 0 {
+            output.push_str(&format!(
+                "\n{}\n",
+                "\x1b[31m✗ Complexity check failed. Consider refactoring high-complexity functions.\x1b[0m"
+            ));
+        }
     }
 
     // Errors

@@ -144,6 +144,8 @@ fn main() -> ExitCode {
             since,
             lang,
             exclude,
+            no_default_excludes,
+            no_gitignore,
             output,
             no_cache,
             verbose,
@@ -156,6 +158,8 @@ fn main() -> ExitCode {
             cli.since = since;
             cli.lang = lang;
             cli.exclude = exclude;
+            cli.no_default_excludes = no_default_excludes;
+            cli.no_gitignore = no_gitignore;
             cli.output = output;
             cli.no_cache = no_cache;
             cli.verbose = verbose;
@@ -176,6 +180,8 @@ fn main() -> ExitCode {
             checks,
             lang,
             exclude,
+            no_default_excludes,
+            no_gitignore,
             output,
             no_cache,
             verbose,
@@ -189,6 +195,8 @@ fn main() -> ExitCode {
             cli.checks = checks;
             cli.lang = lang;
             cli.exclude = exclude;
+            cli.no_default_excludes = no_default_excludes;
+            cli.no_gitignore = no_gitignore;
             cli.output = output;
             cli.no_cache = no_cache;
             cli.verbose = verbose;
@@ -251,7 +259,6 @@ fn main() -> ExitCode {
         only_high,
         sort,
         no_parallel,
-        fail_on_high,
         verbose,
     }) = cli.command
     {
@@ -269,7 +276,6 @@ fn main() -> ExitCode {
             only_high,
             sort,
             no_parallel,
-            fail_on_high,
             verbose,
         });
     }
@@ -915,6 +921,15 @@ fn main() -> ExitCode {
                 }
             }
 
+            // Apply lint fail_on from config
+            let lint_fail_on = runtime_config
+                .checks
+                .lint
+                .as_ref()
+                .and_then(|c| c.fail_on.clone())
+                .unwrap_or_default();
+            result.calculate_exit_code_with_fail_on(&lint_fail_on);
+
             // Record target paths for trend analysis scope tracking
             result.target_paths = cli.paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
 
@@ -957,29 +972,16 @@ fn main() -> ExitCode {
 
                 // Per-file cache: only scan files whose content changed
                 let mut cache = PerFileCache::load(&security_cache_path);
-                let (changed, cached_findings, cache_hits) = cache.partition_files(&target_files, cli.no_cache);
+                let partition = cache.partition_files(&target_files, cli.no_cache);
 
-                if changed.is_empty() && cache_hits > 0 {
-                    if !cli.quiet {
-                        eprintln!("Running [security] check ({} cached)", cache_hits);
-                    }
-                } else if !cli.quiet {
-                    if cache_hits == 0 {
-                        eprintln!("Running [security] check...");
-                    } else {
-                        eprintln!(
-                            "Running [security] check ({} cached, {} changed)...",
-                            cache_hits,
-                            changed.len(),
-                        );
-                    }
+                if !cli.quiet {
+                    eprintln!("{}", PerFileCache::format_status("security", &partition));
                 }
 
                 // Scan only changed files
-                let fresh_result = if !changed.is_empty() {
-                    let r = run_sast_scan(&runtime_project_root, &changed, &security_config);
-                    // Update cache for scanned files
-                    cache.update_from_sast(&changed, &r);
+                let fresh_result = if !partition.changed.is_empty() {
+                    let r = run_sast_scan(&runtime_project_root, &partition.changed, &security_config);
+                    cache.update_from_sast(&partition.changed, &r);
                     cache.save(&security_cache_path);
                     r
                 } else {
@@ -996,7 +998,7 @@ fn main() -> ExitCode {
 
                 // Merge cached + fresh findings
                 let mut merged = fresh_result;
-                let mut all_findings = cached_findings;
+                let mut all_findings = partition.cached_findings;
                 all_findings.append(&mut merged.findings);
                 merged.findings = all_findings;
                 // Rebuild counts
@@ -1009,9 +1011,22 @@ fn main() -> ExitCode {
                     *merged.by_tool.entry(f.source.clone()).or_insert(0) += 1;
                 }
 
-                if merged.critical_high_count() > 0 {
-                    result.exit_code = std::cmp::max(result.exit_code, 1);
-                }
+                // Apply security fail_on
+                let sec_fail_on = security_config
+                    .fail_on
+                    .clone()
+                    .unwrap_or_default();
+                let sec_errors = merged.findings.iter().filter(|f| {
+                    matches!(f.severity, linthis::security::Severity::Critical | linthis::security::Severity::High)
+                }).count();
+                let sec_warnings = merged.findings.iter().filter(|f| {
+                    f.severity == linthis::security::Severity::Medium
+                }).count();
+                let sec_infos = merged.findings.iter().filter(|f| {
+                    matches!(f.severity, linthis::security::Severity::Low | linthis::security::Severity::None | linthis::security::Severity::Unknown)
+                }).count();
+                let sec_exit = sec_fail_on.exit_code(sec_errors, sec_warnings, sec_infos);
+                result.exit_code = std::cmp::max(result.exit_code, sec_exit);
                 // Merge SAST unavailable tools into main result
                 for ut in &merged.unavailable_tools {
                     result.unavailable_tools.push(
@@ -1037,44 +1052,43 @@ fn main() -> ExitCode {
 
                 // Per-file cache: only analyze files whose content changed
                 let mut cache = PerFileCache::load(&complexity_cache_path);
-                let (changed, _cached_findings, cache_hits) = cache.partition_files(&target_files, cli.no_cache);
+                let partition = cache.partition_files(&target_files, cli.no_cache);
 
-                if changed.is_empty() && cache_hits > 0 {
-                    if !cli.quiet {
-                        eprintln!("Running [complexity] check ({} cached)", cache_hits);
-                    }
-                } else if !cli.quiet {
-                    if cache_hits == 0 {
-                        eprintln!("Running [complexity] check...");
-                    } else {
-                        eprintln!(
-                            "Running [complexity] check ({} cached, {} changed)...",
-                            cache_hits,
-                            changed.len(),
-                        );
-                    }
+                if !cli.quiet {
+                    eprintln!("{}", PerFileCache::format_status("complexity", &partition));
                 }
 
                 // Analyze only changed files
-                if !changed.is_empty() {
+                if !partition.changed.is_empty() {
                     let analysis_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         run_complexity_analysis(
                             &runtime_project_root,
-                            &changed,
+                            &partition.changed,
                             &complexity_config,
                         )
                     }));
                     match analysis_result {
                         Ok(Ok(analysis)) => {
                             // Update cache for analyzed files
-                            cache.update_from_complexity(&changed, &analysis);
+                            cache.update_from_complexity(&partition.changed, &analysis);
                             cache.save(&complexity_cache_path);
 
-                            if complexity_config.fail_on_high.unwrap_or(false)
-                                && analysis.summary.high_complexity_files > 0
-                            {
-                                result.exit_code = std::cmp::max(result.exit_code, 1);
-                            }
+                            // Apply complexity fail_on
+                            let cx_fail_on = complexity_config
+                                .fail_on
+                                .clone()
+                                .unwrap_or_default();
+                            let cx_high = analysis.thresholds.cyclomatic.high;
+                            let cx_warning = analysis.thresholds.cyclomatic.warning;
+                            let cx_threshold = analysis.thresholds.cyclomatic.good;
+                            let cx_errors = analysis.files.iter().flat_map(|f| &f.functions)
+                                .filter(|func| func.metrics.cyclomatic > cx_high).count();
+                            let cx_warns = analysis.files.iter().flat_map(|f| &f.functions)
+                                .filter(|func| func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high).count();
+                            let cx_infos = analysis.files.iter().flat_map(|f| &f.functions)
+                                .filter(|func| func.metrics.cyclomatic > cx_threshold && func.metrics.cyclomatic <= cx_warning).count();
+                            let cx_exit = cx_fail_on.exit_code(cx_errors, cx_warns, cx_infos);
+                            result.exit_code = std::cmp::max(result.exit_code, cx_exit);
                             result.complexity = Some(analysis);
                         }
                         Ok(Err(e)) => {
@@ -1091,7 +1105,7 @@ fn main() -> ExitCode {
                 }
                 // If all files were cached (no changed files to analyze),
                 // set a minimal result to signal complexity was checked
-                if result.complexity.is_none() && cache_hits > 0 {
+                if result.complexity.is_none() && partition.cache_hits > 0 {
                     result.complexity = Some(linthis::complexity::AnalysisResult::new());
                 }
                 result.checks_run.push("complexity".to_string());
@@ -1333,129 +1347,5 @@ fn main() -> ExitCode {
     }
 }
 
-/// Per-file cache for security and complexity checks.
-///
-/// Stores findings per file keyed by content hash (xxHash64).
-/// Only changed files are re-scanned; cached results are reused.
-#[derive(serde::Serialize, serde::Deserialize, Default)]
-struct PerFileCache {
-    /// file_path (relative) → (content_hash, serialized findings JSON)
-    entries: std::collections::HashMap<String, (u64, String)>,
-}
-
-impl PerFileCache {
-    fn load(path: &std::path::Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
-
-    fn save(&self, path: &std::path::Path) {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(json) = serde_json::to_string(self) {
-            let _ = std::fs::write(path, json);
-        }
-    }
-
-    /// Partition files into changed (need scan) and cached (reuse findings).
-    ///
-    /// Returns (changed_files, cached_findings, cache_hit_count).
-    fn partition_files(
-        &self,
-        files: &[std::path::PathBuf],
-        no_cache: bool,
-    ) -> (Vec<std::path::PathBuf>, Vec<linthis::security::sast::SastFinding>, usize) {
-        use linthis::cache::file_hash;
-
-        let mut changed = Vec::new();
-        let mut cached_findings = Vec::new();
-        let mut cache_hits = 0;
-
-        for file in files {
-            let key = file.to_string_lossy().to_string();
-
-            if no_cache {
-                changed.push(file.clone());
-                continue;
-            }
-
-            let current_hash = match file_hash(file) {
-                Ok(h) => h,
-                Err(_) => {
-                    changed.push(file.clone());
-                    continue;
-                }
-            };
-
-            match self.entries.get(&key) {
-                Some((cached_hash, findings_json)) if *cached_hash == current_hash => {
-                    // Cache hit: parse cached findings
-                    cache_hits += 1;
-                    if let Ok(findings) = serde_json::from_str::<Vec<linthis::security::sast::SastFinding>>(findings_json) {
-                        cached_findings.extend(findings);
-                    }
-                    // Even if parse fails, it's still a cache hit (clean file)
-                }
-                _ => {
-                    changed.push(file.clone());
-                }
-            }
-        }
-
-        (changed, cached_findings, cache_hits)
-    }
-
-    /// Update cache entries from SAST scan results.
-    fn update_from_sast(
-        &mut self,
-        files: &[std::path::PathBuf],
-        result: &linthis::security::sast::SastResult,
-    ) {
-        use linthis::cache::file_hash;
-
-        for file in files {
-            let key = file.to_string_lossy().to_string();
-            let hash = file_hash(file).unwrap_or(0);
-
-            // Collect findings for this specific file
-            let file_findings: Vec<&linthis::security::sast::SastFinding> = result
-                .findings
-                .iter()
-                .filter(|f| f.file_path == *file)
-                .collect();
-
-            let json = serde_json::to_string(&file_findings).unwrap_or_else(|_| "[]".to_string());
-            self.entries.insert(key, (hash, json));
-        }
-    }
-
-    /// Update cache entries from complexity analysis results.
-    fn update_from_complexity(
-        &mut self,
-        files: &[std::path::PathBuf],
-        result: &linthis::complexity::AnalysisResult,
-    ) {
-        use linthis::cache::file_hash;
-
-        for file in files {
-            let key = file.to_string_lossy().to_string();
-            let hash = file_hash(file).unwrap_or(0);
-
-            // Find FileMetrics for this file and store slim version
-            let file_metrics: Option<&linthis::complexity::FileMetrics> = result
-                .files
-                .iter()
-                .find(|f| f.path == *file);
-
-            let json = if let Some(metrics) = file_metrics {
-                serde_json::to_string(metrics).unwrap_or_else(|_| "null".to_string())
-            } else {
-                "null".to_string()
-            };
-            self.entries.insert(key, (hash, json));
-        }
-    }
-}
+// PerFileCache is now in linthis::cache::checks_cache
+use linthis::cache::PerFileCache;

@@ -425,6 +425,14 @@ pub enum Commands {
         #[arg(short, long)]
         exclude: Option<Vec<String>>,
 
+        /// Disable default exclusions (.git, node_modules, target, etc.)
+        #[arg(long)]
+        no_default_excludes: bool,
+
+        /// Disable .gitignore pattern exclusions
+        #[arg(long)]
+        no_gitignore: bool,
+
         /// Output format: human, json, github-actions
         #[arg(short = 'o', long, default_value = "human")]
         output: String,
@@ -480,6 +488,14 @@ pub enum Commands {
         /// Exclude patterns (glob patterns)
         #[arg(short, long)]
         exclude: Option<Vec<String>>,
+
+        /// Disable default exclusions (.git, node_modules, target, etc.)
+        #[arg(long)]
+        no_default_excludes: bool,
+
+        /// Disable .gitignore pattern exclusions
+        #[arg(long)]
+        no_gitignore: bool,
 
         /// Output format: human, json, github-actions
         #[arg(short = 'o', long, default_value = "human")]
@@ -665,10 +681,6 @@ pub enum Commands {
         /// Disable parallel processing
         #[arg(long)]
         no_parallel: bool,
-
-        /// Exit with error if any file exceeds threshold
-        #[arg(long)]
-        fail_on_high: bool,
 
         /// Verbose output
         #[arg(long)]

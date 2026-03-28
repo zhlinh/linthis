@@ -186,12 +186,76 @@ pub struct Config {
     pub checks: ChecksConfig,
 }
 
+/// Unified fail_on level for all checks.
+///
+/// Controls the minimum severity that causes a non-zero exit code.
+/// Default: "warning" (error→exit 1, warning→exit 3, info→exit 0).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FailOn {
+    /// Only errors cause failure (exit 1)
+    Error,
+    /// Errors (exit 1) and warnings (exit 2) cause failure
+    #[default]
+    Warning,
+    /// All severities cause failure
+    Info,
+    /// Never fail regardless of findings
+    None,
+}
+
+impl FailOn {
+    /// Calculate exit code for given error/warning/info counts.
+    ///
+    /// Exit codes:
+    /// - 0: No issues (success)
+    /// - 1: Has errors
+    /// - 2: Has warnings (no errors)
+    /// - 3: Has info (no errors/warnings)
+    /// - 4: Formatting errors (set separately, not by this method)
+    pub fn exit_code(&self, errors: usize, warnings: usize, infos: usize) -> i32 {
+        match self {
+            FailOn::None => 0,
+            FailOn::Error => {
+                if errors > 0 {
+                    1
+                } else {
+                    0
+                }
+            }
+            FailOn::Warning => {
+                if errors > 0 {
+                    1
+                } else if warnings > 0 {
+                    2
+                } else {
+                    0
+                }
+            }
+            FailOn::Info => {
+                if errors > 0 {
+                    1
+                } else if warnings > 0 {
+                    2
+                } else if infos > 0 {
+                    3
+                } else {
+                    0
+                }
+            }
+        }
+    }
+}
+
 /// Configuration for which checks to run and per-check settings — `[checks]` in TOML
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChecksConfig {
     /// Which checks to run: ["lint"] (default), ["lint", "security"], etc.
     #[serde(default = "default_checks")]
     pub run: Vec<String>,
+    /// Lint check settings
+    #[serde(default)]
+    pub lint: Option<LintChecksConfig>,
     /// Security check settings
     #[serde(default)]
     pub security: Option<SecurityChecksConfig>,
@@ -204,6 +268,7 @@ impl Default for ChecksConfig {
     fn default() -> Self {
         Self {
             run: default_checks(),
+            lint: None,
             security: None,
             complexity: None,
         }
@@ -218,15 +283,23 @@ fn default_checks() -> Vec<String> {
     ]
 }
 
+/// Lint check configuration — `[checks.lint]` in TOML
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LintChecksConfig {
+    /// Minimum severity to fail on (default: warning)
+    #[serde(default)]
+    pub fail_on: Option<FailOn>,
+}
+
 /// Security check configuration — `[checks.security]` in TOML
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SecurityChecksConfig {
     /// Scan type: sca, sast, all (default: all)
     #[serde(default)]
     pub scan_type: Option<String>,
-    /// Minimum severity to fail on (critical, high, medium, low)
+    /// Minimum severity to fail on (default: warning)
     #[serde(default)]
-    pub fail_on: Option<String>,
+    pub fail_on: Option<FailOn>,
     /// Custom SAST config path
     #[serde(default)]
     pub sast_config: Option<PathBuf>,
@@ -235,12 +308,18 @@ pub struct SecurityChecksConfig {
 /// Complexity check configuration — `[checks.complexity]` in TOML
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ComplexityChecksConfig {
-    /// Cyclomatic complexity threshold
+    /// Cyclomatic complexity threshold for info level (default: 10)
     #[serde(default)]
     pub threshold: Option<u32>,
-    /// Fail if any file exceeds threshold
+    /// Warning threshold (default: threshold + 10)
     #[serde(default)]
-    pub fail_on_high: Option<bool>,
+    pub warning_threshold: Option<u32>,
+    /// Error threshold (default: threshold + 20)
+    #[serde(default)]
+    pub error_threshold: Option<u32>,
+    /// Minimum severity to fail on (default: warning)
+    #[serde(default)]
+    pub fail_on: Option<FailOn>,
 }
 
 /// Plugin configuration section

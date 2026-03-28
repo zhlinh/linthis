@@ -17,6 +17,7 @@ use colored::Colorize;
 
 use std::path::Path;
 
+use linthis::cache::PerFileCache;
 use linthis::config::SecurityChecksConfig;
 use linthis::security::report::SecurityReportFormat;
 use linthis::security::sast::{format_sast_report, SastAggregator, SastResult, SastScanOptions};
@@ -168,17 +169,92 @@ pub fn handle_security_command(
             verbose,
         };
 
-        // Use stderr for status messages when outputting structured formats
-        if report_format == SecurityReportFormat::Human {
-            println!(
-                "{}",
-                "🔍 SAST: Scanning source code for security issues...".bold()
-            );
+        // Per-file cache for SAST
+        let project_root = linthis::utils::get_project_root();
+        let cache_path = project_root.join(".linthis").join("security-cache.json");
+        let mut cache = PerFileCache::load(&cache_path);
+
+        // Collect target files for cache partitioning
+        let target_files: Vec<PathBuf> = if path.is_file() {
+            vec![path.clone()]
         } else {
-            eprintln!("🔍 SAST: Scanning source code for security issues...");
+            // Walk directory to collect source files
+            walkdir::WalkDir::new(&path)
+                .max_depth(10)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+                .filter(|e| {
+                    let name = e.file_name().to_string_lossy();
+                    !name.starts_with('.')
+                })
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| {
+                            matches!(
+                                ext,
+                                "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java"
+                                    | "kt" | "c" | "h" | "cpp" | "cc" | "rb" | "php"
+                                    | "swift" | "scala" | "cs" | "yaml" | "yml" | "toml"
+                                    | "json" | "env" | "cfg" | "ini" | "conf" | "sh"
+                                    | "mm" | "m"
+                            )
+                        })
+                        .unwrap_or(false)
+                })
+                .map(|e| e.into_path())
+                .collect()
+        };
+
+        let partition = cache.partition_files(&target_files, false);
+
+        // Show cache status
+        if report_format == SecurityReportFormat::Human {
+            eprintln!("{}", PerFileCache::format_status("security", &partition));
         }
 
-        let result = sast.scan(&path, &[], &sast_options);
+        // Only scan changed files
+        let result = if !partition.changed.is_empty() {
+            let r = sast.scan(&path, &partition.changed, &sast_options);
+            cache.update_from_sast(&partition.changed, &r);
+            cache.save(&cache_path);
+
+            // Merge cached + fresh
+            let mut merged = r;
+            let mut all_findings = partition.cached_findings;
+            all_findings.append(&mut merged.findings);
+            merged.findings = all_findings;
+            // Rebuild counts
+            merged.by_severity.clear();
+            for f in &merged.findings {
+                *merged.by_severity.entry(f.severity.to_string()).or_insert(0) += 1;
+            }
+            merged.by_tool.clear();
+            for f in &merged.findings {
+                *merged.by_tool.entry(f.source.clone()).or_insert(0) += 1;
+            }
+            merged
+        } else {
+            // All cached — build result from cached findings only
+            let mut merged = linthis::security::sast::SastResult {
+                findings: partition.cached_findings,
+                by_severity: std::collections::HashMap::new(),
+                by_tool: std::collections::HashMap::new(),
+                scanner_status: sast.available_scanners().iter().map(|(n, a, _)| (n.to_string(), *a)).collect(),
+                unavailable_tools: vec![],
+                duration_ms: 0,
+                errors: vec![],
+            };
+            for f in &merged.findings {
+                *merged.by_severity.entry(f.severity.to_string()).or_insert(0) += 1;
+            }
+            for f in &merged.findings {
+                *merged.by_tool.entry(f.source.clone()).or_insert(0) += 1;
+            }
+            merged
+        };
 
         let output = format_sast_report(&result, report_format);
         println!("{}", output);
@@ -189,28 +265,21 @@ pub fn handle_security_command(
             }
         }
 
-        if result.critical_high_count() > 0 {
-            has_critical_high = true;
+        // Calculate exit code using unified FailOn (default: warning)
+        let sec_errors = result.findings.iter().filter(|f| {
+            matches!(f.severity, linthis::security::Severity::Critical | linthis::security::Severity::High)
+        }).count();
+        let sec_warnings = result.findings.iter().filter(|f| {
+            f.severity == linthis::security::Severity::Medium
+        }).count();
+        let sec_infos = result.findings.iter().filter(|f| {
+            matches!(f.severity, linthis::security::Severity::Low | linthis::security::Severity::None | linthis::security::Severity::Unknown)
+        }).count();
+        let fail_on_level = linthis::config::FailOn::default(); // warning
+        let exit_code = fail_on_level.exit_code(sec_errors, sec_warnings, sec_infos);
+        if exit_code != 0 {
+            return ExitCode::from(exit_code as u8);
         }
-    }
-
-    // Check fail condition
-    if let Some(ref threshold_str) = fail_on {
-        if has_critical_high {
-            eprintln!(
-                "\n{}: Found security issues with severity >= {}",
-                "Error".red().bold(),
-                threshold_str
-            );
-            return ExitCode::from(1);
-        }
-    }
-
-    if has_critical_high && fail_on.is_none() {
-        eprintln!(
-            "\n{}: Critical/high security issues found",
-            "Warning".yellow().bold(),
-        );
     }
 
     ExitCode::SUCCESS
@@ -227,7 +296,7 @@ pub fn run_sast_scan(
 ) -> SastResult {
     let sast = SastAggregator::with_config(config.sast_config.as_deref());
     let sast_options = SastScanOptions {
-        severity_threshold: config.fail_on.as_ref().map(|s| Severity::from_str(s)),
+        severity_threshold: None, // report all findings, fail_on controls exit code
         config_path: config.sast_config.clone(),
         ..Default::default()
     };

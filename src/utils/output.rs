@@ -201,17 +201,11 @@ pub fn format_summary_human(result: &RunResult) -> String {
             RunModeKind::Both => "All checks and formats passed",
         };
 
-        // Add file statistics
-        let file_stats = if result.total_files > 0 {
-            format!(
-                " ({} file{} checked, {} formatted)",
-                result.total_files,
-                if result.total_files == 1 { "" } else { "s" },
-                result.files_formatted
-            )
-        } else {
-            String::new()
-        };
+        let file_stats = format!(
+            " (0 errors, 0 warnings in {} file{})",
+            result.total_files,
+            if result.total_files == 1 { "" } else { "s" },
+        );
 
         // Add duration
         let duration_str = if result.duration_ms >= 1000 {
@@ -221,7 +215,7 @@ pub fn format_summary_human(result: &RunResult) -> String {
         };
 
         return format!(
-            "{} {}{} (0 errors, 0 warnings)\nDone in {}",
+            "{} {}{}\nDone in {}",
             "✓".green(),
             msg.green().bold(),
             file_stats,
@@ -283,17 +277,11 @@ pub fn format_summary_human(result: &RunResult) -> String {
             RunModeKind::Both => "All checks and formats passed",
         };
 
-        // Add file statistics
-        let file_stats = if result.total_files > 0 {
-            format!(
-                " ({} file{} checked, {} formatted)",
-                result.total_files,
-                if result.total_files == 1 { "" } else { "s" },
-                result.files_formatted
-            )
-        } else {
-            String::new()
-        };
+        let file_stats = format!(
+            " (0 errors, 0 warnings in {} file{})",
+            result.total_files,
+            if result.total_files == 1 { "" } else { "s" },
+        );
 
         summary.push_str(&format!(
             "{} {}{} (0 errors, 0 warnings)",
@@ -518,17 +506,26 @@ fn build_security_view(sast: &crate::security::sast::SastResult) -> CheckResultV
     let issues: Vec<IssueView> = sast
         .findings
         .iter()
-        .map(|f| IssueView {
-            file: f.file_path.to_string_lossy().to_string(),
-            line: f.line,
-            column: f.column,
-            end_line: f.end_line,
-            severity: f.severity.to_string(),
-            message: f.message.clone(),
-            source: f.source.clone(),
-            code: Some(f.rule_id.clone()),
-            suggestion: f.fix_suggestion.clone(),
-            function: None,
+        .map(|f| {
+            // Map security severity to unified error/warning/info
+            let unified_severity = match f.severity {
+                crate::security::Severity::Critical
+                | crate::security::Severity::High => "error",
+                crate::security::Severity::Medium => "warning",
+                _ => "info",
+            };
+            IssueView {
+                file: f.file_path.to_string_lossy().to_string(),
+                line: f.line,
+                column: f.column,
+                end_line: f.end_line,
+                severity: unified_severity.to_string(),
+                message: f.message.clone(),
+                source: f.source.clone(),
+                code: Some(f.rule_id.clone()),
+                suggestion: f.fix_suggestion.clone(),
+                function: None,
+            }
         })
         .collect();
 
@@ -559,18 +556,22 @@ fn build_security_view(sast: &crate::security::sast::SastResult) -> CheckResultV
 fn build_complexity_view(
     analysis: &crate::complexity::AnalysisResult,
 ) -> CheckResultView {
-    let default_threshold = 15;
-    let threshold = analysis.thresholds.cyclomatic.good;
-    let effective_threshold = if threshold > 0 { threshold } else { default_threshold };
+    let threshold = if analysis.thresholds.cyclomatic.good > 0 {
+        analysis.thresholds.cyclomatic.good
+    } else {
+        10
+    };
+    let warning_threshold = analysis.thresholds.cyclomatic.warning;
+    let high_threshold = analysis.thresholds.cyclomatic.high;
 
     let mut issues: Vec<IssueView> = Vec::new();
 
     for file in &analysis.files {
         for func in &file.functions {
-            if func.metrics.cyclomatic > effective_threshold {
-                let severity = if func.metrics.cyclomatic > effective_threshold * 3 {
+            if func.metrics.cyclomatic > threshold {
+                let severity = if func.metrics.cyclomatic > high_threshold {
                     "error"
-                } else if func.metrics.cyclomatic > effective_threshold * 2 {
+                } else if func.metrics.cyclomatic > warning_threshold {
                     "warning"
                 } else {
                     "info"
@@ -584,7 +585,7 @@ fn build_complexity_view(
                     severity: severity.to_string(),
                     message: format!(
                         "function `{}` cyclomatic complexity {} exceeds threshold {}",
-                        func.name, func.metrics.cyclomatic, effective_threshold,
+                        func.name, func.metrics.cyclomatic, threshold,
                     ),
                     source: "linthis-complexity".to_string(),
                     code: None,
