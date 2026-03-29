@@ -2,14 +2,8 @@
 
 use crate::review::{Assessment, ReviewIssue, ReviewResult, Severity};
 
-/// Generate a Markdown report from review results.
-pub fn generate_markdown_report(result: &ReviewResult) -> String {
-    let mut report = String::new();
-
-    // Title
-    report.push_str("# Code Review Report\n\n");
-
-    // Summary table
+/// Render the summary table section of the Markdown report.
+fn render_summary_section(report: &mut String, result: &ReviewResult) {
     let assessment_icon = match result.summary.assessment {
         Assessment::Ready => "✅ Ready",
         Assessment::NeedsWork => "⚠️ Needs Work",
@@ -33,84 +27,84 @@ pub fn generate_markdown_report(result: &ReviewResult) -> String {
     if !result.summary.summary_text.is_empty() {
         report.push_str(&format!("{}\n\n", result.summary.summary_text));
     }
+}
 
-    // Changed files table
-    if !result.files.is_empty() {
-        report.push_str("## Changed Files\n");
-        report.push_str("| File | Status | Issues |\n");
-        report.push_str("|------|--------|--------|\n");
-        for file in &result.files {
-            report.push_str(&format!(
-                "| {} | {} | {} |\n",
-                file.path.display(),
-                file.status,
-                file.issues.len()
-            ));
-        }
-        report.push('\n');
+/// Render the changed files table section.
+fn render_changed_files_section(report: &mut String, result: &ReviewResult) {
+    if result.files.is_empty() {
+        return;
+    }
+    report.push_str("## Changed Files\n");
+    report.push_str("| File | Status | Issues |\n");
+    report.push_str("|------|--------|--------|\n");
+    for file in &result.files {
+        report.push_str(&format!(
+            "| {} | {} | {} |\n",
+            file.path.display(),
+            file.status,
+            file.issues.len()
+        ));
+    }
+    report.push('\n');
+}
+
+/// Render a group of issues under a severity heading.
+fn render_issue_group(report: &mut String, heading: &str, issues: &[&ReviewIssue]) {
+    if issues.is_empty() {
+        return;
+    }
+    report.push_str(&format!("### {} ({})\n", heading, issues.len()));
+    for issue in issues {
+        format_issue(report, issue);
+    }
+    report.push('\n');
+}
+
+/// Render the "Issues Found" section, grouped by severity.
+fn render_issues_section(report: &mut String, issues: &[ReviewIssue]) {
+    if issues.is_empty() {
+        return;
     }
 
-    // Issues by severity
-    let critical: Vec<&ReviewIssue> = result
-        .issues
+    let critical: Vec<&ReviewIssue> = issues
         .iter()
         .filter(|i| i.severity == Severity::Critical)
         .collect();
-    let important: Vec<&ReviewIssue> = result
-        .issues
+    let important: Vec<&ReviewIssue> = issues
         .iter()
         .filter(|i| i.severity == Severity::Important)
         .collect();
-    let minor: Vec<&ReviewIssue> = result
-        .issues
+    let minor: Vec<&ReviewIssue> = issues
         .iter()
         .filter(|i| i.severity == Severity::Minor)
         .collect();
 
-    if !result.issues.is_empty() {
-        report.push_str("## Issues Found\n\n");
+    report.push_str("## Issues Found\n\n");
+    render_issue_group(report, "Critical", &critical);
+    render_issue_group(report, "Important", &important);
+    render_issue_group(report, "Minor", &minor);
+}
 
-        if !critical.is_empty() {
-            report.push_str(&format!("### Critical ({})\n", critical.len()));
-            for issue in &critical {
-                format_issue(&mut report, issue);
-            }
-            report.push('\n');
-        }
-
-        if !important.is_empty() {
-            report.push_str(&format!("### Important ({})\n", important.len()));
-            for issue in &important {
-                format_issue(&mut report, issue);
-            }
-            report.push('\n');
-        }
-
-        if !minor.is_empty() {
-            report.push_str(&format!("### Minor ({})\n", minor.len()));
-            for issue in &minor {
-                format_issue(&mut report, issue);
-            }
-            report.push('\n');
-        }
+/// Render the auto-fixed issues section.
+fn render_auto_fixes_section(report: &mut String, result: &ReviewResult) {
+    if result.auto_fixes.is_empty() {
+        return;
     }
-
-    // Auto-fixed issues
-    if !result.auto_fixes.is_empty() {
-        report.push_str("## Auto-Fixed Issues\n\n");
-        report.push_str("The following issues were automatically fixed:\n\n");
-        for fix in &result.auto_fixes {
-            let location = if let Some(line) = fix.line {
-                format!("{}:{}", fix.file.display(), line)
-            } else {
-                fix.file.display().to_string()
-            };
-            report.push_str(&format!("- {} — {}\n", location, fix.description));
-        }
-        report.push('\n');
+    report.push_str("## Auto-Fixed Issues\n\n");
+    report.push_str("The following issues were automatically fixed:\n\n");
+    for fix in &result.auto_fixes {
+        let location = if let Some(line) = fix.line {
+            format!("{}:{}", fix.file.display(), line)
+        } else {
+            fix.file.display().to_string()
+        };
+        report.push_str(&format!("- {} — {}\n", location, fix.description));
     }
+    report.push('\n');
+}
 
-    // Assessment
+/// Render the final assessment section.
+fn render_assessment_section(report: &mut String, result: &ReviewResult) {
     report.push_str("## Assessment\n");
     match result.summary.assessment {
         Assessment::Ready => {
@@ -131,6 +125,18 @@ pub fn generate_markdown_report(result: &ReviewResult) -> String {
             ));
         }
     }
+}
+
+/// Generate a Markdown report from review results.
+pub fn generate_markdown_report(result: &ReviewResult) -> String {
+    let mut report = String::new();
+
+    report.push_str("# Code Review Report\n\n");
+    render_summary_section(&mut report, result);
+    render_changed_files_section(&mut report, result);
+    render_issues_section(&mut report, &result.issues);
+    render_auto_fixes_section(&mut report, result);
+    render_assessment_section(&mut report, result);
 
     report
 }

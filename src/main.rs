@@ -550,8 +550,128 @@ fn plugin_name_from_path(url_or_path: &str) -> String {
 
 /// Load plugins and build a `ConfigResolver`.
 /// Returns `(loaded_plugin_names, config_resolver)` or an error exit code.
+/// Build a `PluginSource` from a URL/path and an optional git ref.
+fn make_plugin_source(
+    url_or_path: &str,
+    git_ref: Option<&str>,
+) -> linthis::plugin::PluginSource {
+    let source = linthis::plugin::PluginSource::new(url_or_path);
+    match git_ref {
+        Some(r) => source.with_ref(r),
+        None => source,
+    }
+}
+
+/// Collect plugins specified on the CLI via `--use-plugin`.
+fn collect_cli_plugins(
+    plugin_specs: &[String],
+    verbose: bool,
+) -> Vec<(String, linthis::plugin::PluginSource)> {
+    plugin_specs
+        .iter()
+        .map(|spec| {
+            let (url_or_path, git_ref) = parse_plugin_spec(spec);
+            let name = plugin_name_from_path(&url_or_path);
+            let source = make_plugin_source(&url_or_path, git_ref.as_deref());
+            if verbose {
+                eprintln!("Using plugin from CLI: {} ({})", name, url_or_path);
+            }
+            (name, source)
+        })
+        .collect()
+}
+
+/// Convert a list of `(name, url, git_ref)` tuples from a plugin
+/// config manager into `(name, PluginSource)` pairs, silently
+/// returning an empty vec on any error.
+fn list_plugins_from_manager(
+    manager: Result<linthis::plugin::PluginConfigManager, linthis::plugin::PluginError>,
+) -> Vec<(String, linthis::plugin::PluginSource)> {
+    let manager = match manager {
+        Ok(m) => m,
+        Err(_) => return Vec::new(),
+    };
+    let entries = match manager.list_plugins() {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    entries
+        .into_iter()
+        .map(|(name, url, git_ref)| {
+            let source = make_plugin_source(&url, git_ref.as_deref());
+            (name, source)
+        })
+        .collect()
+}
+
+/// Load configs from a set of plugins and merge them into
+/// `loaded_plugins` and `config_resolver`.
+fn load_plugin_configs(
+    plugins: Vec<(String, linthis::plugin::PluginSource)>,
+    source_type: ConfigSource,
+    verbose: bool,
+    loaded_plugins: &mut Vec<String>,
+    config_resolver: &mut ConfigResolver,
+) -> Result<(), ExitCode> {
+    if plugins.is_empty() {
+        return Ok(());
+    }
+
+    let loader = linthis::plugin::PluginLoader::with_verbose(verbose)
+        .map_err(|e| {
+            eprintln!(
+                "{}: Failed to initialize plugin loader: {}",
+                "Error".red(),
+                e
+            );
+            ExitCode::from(1)
+        })?;
+
+    for (plugin_name, source) in plugins {
+        match loader.load_configs(&[source], false) {
+            Ok(configs) => {
+                loaded_plugins.push(plugin_name.clone());
+                if verbose {
+                    eprintln!(
+                        "Loaded {} config(s) from plugin '{}' (priority: {:?})",
+                        configs.len(),
+                        plugin_name,
+                        source_type
+                    );
+                }
+                for config in &configs {
+                    config_resolver.add_config(ResolvedConfig::new(
+                        config.language.clone(),
+                        config.tool.clone(),
+                        config.config_path.clone(),
+                        source_type,
+                        plugin_name.clone(),
+                    ));
+                    if verbose {
+                        eprintln!(
+                            "  - {}/{}: {} (from plugin cache)",
+                            config.language,
+                            config.tool,
+                            config.config_path.display()
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "{}: Failed to load plugin '{}': {}",
+                    "Warning".yellow(),
+                    plugin_name,
+                    e
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn load_plugins(cli: &Cli) -> Result<(Vec<String>, ConfigResolver), ExitCode> {
-    use linthis::plugin::{PluginConfigManager, PluginLoader, PluginSource};
+    use linthis::plugin::PluginConfigManager;
 
     let mut loaded_plugins: Vec<String> = Vec::new();
     let mut config_resolver = ConfigResolver::new();
@@ -560,55 +680,18 @@ fn load_plugins(cli: &Cli) -> Result<(Vec<String>, ConfigResolver), ExitCode> {
         return Ok((loaded_plugins, config_resolver));
     }
 
-    let mut cli_plugins: Vec<(String, PluginSource)> = Vec::new();
-    let mut project_plugins: Vec<(String, PluginSource)> = Vec::new();
-    let mut global_plugins: Vec<(String, PluginSource)> = Vec::new();
-
-    if let Some(ref plugin_specs) = cli.use_plugin {
-        for spec in plugin_specs {
-            let (url_or_path, git_ref) = parse_plugin_spec(spec);
-            let name = plugin_name_from_path(&url_or_path);
-
-            let source = if let Some(ref r) = git_ref {
-                PluginSource::new(&url_or_path).with_ref(r)
+    let (cli_plugins, project_plugins, global_plugins) =
+        if let Some(ref specs) = cli.use_plugin {
+            (collect_cli_plugins(specs, cli.verbose), Vec::new(), Vec::new())
+        } else {
+            let project = list_plugins_from_manager(PluginConfigManager::project());
+            let global = if project.is_empty() {
+                list_plugins_from_manager(PluginConfigManager::global())
             } else {
-                PluginSource::new(&url_or_path)
+                Vec::new()
             };
-
-            if cli.verbose {
-                eprintln!("Using plugin from CLI: {} ({})", name, url_or_path);
-            }
-            cli_plugins.push((name, source));
-        }
-    } else {
-        if let Ok(project_manager) = PluginConfigManager::project() {
-            if let Ok(plugins) = project_manager.list_plugins() {
-                for (name, url, git_ref) in plugins {
-                    let source = if let Some(ref r) = git_ref {
-                        PluginSource::new(&url).with_ref(r)
-                    } else {
-                        PluginSource::new(&url)
-                    };
-                    project_plugins.push((name, source));
-                }
-            }
-        }
-
-        if project_plugins.is_empty() {
-            if let Ok(global_manager) = PluginConfigManager::global() {
-                if let Ok(plugins) = global_manager.list_plugins() {
-                    for (name, url, git_ref) in plugins {
-                        let source = if let Some(ref r) = git_ref {
-                            PluginSource::new(&url).with_ref(r)
-                        } else {
-                            PluginSource::new(&url)
-                        };
-                        global_plugins.push((name, source));
-                    }
-                }
-            }
-        }
-    }
+            (Vec::new(), project, global)
+        };
 
     let all_plugins = [
         (cli_plugins, ConfigSource::CliPlugin),
@@ -617,64 +700,13 @@ fn load_plugins(cli: &Cli) -> Result<(Vec<String>, ConfigResolver), ExitCode> {
     ];
 
     for (plugins, source_type) in all_plugins {
-        if plugins.is_empty() {
-            continue;
-        }
-
-        let loader = match PluginLoader::with_verbose(cli.verbose) {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!(
-                    "{}: Failed to initialize plugin loader: {}",
-                    "Error".red(),
-                    e
-                );
-                return Err(ExitCode::from(1));
-            }
-        };
-
-        for (plugin_name, source) in plugins {
-            match loader.load_configs(&[source], false) {
-                Ok(configs) => {
-                    loaded_plugins.push(plugin_name.clone());
-                    if cli.verbose {
-                        eprintln!(
-                            "Loaded {} config(s) from plugin '{}' (priority: {:?})",
-                            configs.len(),
-                            plugin_name,
-                            source_type
-                        );
-                    }
-
-                    for config in &configs {
-                        config_resolver.add_config(ResolvedConfig::new(
-                            config.language.clone(),
-                            config.tool.clone(),
-                            config.config_path.clone(),
-                            source_type,
-                            plugin_name.clone(),
-                        ));
-
-                        if cli.verbose {
-                            eprintln!(
-                                "  - {}/{}: {} (from plugin cache)",
-                                config.language,
-                                config.tool,
-                                config.config_path.display()
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{}: Failed to load plugin '{}': {}",
-                        "Warning".yellow(),
-                        plugin_name,
-                        e
-                    );
-                }
-            }
-        }
+        load_plugin_configs(
+            plugins,
+            source_type,
+            cli.verbose,
+            &mut loaded_plugins,
+            &mut config_resolver,
+        )?;
     }
 
     Ok((loaded_plugins, config_resolver))
@@ -1497,84 +1529,44 @@ fn process_lint_result(
     ExitCode::from(result.exit_code as u8)
 }
 
-fn main() -> ExitCode {
-    env_logger::init();
-
-    let mut cmd = Cli::command();
-    inject_dynamic_help(&mut cmd);
-    let matches = cmd.get_matches();
-    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-
-    // Handle subcommands that return early (all except Lint/Check which fall through)
-    if let Some(command) = cli.command.take() {
-        if matches!(command, Commands::Lint { .. }) {
-            cli.command = Some(command);
-            apply_lint_subcommand(&mut cli);
-        } else if matches!(command, Commands::Check { .. }) {
-            cli.command = Some(command);
-            apply_check_subcommand(&mut cli);
-        } else if let Some(exit) = dispatch_subcommand(command) {
-            return exit;
-        }
+/// Handle the `--clear-cache` flag. Returns `Some(ExitCode)` when `main`
+/// should return early, `None` to continue.
+fn handle_clear_cache(cli: &Cli) -> Option<ExitCode> {
+    if !cli.clear_cache {
+        return None;
     }
-
-    // Handle --clear-cache flag
-    if cli.clear_cache {
-        let project_root = linthis::utils::get_project_root();
-        if let Err(e) = linthis::cache::LintCache::clear(&project_root) {
-            eprintln!("{}: {}", "Error clearing cache".red(), e);
-            return ExitCode::from(2);
-        }
-        if !cli.quiet {
-            println!("{} Cache cleared", "\u{2713}".green());
-        }
-        if cli.paths.is_empty() && !cli.check_only && !cli.format_only {
-            return ExitCode::SUCCESS;
-        }
+    let project_root = linthis::utils::get_project_root();
+    if let Err(e) = linthis::cache::LintCache::clear(&project_root) {
+        eprintln!("{}: {}", "Error clearing cache".red(), e);
+        return Some(ExitCode::from(2));
     }
-
-    // Expand --auto-fix to --fix --ai -y
-    if cli.auto_fix {
-        cli.fix = true;
-        cli.ai = true;
-        cli.accept_all = true;
+    if !cli.quiet {
+        println!("{} Cache cleared", "\u{2713}".green());
     }
-
-    if let Some(exit) = validate_cli_flags(&cli) {
-        return exit;
+    if cli.paths.is_empty() && !cli.check_only && !cli.format_only {
+        return Some(ExitCode::SUCCESS);
     }
+    None
+}
 
-    // Perform self-update and auto-sync checks
-    {
-        let project_root = linthis::utils::get_project_root();
-        let config = linthis::config::Config::load_merged(&project_root);
-        perform_self_update(config.self_auto_update.as_ref());
-        perform_auto_sync(config.plugin_auto_sync.as_ref());
-    }
-
-    // Load plugins
-    let (loaded_plugins, config_resolver) = match load_plugins(&cli) {
-        Ok(result) => result,
-        Err(exit) => return exit,
-    };
-
-    // Handle --init flag
+/// Handle early-exit flags (`--init`, `--init-configs`, `--benchmark`).
+/// Returns `Some(ExitCode)` when `main` should return early.
+fn handle_early_flags(cli: &Cli) -> Option<ExitCode> {
     if cli.init {
-        return handle_init_flag();
+        return Some(handle_init_flag());
     }
-
-    // Handle --init-configs flag
     if cli.init_configs {
-        return init_linter_configs();
+        return Some(init_linter_configs());
     }
-
-    // Handle --benchmark flag
     if cli.benchmark {
-        return run_benchmark(&cli);
+        return Some(run_benchmark(cli));
     }
+    None
+}
 
-    // Determine run mode
-    let mode = if cli.check_only && cli.format_only {
+/// Determine the `RunMode` from CLI flags.
+fn determine_run_mode(cli: &Cli) -> RunMode {
+    if cli.check_only && cli.format_only {
         RunMode::Both
     } else if cli.check_only {
         RunMode::CheckOnly
@@ -1582,18 +1574,12 @@ fn main() -> ExitCode {
         RunMode::FormatOnly
     } else {
         RunMode::Both
-    };
+    }
+}
 
-    // Parse languages
-    let languages: Vec<Language> = cli
-        .lang
-        .clone()
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|s| Language::from_name(s))
-        .collect();
-
-    // Collect paths
+/// Collect target paths and exclude patterns from CLI options.
+/// Returns `Err(ExitCode)` on failure or empty input.
+fn collect_target_paths(cli: &Cli) -> Result<(Vec<PathBuf>, Vec<String>), ExitCode> {
     let path_options = PathCollectionOptions {
         staged: cli.staged,
         since: cli.since.clone(),
@@ -1605,29 +1591,86 @@ fn main() -> ExitCode {
         verbose: cli.verbose,
     };
 
-    let (paths, exclude_patterns) = match collect_paths(&path_options) {
-        PathCollectionResult::Success(p, e) => (p, e),
+    match collect_paths(&path_options) {
+        PathCollectionResult::Success(p, e) => Ok((p, e)),
         PathCollectionResult::Empty(msg) => {
             if !cli.quiet {
                 println!("{}", msg);
             }
-            return ExitCode::SUCCESS;
+            Err(ExitCode::SUCCESS)
         }
         PathCollectionResult::Error(msg, code) => {
             eprintln!("{}", msg);
-            return ExitCode::from(code as u8);
+            Err(ExitCode::from(code as u8))
         }
-    };
+    }
+}
 
-    // Load runtime config
-    let runtime_project_root = linthis::utils::get_project_root();
-    let runtime_config =
-        linthis::config::Config::load_merged(&runtime_project_root);
+/// Parse the output format and optional hook type from CLI flags.
+fn parse_output_format(cli: &Cli) -> (OutputFormat, Option<String>) {
+    if let Some(ref hook) = cli.hook_mode {
+        (OutputFormat::Hook, Some(hook.clone()))
+    } else {
+        (
+            OutputFormat::parse(&cli.output).unwrap_or(OutputFormat::Human),
+            None,
+        )
+    }
+}
 
-    let tool_install_mode =
-        resolve_tool_install_mode(cli.no_tool_auto_install, &runtime_config);
+/// Handle subcommands. Lint/Check subcommands modify `cli` flags and
+/// fall through; all others dispatch and return an exit code.
+fn handle_subcommands(cli: &mut Cli) -> Option<ExitCode> {
+    let command = cli.command.take()?;
+    if matches!(command, Commands::Lint { .. }) {
+        cli.command = Some(command);
+        apply_lint_subcommand(cli);
+        None
+    } else if matches!(command, Commands::Check { .. }) {
+        cli.command = Some(command);
+        apply_check_subcommand(cli);
+        None
+    } else {
+        dispatch_subcommand(command)
+    }
+}
 
-    let options = RunOptions {
+/// Expand the `--auto-fix` convenience flag.
+fn expand_auto_fix(cli: &mut Cli) {
+    if cli.auto_fix {
+        cli.fix = true;
+        cli.ai = true;
+        cli.accept_all = true;
+    }
+}
+
+/// Perform self-update and plugin auto-sync checks.
+fn run_update_checks() {
+    let project_root = linthis::utils::get_project_root();
+    let config = linthis::config::Config::load_merged(&project_root);
+    perform_self_update(config.self_auto_update.as_ref());
+    perform_auto_sync(config.plugin_auto_sync.as_ref());
+}
+
+/// Build the `RunOptions` for the main lint/format run.
+fn build_run_options(
+    cli: &Cli,
+    loaded_plugins: Vec<String>,
+    config_resolver: ConfigResolver,
+    mode: RunMode,
+    paths: Vec<PathBuf>,
+    exclude_patterns: Vec<String>,
+    tool_install_mode: ToolInstallMode,
+) -> RunOptions {
+    let languages: Vec<Language> = cli
+        .lang
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| Language::from_name(s))
+        .collect();
+
+    RunOptions {
         paths,
         mode,
         languages,
@@ -1642,17 +1685,18 @@ fn main() -> ExitCode {
             Some(Arc::new(config_resolver))
         },
         tool_install_mode,
-    };
+    }
+}
 
-    // Parse output format
-    let (output_format, hook_type) = if let Some(ref hook) = cli.hook_mode {
-        (OutputFormat::Hook, Some(hook.clone()))
-    } else {
-        (
-            OutputFormat::parse(&cli.output).unwrap_or(OutputFormat::Human),
-            None,
-        )
-    };
+/// Execute the lint/format run and process results.
+fn execute_run(
+    cli: &Cli,
+    options: &RunOptions,
+    runtime_config: &linthis::config::Config,
+    runtime_project_root: &std::path::Path,
+    mode: RunMode,
+) -> ExitCode {
+    let (output_format, hook_type) = parse_output_format(cli);
 
     if cli.verbose {
         eprintln!(
@@ -1663,7 +1707,6 @@ fn main() -> ExitCode {
         eprintln!("Paths: {:?}", options.paths);
     }
 
-    // Backup files before formatting
     if matches!(mode, RunMode::Both | RunMode::FormatOnly) {
         cli::create_backup(
             &options.paths,
@@ -1672,13 +1715,12 @@ fn main() -> ExitCode {
         );
     }
 
-    // Run linthis
-    match run(&options) {
+    match run(options) {
         Ok(result) => process_lint_result(
             result,
-            &cli,
-            &runtime_config,
-            &runtime_project_root,
+            cli,
+            runtime_config,
+            runtime_project_root,
             output_format,
             hook_type,
         ),
@@ -1687,6 +1729,66 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn main() -> ExitCode {
+    env_logger::init();
+
+    let mut cmd = Cli::command();
+    inject_dynamic_help(&mut cmd);
+    let matches = cmd.get_matches();
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+
+    if let Some(exit) = handle_subcommands(&mut cli) {
+        return exit;
+    }
+
+    if let Some(exit) = handle_clear_cache(&cli) {
+        return exit;
+    }
+
+    expand_auto_fix(&mut cli);
+
+    if let Some(exit) = validate_cli_flags(&cli) {
+        return exit;
+    }
+
+    run_update_checks();
+
+    let (loaded_plugins, config_resolver) = match load_plugins(&cli) {
+        Ok(result) => result,
+        Err(exit) => return exit,
+    };
+
+    if let Some(exit) = handle_early_flags(&cli) {
+        return exit;
+    }
+
+    let mode = determine_run_mode(&cli);
+
+    let (paths, exclude_patterns) = match collect_target_paths(&cli) {
+        Ok(result) => result,
+        Err(exit) => return exit,
+    };
+
+    let runtime_project_root = linthis::utils::get_project_root();
+    let runtime_config =
+        linthis::config::Config::load_merged(&runtime_project_root);
+
+    let tool_install_mode =
+        resolve_tool_install_mode(cli.no_tool_auto_install, &runtime_config);
+
+    let options = build_run_options(
+        &cli,
+        loaded_plugins,
+        config_resolver,
+        mode,
+        paths,
+        exclude_patterns,
+        tool_install_mode,
+    );
+
+    execute_run(&cli, &options, &runtime_config, &runtime_project_root, mode)
 }
 
 // PerFileCache is now in linthis::cache::checks_cache
