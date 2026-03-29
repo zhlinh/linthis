@@ -293,131 +293,186 @@ impl SecretsScanner {
     }
 
     fn scan_content(&self, file_path: &Path, content: &str) -> Vec<SastFinding> {
-        let mut findings = Vec::new();
         let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-        // Skip binary/non-source files
-        if matches!(
-            ext,
-            "png"
-                | "jpg"
-                | "jpeg"
-                | "gif"
-                | "ico"
-                | "woff"
-                | "woff2"
-                | "ttf"
-                | "eot"
-                | "zip"
-                | "tar"
-                | "gz"
-                | "bin"
-                | "exe"
-                | "dll"
-                | "so"
-                | "dylib"
-                | "pdf"
-                | "lock"
-        ) {
-            return findings;
+        if is_binary_extension(ext) {
+            return Vec::new();
         }
 
+        let mut findings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
         let mut next_line_directive: Option<String> = None;
 
         for (line_num, line) in lines.iter().enumerate() {
-            // Parse ignore directives:
-            //   # linthis:ignore secrets                   — ignore this line
-            //   # linthis:ignore secrets/sk-prefix-key     — ignore specific rule on this line
-            //   # linthis:ignore-next-line secrets          — ignore next line
-            //   # linthis:ignore-next-line secrets/rule-id  — ignore specific rule on next line
-            let ignore_directive = parse_ignore_directive(line);
-            let ignore_next = parse_ignore_next_line_directive(line);
+            let effective_directive =
+                resolve_effective_directive(line, &mut next_line_directive);
 
-            // Apply next-line directive carried from previous line
-            let effective_directive = if next_line_directive.is_some() {
-                let d = next_line_directive.take();
-                // Merge with inline directive if both present (inline takes precedence for broader scope)
-                match (&d, &ignore_directive) {
-                    (_, Some(inline)) if inline == "secrets" => Some("secrets".to_string()),
-                    (Some(next), Some(inline)) if next == "secrets" => Some("secrets".to_string()),
-                    (_, Some(inline)) => Some(inline.clone()),
-                    (d, None) => d.clone(),
-                }
-            } else {
-                ignore_directive
-            };
-
-            // Store next-line directive for the following iteration
-            if ignore_next.is_some() {
-                next_line_directive = ignore_next;
-            }
-
-            for pattern in &self.compiled {
-                // Check if this specific pattern is ignored
-                if let Some(ref directive) = effective_directive {
-                    if directive == "secrets" || *directive == pattern.id {
-                        continue;
-                    }
-                }
-
-                if let Some(m) = pattern.regex.find(line) {
-                    let matched = m.as_str();
-
-                    // Skip placeholder/dummy values (xxx, XXX, ****, 0000, YOUR_xxx, etc.)
-                    if is_placeholder_value(matched) {
-                        continue;
-                    }
-                    let masked = if matched.len() > 12 {
-                        format!("{}...{}", &matched[..8], &matched[matched.len() - 4..])
-                    } else {
-                        matched.to_string()
-                    };
-
-                    let lang = match ext {
-                        "py" => "python",
-                        "js" | "jsx" | "mjs" => "javascript",
-                        "ts" | "tsx" => "typescript",
-                        "go" => "go",
-                        "rs" => "rust",
-                        "java" => "java",
-                        "kt" | "kts" => "kotlin",
-                        "c" | "h" => "c",
-                        "cpp" | "cc" | "hpp" => "cpp",
-                        "rb" => "ruby",
-                        "php" => "php",
-                        "swift" => "swift",
-                        "yaml" | "yml" | "toml" | "json" | "env" | "cfg" | "ini" | "conf"
-                        | "properties" => "config",
-                        _ => "unknown",
-                    };
-
-                    findings.push(SastFinding {
-                        rule_id: pattern.id.clone(),
-                        severity: pattern.severity,
-                        message: format!("{} (matched: {})", pattern.description, masked),
-                        file_path: file_path.to_path_buf(),
-                        line: line_num + 1,
-                        column: Some(m.start() + 1),
-                        end_line: None,
-                        end_column: Some(m.end() + 1),
-                        code_snippet: Some(line.to_string()),
-                        fix_suggestion: Some(
-                            "Move secret to environment variable or secrets manager".to_string(),
-                        ),
-                        category: "secrets".to_string(),
-                        cwe_ids: vec![pattern.cwe.clone()],
-                        source: "linthis-secrets".to_string(),
-                        language: lang.to_string(),
-                    });
-
-                    // Only report the first match per line per pattern group
-                    break;
-                }
-            }
+            self.scan_line(
+                file_path,
+                ext,
+                line,
+                line_num,
+                &effective_directive,
+                &mut findings,
+            );
         }
 
         findings
+    }
+
+    fn scan_line(
+        &self,
+        file_path: &Path,
+        ext: &str,
+        line: &str,
+        line_num: usize,
+        effective_directive: &Option<String>,
+        findings: &mut Vec<SastFinding>,
+    ) {
+        for pattern in &self.compiled {
+            if is_pattern_ignored(effective_directive, &pattern.id) {
+                continue;
+            }
+
+            if let Some(m) = pattern.regex.find(line) {
+                let matched = m.as_str();
+                if is_placeholder_value(matched) {
+                    continue;
+                }
+
+                findings.push(build_finding(
+                    pattern, file_path, ext, line, line_num, &m,
+                ));
+                break;
+            }
+        }
+    }
+}
+
+/// Check whether a file extension indicates a binary/non-source file.
+fn is_binary_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "ico"
+            | "woff"
+            | "woff2"
+            | "ttf"
+            | "eot"
+            | "zip"
+            | "tar"
+            | "gz"
+            | "bin"
+            | "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "pdf"
+            | "lock"
+    )
+}
+
+/// Resolve the effective ignore directive for a line, consuming any pending
+/// next-line directive and merging it with the inline directive.
+fn resolve_effective_directive(
+    line: &str,
+    next_line_directive: &mut Option<String>,
+) -> Option<String> {
+    let ignore_directive = parse_ignore_directive(line);
+    let ignore_next = parse_ignore_next_line_directive(line);
+
+    let effective = if next_line_directive.is_some() {
+        let d = next_line_directive.take();
+        match (&d, &ignore_directive) {
+            (_, Some(inline)) if inline == "secrets" => Some("secrets".to_string()),
+            (Some(next), Some(_inline)) if next == "secrets" => Some("secrets".to_string()),
+            (_, Some(inline)) => Some(inline.clone()),
+            (d, None) => d.clone(),
+        }
+    } else {
+        ignore_directive
+    };
+
+    if ignore_next.is_some() {
+        *next_line_directive = ignore_next;
+    }
+
+    effective
+}
+
+/// Check whether a specific pattern is suppressed by the directive.
+fn is_pattern_ignored(directive: &Option<String>, pattern_id: &str) -> bool {
+    if let Some(ref d) = directive {
+        d == "secrets" || *d == pattern_id
+    } else {
+        false
+    }
+}
+
+/// Map a file extension to a language identifier.
+fn ext_to_language(ext: &str) -> &'static str {
+    match ext {
+        "py" => "python",
+        "js" | "jsx" | "mjs" => "javascript",
+        "ts" | "tsx" => "typescript",
+        "go" => "go",
+        "rs" => "rust",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "hpp" => "cpp",
+        "rb" => "ruby",
+        "php" => "php",
+        "swift" => "swift",
+        "yaml" | "yml" | "toml" | "json" | "env" | "cfg" | "ini" | "conf" | "properties" => {
+            "config"
+        }
+        _ => "unknown",
+    }
+}
+
+/// Mask a matched secret value for display.
+fn mask_matched_value(matched: &str) -> String {
+    if matched.len() > 12 {
+        format!("{}...{}", &matched[..8], &matched[matched.len() - 4..])
+    } else {
+        matched.to_string()
+    }
+}
+
+/// Build a `SastFinding` from a regex match on a line.
+fn build_finding(
+    pattern: &CompiledPattern,
+    file_path: &Path,
+    ext: &str,
+    line: &str,
+    line_num: usize,
+    m: &regex::Match<'_>,
+) -> SastFinding {
+    let matched = m.as_str();
+    let masked = mask_matched_value(matched);
+    let lang = ext_to_language(ext);
+
+    SastFinding {
+        rule_id: pattern.id.clone(),
+        severity: pattern.severity,
+        message: format!("{} (matched: {})", pattern.description, masked),
+        file_path: file_path.to_path_buf(),
+        line: line_num + 1,
+        column: Some(m.start() + 1),
+        end_line: None,
+        end_column: Some(m.end() + 1),
+        code_snippet: Some(line.to_string()),
+        fix_suggestion: Some(
+            "Move secret to environment variable or secrets manager".to_string(),
+        ),
+        category: "secrets".to_string(),
+        cwe_ids: vec![pattern.cwe.clone()],
+        source: "linthis-secrets".to_string(),
+        language: lang.to_string(),
     }
 }
 

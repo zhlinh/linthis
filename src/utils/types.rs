@@ -642,7 +642,7 @@ mod tests {
         ));
 
         result.calculate_exit_code();
-        assert_eq!(result.exit_code, 3); // Warnings only cause exit code 3
+        assert_eq!(result.exit_code, 2); // Warnings cause exit code 2
     }
 
     #[test]
@@ -654,7 +654,7 @@ mod tests {
         ));
 
         result.calculate_exit_code();
-        assert_eq!(result.exit_code, 2);
+        assert_eq!(result.exit_code, 4); // Format errors cause exit code 4
     }
 
     #[test]

@@ -178,54 +178,51 @@ pub fn format_issue_github_actions(issue: &LintIssue) -> String {
     )
 }
 
-/// Format the run result summary for human-readable output.
-pub fn format_summary_human(result: &RunResult) -> String {
-    use crate::utils::types::RunModeKind;
-
-    let issue_count = result.issues.len();
-    let error_count = result
-        .issues
-        .iter()
-        .filter(|i| i.severity == Severity::Error)
-        .count();
-    let warning_count = result
-        .issues
-        .iter()
-        .filter(|i| i.severity == Severity::Warning)
-        .count();
-
-    if issue_count == 0 && result.files_formatted == 0 && result.issues_fixed == 0 {
-        let msg = match result.run_mode {
-            RunModeKind::FormatOnly => "All formats passed",
-            RunModeKind::CheckOnly => "All checks passed",
-            RunModeKind::Both => "All checks and formats passed",
-        };
-
-        let file_stats = format!(
-            " (0 errors, 0 warnings in {} file{})",
-            result.total_files,
-            if result.total_files == 1 { "" } else { "s" },
-        );
-
-        // Add duration
-        let duration_str = if result.duration_ms >= 1000 {
-            format!("{:.2}s", result.duration_ms as f64 / 1000.0)
-        } else {
-            format!("{}ms", result.duration_ms)
-        };
-
-        return format!(
-            "{} {}{}\nDone in {}",
-            "✓".green(),
-            msg.green().bold(),
-            file_stats,
-            duration_str.cyan()
-        );
+/// Format a duration in milliseconds as a human-readable string.
+fn format_duration_str(duration_ms: u64) -> String {
+    if duration_ms >= 1000 {
+        format!("{:.2}s", duration_ms as f64 / 1000.0)
+    } else {
+        format!("{}ms", duration_ms)
     }
+}
 
-    let mut summary = String::new();
+/// Get the "all passed" message based on run mode.
+fn all_passed_message(run_mode: &crate::utils::types::RunModeKind) -> &'static str {
+    use crate::utils::types::RunModeKind;
+    match run_mode {
+        RunModeKind::FormatOnly => "All formats passed",
+        RunModeKind::CheckOnly => "All checks passed",
+        RunModeKind::Both => "All checks and formats passed",
+    }
+}
 
-    // Show formatting stats first
+/// Format file stats string like " (0 errors, 0 warnings in N file(s))".
+fn format_file_stats(total_files: usize) -> String {
+    format!(
+        " (0 errors, 0 warnings in {} file{})",
+        total_files,
+        if total_files == 1 { "" } else { "s" },
+    )
+}
+
+/// Format the no-issues summary case.
+fn format_summary_no_issues(result: &RunResult) -> String {
+    let msg = all_passed_message(&result.run_mode);
+    let file_stats = format_file_stats(result.total_files);
+    let duration_str = format_duration_str(result.duration_ms);
+
+    format!(
+        "{} {}{}\nDone in {}",
+        "✓".green(),
+        msg.green().bold(),
+        file_stats,
+        duration_str.cyan()
+    )
+}
+
+/// Append formatting stats to the summary if files were formatted.
+fn append_formatting_stats(summary: &mut String, result: &RunResult) {
     if result.files_formatted > 0 {
         summary.push_str(&format!(
             "{} Formatted {} file{}",
@@ -235,7 +232,6 @@ pub fn format_summary_human(result: &RunResult) -> String {
         ));
     }
 
-    // Show fixed issues (from formatting)
     if result.issues_fixed > 0 {
         if !summary.is_empty() {
             summary.push('\n');
@@ -247,8 +243,16 @@ pub fn format_summary_human(result: &RunResult) -> String {
             if result.issues_fixed == 1 { "" } else { "s" }
         ));
     }
+}
 
-    // Show remaining issues
+/// Append remaining issues or all-passed message to the summary.
+fn append_issues_or_passed(
+    summary: &mut String,
+    result: &RunResult,
+    issue_count: usize,
+    error_count: usize,
+    warning_count: usize,
+) {
     if issue_count > 0 {
         if !summary.is_empty() {
             summary.push('\n');
@@ -267,22 +271,11 @@ pub fn format_summary_human(result: &RunResult) -> String {
             if result.total_files == 1 { "" } else { "s" }
         ));
     } else if result.files_formatted > 0 || result.issues_fixed > 0 {
-        // All issues were fixed
         if !summary.is_empty() {
             summary.push('\n');
         }
-        let msg = match result.run_mode {
-            RunModeKind::FormatOnly => "All formats passed",
-            RunModeKind::CheckOnly => "All checks passed",
-            RunModeKind::Both => "All checks and formats passed",
-        };
-
-        let file_stats = format!(
-            " (0 errors, 0 warnings in {} file{})",
-            result.total_files,
-            if result.total_files == 1 { "" } else { "s" },
-        );
-
+        let msg = all_passed_message(&result.run_mode);
+        let file_stats = format_file_stats(result.total_files);
         summary.push_str(&format!(
             "{} {}{} (0 errors, 0 warnings)",
             "✓".green(),
@@ -290,16 +283,40 @@ pub fn format_summary_human(result: &RunResult) -> String {
             file_stats
         ));
     }
+}
 
-    // Show duration
+/// Format the run result summary for human-readable output.
+pub fn format_summary_human(result: &RunResult) -> String {
+    let issue_count = result.issues.len();
+    let error_count = result
+        .issues
+        .iter()
+        .filter(|i| i.severity == Severity::Error)
+        .count();
+    let warning_count = result
+        .issues
+        .iter()
+        .filter(|i| i.severity == Severity::Warning)
+        .count();
+
+    if issue_count == 0 && result.files_formatted == 0 && result.issues_fixed == 0 {
+        return format_summary_no_issues(result);
+    }
+
+    let mut summary = String::new();
+    append_formatting_stats(&mut summary, result);
+    append_issues_or_passed(
+        &mut summary,
+        result,
+        issue_count,
+        error_count,
+        warning_count,
+    );
+
     if !summary.is_empty() {
         summary.push('\n');
     }
-    let duration_str = if result.duration_ms >= 1000 {
-        format!("{:.2}s", result.duration_ms as f64 / 1000.0)
-    } else {
-        format!("{}ms", result.duration_ms)
-    };
+    let duration_str = format_duration_str(result.duration_ms);
     summary.push_str(&format!("Done in {}", duration_str.cyan()));
 
     summary
@@ -509,8 +526,7 @@ fn build_security_view(sast: &crate::security::sast::SastResult) -> CheckResultV
         .map(|f| {
             // Map security severity to unified error/warning/info
             let unified_severity = match f.severity {
-                crate::security::Severity::Critical
-                | crate::security::Severity::High => "error",
+                crate::security::Severity::Critical | crate::security::Severity::High => "error",
                 crate::security::Severity::Medium => "warning",
                 _ => "info",
             };
@@ -553,9 +569,7 @@ fn build_security_view(sast: &crate::security::sast::SastResult) -> CheckResultV
 /// Build complexity check result view from AnalysisResult.
 ///
 /// Converts per-function metrics into issues (one issue per function exceeding threshold).
-fn build_complexity_view(
-    analysis: &crate::complexity::AnalysisResult,
-) -> CheckResultView {
+fn build_complexity_view(analysis: &crate::complexity::AnalysisResult) -> CheckResultView {
     let threshold = if analysis.thresholds.cyclomatic.good > 0 {
         analysis.thresholds.cyclomatic.good
     } else {
@@ -614,11 +628,12 @@ fn build_complexity_view(
 
 /// Format the entire run result as unified JSON.
 pub fn format_result_json(result: &RunResult) -> String {
-    let lint_view = if result.checks_run.contains(&"lint".to_string()) || result.checks_run.is_empty() {
-        Some(build_lint_view(result))
-    } else {
-        None
-    };
+    let lint_view =
+        if result.checks_run.contains(&"lint".to_string()) || result.checks_run.is_empty() {
+            Some(build_lint_view(result))
+        } else {
+            None
+        };
 
     let security_view = result.security.as_ref().map(build_security_view);
     let complexity_view = result.complexity.as_ref().map(build_complexity_view);
@@ -773,26 +788,181 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
     format!("\n{}", lines.join("\n"))
 }
 
-/// Format the entire run result for git hook output with configurable width.
-///
-/// # Arguments
-/// * `result` - The run result to format
-/// * `hook_type` - Optional hook type ("pre-push", "commit-msg", or default "pre-commit")
-/// * `config_width` - Optional configured width (0 or None = auto-detect terminal width)
+/// Box drawing context for hook output formatting.
+struct HookBoxContext {
+    content_width: usize,
+    top_border: String,
+    mid_border: String,
+    bot_border: String,
+}
+
+impl HookBoxContext {
+    fn new(config_width: Option<u32>) -> Self {
+        let box_width = match config_width {
+            Some(w) if w > 0 => (w as usize).clamp(50, 120),
+            _ => get_terminal_width().clamp(50, 120),
+        };
+        let content_width = box_width - 4;
+        Self {
+            content_width,
+            top_border: format!("╭{}╮", "─".repeat(box_width - 2)),
+            mid_border: format!("├{}┤", "─".repeat(box_width - 2)),
+            bot_border: format!("╰{}╯", "─".repeat(box_width - 2)),
+        }
+    }
+
+    fn pad_line(&self, content: &str, emoji_count: usize) -> String {
+        let visual_len = content.chars().count() + emoji_count;
+        let padding = self.content_width.saturating_sub(visual_len);
+        format!("│ {}{} │", content, " ".repeat(padding))
+    }
+}
+
+/// Get the hook display name based on hook type.
+fn hook_display_name(hook_type: Option<&str>) -> &'static str {
+    match hook_type {
+        Some("pre-push") => "📤 [Pre-push]",
+        Some("commit-msg") => "📝 [Commit-msg]",
+        _ => "🔍 [Pre-commit]",
+    }
+}
+
+/// Get the skip command based on hook type.
+fn hook_skip_command(hook_type: Option<&str>) -> &'static str {
+    match hook_type {
+        Some("pre-push") => "git push --no-verify",
+        _ => "git commit --no-verify",
+    }
+}
+
+/// Format the success box for hook output.
+fn format_hook_success_box(
+    result: &RunResult,
+    hook_type: Option<&str>,
+    ctx: &HookBoxContext,
+) -> String {
+    let hook_name = hook_display_name(hook_type);
+    let mut output = String::new();
+    output.push_str(&format!("{}\n", ctx.top_border.green()));
+    let header = format!("{} Linthis {} Passed", "✓", hook_name);
+    output.push_str(&format!("{}\n", ctx.pad_line(&header, 1).green()));
+    output.push_str(&format!("{}\n", ctx.mid_border.green()));
+    let checks_msg = if hook_type == Some("pre-push") {
+        "All reviews finish"
+    } else {
+        "All checks passed!"
+    };
+    output.push_str(&format!("{}\n", ctx.pad_line(checks_msg, 0).green()));
+    output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line(&format!("Files checked:   {:>3}", result.total_files), 0)
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line(
+            &format!("Files formatted: {:>3}", result.files_formatted),
+            0
+        )
+    ));
+    output.push_str(&format!("{}", ctx.bot_border.green()));
+    output.push_str(&format_hook_paths_footer(hook_type));
+    output
+}
+
+/// Format a truncated issue line for box display.
+fn format_hook_issue_line(issue: &LintIssue, content_width: usize) -> String {
+    let filename = issue
+        .file_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let location = format!("{}:{}", filename, issue.line);
+    let severity_char = match issue.severity {
+        Severity::Error => "E",
+        Severity::Warning => "W",
+        Severity::Info => "I",
+    };
+    let location_max = (content_width / 3).clamp(10, 35);
+    let location_display = if location.len() > location_max {
+        format!("{}...", &location[..location_max.saturating_sub(3)])
+    } else {
+        location
+    };
+    let msg_prefix_len = 4;
+    let max_msg_len = content_width.saturating_sub(msg_prefix_len + location_display.len());
+    let msg = if issue.message.len() > max_msg_len {
+        format!("{}...", &issue.message[..max_msg_len.saturating_sub(3)])
+    } else {
+        issue.message.clone()
+    };
+    format!(" {} {} {}", severity_char, location_display, msg)
+}
+
+/// Append the tip and skip hint sections for hook failure box.
+fn append_hook_tip_section(
+    output: &mut String,
+    result: &RunResult,
+    hook_type: Option<&str>,
+    ctx: &HookBoxContext,
+) {
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line("Tip: To review and fix issues:", 0)
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line("  linthis report show  - view full details", 0)
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line("  linthis fix          - interactive fix", 0)
+    ));
+    output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
+
+    let clang_tidy_count = result
+        .issues
+        .iter()
+        .filter(|i| i.source.as_deref() == Some("clang-tidy"))
+        .count();
+    if clang_tidy_count >= 10 {
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line(
+                &format!(
+                    "Too many clang-tidy issues ({})? Skip with:",
+                    clang_tidy_count
+                ),
+                0
+            )
+        ));
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line("  LINTHIS_SKIP_CLANG_TIDY=1", 0)
+        ));
+        output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
+    }
+
+    let skip_command = hook_skip_command(hook_type);
+    output.push_str(&format!("{}\n", ctx.pad_line("To skip this check:", 0)));
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line(&format!("  {}", skip_command), 0)
+    ));
+}
+
 pub fn format_result_hook_with_width(
     result: &RunResult,
     hook_type: Option<&str>,
     config_width: Option<u32>,
 ) -> String {
-    let hook_name = match hook_type {
-        Some("pre-push") => "📤 [Pre-push]",
-        Some("commit-msg") => "📝 [Commit-msg]",
-        _ => "🔍 [Pre-commit]",
-    };
-    let skip_command = match hook_type {
-        Some("pre-push") => "git push --no-verify",
-        _ => "git commit --no-verify",
-    };
+    let ctx = HookBoxContext::new(config_width);
+    let total_issues = result.issues.len();
+
+    if total_issues == 0 && result.exit_code == 0 {
+        return format_hook_success_box(result, hook_type, &ctx);
+    }
+
     let error_count = result
         .issues
         .iter()
@@ -803,67 +973,15 @@ pub fn format_result_hook_with_width(
         .iter()
         .filter(|i| i.severity == Severity::Warning)
         .count();
-    let total_issues = result.issues.len();
 
-    // Calculate box width: use config width if provided and > 0, otherwise auto-detect
-    // Clamp to min 50, max 120 for readability
-    let box_width = match config_width {
-        Some(w) if w > 0 => (w as usize).clamp(50, 120),
-        _ => get_terminal_width().clamp(50, 120),
-    };
-    // Content width = box width - 4 (for "│ " prefix and " │" suffix)
-    let content_width = box_width - 4;
-
-    // Create border strings dynamically
-    let top_border = format!("╭{}╮", "─".repeat(box_width - 2));
-    let mid_border = format!("├{}┤", "─".repeat(box_width - 2));
-    let bot_border = format!("╰{}╯", "─".repeat(box_width - 2));
-
-    // Helper to pad content to dynamic width
-    let pad_line = |content: &str, emoji_count: usize| -> String {
-        // Each emoji displays as ~2 chars but counts as 1 in len(), so we subtract emoji_count
-        let visual_len = content.chars().count() + emoji_count;
-        let padding = content_width.saturating_sub(visual_len);
-        format!("│ {}{} │", content, " ".repeat(padding))
-    };
-
-    // If no issues and exit code is 0, show success
-    if total_issues == 0 && result.exit_code == 0 {
-        let mut output = String::new();
-        output.push_str(&format!("{}\n", top_border.green()));
-        let header = format!("{} Linthis {} Passed", "✓", hook_name);
-        output.push_str(&format!("{}\n", pad_line(&header, 1).green()));
-        output.push_str(&format!("{}\n", mid_border.green()));
-        let checks_msg = if hook_type == Some("pre-push") {
-            "All reviews finish"
-        } else {
-            "All checks passed!"
-        };
-        output.push_str(&format!("{}\n", pad_line(checks_msg, 0).green()));
-        output.push_str(&format!("{}\n", pad_line("", 0)));
-        output.push_str(&format!(
-            "{}\n",
-            pad_line(&format!("Files checked:   {:>3}", result.total_files), 0)
-        ));
-        output.push_str(&format!(
-            "{}\n",
-            pad_line(
-                &format!("Files formatted: {:>3}", result.files_formatted),
-                0
-            )
-        ));
-        output.push_str(&format!("{}", bot_border.green()));
-        output.push_str(&format_hook_paths_footer(hook_type));
-        return output;
-    }
-
+    let hook_name = hook_display_name(hook_type);
     let mut output = String::new();
 
     // Header
-    output.push_str(&format!("{}\n", top_border.red()));
+    output.push_str(&format!("{}\n", ctx.top_border.red()));
     let header = format!("X Linthis {} Blocked", hook_name);
-    output.push_str(&format!("{}\n", pad_line(&header, 1).red()));
-    output.push_str(&format!("{}\n", mid_border.red()));
+    output.push_str(&format!("{}\n", ctx.pad_line(&header, 1).red()));
+    output.push_str(&format!("{}\n", ctx.mid_border.red()));
 
     // Summary line
     let summary = format!(
@@ -879,44 +997,14 @@ pub fn format_result_hook_with_width(
             "s"
         }
     );
-    output.push_str(&format!("{}\n", pad_line(&summary, 0)));
-    output.push_str(&format!("{}\n", pad_line("", 0)));
+    output.push_str(&format!("{}\n", ctx.pad_line(&summary, 0)));
+    output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
 
-    // Dynamic truncation lengths based on content width
-    // location: 1/3 of content width, clamped to 10-35 chars
-    let location_max = (content_width / 3).clamp(10, 35);
-    // message: remaining space after " X " (3 chars) + location + " " (1 char)
-    let msg_prefix_len = 4; // " X " + trailing space after location
-
-    // List issues (compact format: file:line message)
-    let max_issues = 8; // Limit to avoid too long output
+    // List issues
+    let max_issues = 8;
     for issue in result.issues.iter().take(max_issues) {
-        let filename = issue
-            .file_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
-        let location = format!("{}:{}", filename, issue.line);
-        let severity_char = match issue.severity {
-            Severity::Error => "E",
-            Severity::Warning => "W",
-            Severity::Info => "I",
-        };
-        // Truncate location if too long
-        let location_display = if location.len() > location_max {
-            format!("{}...", &location[..location_max.saturating_sub(3)])
-        } else {
-            location
-        };
-        // Truncate message to fit
-        let max_msg_len = content_width.saturating_sub(msg_prefix_len + location_display.len());
-        let msg = if issue.message.len() > max_msg_len {
-            format!("{}...", &issue.message[..max_msg_len.saturating_sub(3)])
-        } else {
-            issue.message.clone()
-        };
-        let line_content = format!(" {} {} {}", severity_char, location_display, msg);
-        output.push_str(&format!("{}\n", pad_line(&line_content, 0)));
+        let line_content = format_hook_issue_line(issue, ctx.content_width);
+        output.push_str(&format!("{}\n", ctx.pad_line(&line_content, 0)));
     }
 
     if total_issues > max_issues {
@@ -929,54 +1017,15 @@ pub fn format_result_hook_with_width(
                 "s"
             }
         );
-        output.push_str(&format!("{}\n", pad_line(&more_line, 0)));
+        output.push_str(&format!("{}\n", ctx.pad_line(&more_line, 0)));
     }
 
-    output.push_str(&format!("{}\n", mid_border.red()));
+    output.push_str(&format!("{}\n", ctx.mid_border.red()));
 
-    // Tip section
-    output.push_str(&format!(
-        "{}\n",
-        pad_line("Tip: To review and fix issues:", 0)
-    ));
-    output.push_str(&format!(
-        "{}\n",
-        pad_line("  linthis report show  - view full details", 0)
-    ));
-    output.push_str(&format!(
-        "{}\n",
-        pad_line("  linthis fix          - interactive fix", 0)
-    ));
-    output.push_str(&format!("{}\n", pad_line("", 0)));
+    // Tip and skip sections
+    append_hook_tip_section(&mut output, result, hook_type, &ctx);
 
-    // clang-tidy skip hint if too many clang-tidy issues
-    let clang_tidy_count = result
-        .issues
-        .iter()
-        .filter(|i| i.source.as_deref() == Some("clang-tidy"))
-        .count();
-    if clang_tidy_count >= 10 {
-        output.push_str(&format!(
-            "{}\n",
-            pad_line(
-                &format!(
-                    "Too many clang-tidy issues ({})? Skip with:",
-                    clang_tidy_count
-                ),
-                0
-            )
-        ));
-        output.push_str(&format!("{}\n", pad_line("  LINTHIS_SKIP_CLANG_TIDY=1", 0)));
-        output.push_str(&format!("{}\n", pad_line("", 0)));
-    }
-
-    // Skip check hint
-    output.push_str(&format!("{}\n", pad_line("To skip this check:", 0)));
-    output.push_str(&format!(
-        "{}\n",
-        pad_line(&format!("  {}", skip_command), 0)
-    ));
-    output.push_str(&format!("{}", bot_border.red()));
+    output.push_str(&format!("{}", ctx.bot_border.red()));
     output.push_str(&format_hook_paths_footer(hook_type));
 
     output
@@ -1005,8 +1054,68 @@ pub fn format_result_with_hook_type(
 ///
 /// Produces a box similar to the hook result box, with assessment header,
 /// issue counts, and top issues listed.
+/// Format a single review issue line with truncation for box display.
+fn format_review_issue_line(issue: &crate::review::ReviewIssue, content_width: usize) -> String {
+    use crate::review::Severity;
+
+    let severity_char = match issue.severity {
+        Severity::Critical => "C",
+        Severity::Important => "I",
+        Severity::Minor => "M",
+    };
+    let location = if let Some(line) = issue.line {
+        format!("{}:{}", issue.file.display(), line)
+    } else {
+        issue.file.display().to_string()
+    };
+    let location_max = (content_width / 3).clamp(10, 35);
+    let location_display = if location.len() > location_max {
+        format!("{}...", &location[..location_max.saturating_sub(3)])
+    } else {
+        location
+    };
+    let msg_prefix_len = 4;
+    let max_msg_len = content_width.saturating_sub(msg_prefix_len + location_display.len());
+    let msg = if issue.message.len() > max_msg_len {
+        format!("{}...", &issue.message[..max_msg_len.saturating_sub(3)])
+    } else {
+        issue.message.clone()
+    };
+    format!(" {} {} {}", severity_char, location_display, msg)
+}
+
+/// Append the review issues section to the output.
+fn append_review_issues(
+    output: &mut String,
+    issues: &[crate::review::ReviewIssue],
+    content_width: usize,
+    pad_line: &dyn Fn(&str, usize) -> String,
+) {
+    if issues.is_empty() {
+        return;
+    }
+    output.push_str(&format!("{}\n", pad_line("", 0)));
+    let max_issues = 6;
+    for issue in issues.iter().take(max_issues) {
+        let line_content = format_review_issue_line(issue, content_width);
+        output.push_str(&format!("{}\n", pad_line(&line_content, 0)));
+    }
+    if issues.len() > max_issues {
+        let more = format!(
+            " ... and {} more issue{}",
+            issues.len() - max_issues,
+            if issues.len() - max_issues == 1 {
+                ""
+            } else {
+                "s"
+            }
+        );
+        output.push_str(&format!("{}\n", pad_line(&more, 0)));
+    }
+}
+
 pub fn format_review_box(result: &crate::review::ReviewResult) -> String {
-    use crate::review::{Assessment, Severity};
+    use crate::review::Assessment;
 
     let box_width = get_terminal_width().clamp(50, 120);
     let content_width = box_width - 4;
@@ -1028,21 +1137,24 @@ pub fn format_review_box(result: &crate::review::ReviewResult) -> String {
         Assessment::CriticalIssues => ("X", "Code Review — Critical Issues"),
     };
     let header = format!("{} {}", header_icon, header_text);
-
     let is_success = summary.assessment == Assessment::Ready;
 
     let mut output = String::new();
 
-    // Header
-    if is_success {
-        output.push_str(&format!("{}\n", top_border.green()));
-        output.push_str(&format!("{}\n", pad_line(&header, 1).green()));
-        output.push_str(&format!("{}\n", mid_border.green()));
-    } else {
-        output.push_str(&format!("{}\n", top_border.red()));
-        output.push_str(&format!("{}\n", pad_line(&header, 1).red()));
-        output.push_str(&format!("{}\n", mid_border.red()));
-    }
+    // Header with color based on success/failure
+    let color_border = |s: &str, success: bool| -> String {
+        if success {
+            s.green().to_string()
+        } else {
+            s.red().to_string()
+        }
+    };
+    output.push_str(&format!("{}\n", color_border(&top_border, is_success)));
+    output.push_str(&format!(
+        "{}\n",
+        color_border(&pad_line(&header, 1), is_success)
+    ));
+    output.push_str(&format!("{}\n", color_border(&mid_border, is_success)));
 
     // Summary counts
     let counts = format!(
@@ -1066,58 +1178,11 @@ pub fn format_review_box(result: &crate::review::ReviewResult) -> String {
         )
     ));
 
-    // Top issues (if any)
-    if !result.issues.is_empty() {
-        output.push_str(&format!("{}\n", pad_line("", 0)));
-        let max_issues = 6;
-        for issue in result.issues.iter().take(max_issues) {
-            let severity_char = match issue.severity {
-                Severity::Critical => "C",
-                Severity::Important => "I",
-                Severity::Minor => "M",
-            };
-            let location = if let Some(line) = issue.line {
-                format!("{}:{}", issue.file.display(), line)
-            } else {
-                issue.file.display().to_string()
-            };
-            // Truncate location if needed
-            let location_max = (content_width / 3).clamp(10, 35);
-            let location_display = if location.len() > location_max {
-                format!("{}...", &location[..location_max.saturating_sub(3)])
-            } else {
-                location
-            };
-            let msg_prefix_len = 4; // " C " + trailing space
-            let max_msg_len = content_width.saturating_sub(msg_prefix_len + location_display.len());
-            let msg = if issue.message.len() > max_msg_len {
-                format!("{}...", &issue.message[..max_msg_len.saturating_sub(3)])
-            } else {
-                issue.message.clone()
-            };
-            let line_content = format!(" {} {} {}", severity_char, location_display, msg);
-            output.push_str(&format!("{}\n", pad_line(&line_content, 0)));
-        }
-        if result.issues.len() > max_issues {
-            let more = format!(
-                " ... and {} more issue{}",
-                result.issues.len() - max_issues,
-                if result.issues.len() - max_issues == 1 {
-                    ""
-                } else {
-                    "s"
-                }
-            );
-            output.push_str(&format!("{}\n", pad_line(&more, 0)));
-        }
-    }
+    // Issues section
+    append_review_issues(&mut output, &result.issues, content_width, &pad_line);
 
     // Bottom border
-    if is_success {
-        output.push_str(&format!("{}", bot_border.green()));
-    } else {
-        output.push_str(&format!("{}", bot_border.red()));
-    }
+    output.push_str(&color_border(&bot_border, is_success));
 
     output
 }
@@ -1129,18 +1194,45 @@ pub fn format_review_box(result: &crate::review::ReviewResult) -> String {
 pub fn format_cmsg_result(passed: bool, first_line: &str) -> String {
     if passed {
         let mut out = String::new();
-        out.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".green()));
-        out.push_str(&format!("{}\n", "│ ✓ Linthis 📝 [Commit-msg] Passed       │".green()));
-        out.push_str(&format!("{}\n", "├────────────────────────────────────────┤".green()));
-        out.push_str(&format!("{}\n", "│ Commit message is valid                │".green()));
-        out.push_str(&format!("{}", "╰────────────────────────────────────────╯".green()));
+        out.push_str(&format!(
+            "{}\n",
+            "╭────────────────────────────────────────╮".green()
+        ));
+        out.push_str(&format!(
+            "{}\n",
+            "│ ✓ Linthis 📝 [Commit-msg] Passed       │".green()
+        ));
+        out.push_str(&format!(
+            "{}\n",
+            "├────────────────────────────────────────┤".green()
+        ));
+        out.push_str(&format!(
+            "{}\n",
+            "│ Commit message is valid                │".green()
+        ));
+        out.push_str(&format!(
+            "{}",
+            "╰────────────────────────────────────────╯".green()
+        ));
         out
     } else {
         let mut out = String::new();
-        out.push_str(&format!("{}\n", "╭────────────────────────────────────────╮".red()));
-        out.push_str(&format!("{}\n", "│ X Linthis 📝 [Commit-msg] Blocked      │".red()));
-        out.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
-        out.push_str(&format!("{}\n", "│ Validation Failed!                     │".red()));
+        out.push_str(&format!(
+            "{}\n",
+            "╭────────────────────────────────────────╮".red()
+        ));
+        out.push_str(&format!(
+            "{}\n",
+            "│ X Linthis 📝 [Commit-msg] Blocked      │".red()
+        ));
+        out.push_str(&format!(
+            "{}\n",
+            "├────────────────────────────────────────┤".red()
+        ));
+        out.push_str(&format!(
+            "{}\n",
+            "│ Validation Failed!                     │".red()
+        ));
         out.push_str("│                                        │\n");
         out.push_str("│ Your message:                          │\n");
         // Format: "│   {msg}{padding} │\n"
@@ -1164,10 +1256,16 @@ pub fn format_cmsg_result(passed: bool, first_line: &str) -> String {
         out.push_str("│   feat: add user authentication        │\n");
         out.push_str("│   fix(api): handle null response       │\n");
         out.push_str("│   docs: update README                  │\n");
-        out.push_str(&format!("{}\n", "├────────────────────────────────────────┤".red()));
+        out.push_str(&format!(
+            "{}\n",
+            "├────────────────────────────────────────┤".red()
+        ));
         out.push_str("│ To skip this check:                    │\n");
         out.push_str("│   git commit --no-verify               │\n");
-        out.push_str(&format!("{}", "╰────────────────────────────────────────╯".red()));
+        out.push_str(&format!(
+            "{}",
+            "╰────────────────────────────────────────╯".red()
+        ));
         out
     }
 }

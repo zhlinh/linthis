@@ -212,9 +212,10 @@ mod tests {
     #[test]
     fn test_check_cyclomatic() {
         let thresholds = Thresholds::default();
+        // Default thresholds: good=10, warning=20, high=30
         assert_eq!(thresholds.check_cyclomatic(5), "good");
         assert_eq!(thresholds.check_cyclomatic(15), "warning");
-        assert_eq!(thresholds.check_cyclomatic(35), "high");
-        assert_eq!(thresholds.check_cyclomatic(60), "critical");
+        assert_eq!(thresholds.check_cyclomatic(25), "high");
+        assert_eq!(thresholds.check_cyclomatic(35), "critical");
     }
 }

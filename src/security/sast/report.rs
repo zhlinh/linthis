@@ -42,29 +42,13 @@ pub fn format_sast_report(result: &SastResult, format: SecurityReportFormat) -> 
 fn format_human(result: &SastResult) -> String {
     let mut output = String::new();
 
-    // Header
-    output.push_str(&format!(
-        "\n{}\n",
-        "🔍 SAST Source Code Security Scan Results".bold()
-    ));
-
-    // Scanner status
-    for (name, available) in &result.scanner_status {
-        let status = if *available {
-            "✓".green().to_string()
-        } else {
-            "✗".red().to_string()
-        };
-        output.push_str(&format!("  {} {}\n", status, name));
-    }
-    output.push('\n');
+    format_header(&mut output, result);
 
     if result.findings.is_empty() {
         output.push_str(&format!("{}\n", "  ✅ No security issues found.".green()));
         return output;
     }
 
-    // Group findings by unified severity: error (critical+high), warning (medium), info (low)
     let errors: Vec<_> = result
         .findings
         .iter()
@@ -81,68 +65,128 @@ fn format_human(result: &SastResult) -> String {
         .filter(|f| matches!(f.severity, Severity::Low | Severity::None | Severity::Unknown))
         .collect();
 
-    // Summary counts
+    format_issue_counts(&mut output, result.findings.len(), &errors, &warnings, &infos);
+    format_grouped_findings(&mut output, &errors, &warnings, &infos);
+    format_summary_line(&mut output, result, &errors, &warnings, &infos);
+    save_result_to_disk(&mut output, result);
+    format_unavailable_tools(&mut output, result);
+
+    output
+}
+
+/// Render the header and scanner status lines.
+fn format_header(output: &mut String, result: &SastResult) {
+    output.push_str(&format!(
+        "\n{}\n",
+        "🔍 SAST Source Code Security Scan Results".bold()
+    ));
+
+    for (name, available) in &result.scanner_status {
+        let status = if *available {
+            "✓".green().to_string()
+        } else {
+            "✗".red().to_string()
+        };
+        output.push_str(&format!("  {} {}\n", status, name));
+    }
+    output.push('\n');
+}
+
+/// Render the "Found N issue(s)" counts.
+fn format_issue_counts(
+    output: &mut String,
+    total: usize,
+    errors: &[&SastFinding],
+    warnings: &[&SastFinding],
+    infos: &[&SastFinding],
+) {
     output.push_str(&format!(
         "  Found {} issue(s): {} error{}, {} warning{}, {} info\n\n",
-        result.findings.len(),
+        total,
         errors.len(),
         if errors.len() == 1 { "" } else { "s" },
         warnings.len(),
         if warnings.len() == 1 { "" } else { "s" },
         infos.len(),
     ));
+}
 
-    // Print findings grouped by severity
-    let all_groups: Vec<(&str, &Vec<&SastFinding>)> = vec![
-        ("ERROR", &errors),
-        ("WARN", &warnings),
-        ("INFO", &infos),
+/// Render each finding grouped by severity.
+fn format_grouped_findings(
+    output: &mut String,
+    errors: &[&SastFinding],
+    warnings: &[&SastFinding],
+    infos: &[&SastFinding],
+) {
+    let all_groups: Vec<(&str, &[&SastFinding])> = vec![
+        ("ERROR", errors),
+        ("WARN", warnings),
+        ("INFO", infos),
     ];
 
     let mut issue_num = 0usize;
     for (label, findings) in all_groups {
-        if findings.is_empty() {
-            continue;
-        }
-        for finding in findings.iter() {
+        for finding in findings {
             issue_num += 1;
-            let colored_label = match label {
-                "ERROR" => format!("[{}]", label).red().bold().to_string(),
-                "WARN" => format!("[{}]", label).yellow().to_string(),
-                _ => format!("[{}]", label).cyan().to_string(),
-            };
+            format_single_finding(output, issue_num, label, finding);
+        }
+    }
+}
 
-            output.push_str(&format!("  {}. {} {}\n", issue_num, colored_label, finding.message));
-            output.push_str(&format!(
-                "    File: {}:{}\n",
-                finding.file_path.display(),
-                finding.line
-            ));
-            output.push_str(&format!("    Rule: {}\n", finding.rule_id));
-            output.push_str(&format!("    Tool: {}\n", finding.source));
+/// Render a single finding entry.
+fn format_single_finding(
+    output: &mut String,
+    issue_num: usize,
+    label: &str,
+    finding: &SastFinding,
+) {
+    let colored_label = match label {
+        "ERROR" => format!("[{}]", label).red().bold().to_string(),
+        "WARN" => format!("[{}]", label).yellow().to_string(),
+        _ => format!("[{}]", label).cyan().to_string(),
+    };
 
-            if !finding.cwe_ids.is_empty() {
-                output.push_str(&format!("    CWE:  {}\n", finding.cwe_ids.join(", ")));
-            }
+    output.push_str(&format!("  {}. {} {}\n", issue_num, colored_label, finding.message));
+    output.push_str(&format!(
+        "    File: {}:{}\n",
+        finding.file_path.display(),
+        finding.line
+    ));
+    output.push_str(&format!("    Rule: {}\n", finding.rule_id));
+    output.push_str(&format!("    Tool: {}\n", finding.source));
 
-            if let Some(ref snippet) = finding.code_snippet {
-                let snippet_str: &str = snippet;
-                for code_line in snippet_str.lines().take(3) {
-                    output.push_str(&format!("    > {}\n", code_line.dimmed()));
-                }
-            }
+    if !finding.cwe_ids.is_empty() {
+        output.push_str(&format!("    CWE:  {}\n", finding.cwe_ids.join(", ")));
+    }
 
-            if let Some(ref fix) = finding.fix_suggestion {
-                let fix_str: &str = fix;
-                output.push_str(&format!("    Fix:  {}\n", fix_str.green()));
-            }
-
-            output.push('\n');
+    if let Some(ref snippet) = finding.code_snippet {
+        let snippet_str: &str = snippet;
+        for code_line in snippet_str.lines().take(3) {
+            output.push_str(&format!("    > {}\n", code_line.dimmed()));
         }
     }
 
-    // Summary line (like lint output)
+    if let Some(ref fix) = finding.fix_suggestion {
+        let fix_str: &str = fix;
+        output.push_str(&format!("    Fix:  {}\n", fix_str.green()));
+    }
+
+    output.push('\n');
+}
+
+/// Render the bottom summary line with counts, duration, and failure message.
+fn format_summary_line(
+    output: &mut String,
+    result: &SastResult,
+    errors: &[&SastFinding],
+    warnings: &[&SastFinding],
+    infos: &[&SastFinding],
+) {
     let total = result.findings.len();
+    if total == 0 {
+        return;
+    }
+
     let files_with_issues = {
         let mut files: std::collections::HashSet<String> = std::collections::HashSet::new();
         for f in &result.findings {
@@ -152,59 +196,59 @@ fn format_human(result: &SastResult) -> String {
     };
     let error_count = errors.len();
 
-    if total > 0 {
-        let duration_str = if result.duration_ms >= 1000 {
-            format!("{:.2}s", result.duration_ms as f64 / 1000.0)
-        } else {
-            format!("{}ms", result.duration_ms)
-        };
+    let duration_str = if result.duration_ms >= 1000 {
+        format!("{:.2}s", result.duration_ms as f64 / 1000.0)
+    } else {
+        format!("{}ms", result.duration_ms)
+    };
 
+    output.push_str(&format!(
+        "  {} {} issue(s) ({} error{}, {} warning{}, {} info) in {} file(s)\n",
+        if error_count > 0 { "✗".red().to_string() } else { "⚠".yellow().to_string() },
+        total,
+        error_count,
+        if error_count == 1 { "" } else { "s" },
+        warnings.len(),
+        if warnings.len() == 1 { "" } else { "s" },
+        infos.len(),
+        files_with_issues,
+    ));
+    output.push_str(&format!("  Done in {}\n", duration_str.cyan()));
+
+    if error_count > 0 {
         output.push_str(&format!(
-            "  {} {} issue(s) ({} error{}, {} warning{}, {} info) in {} file(s)\n",
-            if error_count > 0 { "✗".red().to_string() } else { "⚠".yellow().to_string() },
-            total,
-            error_count,
-            if error_count == 1 { "" } else { "s" },
-            warnings.len(),
-            if warnings.len() == 1 { "" } else { "s" },
-            infos.len(),
-            files_with_issues,
+            "\n  {}\n",
+            "✗ Security scan failed due to errors. Fix the issues above.".red().bold()
         ));
-        output.push_str(&format!("  Done in {}\n", duration_str.cyan()));
-
-        if error_count > 0 {
-            output.push_str(&format!(
-                "\n  {}\n",
-                "✗ Security scan failed due to errors. Fix the issues above.".red().bold()
-            ));
-        }
     }
+}
 
-    // Save result to .linthis/result/
-    {
-        use chrono::Local;
-        use std::fs::{self, File};
-        use std::io::Write;
+/// Persist the scan result as JSON to .linthis/result/.
+fn save_result_to_disk(output: &mut String, result: &SastResult) {
+    use chrono::Local;
+    use std::fs::{self, File};
+    use std::io::Write;
 
-        let project_root = crate::utils::get_project_root();
-        let result_dir = project_root.join(".linthis").join("result");
-        if fs::create_dir_all(&result_dir).is_ok() {
-            let timestamp = Local::now().format("%Y%m%d-%H%M%S");
-            let result_file = result_dir.join(format!("security-{}.json", timestamp));
-            if let Ok(json) = serde_json::to_string_pretty(result) {
-                if let Ok(mut f) = File::create(&result_file) {
-                    let _ = writeln!(f, "{}", json);
-                    output.push_str(&format!(
-                        "  {} Results saved to {}\n",
-                        "✓".green(),
-                        result_file.display()
-                    ));
-                }
+    let project_root = crate::utils::get_project_root();
+    let result_dir = project_root.join(".linthis").join("result");
+    if fs::create_dir_all(&result_dir).is_ok() {
+        let timestamp = Local::now().format("%Y%m%d-%H%M%S");
+        let result_file = result_dir.join(format!("security-{}.json", timestamp));
+        if let Ok(json) = serde_json::to_string_pretty(result) {
+            if let Ok(mut f) = File::create(&result_file) {
+                let _ = writeln!(f, "{}", json);
+                output.push_str(&format!(
+                    "  {} Results saved to {}\n",
+                    "✓".green(),
+                    result_file.display()
+                ));
             }
         }
     }
+}
 
-    // Unavailable tools warning
+/// Append a warning about unavailable SAST tools, if any.
+fn format_unavailable_tools(output: &mut String, result: &SastResult) {
     let unavailable: Vec<_> = result
         .scanner_status
         .iter()
@@ -220,8 +264,6 @@ fn format_human(result: &SastResult) -> String {
             unavailable.join(", ")
         ));
     }
-
-    output
 }
 
 fn format_json(result: &SastResult) -> String {

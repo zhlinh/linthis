@@ -221,8 +221,9 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
 const MAX_AI_FIX_ITERATIONS: usize = 100;
 
 /// Handle fix by loading from result file
-fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitCode {
-    let path = if options.source == "last" {
+/// Resolve the result file path from the source option.
+fn resolve_result_path(source: &str) -> Result<PathBuf, ExitCode> {
+    let path = if source == "last" {
         match find_latest_result_file() {
             Some(p) => p,
             None => {
@@ -237,11 +238,11 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
                     "  Run {} first to generate a result file.",
                     "linthis -c".cyan()
                 );
-                return ExitCode::from(1);
+                return Err(ExitCode::from(1));
             }
         }
     } else {
-        PathBuf::from(&options.source)
+        PathBuf::from(source)
     };
 
     if !path.exists() {
@@ -250,8 +251,105 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
             "Error".red(),
             path.display()
         );
-        return ExitCode::from(1);
+        return Err(ExitCode::from(1));
     }
+    Ok(path)
+}
+
+/// Count issues by type (lint, security, complexity) and print summary.
+fn print_issue_type_summary(issues: &[LintIssue]) {
+    let lint_count = issues
+        .iter()
+        .filter(|i| {
+            !i.source
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("security/")
+                && i.source.as_deref() != Some("linthis-complexity")
+        })
+        .count();
+    let sec_count = issues
+        .iter()
+        .filter(|i| {
+            i.source
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("security/")
+        })
+        .count();
+    let cx_count = issues
+        .iter()
+        .filter(|i| i.source.as_deref() == Some("linthis-complexity"))
+        .count();
+
+    let mut parts = Vec::new();
+    if lint_count > 0 {
+        parts.push(format!("{} lint", lint_count));
+    }
+    if sec_count > 0 {
+        parts.push(format!("{} security", sec_count));
+    }
+    if cx_count > 0 {
+        parts.push(format!("{} complexity", cx_count));
+    }
+    println!(
+        "  Found {} issue{} from previous run ({})\n",
+        issues.len(),
+        if issues.len() == 1 { "" } else { "s" },
+        parts.join(", "),
+    );
+}
+
+/// Run fix logic (AI or interactive) and recheck modified files.
+fn run_fix_and_recheck(
+    options: &FixCommandOptions,
+    config: &Config,
+    result: &linthis::utils::types::RunResult,
+) {
+    // Create backup before making changes
+    let files_to_backup = collect_files_from_issues(&result.issues);
+    let _backup_id = create_backup(&files_to_backup, "linthis fix", options.quiet);
+    if !options.quiet && !files_to_backup.is_empty() {
+        println!();
+    }
+
+    let (modified_files, fixed_count) = if options.ai {
+        let provider = resolve_ai_provider(
+            options.provider.as_deref(),
+            config.ai.provider.as_deref(),
+        );
+        let ai_config = AiFixConfig::with_provider(&provider)
+            .with_model(options.model.clone())
+            .with_accept_all(options.accept_all)
+            .with_verbose(options.verbose)
+            .with_parallel(options.jobs);
+
+        let ai_result = run_ai_fix_all(result, &ai_config);
+        (ai_result.modified_files, ai_result.applied)
+    } else {
+        let interactive_result = run_interactive(result);
+        let count = interactive_result.edited + interactive_result.ignored;
+        (interactive_result.modified_files, count)
+    };
+
+    if !modified_files.is_empty() {
+        print_recheck_header();
+        let recheck_result = recheck_modified_files(
+            &modified_files,
+            &result.issues,
+            options.quiet,
+            options.verbose,
+        );
+        print_recheck_summary(&recheck_result, fixed_count);
+        print_recheck_footer();
+    }
+}
+
+fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitCode {
+    let path = match resolve_result_path(&options.source) {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
 
     if !options.quiet {
         println!("{} Loading results from: {}", "→".cyan(), path.display());
@@ -259,87 +357,25 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
 
     match linthis::reports::load_result_from_file(&path) {
         Some(mut result) => {
-                // Merge security/complexity findings into unified issues list
-                result.merge_all_check_issues();
+            result.merge_all_check_issues();
 
-                if result.issues.is_empty() {
-                    if !options.quiet {
-                        println!("{}", "No issues in the saved result.".green());
-                    }
-                    return ExitCode::SUCCESS;
-                }
-
-                // Count by type
-                let lint_count = result.issues.iter()
-                    .filter(|i| !i.source.as_deref().unwrap_or("").starts_with("security/")
-                        && i.source.as_deref() != Some("linthis-complexity"))
-                    .count();
-                let sec_count = result.issues.iter()
-                    .filter(|i| i.source.as_deref().unwrap_or("").starts_with("security/"))
-                    .count();
-                let cx_count = result.issues.iter()
-                    .filter(|i| i.source.as_deref() == Some("linthis-complexity"))
-                    .count();
-
+            if result.issues.is_empty() {
                 if !options.quiet {
-                    let mut parts = Vec::new();
-                    if lint_count > 0 { parts.push(format!("{} lint", lint_count)); }
-                    if sec_count > 0 { parts.push(format!("{} security", sec_count)); }
-                    if cx_count > 0 { parts.push(format!("{} complexity", cx_count)); }
-                    println!(
-                        "  Found {} issue{} from previous run ({})\n",
-                        result.issues.len(),
-                        if result.issues.len() == 1 { "" } else { "s" },
-                        parts.join(", "),
-                    );
+                    println!("{}", "No issues in the saved result.".green());
                 }
+                return ExitCode::SUCCESS;
+            }
 
-                // For AI mode with accept_all, use iterative fix loop
-                if options.ai && options.accept_all {
-                    return run_ai_fix_loop(options, config, result);
-                }
+            if !options.quiet {
+                print_issue_type_summary(&result.issues);
+            }
 
-                // Create backup before making changes
-                let files_to_backup = collect_files_from_issues(&result.issues);
-                let _backup_id = create_backup(&files_to_backup, "linthis fix", options.quiet);
-                if !options.quiet && !files_to_backup.is_empty() {
-                    println!();
-                }
+            if options.ai && options.accept_all {
+                return run_ai_fix_loop(options, config, result);
+            }
 
-                // Check if AI mode is enabled (non-accept-all mode)
-                let (modified_files, fixed_count) = if options.ai {
-                    let provider = resolve_ai_provider(
-                        options.provider.as_deref(),
-                        config.ai.provider.as_deref(),
-                    );
-                    let ai_config = AiFixConfig::with_provider(&provider)
-                        .with_model(options.model.clone())
-                        .with_accept_all(options.accept_all)
-                        .with_verbose(options.verbose)
-                        .with_parallel(options.jobs);
-
-                    let ai_result = run_ai_fix_all(&result, &ai_config);
-                    (ai_result.modified_files, ai_result.applied)
-                } else {
-                    let interactive_result = run_interactive(&result);
-                    let count = interactive_result.edited + interactive_result.ignored;
-                    (interactive_result.modified_files, count)
-                };
-
-                // Recheck modified files if any changes were made
-                if !modified_files.is_empty() {
-                    print_recheck_header();
-                    let recheck_result = recheck_modified_files(
-                        &modified_files,
-                        &result.issues,
-                        options.quiet,
-                        options.verbose,
-                    );
-                    print_recheck_summary(&recheck_result, fixed_count);
-                    print_recheck_footer();
-                }
-
-                ExitCode::from(result.exit_code as u8)
+            run_fix_and_recheck(options, config, &result);
+            ExitCode::from(result.exit_code as u8)
         }
         None => {
             eprintln!(
@@ -348,20 +384,113 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
                 path.display()
             );
             eprintln!("  Make sure the file is a valid JSON result file.");
-            eprintln!("  Run {} first to generate a result file.", "linthis -c".cyan());
+            eprintln!(
+                "  Run {} first to generate a result file.",
+                "linthis -c".cyan()
+            );
             ExitCode::from(2)
         }
     }
 }
 
 /// Run AI fix in a loop until no issues remain or max iterations reached
+/// Build an `AiFixConfig` from the command options and resolved provider.
+fn build_ai_fix_config(options: &FixCommandOptions, config: &Config, accept_all: bool) -> AiFixConfig {
+    let provider = resolve_ai_provider(
+        options.provider.as_deref(),
+        config.ai.provider.as_deref(),
+    );
+    AiFixConfig::with_provider(&provider)
+        .with_model(options.model.clone())
+        .with_accept_all(accept_all)
+        .with_verbose(options.verbose)
+        .with_parallel(options.jobs)
+}
+
+/// Re-run lint checks on modified files and return the new result.
+///
+/// Returns `Some(result)` on success or `None` on recheck failure.
+fn recheck_modified_paths(
+    modified_files: &std::collections::HashSet<PathBuf>,
+    verbose: bool,
+    quiet: bool,
+) -> Option<linthis::utils::types::RunResult> {
+    use linthis::{run, RunMode, RunOptions};
+
+    let modified_paths: Vec<PathBuf> = modified_files.iter().cloned().collect();
+    if modified_paths.is_empty() {
+        return None;
+    }
+
+    if !quiet {
+        println!(
+            "\n{} Re-checking {} modified file{}...",
+            "→".cyan(),
+            modified_paths.len(),
+            if modified_paths.len() == 1 { "" } else { "s" }
+        );
+    }
+
+    let run_options = RunOptions {
+        paths: modified_paths,
+        mode: RunMode::CheckOnly,
+        languages: vec![],
+        exclude_patterns: vec![],
+        verbose,
+        quiet: true,
+        plugins: vec![],
+        no_cache: true,
+        config_resolver: None,
+        tool_install_mode: linthis::ToolInstallMode::Disabled,
+    };
+
+    match run(&run_options) {
+        Ok(result) => Some(result),
+        Err(e) => {
+            eprintln!("{}: Re-check failed: {}", "Error".red(), e);
+            None
+        }
+    }
+}
+
+/// Print the final summary for an AI fix loop.
+fn print_ai_fix_summary(
+    current_result: &linthis::utils::types::RunResult,
+    iteration: usize,
+    total_fixed: usize,
+    elapsed: std::time::Duration,
+) {
+    let elapsed_str = format_duration(elapsed);
+    println!("\n{}", "─".repeat(50));
+    println!(
+        "{} AI Fix completed after {} iteration{}",
+        "→".cyan(),
+        iteration,
+        if iteration == 1 { "" } else { "s" }
+    );
+    println!("  Total fixes applied: {}", total_fixed.to_string().cyan());
+    println!("  Total time: {}", elapsed_str.cyan());
+
+    if !current_result.issues.is_empty() {
+        println!(
+            "  {} remaining issue{}",
+            current_result.issues.len().to_string().yellow(),
+            if current_result.issues.len() == 1 { "" } else { "s" }
+        );
+        println!(
+            "\n  Run {} to see remaining issues",
+            "linthis report show".cyan()
+        );
+    }
+
+    println!("\n  To undo: {}", "linthis fix --undo".cyan());
+}
+
 fn run_ai_fix_loop(
     options: &FixCommandOptions,
     config: &Config,
     initial_result: linthis::utils::types::RunResult,
 ) -> ExitCode {
-    use linthis::{run, RunMode, RunOptions};
-
     // Create backup before making any changes
     let files_to_backup = collect_files_from_issues(&initial_result.issues);
     let _backup_id = create_backup(&files_to_backup, "AI fix with --yes", options.quiet);
@@ -392,17 +521,7 @@ fn run_ai_fix_loop(
             );
         }
 
-        // Run AI fix
-        let provider = resolve_ai_provider(
-            options.provider.as_deref(),
-            config.ai.provider.as_deref(),
-        );
-        let ai_config = AiFixConfig::with_provider(&provider)
-            .with_model(options.model.clone())
-            .with_accept_all(true)
-            .with_verbose(options.verbose)
-            .with_parallel(options.jobs);
-
+        let ai_config = build_ai_fix_config(options, config, true);
         let ai_result = run_ai_fix_all(&current_result, &ai_config);
         total_fixed += ai_result.applied;
 
@@ -425,7 +544,6 @@ fn run_ai_fix_loop(
             );
         }
 
-        // Check if we've reached max iterations
         if iteration >= MAX_AI_FIX_ITERATIONS {
             if !options.quiet {
                 println!(
@@ -437,58 +555,23 @@ fn run_ai_fix_loop(
             break;
         }
 
-        // Re-run lint check ONLY on modified files to see if there are remaining issues
-        let modified_paths: Vec<PathBuf> = ai_result.modified_files.iter().cloned().collect();
-        if modified_paths.is_empty() {
-            break;
-        }
-
-        if !options.quiet {
-            println!(
-                "\n{} Re-checking {} modified file{}...",
-                "→".cyan(),
-                modified_paths.len(),
-                if modified_paths.len() == 1 { "" } else { "s" }
-            );
-        }
-
-        let run_options = RunOptions {
-            paths: modified_paths,
-            mode: RunMode::CheckOnly,
-            languages: vec![],
-            exclude_patterns: vec![],
-            verbose: options.verbose,
-            quiet: true, // Suppress normal output during recheck
-            plugins: vec![],
-            no_cache: true, // Don't use cache for recheck
-            config_resolver: None,
-            tool_install_mode: linthis::ToolInstallMode::Disabled,
-        };
-
-        match run(&run_options) {
-            Ok(result) => {
-                if result.issues.is_empty() {
-                    if !options.quiet {
-                        let elapsed = start_time.elapsed();
-                        let elapsed_str = format_duration(elapsed);
-                        println!(
-                            "\n{} All issues fixed after {} iteration{}!",
-                            "✓".green().bold(),
-                            iteration,
-                            if iteration == 1 { "" } else { "s" }
-                        );
-                        println!(
-                            "  Total fixes applied: {}",
-                            total_fixed.to_string().cyan()
-                        );
-                        println!(
-                            "  Total time: {}",
-                            elapsed_str.cyan()
-                        );
-                    }
-                    return ExitCode::SUCCESS;
+        match recheck_modified_paths(&ai_result.modified_files, options.verbose, options.quiet) {
+            Some(result) if result.issues.is_empty() => {
+                if !options.quiet {
+                    let elapsed = start_time.elapsed();
+                    let elapsed_str = format_duration(elapsed);
+                    println!(
+                        "\n{} All issues fixed after {} iteration{}!",
+                        "✓".green().bold(),
+                        iteration,
+                        if iteration == 1 { "" } else { "s" }
+                    );
+                    println!("  Total fixes applied: {}", total_fixed.to_string().cyan());
+                    println!("  Total time: {}", elapsed_str.cyan());
                 }
-
+                return ExitCode::SUCCESS;
+            }
+            Some(result) => {
                 if !options.quiet {
                     println!(
                         "  {} remaining issue{}",
@@ -496,47 +579,15 @@ fn run_ai_fix_loop(
                         if result.issues.len() == 1 { "" } else { "s" }
                     );
                 }
-
-                // Continue with remaining issues
                 current_result = result;
             }
-            Err(e) => {
-                eprintln!("{}: Re-check failed: {}", "Error".red(), e);
-                break;
-            }
+            None => break,
         }
     }
 
     // Final summary
     if !options.quiet {
-        let elapsed = start_time.elapsed();
-        let elapsed_str = format_duration(elapsed);
-        println!("\n{}", "─".repeat(50));
-        println!(
-            "{} AI Fix completed after {} iteration{}",
-            "→".cyan(),
-            iteration,
-            if iteration == 1 { "" } else { "s" }
-        );
-        println!("  Total fixes applied: {}", total_fixed.to_string().cyan());
-        println!("  Total time: {}", elapsed_str.cyan());
-
-        if !current_result.issues.is_empty() {
-            println!(
-                "  {} remaining issue{}",
-                current_result.issues.len().to_string().yellow(),
-                if current_result.issues.len() == 1 { "" } else { "s" }
-            );
-            println!(
-                "\n  Run {} to see remaining issues",
-                "linthis report show".cyan()
-            );
-        }
-
-        println!(
-            "\n  To undo: {}",
-            "linthis fix --undo".cyan()
-        );
+        print_ai_fix_summary(&current_result, iteration, total_fixed, start_time.elapsed());
     }
 
     if current_result.issues.is_empty() {
@@ -557,18 +608,9 @@ fn format_duration(duration: std::time::Duration) -> String {
 }
 
 /// Handle single file AI fix mode
-fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> ExitCode {
-    let file_path = options.file.as_ref().unwrap();
-    let line_number = options.line.unwrap();
-
-    // Create AI provider
-    let provider_str = resolve_ai_provider(
-        options.provider.as_deref(),
-        config.ai.provider.as_deref(),
-    );
-    let provider_kind: AiProviderKind = provider_str.parse().unwrap_or_default();
-
-    let mut config = match &provider_kind {
+/// Build an `AiProviderConfig` from the provider kind.
+fn build_provider_config(provider_kind: &AiProviderKind) -> AiProviderConfig {
+    match provider_kind {
         AiProviderKind::Claude => AiProviderConfig::claude(),
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
         AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
@@ -583,15 +625,12 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
             ..AiProviderConfig::default()
         },
         AiProviderKind::Mock => AiProviderConfig::mock(),
-    };
-
-    // Override model if specified
-    if let Some(ref model) = options.model {
-        config.model = model.clone();
     }
+}
 
-    // Set API key from environment
-    config.api_key = match &provider_kind {
+/// Resolve the API key for a given provider kind from environment variables.
+fn resolve_api_key(provider_kind: &AiProviderKind) -> Option<String> {
+    match provider_kind {
         AiProviderKind::Claude => std::env::var("ANTHROPIC_AUTH_TOKEN")
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
@@ -603,57 +642,119 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
             .ok(),
         _ => None,
-    };
+    }
+}
 
-    // Set endpoint from environment
-    match &provider_kind {
+/// Resolve the endpoint override for a given provider kind from environment variables.
+fn resolve_endpoint(provider_kind: &AiProviderKind) -> Option<String> {
+    match provider_kind {
+        AiProviderKind::Claude => std::env::var("ANTHROPIC_BASE_URL").ok(),
+        AiProviderKind::CodeBuddy => std::env::var("CODEBUDDY_BASE_URL").ok(),
+        _ => None,
+    }
+}
+
+/// Create an `AiSuggester` from the command options and app config.
+fn create_suggester(
+    options: &FixCommandOptions,
+    app_config: &Config,
+) -> (AiSuggester, AiProviderKind) {
+    let provider_str = resolve_ai_provider(
+        options.provider.as_deref(),
+        app_config.ai.provider.as_deref(),
+    );
+    let provider_kind: AiProviderKind = provider_str.parse().unwrap_or_default();
+
+    let mut prov_config = build_provider_config(&provider_kind);
+    if let Some(ref model) = options.model {
+        prov_config.model = model.clone();
+    }
+    prov_config.api_key = resolve_api_key(&provider_kind);
+    prov_config.endpoint = resolve_endpoint(&provider_kind);
+
+    let provider = AiProvider::new(prov_config);
+    (AiSuggester::with_provider(provider), provider_kind)
+}
+
+/// Print a help message when the AI provider is unavailable.
+fn print_provider_unavailable_hint(provider_kind: &AiProviderKind) {
+    match provider_kind {
         AiProviderKind::Claude => {
-            if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
-                config.endpoint = Some(base_url);
-            }
+            eprintln!("Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable");
         }
-        AiProviderKind::CodeBuddy => {
-            if let Ok(base_url) = std::env::var("CODEBUDDY_BASE_URL") {
-                config.endpoint = Some(base_url);
-            }
+        AiProviderKind::ClaudeCli => {
+            eprintln!("Install Claude CLI (claude command must be available)");
+        }
+        AiProviderKind::OpenAi => {
+            eprintln!("Set OPENAI_API_KEY environment variable");
+        }
+        AiProviderKind::CodexCli => {
+            eprintln!("Install Codex CLI (npm install -g @openai/codex)");
+        }
+        AiProviderKind::Gemini => {
+            eprintln!("Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable");
+        }
+        AiProviderKind::GeminiCli => {
+            eprintln!("Install Gemini CLI (npm install -g @google/gemini-cli)");
+        }
+        AiProviderKind::Local => {
+            eprintln!("Set LINTHIS_AI_ENDPOINT environment variable");
         }
         _ => {}
     }
+}
 
-    let provider = AiProvider::new(config);
-    let suggester = AiSuggester::with_provider(provider);
+/// Try to auto-apply the first suggestion from a successful result.
+fn try_auto_apply(
+    result: &linthis::ai::SuggestionResult,
+    file_path: &PathBuf,
+    line_number: u32,
+    message: &str,
+    rule_id: &str,
+    accept_all: bool,
+) -> Option<ExitCode> {
+    if !accept_all || result.suggestions.is_empty() {
+        return None;
+    }
 
-    // Check if provider is available
+    let suggestion = result.suggestions.first()?;
+    let issue = LintIssue {
+        file_path: file_path.clone(),
+        line: line_number as usize,
+        column: None,
+        severity: linthis::utils::types::Severity::Error,
+        message: message.to_string(),
+        code: Some(rule_id.to_string()),
+        source: Some("ai-fix".to_string()),
+        language: None,
+        suggestion: None,
+        code_line: None,
+        context_before: vec![],
+        context_after: vec![],
+    };
+
+    if apply_suggestion(&issue, suggestion) {
+        println!("{} Applied suggestion!", "✓".green());
+        None
+    } else {
+        eprintln!("{} Failed to apply suggestion.", "✗".red());
+        Some(ExitCode::FAILURE)
+    }
+}
+
+fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> ExitCode {
+    let file_path = options.file.as_ref().unwrap();
+    let line_number = options.line.unwrap();
+
+    let (suggester, provider_kind) = create_suggester(options, config);
+
     if !suggester.is_available() {
         eprintln!(
             "{}: AI provider {} is not available",
             "Error".red(),
             suggester.provider_name()
         );
-        match &provider_kind {
-            AiProviderKind::Claude => {
-                eprintln!("Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable");
-            }
-            AiProviderKind::ClaudeCli => {
-                eprintln!("Install Claude CLI (claude command must be available)");
-            }
-            AiProviderKind::OpenAi => {
-                eprintln!("Set OPENAI_API_KEY environment variable");
-            }
-            AiProviderKind::CodexCli => {
-                eprintln!("Install Codex CLI (npm install -g @openai/codex)");
-            }
-            AiProviderKind::Gemini => {
-                eprintln!("Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable");
-            }
-            AiProviderKind::GeminiCli => {
-                eprintln!("Install Gemini CLI (npm install -g @google/gemini-cli)");
-            }
-            AiProviderKind::Local => {
-                eprintln!("Set LINTHIS_AI_ENDPOINT environment variable");
-            }
-            _ => {}
-        }
+        print_provider_unavailable_hint(&provider_kind);
         return ExitCode::FAILURE;
     }
 
@@ -665,7 +766,6 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
         );
     }
 
-    // Create suggestion options
     let suggestion_options = SuggestionOptions {
         max_suggestions: options.max_suggestions,
         include_explanation: true,
@@ -692,36 +792,11 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
         &suggestion_options,
     );
 
-    // Format output
     format_single_result(&result, &options.output, options.with_context);
 
     if result.is_success() {
-        // Handle auto-apply
-        if options.accept_all && !result.suggestions.is_empty() {
-            if let Some(suggestion) = result.suggestions.first() {
-                // Create a temporary issue for apply_suggestion
-                let issue = LintIssue {
-                    file_path: file_path.clone(),
-                    line: line_number as usize,
-                    column: None,
-                    severity: linthis::utils::types::Severity::Error,
-                    message: message.to_string(),
-                    code: Some(rule_id.to_string()),
-                    source: Some("ai-fix".to_string()),
-                    language: None,
-                    suggestion: None,
-                    code_line: None,
-                    context_before: vec![],
-                    context_after: vec![],
-                };
-
-                if apply_suggestion(&issue, suggestion) {
-                    println!("{} Applied suggestion!", "✓".green());
-                } else {
-                    eprintln!("{} Failed to apply suggestion.", "✗".red());
-                    return ExitCode::FAILURE;
-                }
-            }
+        if let Some(code) = try_auto_apply(&result, file_path, line_number, message, rule_id, options.accept_all) {
+            return code;
         }
         ExitCode::SUCCESS
     } else {
