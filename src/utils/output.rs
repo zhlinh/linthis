@@ -827,8 +827,8 @@ pub fn format_result_hook_with_width(
         format!("│ {}{} │", content, " ".repeat(padding))
     };
 
-    // If no issues, show success
-    if total_issues == 0 {
+    // If no issues and exit code is 0, show success
+    if total_issues == 0 && result.exit_code == 0 {
         let mut output = String::new();
         output.push_str(&format!("{}\n", top_border.green()));
         let header = format!("{} Linthis {} Passed", "✓", hook_name);

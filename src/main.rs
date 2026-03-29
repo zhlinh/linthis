@@ -1232,27 +1232,101 @@ fn main() -> ExitCode {
             // Show failure message if exit code is non-zero
             if result.exit_code != 0 && !cli.quiet {
                 eprintln!();
-                match result.exit_code {
-                    1 => {
-                        eprintln!("{} {} {}",
-                            "✗".red().bold(),
-                            "Linting failed due to errors.".red().bold(),
-                            "Fix the errors above before committing.".red()
-                        );
+
+                // Header: icon + checks list
+                let checks_label = if result.checks_run.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", result.checks_run.join(", "))
+                };
+                let is_info_only = result.exit_code == 3;
+                if is_info_only {
+                    eprintln!("{} {}",
+                        "⚠".yellow().bold(),
+                        format!("Linthis check completed with issues{}", checks_label).yellow().bold()
+                    );
+                } else {
+                    eprintln!("{} {}",
+                        "✗".red().bold(),
+                        format!("Linthis check failed{}", checks_label).red().bold()
+                    );
+                }
+
+                // Per-check detail lines
+                // Formatting
+                let fmt_errors = result.format_results.iter().filter(|r| r.error.is_some()).count();
+                if fmt_errors > 0 {
+                    eprintln!("  {}: {}",
+                        "formatting".red(),
+                        format!("{} file(s) with errors", fmt_errors).red()
+                    );
+                }
+
+                // Lint
+                if result.checks_run.iter().any(|c| c == "lint") {
+                    let lint_errors = result.issues.iter()
+                        .filter(|i| i.severity == linthis::utils::types::Severity::Error).count();
+                    let lint_warnings = result.issues.iter()
+                        .filter(|i| i.severity == linthis::utils::types::Severity::Warning).count();
+                    let lint_infos = result.issues.iter()
+                        .filter(|i| i.severity == linthis::utils::types::Severity::Info).count();
+                    if lint_errors > 0 || lint_warnings > 0 || lint_infos > 0 {
+                        let mut parts = Vec::new();
+                        if lint_errors > 0 { parts.push(format!("{} error(s)", lint_errors)); }
+                        if lint_warnings > 0 { parts.push(format!("{} warning(s)", lint_warnings)); }
+                        if lint_infos > 0 { parts.push(format!("{} info", lint_infos)); }
+                        eprintln!("  {}: {}", "lint".red(), parts.join(", ").red());
+                    } else if result.exit_code != 0 {
+                        eprintln!("  {}: {}", "lint", "✓".green());
                     }
-                    2 => {
-                        eprintln!("{} {}",
-                            "✗".red().bold(),
-                            "Linting failed due to formatting errors.".red().bold()
-                        );
+                }
+
+                // Security
+                if result.checks_run.iter().any(|c| c == "security") {
+                    if let Some(ref sec) = result.security {
+                        let sec_errors = sec.findings.iter().filter(|f| {
+                            matches!(f.severity, linthis::security::Severity::Critical | linthis::security::Severity::High)
+                        }).count();
+                        let sec_warnings = sec.findings.iter().filter(|f| {
+                            f.severity == linthis::security::Severity::Medium
+                        }).count();
+                        let sec_infos = sec.findings.iter().filter(|f| {
+                            matches!(f.severity, linthis::security::Severity::Low | linthis::security::Severity::None | linthis::security::Severity::Unknown)
+                        }).count();
+                        if sec_errors > 0 || sec_warnings > 0 || sec_infos > 0 {
+                            let mut parts = Vec::new();
+                            if sec_errors > 0 { parts.push(format!("{} error(s)", sec_errors)); }
+                            if sec_warnings > 0 { parts.push(format!("{} warning(s)", sec_warnings)); }
+                            if sec_infos > 0 { parts.push(format!("{} info", sec_infos)); }
+                            eprintln!("  {}: {}", "security".red(), parts.join(", ").red());
+                        } else {
+                            eprintln!("  {}: {}", "security", "✓".green());
+                        }
                     }
-                    3 => {
-                        eprintln!("{} {}",
-                            "⚠".yellow().bold(),
-                            "Linting completed with warnings.".yellow().bold()
-                        );
+                }
+
+                // Complexity
+                if result.checks_run.iter().any(|c| c == "complexity") {
+                    if let Some(ref cx) = result.complexity {
+                        let cx_high = cx.thresholds.cyclomatic.high;
+                        let cx_warning = cx.thresholds.cyclomatic.warning;
+                        let cx_good = cx.thresholds.cyclomatic.good;
+                        let cx_errors = cx.files.iter().flat_map(|f| &f.functions)
+                            .filter(|func| func.metrics.cyclomatic > cx_high).count();
+                        let cx_warns = cx.files.iter().flat_map(|f| &f.functions)
+                            .filter(|func| func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high).count();
+                        let cx_infos = cx.files.iter().flat_map(|f| &f.functions)
+                            .filter(|func| func.metrics.cyclomatic > cx_good && func.metrics.cyclomatic <= cx_warning).count();
+                        if cx_errors > 0 || cx_warns > 0 || cx_infos > 0 {
+                            let mut parts = Vec::new();
+                            if cx_errors > 0 { parts.push(format!("{} error(s)", cx_errors)); }
+                            if cx_warns > 0 { parts.push(format!("{} warning(s)", cx_warns)); }
+                            if cx_infos > 0 { parts.push(format!("{} info", cx_infos)); }
+                            eprintln!("  {}: {}", "complexity".red(), parts.join(", ").red());
+                        } else {
+                            eprintln!("  {}: {}", "complexity", "✓".green());
+                        }
                     }
-                    _ => {}
                 }
             }
 
