@@ -349,12 +349,17 @@ impl RunResult {
                         } else {
                             Severity::Info
                         };
+                        let exceeded_threshold = match severity {
+                            Severity::Error => high_threshold,
+                            Severity::Warning => warning_threshold,
+                            _ => threshold,
+                        };
                         let mut issue = LintIssue::new(
                             file.path.clone(),
                             func.start_line as usize,
                             format!(
                                 "[complexity] function `{}` cyclomatic complexity {} exceeds threshold {}",
-                                func.name, func.metrics.cyclomatic, threshold,
+                                func.name, func.metrics.cyclomatic, exceeded_threshold,
                             ),
                             severity,
                         );
