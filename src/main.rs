@@ -1503,6 +1503,10 @@ fn process_lint_result(
 
     run_additional_checks(&mut result, cli, runtime_config, runtime_project_root);
 
+    // Merge security/complexity issues into result.issues so all formatters
+    // (including hook box output) can see them
+    result.merge_all_check_issues();
+
     let output =
         format_result_with_hook_type(&result, output_format, hook_type.as_deref());
 
