@@ -89,16 +89,19 @@ fn handle_show_report(
     warnings_only: bool,
     format: &str,
 ) -> ExitCode {
-    let result = match load_result_from_source(source) {
+    let mut result = match load_result_from_source(source) {
         Some(r) => r,
         None => {
             eprintln!(
-                "{}: No lint results found. Run 'linthis -c' first.",
+                "{}: No results found. Run 'linthis -c' first.",
                 "Error".red()
             );
             return ExitCode::from(1);
         }
     };
+
+    // Merge security/complexity findings into unified issues list
+    result.merge_all_check_issues();
 
     // Filter issues based on flags
     let filtered_issues: Vec<_> = result
