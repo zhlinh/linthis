@@ -486,12 +486,106 @@ fn print_ai_fix_summary(
     println!("\n  To undo: {}", "linthis fix --undo".cyan());
 }
 
+/// Print the iteration header showing the current iteration number and
+/// remaining issue count.
+fn print_iteration_header(iteration: usize, issue_count: usize) {
+    println!(
+        "\n{} AI Fix Iteration {} / {}",
+        "→".cyan().bold(),
+        iteration,
+        MAX_AI_FIX_ITERATIONS
+    );
+    println!(
+        "  {} issue{} to fix",
+        issue_count,
+        if issue_count == 1 { "" } else { "s" }
+    );
+}
+
+/// Print the "all issues fixed" success banner.
+fn print_all_fixed_banner(iteration: usize, total_fixed: usize, elapsed: std::time::Duration) {
+    let elapsed_str = format_duration(elapsed);
+    println!(
+        "\n{} All issues fixed after {} iteration{}!",
+        "✓".green().bold(),
+        iteration,
+        if iteration == 1 { "" } else { "s" }
+    );
+    println!("  Total fixes applied: {}", total_fixed.to_string().cyan());
+    println!("  Total time: {}", elapsed_str.cyan());
+}
+
+/// Outcome of a single AI fix iteration, used to decide whether the loop
+/// should continue.
+enum IterationOutcome {
+    /// All issues have been resolved.
+    AllFixed,
+    /// Some issues remain; continue with the updated result.
+    Continue(linthis::utils::types::RunResult),
+    /// No further progress can be made; stop the loop.
+    Stop,
+}
+
+/// Execute one iteration of the AI fix loop.  Returns an
+/// `IterationOutcome` that tells the caller what to do next.
+fn run_single_ai_iteration(
+    current_result: &linthis::utils::types::RunResult,
+    options: &FixCommandOptions,
+    config: &Config,
+    iteration: usize,
+) -> (usize, IterationOutcome) {
+    let ai_config = build_ai_fix_config(options, config, true);
+    let ai_result = run_ai_fix_all(current_result, &ai_config);
+    let applied = ai_result.applied;
+
+    if ai_result.modified_files.is_empty() {
+        if !options.quiet {
+            println!("  {} No files modified in this iteration", "⚠".yellow());
+        }
+        return (applied, IterationOutcome::Stop);
+    }
+
+    if !options.quiet {
+        println!(
+            "  {} Applied {} fix{}",
+            "✓".green(),
+            applied,
+            if applied == 1 { "" } else { "es" }
+        );
+    }
+
+    if iteration >= MAX_AI_FIX_ITERATIONS {
+        if !options.quiet {
+            println!(
+                "\n{} Reached maximum iterations ({})",
+                "⚠".yellow(),
+                MAX_AI_FIX_ITERATIONS
+            );
+        }
+        return (applied, IterationOutcome::Stop);
+    }
+
+    match recheck_modified_paths(&ai_result.modified_files, options.verbose, options.quiet) {
+        Some(result) if result.issues.is_empty() => (applied, IterationOutcome::AllFixed),
+        Some(result) => {
+            if !options.quiet {
+                println!(
+                    "  {} remaining issue{}",
+                    result.issues.len(),
+                    if result.issues.len() == 1 { "" } else { "s" }
+                );
+            }
+            (applied, IterationOutcome::Continue(result))
+        }
+        None => (applied, IterationOutcome::Stop),
+    }
+}
+
 fn run_ai_fix_loop(
     options: &FixCommandOptions,
     config: &Config,
     initial_result: linthis::utils::types::RunResult,
 ) -> ExitCode {
-    // Create backup before making any changes
     let files_to_backup = collect_files_from_issues(&initial_result.issues);
     let _backup_id = create_backup(&files_to_backup, "AI fix with --yes", options.quiet);
 
@@ -508,84 +602,27 @@ fn run_ai_fix_loop(
         iteration += 1;
 
         if !options.quiet {
-            println!(
-                "\n{} AI Fix Iteration {} / {}",
-                "→".cyan().bold(),
-                iteration,
-                MAX_AI_FIX_ITERATIONS
-            );
-            println!(
-                "  {} issue{} to fix",
-                current_result.issues.len(),
-                if current_result.issues.len() == 1 { "" } else { "s" }
-            );
+            print_iteration_header(iteration, current_result.issues.len());
         }
 
-        let ai_config = build_ai_fix_config(options, config, true);
-        let ai_result = run_ai_fix_all(&current_result, &ai_config);
-        total_fixed += ai_result.applied;
+        let (applied, outcome) =
+            run_single_ai_iteration(&current_result, options, config, iteration);
+        total_fixed += applied;
 
-        if ai_result.modified_files.is_empty() {
-            if !options.quiet {
-                println!(
-                    "  {} No files modified in this iteration",
-                    "⚠".yellow()
-                );
-            }
-            break;
-        }
-
-        if !options.quiet {
-            println!(
-                "  {} Applied {} fix{}",
-                "✓".green(),
-                ai_result.applied,
-                if ai_result.applied == 1 { "" } else { "es" }
-            );
-        }
-
-        if iteration >= MAX_AI_FIX_ITERATIONS {
-            if !options.quiet {
-                println!(
-                    "\n{} Reached maximum iterations ({})",
-                    "⚠".yellow(),
-                    MAX_AI_FIX_ITERATIONS
-                );
-            }
-            break;
-        }
-
-        match recheck_modified_paths(&ai_result.modified_files, options.verbose, options.quiet) {
-            Some(result) if result.issues.is_empty() => {
+        match outcome {
+            IterationOutcome::AllFixed => {
                 if !options.quiet {
-                    let elapsed = start_time.elapsed();
-                    let elapsed_str = format_duration(elapsed);
-                    println!(
-                        "\n{} All issues fixed after {} iteration{}!",
-                        "✓".green().bold(),
-                        iteration,
-                        if iteration == 1 { "" } else { "s" }
-                    );
-                    println!("  Total fixes applied: {}", total_fixed.to_string().cyan());
-                    println!("  Total time: {}", elapsed_str.cyan());
+                    print_all_fixed_banner(iteration, total_fixed, start_time.elapsed());
                 }
                 return ExitCode::SUCCESS;
             }
-            Some(result) => {
-                if !options.quiet {
-                    println!(
-                        "  {} remaining issue{}",
-                        result.issues.len(),
-                        if result.issues.len() == 1 { "" } else { "s" }
-                    );
-                }
+            IterationOutcome::Continue(result) => {
                 current_result = result;
             }
-            None => break,
+            IterationOutcome::Stop => break,
         }
     }
 
-    // Final summary
     if !options.quiet {
         print_ai_fix_summary(&current_result, iteration, total_fixed, start_time.elapsed());
     }
