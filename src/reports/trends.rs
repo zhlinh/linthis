@@ -395,9 +395,59 @@ pub fn load_result_from_file(path: &Path) -> Option<RunResult> {
             result.target_paths = paths.iter().filter_map(|v| v.as_str().map(String::from)).collect();
         }
 
-        // Note: security/complexity data in unified format uses CheckResultView
-        // which doesn't directly map to SastResult/AnalysisResult.
-        // For report/trend purposes, lint issues are the primary data.
+        // Parse security issues from unified format into result.issues
+        if let Some(sec) = unified.get("security") {
+            if let Some(issues) = sec.get("issues").and_then(|v| v.as_array()) {
+                for iv in issues {
+                    let file_str = iv.get("file").and_then(|v| v.as_str()).unwrap_or("");
+                    let line = iv.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    let message = iv.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let severity = match iv.get("severity").and_then(|v| v.as_str()).unwrap_or("info") {
+                        "error" => crate::utils::types::Severity::Error,
+                        "warning" => crate::utils::types::Severity::Warning,
+                        _ => crate::utils::types::Severity::Info,
+                    };
+                    let source = iv.get("source").and_then(|v| v.as_str()).unwrap_or("security");
+                    let mut issue = crate::utils::types::LintIssue::new(
+                        std::path::PathBuf::from(file_str), line,
+                        format!("[security] {}", message), severity,
+                    );
+                    issue = issue.with_source(format!("security/{}", source));
+                    if let Some(code) = iv.get("code").and_then(|v| v.as_str()) {
+                        issue = issue.with_code(code.to_string());
+                    }
+                    if let Some(sug) = iv.get("suggestion").and_then(|v| v.as_str()) {
+                        issue = issue.with_suggestion(sug.to_string());
+                    }
+                    result.issues.push(issue);
+                }
+            }
+        }
+
+        // Parse complexity issues from unified format into result.issues
+        if let Some(cx) = unified.get("complexity") {
+            if let Some(issues) = cx.get("issues").and_then(|v| v.as_array()) {
+                for iv in issues {
+                    let file_str = iv.get("file").and_then(|v| v.as_str()).unwrap_or("");
+                    let line = iv.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    let message = iv.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let severity = match iv.get("severity").and_then(|v| v.as_str()).unwrap_or("info") {
+                        "error" => crate::utils::types::Severity::Error,
+                        "warning" => crate::utils::types::Severity::Warning,
+                        _ => crate::utils::types::Severity::Info,
+                    };
+                    let mut issue = crate::utils::types::LintIssue::new(
+                        std::path::PathBuf::from(file_str), line,
+                        format!("[complexity] {}", message), severity,
+                    );
+                    issue = issue.with_source("linthis-complexity".to_string());
+                    if let Some(sug) = iv.get("suggestion").and_then(|v| v.as_str()) {
+                        issue = issue.with_suggestion(sug.to_string());
+                    }
+                    result.issues.push(issue);
+                }
+            }
+        }
 
         result.count_files_with_issues();
         return Some(result);

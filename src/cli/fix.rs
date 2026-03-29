@@ -257,9 +257,11 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
         println!("{} Loading results from: {}", "→".cyan(), path.display());
     }
 
-    match fs::read_to_string(&path) {
-        Ok(content) => match serde_json::from_str::<linthis::utils::types::RunResult>(&content) {
-            Ok(result) => {
+    match linthis::reports::load_result_from_file(&path) {
+        Some(mut result) => {
+                // Merge security/complexity findings into unified issues list
+                result.merge_all_check_issues();
+
                 if result.issues.is_empty() {
                     if !options.quiet {
                         println!("{}", "No issues in the saved result.".green());
@@ -267,11 +269,28 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
                     return ExitCode::SUCCESS;
                 }
 
+                // Count by type
+                let lint_count = result.issues.iter()
+                    .filter(|i| !i.source.as_deref().unwrap_or("").starts_with("security/")
+                        && i.source.as_deref() != Some("linthis-complexity"))
+                    .count();
+                let sec_count = result.issues.iter()
+                    .filter(|i| i.source.as_deref().unwrap_or("").starts_with("security/"))
+                    .count();
+                let cx_count = result.issues.iter()
+                    .filter(|i| i.source.as_deref() == Some("linthis-complexity"))
+                    .count();
+
                 if !options.quiet {
+                    let mut parts = Vec::new();
+                    if lint_count > 0 { parts.push(format!("{} lint", lint_count)); }
+                    if sec_count > 0 { parts.push(format!("{} security", sec_count)); }
+                    if cx_count > 0 { parts.push(format!("{} complexity", cx_count)); }
                     println!(
-                        "  Found {} issue{} from previous run\n",
+                        "  Found {} issue{} from previous run ({})\n",
                         result.issues.len(),
-                        if result.issues.len() == 1 { "" } else { "s" }
+                        if result.issues.len() == 1 { "" } else { "s" },
+                        parts.join(", "),
                     );
                 }
 
@@ -321,20 +340,15 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
                 }
 
                 ExitCode::from(result.exit_code as u8)
-            }
-            Err(e) => {
-                eprintln!(
-                    "{}: Failed to parse result file as JSON: {}",
-                    "Error".red(),
-                    e
-                );
-                eprintln!("  Result files are saved in JSON format by default.");
-                eprintln!("  Make sure the file is a valid JSON result file.");
-                ExitCode::from(2)
-            }
-        },
-        Err(e) => {
-            eprintln!("{}: Failed to read result file: {}", "Error".red(), e);
+        }
+        None => {
+            eprintln!(
+                "{}: Failed to load result file: {}",
+                "Error".red(),
+                path.display()
+            );
+            eprintln!("  Make sure the file is a valid JSON result file.");
+            eprintln!("  Run {} first to generate a result file.", "linthis -c".cyan());
             ExitCode::from(2)
         }
     }

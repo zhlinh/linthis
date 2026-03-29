@@ -303,6 +303,71 @@ impl RunResult {
         let unique_files: HashSet<_> = self.issues.iter().map(|i| &i.file_path).collect();
         self.files_with_issues = unique_files.len();
     }
+
+    /// Merge security and complexity findings into the issues list.
+    ///
+    /// Converts security `SastFinding` and complexity function metrics
+    /// into `LintIssue` entries, so they can be displayed/fixed uniformly.
+    pub fn merge_all_check_issues(&mut self) {
+        // Merge security findings
+        if let Some(ref sec) = self.security {
+            for finding in &sec.findings {
+                let severity = match finding.severity {
+                    crate::security::Severity::Critical | crate::security::Severity::High => {
+                        Severity::Error
+                    }
+                    crate::security::Severity::Medium => Severity::Warning,
+                    _ => Severity::Info,
+                };
+                let mut issue = LintIssue::new(
+                    finding.file_path.clone(),
+                    finding.line,
+                    format!("[security] {}", finding.message),
+                    severity,
+                );
+                issue = issue.with_source(format!("security/{}", finding.source));
+                issue = issue.with_code(finding.rule_id.clone());
+                if let Some(ref fix) = finding.fix_suggestion {
+                    issue = issue.with_suggestion(fix.clone());
+                }
+                self.issues.push(issue);
+            }
+        }
+
+        // Merge complexity issues
+        if let Some(ref cx) = self.complexity {
+            let threshold = cx.thresholds.cyclomatic.good;
+            let warning_threshold = cx.thresholds.cyclomatic.warning;
+            let high_threshold = cx.thresholds.cyclomatic.high;
+            for file in &cx.files {
+                for func in &file.functions {
+                    if func.metrics.cyclomatic > threshold {
+                        let severity = if func.metrics.cyclomatic > high_threshold {
+                            Severity::Error
+                        } else if func.metrics.cyclomatic > warning_threshold {
+                            Severity::Warning
+                        } else {
+                            Severity::Info
+                        };
+                        let mut issue = LintIssue::new(
+                            file.path.clone(),
+                            func.start_line as usize,
+                            format!(
+                                "[complexity] function `{}` cyclomatic complexity {} exceeds threshold {}",
+                                func.name, func.metrics.cyclomatic, threshold,
+                            ),
+                            severity,
+                        );
+                        issue = issue.with_source("linthis-complexity".to_string());
+                        issue = issue.with_suggestion(
+                            "Consider refactoring into smaller functions".to_string(),
+                        );
+                        self.issues.push(issue);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
