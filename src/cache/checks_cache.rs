@@ -146,6 +146,29 @@ impl PerFileCache {
         }
     }
 
+    /// Get cached FileMetrics for files that had cache hits.
+    ///
+    /// Returns FileMetrics for all cached files (used by complexity check
+    /// to restore results without re-analyzing).
+    pub fn get_cached_file_metrics(
+        &self,
+        files: &[PathBuf],
+    ) -> Vec<crate::complexity::FileMetrics> {
+        let mut metrics = Vec::new();
+        for file in files {
+            let key = file.to_string_lossy().to_string();
+            let current_hash = file_hash(file).unwrap_or(0);
+            if let Some((cached_hash, json)) = self.entries.get(&key) {
+                if *cached_hash == current_hash {
+                    if let Ok(fm) = serde_json::from_str::<crate::complexity::FileMetrics>(json) {
+                        metrics.push(fm);
+                    }
+                }
+            }
+        }
+        metrics
+    }
+
     /// Format cache status message (like lint's "Running [X] check (N cached, N changed)").
     pub fn format_status(check_name: &str, partition: &PartitionResult) -> String {
         let total = partition.cache_hits + partition.cache_misses;

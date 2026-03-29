@@ -1103,10 +1103,42 @@ fn main() -> ExitCode {
                         }
                     }
                 }
-                // If all files were cached (no changed files to analyze),
-                // set a minimal result to signal complexity was checked
+                // If all files were cached, rebuild AnalysisResult from cached FileMetrics
                 if result.complexity.is_none() && partition.cache_hits > 0 {
-                    result.complexity = Some(linthis::complexity::AnalysisResult::new());
+                    let cached_metrics = cache.get_cached_file_metrics(&target_files);
+                    let mut cached_result = linthis::complexity::AnalysisResult::new();
+                    cached_result.files = cached_metrics;
+                    cached_result.calculate_summary();
+
+                    // Apply config thresholds
+                    if let Some(t) = complexity_config.threshold {
+                        cached_result.thresholds.cyclomatic.good = t;
+                        cached_result.thresholds.cyclomatic.warning = t + 10;
+                        cached_result.thresholds.cyclomatic.high = t + 20;
+                    }
+                    if let Some(w) = complexity_config.warning_threshold {
+                        cached_result.thresholds.cyclomatic.warning = w;
+                    }
+                    if let Some(e) = complexity_config.error_threshold {
+                        cached_result.thresholds.cyclomatic.high = e;
+                    }
+                    cached_result.thresholds.cyclomatic.normalize();
+
+                    // Calculate exit code from cached result
+                    let cx_fail_on = complexity_config.fail_on.clone().unwrap_or_default();
+                    let cx_high = cached_result.thresholds.cyclomatic.high;
+                    let cx_warning = cached_result.thresholds.cyclomatic.warning;
+                    let cx_threshold = cached_result.thresholds.cyclomatic.good;
+                    let cx_errors = cached_result.files.iter().flat_map(|f| &f.functions)
+                        .filter(|func| func.metrics.cyclomatic > cx_high).count();
+                    let cx_warns = cached_result.files.iter().flat_map(|f| &f.functions)
+                        .filter(|func| func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high).count();
+                    let cx_infos = cached_result.files.iter().flat_map(|f| &f.functions)
+                        .filter(|func| func.metrics.cyclomatic > cx_threshold && func.metrics.cyclomatic <= cx_warning).count();
+                    let cx_exit = cx_fail_on.exit_code(cx_errors, cx_warns, cx_infos);
+                    result.exit_code = std::cmp::max(result.exit_code, cx_exit);
+
+                    result.complexity = Some(cached_result);
                 }
                 result.checks_run.push("complexity".to_string());
             }
