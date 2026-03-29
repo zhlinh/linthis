@@ -411,74 +411,104 @@ mod dirs {
     }
 }
 
+/// Resolve types and events for install: dedup + interactive prompt or -y fallback.
+/// Returns `Ok((types, events))` or `Err(ExitCode)` if the user cancels.
+fn resolve_install_types_events(
+    hook_types: Vec<HookTool>,
+    hook_events: Vec<HookEvent>,
+    yes: bool,
+) -> Result<(Vec<HookTool>, Vec<HookEvent>), ExitCode> {
+    if yes {
+        return Ok(apply_yes_fallback(
+            deduplicate_hook_types(hook_types),
+            deduplicate_hook_events(hook_events),
+        ));
+    }
+    let types = resolve_or_prompt_types(hook_types, false, "Installation cancelled")?;
+    let events = resolve_or_prompt_events(hook_events, false, "Installation cancelled")?;
+    Ok((types, events))
+}
+
+/// Resolve types and events for uninstall: dedup + interactive prompt or flags.
+/// Returns `Ok((types, events))` or `Err(ExitCode)` if the user cancels.
+fn resolve_uninstall_types_events(
+    hook_types: Vec<HookTool>,
+    hook_events: Vec<HookEvent>,
+    skip_prompt: bool,
+) -> Result<(Vec<HookTool>, Vec<HookEvent>), ExitCode> {
+    if skip_prompt {
+        return Ok((
+            deduplicate_hook_types(hook_types),
+            deduplicate_hook_events(hook_events),
+        ));
+    }
+    let types = resolve_or_prompt_types(hook_types, true, "Uninstall cancelled")?;
+    let events = resolve_or_prompt_events(hook_events, true, "Uninstall cancelled")?;
+    Ok((types, events))
+}
+
+/// Dedup types and prompt interactively if empty.
+fn resolve_or_prompt_types(
+    hook_types: Vec<HookTool>,
+    show_all: bool,
+    cancel_msg: &str,
+) -> Result<Vec<HookTool>, ExitCode> {
+    let types = deduplicate_hook_types(hook_types);
+    if types.is_empty() {
+        match prompt_hook_types(show_all) {
+            Some(t) => Ok(t),
+            None => {
+                println!("{}", cancel_msg);
+                Err(ExitCode::SUCCESS)
+            }
+        }
+    } else {
+        Ok(types)
+    }
+}
+
+/// Dedup events and prompt interactively if empty.
+fn resolve_or_prompt_events(
+    hook_events: Vec<HookEvent>,
+    show_all: bool,
+    cancel_msg: &str,
+) -> Result<Vec<HookEvent>, ExitCode> {
+    let events = deduplicate_hook_events(hook_events);
+    if events.is_empty() {
+        match prompt_hook_events(show_all) {
+            Some(e) => Ok(e),
+            None => {
+                println!("{}", cancel_msg);
+                Err(ExitCode::SUCCESS)
+            }
+        }
+    } else {
+        Ok(events)
+    }
+}
+
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
         HookCommands::Install { hook_types, hook_events, force, yes, global, provider, args, provider_args } => {
-            // Resolve types and events (dedup + interactive prompt or -y fallback)
-            let (hook_types, hook_events) = if yes {
-                apply_yes_fallback(
-                    deduplicate_hook_types(hook_types),
-                    deduplicate_hook_events(hook_events),
-                )
-            } else {
-                let types = deduplicate_hook_types(hook_types);
-                let types = if types.is_empty() {
-                    match prompt_hook_types(false) {
-                        Some(t) => t,
-                        None => { println!("Installation cancelled"); return ExitCode::SUCCESS; }
-                    }
-                } else { types };
-                let events = deduplicate_hook_events(hook_events);
-                let events = if events.is_empty() {
-                    match prompt_hook_events(false) {
-                        Some(e) => e,
-                        None => { println!("Installation cancelled"); return ExitCode::SUCCESS; }
-                    }
-                } else { events };
-                (types, events)
+            let (hook_types, hook_events) = match resolve_install_types_events(hook_types, hook_events, yes) {
+                Ok(r) => r,
+                Err(code) => return code,
             };
             handle_hook_install(hook_types, hook_events, force, yes, global, provider, args, provider_args)
         }
         HookCommands::Uninstall { hook_types, hook_events, all, all_types, all_events, yes, global } => {
-            // --all / --all-types / --all-events: skip interactive prompts.
-            // -y: skip prompt, use whatever was explicitly specified (no default fallback for uninstall).
-            let (types, events) = if all || all_types || all_events || yes {
-                (
-                    deduplicate_hook_types(hook_types),
-                    deduplicate_hook_events(hook_events),
-                )
-            } else {
-                let types = deduplicate_hook_types(hook_types);
-                let types = if types.is_empty() {
-                    match prompt_hook_types(true) {
-                        Some(t) => t,
-                        None => { println!("Uninstall cancelled"); return ExitCode::SUCCESS; }
-                    }
-                } else { types };
-                let events = deduplicate_hook_events(hook_events);
-                let events = if events.is_empty() {
-                    match prompt_hook_events(true) {
-                        Some(e) => e,
-                        None => { println!("Uninstall cancelled"); return ExitCode::SUCCESS; }
-                    }
-                } else { events };
-                (types, events)
+            let skip_prompt = all || all_types || all_events || yes;
+            let (types, events) = match resolve_uninstall_types_events(hook_types, hook_events, skip_prompt) {
+                Ok(r) => r,
+                Err(code) => return code,
             };
             handle_hook_uninstall(types, events, all, all_types, all_events, yes, global)
         }
-        HookCommands::Status => {
-            handle_hook_status()
-        }
-        HookCommands::List { global } => {
-            handle_hook_list(global)
-        }
-        HookCommands::Check => {
-            handle_hook_check()
-        }
-        HookCommands::CommitMsgCheck { msg_or_file } => {
-            handle_commit_msg_check(&msg_or_file, false, None)
-        }
+        HookCommands::Status => handle_hook_status(),
+        HookCommands::List { global } => handle_hook_list(global),
+        HookCommands::Check => handle_hook_check(),
+        HookCommands::CommitMsgCheck { msg_or_file } => handle_commit_msg_check(&msg_or_file, false, None),
         HookCommands::Run { event, hook_type, provider, provider_args, global, hook_args } => {
             let code = handle_hook_run(&event, &hook_type, provider.as_deref(), provider_args.as_deref(), global, &hook_args);
             ExitCode::from(code as u8)
@@ -546,7 +576,121 @@ fn handle_hook_install(
     overall
 }
 
-/// Install git hook (pre-commit, pre-push, or commit-msg) for a single type × event pair.
+/// Parse an agent provider string into an `AgentProvider` enum.
+/// Returns `None` for unknown provider names (with error printed).
+fn parse_agent_provider(name: &str) -> Option<AgentProvider> {
+    match name.to_lowercase().as_str() {
+        "claude"    => Some(AgentProvider::Claude),
+        "codex"     => Some(AgentProvider::Codex),
+        "gemini"    => Some(AgentProvider::Gemini),
+        "cursor"    => Some(AgentProvider::Cursor),
+        "droid"     => Some(AgentProvider::Droid),
+        "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
+        "codebuddy" => Some(AgentProvider::Codebuddy),
+        "openclaw"  => Some(AgentProvider::Openclaw),
+        _ => {
+            eprintln!(
+                "{}: Unknown agent provider '{}'. Valid options: claude, codex, gemini, cursor, droid, auggie, codebuddy, openclaw",
+                "Error".red(), name
+            );
+            None
+        }
+    }
+}
+
+/// Print detected hook content analysis for an existing hook file.
+fn print_existing_hook_analysis(content: &str) {
+    let has_linthis = content.contains("linthis");
+    let has_prek = content.contains("prek") || std::path::Path::new(".pre-commit-config.yaml").exists();
+    let has_precommit = content.contains("pre-commit");
+    let has_husky = content.contains("husky");
+
+    println!("\nDetected hook content:");
+    if has_linthis {
+        println!("  {} linthis", "✓".green());
+    }
+    if has_prek {
+        println!("  {} prek/pre-commit framework", "⚠".yellow());
+    }
+    if has_precommit && !has_prek {
+        println!("  {} pre-commit hooks", "⚠".yellow());
+    }
+    if has_husky {
+        println!("  {} husky", "⚠".yellow());
+    }
+}
+
+/// Prompt the user for how to handle an existing hook conflict.
+/// Returns the ExitCode for the chosen action.
+fn prompt_existing_hook_action(
+    hook_path: &std::path::Path,
+    hook_filename: &str,
+    hook_type: &Option<HookTool>,
+    hook_event: &HookEvent,
+    args: &Option<String>,
+) -> ExitCode {
+    use std::io::{self, Write};
+
+    println!("\nOptions:");
+    println!("  1. {} - Replace existing hook with linthis", "Replace".cyan());
+    println!("  2. {} - Append linthis to existing hook", "Append".cyan());
+    println!("  3. {} - Create backup and replace", "Backup".cyan());
+    println!("  4. {} - Cancel", "Cancel".cyan());
+
+    print!("\nChoose an option [1-4]: ");
+    io::stdout().flush().unwrap();
+
+    let mut choice = String::new();
+    io::stdin().read_line(&mut choice).ok();
+
+    match choice.trim() {
+        "1" => handle_hook_install_impl(hook_type.clone(), hook_event, true, false, args.clone()),
+        "2" => handle_hook_install_impl(hook_type.clone(), hook_event, false, true, args.clone()),
+        "3" => {
+            let backup_path = hook_path.with_extension(format!("{}.backup", hook_filename));
+            if let Err(e) = std::fs::copy(hook_path, &backup_path) {
+                eprintln!("{}: Failed to create backup: {}", "Error".red(), e);
+                return ExitCode::from(2);
+            }
+            println!("{} Created backup at {}", "✓".green(), backup_path.display());
+            handle_hook_install_impl(hook_type.clone(), hook_event, true, false, args.clone())
+        }
+        _ => {
+            println!("Installation cancelled");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// Handle installation of *-with-agent hook types.
+fn install_with_agent_hook(
+    hook_type: &HookTool,
+    hook_event: &HookEvent,
+    force: bool,
+    yes: bool,
+    global: bool,
+    provider: Option<&str>,
+    preresolved_fix_provider: Option<AgentFixProvider>,
+    args: &Option<String>,
+    provider_args: Option<&str>,
+) -> ExitCode {
+    let fix_provider = if let Some(p) = preresolved_fix_provider {
+        p
+    } else {
+        match resolve_agent_fix_provider(provider, yes) {
+            Ok(p)  => p,
+            Err(e) => return e,
+        }
+    };
+    let base = hook_type.base_tool().clone();
+    match &base {
+        HookTool::Git => handle_git_with_agent_install(hook_event, force, global, yes, &fix_provider, args, provider_args),
+        HookTool::Prek => handle_precommit_with_agent_install(&base, hook_event, force, &fix_provider, args),
+        _ => ExitCode::from(1),
+    }
+}
+
+/// Install git hook (pre-commit, pre-push, or commit-msg) for a single type x event pair.
 fn handle_hook_install_single(
     hook_type: Option<HookTool>,
     hook_event: HookEvent,
@@ -558,60 +702,25 @@ fn handle_hook_install_single(
     args: Option<String>,
     provider_args: Option<String>,
 ) -> ExitCode {
-    use std::io::{self, Write};
-
-    // *-with-agent types: install base hook + agent fix fallback
     if hook_type.as_ref().map(|t| t.has_agent_fix()).unwrap_or(false) {
-        let fix_provider = if let Some(p) = preresolved_fix_provider {
-            p
-        } else {
-            match resolve_agent_fix_provider(provider.as_deref(), yes) {
-                Ok(p)  => p,
-                Err(e) => return e,
-            }
-        };
-        let base = hook_type.as_ref().unwrap().base_tool().clone();
-        return match &base {
-            HookTool::Git => handle_git_with_agent_install(&hook_event, force, global, yes, &fix_provider, &args, provider_args.as_deref()),
-            HookTool::Prek => {
-                handle_precommit_with_agent_install(&base, &hook_event, force, &fix_provider, &args)
-            }
-            _ => ExitCode::from(1),
-        };
+        return install_with_agent_hook(
+            hook_type.as_ref().unwrap(), &hook_event, force, yes, global,
+            provider.as_deref(), preresolved_fix_provider, &args, provider_args.as_deref(),
+        );
     }
 
-    // Agent type has its own installation flow
     if matches!(hook_type, Some(HookTool::Agent)) {
-        // Parse provider as AgentProvider if given
-        let agent_provider = provider.as_deref().and_then(|p| {
-            match p.to_lowercase().as_str() {
-                "claude"    => Some(AgentProvider::Claude),
-                "codex"     => Some(AgentProvider::Codex),
-                "gemini"    => Some(AgentProvider::Gemini),
-                "cursor"    => Some(AgentProvider::Cursor),
-                "droid"     => Some(AgentProvider::Droid),
-                "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
-                "codebuddy" => Some(AgentProvider::Codebuddy),
-                "openclaw"  => Some(AgentProvider::Openclaw),
-                _ => {
-                    eprintln!("{}: Unknown agent provider '{}'. Valid options: claude, codex, gemini, cursor, droid, auggie, codebuddy, openclaw", "Error".red(), p);
-                    None
-                }
-            }
-        });
-        // If provider was given but invalid, exit
+        let agent_provider = provider.as_deref().and_then(parse_agent_provider);
         if provider.is_some() && agent_provider.is_none() {
             return ExitCode::from(1);
         }
         return handle_agent_hook_install(agent_provider, &[hook_event.clone()], force, yes, global);
     }
 
-    // Global non-agent hook: install into ~/.config/git/hooks
     if global {
         return handle_global_hook_install(hook_type, &hook_event, force, yes, &args, provider_args.as_deref());
     }
 
-    // Find git root
     let git_root = match find_git_root() {
         Some(root) => root,
         None => {
@@ -624,82 +733,38 @@ fn handle_hook_install_single(
     let hook_filename = hook_event.hook_filename();
     let hook_path = git_root.join(".git/hooks").join(hook_filename);
 
-    // Check for existing hook
     let is_empty_hook = hook_path.exists()
         && std::fs::read_to_string(&hook_path).map(|s| s.trim().is_empty()).unwrap_or(false);
     if hook_path.exists() && !force && !is_empty_hook {
-        println!("{}: {} already exists", "Warning".yellow(), hook_path.display());
-
-        // Read and analyze existing hook
-        if let Ok(existing_content) = std::fs::read_to_string(&hook_path) {
-            let has_linthis = existing_content.contains("linthis");
-            let has_prek = existing_content.contains("prek") || std::path::Path::new(".pre-commit-config.yaml").exists();
-            let has_precommit = existing_content.contains("pre-commit");
-            let has_husky = existing_content.contains("husky");
-
-            println!("\nDetected hook content:");
-            if has_linthis {
-                println!("  {} linthis", "✓".green());
-            }
-            if has_prek {
-                println!("  {} prek/pre-commit framework", "⚠".yellow());
-            }
-            if has_precommit && !has_prek {
-                println!("  {} pre-commit hooks", "⚠".yellow());
-            }
-            if has_husky {
-                println!("  {} husky", "⚠".yellow());
-            }
-
-            if !yes {
-                println!("\nOptions:");
-                println!("  1. {} - Replace existing hook with linthis", "Replace".cyan());
-                println!("  2. {} - Append linthis to existing hook", "Append".cyan());
-                println!("  3. {} - Create backup and replace", "Backup".cyan());
-                println!("  4. {} - Cancel", "Cancel".cyan());
-
-                print!("\nChoose an option [1-4]: ");
-                io::stdout().flush().unwrap();
-
-                let mut choice = String::new();
-                io::stdin().read_line(&mut choice).ok();
-
-                match choice.trim() {
-                    "1" => {
-                        // Replace: use force flag internally
-                        return handle_hook_install_impl(hook_type, &hook_event, true, false, args.clone());
-                    }
-                    "2" => {
-                        // Append
-                        return handle_hook_install_impl(hook_type, &hook_event, false, true, args.clone());
-                    }
-                    "3" => {
-                        // Backup and replace
-                        let backup_path = hook_path.with_extension(format!("{}.backup", hook_filename));
-                        if let Err(e) = std::fs::copy(&hook_path, &backup_path) {
-                            eprintln!("{}: Failed to create backup: {}", "Error".red(), e);
-                            return ExitCode::from(2);
-                        }
-                        println!("{} Created backup at {}", "✓".green(), backup_path.display());
-                        return handle_hook_install_impl(hook_type, &hook_event, true, false, args.clone());
-                    }
-                    _ => {
-                        println!("Installation cancelled");
-                        return ExitCode::SUCCESS;
-                    }
-                }
-            } else {
-                // Non-interactive mode: append by default
-                return handle_hook_install_impl(hook_type, &hook_event, false, true, args.clone());
-            }
-        }
-
-        println!("  Use {} to overwrite, or {} to append", "--force".yellow(), "choose option 2".cyan());
-        return ExitCode::from(1);
+        return handle_existing_hook_conflict(&hook_path, hook_filename, &hook_type, &hook_event, yes, &args);
     }
 
-    // No existing hook or force mode - create new hook
     handle_hook_install_impl(hook_type, &hook_event, force, false, args)
+}
+
+/// Handle the case where a hook file already exists and --force was not specified.
+fn handle_existing_hook_conflict(
+    hook_path: &std::path::Path,
+    hook_filename: &str,
+    hook_type: &Option<HookTool>,
+    hook_event: &HookEvent,
+    yes: bool,
+    args: &Option<String>,
+) -> ExitCode {
+    println!("{}: {} already exists", "Warning".yellow(), hook_path.display());
+
+    if let Ok(existing_content) = std::fs::read_to_string(hook_path) {
+        print_existing_hook_analysis(&existing_content);
+
+        if !yes {
+            return prompt_existing_hook_action(hook_path, hook_filename, hook_type, hook_event, args);
+        }
+        // Non-interactive mode: append by default
+        return handle_hook_install_impl(hook_type.clone(), hook_event, false, true, args.clone());
+    }
+
+    println!("  Use {} to overwrite, or {} to append", "--force".yellow(), "choose option 2".cyan());
+    ExitCode::from(1)
 }
 
 /// Internal implementation of hook installation
@@ -769,162 +834,138 @@ fn build_thin_wrapper_script(
     )
 }
 
-/// Build the global hook script with the hook event name substituted.
-fn build_global_hook_script_for_event(
-    hook_event: &HookEvent,
-    args: &Option<String>,
-    fix_provider: Option<&AgentFixProvider>,
-) -> String {
-    let linthis_cmd = build_hook_command(hook_event, args);
+/// Build the shell preamble and local-hook argument style for pre-push events.
+/// Returns (preamble_script, local_hook_args_expression).
+fn build_pre_push_preamble() -> (String, &'static str) {
+    let preamble = "# For pre-push: save remote args, read stdin for push info\n\
+         _REMOTE_NAME=\"$1\"\n\
+         _REMOTE_URL=\"$2\"\n\
+         # Read push info from stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>\n\
+         _IS_TAG=0\n\
+         _LOCAL_SHA=\"\"\n\
+         _REMOTE_SHA=\"\"\n\
+         while read -r _LREF _LSHA _RREF _RSHA; do\n\
+         \x20 # Skip tag pushes — no source code to check\n\
+         \x20 case \"$_LREF\" in refs/tags/*) _IS_TAG=1 ;; esac\n\
+         \x20 _LOCAL_SHA=\"$_LSHA\"\n\
+         \x20 _REMOTE_SHA=\"$_RSHA\"\n\
+         done\n\
+         if [ \"$_IS_TAG\" = \"1\" ]; then\n\
+         \x20 exit 0\n\
+         fi\n\
+         # Compute changed files between remote and local\n\
+         _ZERO_SHA=\"0000000000000000000000000000000000000000\"\n\
+         if [ \"$_REMOTE_SHA\" = \"$_ZERO_SHA\" ]; then\n\
+         \x20 # New branch: diff against default branch\n\
+         \x20 _BASE=$(git rev-parse 'HEAD~1' 2>/dev/null || echo \"$_LOCAL_SHA\")\n\
+         else\n\
+         \x20 _BASE=\"$_REMOTE_SHA\"\n\
+         fi\n\
+         _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..\"$_LOCAL_SHA\" 2>/dev/null | grep -v '^$')\n\
+         # No files to push = nothing to check\n\
+         if [ -z \"$_PUSHED_FILES\" ]; then\n\
+         \x20 exit 0\n\
+         fi\n\
+         set --\n\
+         while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
+         $_PUSHED_FILES\n\
+         _EOF_\n\
+         \n"
+        .to_string();
+    (preamble, "\"$_REMOTE_NAME\" \"$_REMOTE_URL\"")
+}
 
-    // For commit-msg, git passes the message file as $1.  Strip the literal
-    // "$1" from the command string so it is not embedded inside the variable
-    // assignment (which would break with paths containing spaces).  We instead
-    // call `$LINTHIS_CMD "$@"` at every invocation site so the argument is
-    // forwarded correctly.  For pre-commit the hook receives no args so "$@"
-    // is empty (a no-op).
-    let linthis_cmd_var = match hook_event {
-        HookEvent::CommitMsg => linthis_cmd
-            .trim_end_matches(" \"$1\"")
-            .to_string(),
-        _ => linthis_cmd.clone(),
-    };
-
-    // For pre-push: git passes <remote-name> <remote-url> as positional args,
-    // NOT file paths.  linthis uses `-i <file>` for file inputs and has no
-    // positional-arg support, so we must compute the pushed files from git diff
-    // and build `-i` flags.  The original remote args are saved for delegating
-    // to any local hook (which expects them).
-    //
-    // For other events (pre-commit receives nothing, commit-msg receives $1 =
-    // message file via "$@") the existing "$@" passthrough is correct.
-    let (pre_push_preamble, local_hook_orig_args) = if matches!(hook_event, HookEvent::PrePush) {
-        let preamble = "# For pre-push: save remote args, read stdin for push info\n\
-             _REMOTE_NAME=\"$1\"\n\
-             _REMOTE_URL=\"$2\"\n\
-             # Read push info from stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>\n\
-             _IS_TAG=0\n\
-             _LOCAL_SHA=\"\"\n\
-             _REMOTE_SHA=\"\"\n\
-             while read -r _LREF _LSHA _RREF _RSHA; do\n\
-             \x20 # Skip tag pushes — no source code to check\n\
-             \x20 case \"$_LREF\" in refs/tags/*) _IS_TAG=1 ;; esac\n\
-             \x20 _LOCAL_SHA=\"$_LSHA\"\n\
-             \x20 _REMOTE_SHA=\"$_RSHA\"\n\
-             done\n\
-             if [ \"$_IS_TAG\" = \"1\" ]; then\n\
-             \x20 exit 0\n\
-             fi\n\
-             # Compute changed files between remote and local\n\
-             _ZERO_SHA=\"0000000000000000000000000000000000000000\"\n\
-             if [ \"$_REMOTE_SHA\" = \"$_ZERO_SHA\" ]; then\n\
-             \x20 # New branch: diff against default branch\n\
-             \x20 _BASE=$(git rev-parse 'HEAD~1' 2>/dev/null || echo \"$_LOCAL_SHA\")\n\
-             else\n\
-             \x20 _BASE=\"$_REMOTE_SHA\"\n\
-             fi\n\
-             _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..\"$_LOCAL_SHA\" 2>/dev/null | grep -v '^$')\n\
-             # No files to push = nothing to check\n\
-             if [ -z \"$_PUSHED_FILES\" ]; then\n\
-             \x20 exit 0\n\
-             fi\n\
-             set --\n\
-             while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
-             $_PUSHED_FILES\n\
-             _EOF_\n\
-             \n"
-            .to_string();
-        (preamble, "\"$_REMOTE_NAME\" \"$_REMOTE_URL\"")
+/// Build the agent fix command for a given hook event.
+fn agent_fix_cmd_for_event(provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
+    if matches!(hook_event, HookEvent::CommitMsg) {
+        agent_fix_headless_cmd_commit_msg(provider, None)
     } else {
-        (String::new(), "\"$@\"")
-    };
+        let prompt = agent_fix_prompt_for_event(hook_event);
+        agent_fix_headless_cmd(provider, &prompt, None)
+    }
+}
 
+/// Build the shell fix block that invokes an agent on lint failure.
+fn build_agent_fix_block(
+    provider: &AgentFixProvider,
+    hook_event: &HookEvent,
+) -> String {
+    let agent_cmd = agent_fix_cmd_for_event(provider, hook_event);
+    let agent_check = shell_agent_availability_check(provider);
     let error_msg = agent_fix_error_msg(hook_event);
     let new_msg_print = if matches!(hook_event, HookEvent::CommitMsg) {
         agent_fix_show_fixed_cmsg("   ")
     } else {
         String::new()
     };
-    let fix_block = match fix_provider {
-        None => String::new(),
-        Some(p) => {
-            let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
-                agent_fix_headless_cmd_commit_msg(p, None)
-            } else {
-                let prompt = agent_fix_prompt_for_event(hook_event);
-                agent_fix_headless_cmd(p, &prompt, None)
-            };
-            let agent_check = shell_agent_availability_check(p);
-            format!(
-                "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-                 \x20\x20\x20 {agent_check}\
-                 \x20\x20\x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
-                 \x20\x20\x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
-                 \x20\x20\x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
-                 \x20\x20\x20\x20\x20 {agent}\n\
-                 \x20\x20\x20\x20\x20 stop_timer\n\
-                 \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-                 \x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
-                 \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
-                 \x20\x20\x20 fi\n\
-                 {new_msg_print}\
-                 \x20 fi\n",
-                provider = p,
-                agent = agent_cmd,
-                agent_check = agent_check,
-                error_msg = error_msg,
-                new_msg_print = new_msg_print,
-            )
-        }
-    };
-    let fix_block_direct = match fix_provider {
-        None => String::new(),
-        Some(p) => {
-            let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
-                agent_fix_headless_cmd_commit_msg(p, None)
-            } else {
-                let prompt = agent_fix_prompt_for_event(hook_event);
-                agent_fix_headless_cmd(p, &prompt, None)
-            };
-            let agent_check = shell_agent_availability_check(p);
-            format!(
-                "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-                 \x20\x20\x20 {agent_check}\
-                 \x20\x20\x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
-                 \x20\x20\x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
-                 \x20\x20\x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
-                 \x20\x20\x20\x20\x20 {agent}\n\
-                 \x20\x20\x20\x20\x20 stop_timer\n\
-                 \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-                 \x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
-                 \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
-                 \x20\x20\x20 fi\n\
-                 {new_msg_print}\
-                 \x20 fi\n",
-                provider = p,
-                agent = agent_cmd,
-                agent_check = agent_check,
-                error_msg = error_msg,
-                new_msg_print = new_msg_print,
-            )
-        }
-    };
+    format!(
+        "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
+         \x20\x20\x20 {agent_check}\
+         \x20\x20\x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+         \x20\x20\x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
+         \x20\x20\x20\x20\x20 {agent}\n\
+         \x20\x20\x20\x20\x20 stop_timer\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+         \x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
+         \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
+         \x20\x20\x20 fi\n\
+         {new_msg_print}\
+         \x20 fi\n",
+        provider = provider,
+        agent = agent_cmd,
+        agent_check = agent_check,
+        error_msg = error_msg,
+        new_msg_print = new_msg_print,
+    )
+}
 
-    let event_name = hook_event.hook_filename();
+/// Build the linthis command variable for the global hook script.
+/// For commit-msg, strips "$1" so it can be forwarded via "$@".
+fn build_linthis_cmd_var(hook_event: &HookEvent, args: &Option<String>) -> String {
+    let cmd = build_hook_command(hook_event, args);
+    match hook_event {
+        HookEvent::CommitMsg => cmd.trim_end_matches(" \"$1\"").to_string(),
+        _ => cmd,
+    }
+}
 
-    // For pre-push events, add background review trigger
+/// Resolve preamble and local-hook argument style for a given event.
+fn resolve_event_preamble(hook_event: &HookEvent) -> (String, &'static str) {
+    if matches!(hook_event, HookEvent::PrePush) {
+        build_pre_push_preamble()
+    } else {
+        (String::new(), "\"$@\"")
+    }
+}
+
+/// Resolve the fix block, review block, and timer block for the global hook script.
+fn resolve_global_hook_blocks(
+    hook_event: &HookEvent,
+    fix_provider: Option<&AgentFixProvider>,
+) -> (String, String, &'static str, &'static str) {
+    let fix_block = fix_provider.map(|p| build_agent_fix_block(p, hook_event)).unwrap_or_default();
+    let fix_block_direct = fix_provider.map(|p| build_agent_fix_block(p, hook_event)).unwrap_or_default();
     let review_block = if matches!(hook_event, HookEvent::PrePush) {
         "\n# Trigger background AI code review (non-blocking)\n\
          linthis review --background 2>/dev/null &\n"
     } else {
         ""
     };
+    let timer_block = if fix_provider.is_some() { shell_timer_functions() } else { "" };
+    (fix_block, fix_block_direct, review_block, timer_block)
+}
 
-    let timer_block = if fix_provider.is_some() {
-        shell_timer_functions()
-    } else {
-        ""
-    };
+/// Build the global hook script with the hook event name substituted.
+fn build_global_hook_script_for_event(
+    hook_event: &HookEvent,
+    args: &Option<String>,
+    fix_provider: Option<&AgentFixProvider>,
+) -> String {
+    let linthis_cmd_var = build_linthis_cmd_var(hook_event, args);
+    let (pre_push_preamble, local_hook_orig_args) = resolve_event_preamble(hook_event);
+    let (fix_block, fix_block_direct, review_block, timer_block) = resolve_global_hook_blocks(hook_event, fix_provider);
+    let event_name = hook_event.hook_filename();
 
     format!(
         "#!/bin/sh\n\
@@ -973,6 +1014,98 @@ fn build_global_hook_script_for_event(
     )
 }
 
+/// Prompt user to confirm a global hook install. Returns true if user confirms.
+fn confirm_global_install(hook_filename: &str, hook_path: &std::path::Path) -> bool {
+    use std::io::{self, Write};
+    println!(
+        "This will install a global {} hook at {}",
+        hook_filename.cyan(),
+        hook_path.display()
+    );
+    println!(
+        "and set {} in your global git config.",
+        "core.hooksPath".cyan()
+    );
+    print!("Continue? [y/N]: ");
+    io::stdout().flush().ok();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).ok();
+    matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
+}
+
+/// Check if an existing hook blocks installation.
+/// Returns Ok(()) to proceed, Err(ExitCode) to stop.
+fn check_existing_global_hook(hook_path: &std::path::Path, hook_filename: &str, force: bool) -> Result<(), ExitCode> {
+    if !hook_path.exists() || force {
+        return Ok(());
+    }
+    if let Ok(existing) = std::fs::read_to_string(hook_path) {
+        if existing.trim().is_empty() {
+            return Ok(()); // Empty file — treat as not installed
+        }
+        if existing.contains("# linthis-hook") || existing.contains("linthis hook run") {
+            println!(
+                "{}: Global {} hook already installed at {}",
+                "Info".cyan(), hook_filename, hook_path.display()
+            );
+            return Err(ExitCode::SUCCESS);
+        }
+        eprintln!(
+            "{}: {} already exists (not by linthis). Use --force to overwrite.",
+            "Warning".yellow(), hook_path.display()
+        );
+        return Err(ExitCode::from(1));
+    }
+    Ok(())
+}
+
+/// Write a hook script to disk and make it executable.
+fn write_hook_script(hook_path: &std::path::Path, content: &str) -> Result<(), ExitCode> {
+    use std::fs;
+    if let Err(e) = fs::write(hook_path, content) {
+        eprintln!("{}: Failed to write {}: {}", "Error".red(), hook_path.display(), e);
+        return Err(ExitCode::from(2));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(hook_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(hook_path, perms);
+        }
+    }
+    Ok(())
+}
+
+/// Set git config --global core.hooksPath and print result messages.
+fn set_global_hooks_path_config(hook_filename: &str, hook_path: &std::path::Path, hooks_dir_str: &str) {
+    let git_config_result = std::process::Command::new("git")
+        .args(["config", "--global", "core.hooksPath", hooks_dir_str])
+        .status();
+
+    match git_config_result {
+        Ok(status) if status.success() => {
+            println!("{} Installed global {} hook → {}", "✓".green(), hook_filename, hook_path.display());
+            println!("{} Set {} = {}", "✓".green(), "core.hooksPath".cyan(), hooks_dir_str);
+            println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
+            println!();
+            println!("  {}", "How it works (Strategy B — local takes priority):".dimmed());
+            println!("  {} If local hook has linthis → global delegates entirely", "·".dimmed());
+            println!("  {} If local hook has no linthis → global runs linthis first, then delegates", "·".dimmed());
+            println!("  {} No local hook → global runs linthis directly", "·".dimmed());
+        }
+        Ok(_) | Err(_) => {
+            println!("{} Installed global {} hook → {}", "✓".green(), hook_filename, hook_path.display());
+            eprintln!(
+                "{}: Failed to set core.hooksPath automatically. Run manually:\n  git config --global core.hooksPath {}",
+                "Warning".yellow(),
+                hooks_dir_str
+            );
+        }
+    }
+}
+
 /// Install a global git hook into ~/.config/git/hooks/<event>.
 ///
 /// After writing the script, configures `git config --global core.hooksPath`
@@ -986,9 +1119,6 @@ fn handle_global_hook_install(
     provider_args: Option<&str>,
 ) -> ExitCode {
     use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-    use std::io::{self, Write};
 
     // Resolve agent fix provider for *-with-agent types
     let fix_provider: Option<AgentFixProvider> =
@@ -1012,115 +1142,42 @@ fn handle_global_hook_install(
     let hook_filename = hook_event.hook_filename();
     let hook_path = hooks_dir.join(hook_filename);
 
-    // Confirm with user unless --yes
-    if !yes {
-        println!(
-            "This will install a global {} hook at {}",
-            hook_filename.cyan(),
-            hook_path.display()
-        );
-        println!(
-            "and set {} in your global git config.",
-            "core.hooksPath".cyan()
-        );
-        print!("Continue? [y/N]: ");
-        io::stdout().flush().ok();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).ok();
-        if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
-            println!("Installation cancelled");
-            return ExitCode::SUCCESS;
-        }
+    if !yes && !confirm_global_install(hook_filename, &hook_path) {
+        println!("Installation cancelled");
+        return ExitCode::SUCCESS;
     }
 
-    // Check if already exists
-    if hook_path.exists() && !force {
-        if let Ok(existing) = fs::read_to_string(&hook_path) {
-            if existing.trim().is_empty() {
-                // Empty file — treat as not installed, fall through to overwrite
-            } else if existing.contains("# linthis-hook") || existing.contains("linthis hook run") {
-                println!(
-                    "{}: Global {} hook already installed at {}",
-                    "Info".cyan(),
-                    hook_filename,
-                    hook_path.display()
-                );
-                return ExitCode::SUCCESS;
-            } else {
-                eprintln!(
-                    "{}: {} already exists (not by linthis). Use --force to overwrite.",
-                    "Warning".yellow(),
-                    hook_path.display()
-                );
-                return ExitCode::from(1);
-            }
-        }
+    if let Err(code) = check_existing_global_hook(&hook_path, hook_filename, force) {
+        return code;
     }
 
-    // Create directory
     if let Err(e) = fs::create_dir_all(&hooks_dir) {
         eprintln!("{}: Failed to create {}: {}", "Error".red(), hooks_dir.display(), e);
         return ExitCode::from(2);
     }
 
-    // Determine the effective hook_type for the thin wrapper
     let effective_hook_type = hook_type.clone().unwrap_or(HookTool::Git);
     let provider_str = fix_provider.as_ref().map(|p| p.as_str());
-
-    // Generate thin wrapper script (full logic runs from binary at hook execution time)
     let content = build_thin_wrapper_script(hook_event, &effective_hook_type, provider_str, true, provider_args);
-    let _ = args; // args are embedded in binary logic at run time, not in the thin wrapper
+    let _ = args; // args are embedded in binary logic at run time
 
-    // Write hook file
-    match fs::write(&hook_path, &content) {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("{}: Failed to write {}: {}", "Error".red(), hook_path.display(), e);
-            return ExitCode::from(2);
-        }
+    if let Err(code) = write_hook_script(&hook_path, &content) {
+        return code;
     }
 
-    // Make executable on Unix
-    #[cfg(unix)]
-    {
-        if let Ok(meta) = fs::metadata(&hook_path) {
-            let mut perms = meta.permissions();
-            perms.set_mode(0o755);
-            let _ = fs::set_permissions(&hook_path, perms);
-        }
-    }
-
-    // Set git config --global core.hooksPath
     let hooks_dir_str = hooks_dir.to_string_lossy().to_string();
-    let git_config_result = std::process::Command::new("git")
-        .args(["config", "--global", "core.hooksPath", &hooks_dir_str])
-        .status();
+    set_global_hooks_path_config(hook_filename, &hook_path, &hooks_dir_str);
 
-    match git_config_result {
-        Ok(status) if status.success() => {
-            println!("{} Installed global {} hook → {}", "✓".green(), hook_filename, hook_path.display());
-            println!("{} Set {} = {}", "✓".green(), "core.hooksPath".cyan(), hooks_dir_str);
-            println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
-            println!();
-            println!("  {}", "How it works (Strategy B — local takes priority):".dimmed());
-            println!("  {} If local hook has linthis → global delegates entirely", "·".dimmed());
-            println!("  {} If local hook has no linthis → global runs linthis first, then delegates", "·".dimmed());
-            println!("  {} No local hook → global runs linthis directly", "·".dimmed());
-        }
-        Ok(_) | Err(_) => {
-            println!("{} Installed global {} hook → {}", "✓".green(), hook_filename, hook_path.display());
-            eprintln!(
-                "{}: Failed to set core.hooksPath automatically. Run manually:\n  git config --global core.hooksPath {}",
-                "Warning".yellow(),
-                hooks_dir_str
-            );
-        }
-    }
-
-    // Persist metadata for `linthis hook sync`
     save_installed_hook("global", "", hook_event, &effective_hook_type, provider_str, provider_args);
 
     ExitCode::SUCCESS
+}
+
+/// Check if a hook file is a linthis-managed hook.
+fn is_linthis_hook_file(hook_path: &std::path::Path) -> bool {
+    std::fs::read_to_string(hook_path)
+        .map(|c| c.contains("# linthis-hook") || c.contains("linthis hook run"))
+        .unwrap_or(false)
 }
 
 /// Uninstall a global git hook from ~/.config/git/hooks/<event>.
@@ -1148,15 +1205,7 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
 
     for event in &events_to_remove {
         let hook_path = hooks_dir.join(event.hook_filename());
-        if !hook_path.exists() {
-            continue;
-        }
-
-        let has_linthis = fs::read_to_string(&hook_path)
-            .map(|c| c.contains("# linthis-hook") || c.contains("linthis hook run"))
-            .unwrap_or(false);
-
-        if !has_linthis {
+        if !hook_path.exists() || !is_linthis_hook_file(&hook_path) {
             continue;
         }
 
@@ -1191,10 +1240,7 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
     // Check if any linthis hooks remain; if not, unset core.hooksPath
     let remaining = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg]
         .iter()
-        .any(|e| {
-            let p = hooks_dir.join(e.hook_filename());
-            p.exists() && fs::read_to_string(&p).map(|c| c.contains("# linthis-hook") || c.contains("linthis hook run")).unwrap_or(false)
-        });
+        .any(|e| is_linthis_hook_file(&hooks_dir.join(e.hook_filename())));
 
     if !remaining {
         let _ = std::process::Command::new("git")
@@ -1206,9 +1252,113 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
     ExitCode::SUCCESS
 }
 
+/// Print project-level hook status for each event. Returns true if any hook is installed.
+fn print_project_hook_status(git_root: &std::path::Path, hook_events: &[HookEvent]) -> bool {
+    let mut any_installed = false;
+    println!("{}", "Project Hooks (.git/hooks/):".bold());
+    for event in hook_events {
+        let hook_path = git_root.join(".git/hooks").join(event.hook_filename());
+        if hook_path.exists() {
+            any_installed = true;
+            println!("{} {} [project]", "✓".green(), hook_path.display());
+            println!("    {}", event.description().dimmed());
+            print_hook_content_analysis(&hook_path);
+        } else {
+            println!("{} {} (not installed)", "✗".red(), event.hook_filename());
+        }
+    }
+    any_installed
+}
+
+/// Print analysis of detected tools in a hook file (linthis, prek, pre-commit, husky).
+fn print_hook_content_analysis(hook_path: &std::path::Path) {
+    if let Ok(content) = std::fs::read_to_string(hook_path) {
+        let has_linthis = content.contains("linthis");
+        let has_prek = content.contains("prek");
+        let has_precommit = content.contains("pre-commit");
+        let has_husky = content.contains("husky");
+
+        if has_linthis { println!("    {} linthis", "✓".green()); }
+        if has_prek { println!("    {} prek", "ℹ".cyan()); }
+        if has_precommit { println!("    {} pre-commit", "ℹ".cyan()); }
+        if has_husky { println!("    {} husky", "ℹ".cyan()); }
+        if !has_linthis && !has_prek && !has_precommit && !has_husky {
+            println!("    {} Custom hook", "ℹ".cyan());
+        }
+    }
+}
+
+/// Print global hook status section.
+fn print_global_hook_status(hook_events: &[HookEvent]) {
+    println!();
+    println!("{}", "Global Hooks (~/.config/git/hooks/):".bold());
+    let core_hooks_path = std::process::Command::new("git")
+        .args(["config", "--global", "core.hooksPath"])
+        .output()
+        .ok()
+        .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None });
+
+    if let Some(ref path_str) = core_hooks_path {
+        println!("  {} = {}", "core.hooksPath".cyan(), path_str);
+    } else {
+        println!("  {} (core.hooksPath not set)", "ℹ".cyan());
+    }
+
+    let mut any_global_hook = false;
+    if let Some(ref ghooks_dir) = global_hooks_dir() {
+        for event in hook_events {
+            let hook_path = ghooks_dir.join(event.hook_filename());
+            if hook_path.exists() {
+                any_global_hook = true;
+                let has_linthis = is_linthis_hook_file(&hook_path);
+                if has_linthis {
+                    println!("{} {} [global]", "✓".green(), hook_path.display());
+                    println!("    {} Strategy B: local hook takes priority", "ℹ".dimmed());
+                } else {
+                    println!("{} {} [global, not by linthis]", "⚠".yellow(), hook_path.display());
+                }
+            }
+        }
+    }
+    if !any_global_hook {
+        println!("  {} No global linthis hooks installed", "ℹ".cyan());
+    }
+}
+
+/// Print agent integration status for the project. Returns true if any agent is installed.
+fn print_agent_status(
+    git_root: &std::path::Path,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> bool {
+    println!("\n{}", "Agent Integration".bold());
+    let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
+    let mut any_installed = false;
+    for p in ALL_AGENT_PROVIDERS {
+        if agent_is_installed(git_root, p, false, skill_names) {
+            any_installed = true;
+            println!("{} {}", "✓".green(), p);
+            for event in &events {
+                let path = agent_skill_path(git_root, p, false, event, skill_names);
+                if path.exists() {
+                    println!("  {} {} ({})", "✓".green().dimmed(), path.display(), event.hook_filename());
+                }
+            }
+            if let Some(settings_path) = agent_stop_hook_settings_path(git_root, p) {
+                let has_stop_hook = settings_path.exists()
+                    && std::fs::read_to_string(&settings_path).map(|c| c.contains("linthis")).unwrap_or(false);
+                if has_stop_hook {
+                    println!("  {} Stop Hook ({})", "✓".green().dimmed(), settings_path.display());
+                }
+            }
+        } else {
+            println!("{} {} (not installed)", "✗".red(), p);
+        }
+    }
+    any_installed
+}
+
 /// Show git hook status
 fn handle_hook_status() -> ExitCode {
-    // Find git root
     let git_root = match find_git_root() {
         Some(root) => root,
         None => {
@@ -1223,91 +1373,14 @@ fn handle_hook_status() -> ExitCode {
     println!("Repository: {}", git_root.display());
     println!();
 
-    // Check all hook types
     let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
-    let mut any_hook_installed = false;
 
-    // --- Project-level hooks ---
-    println!("{}", "Project Hooks (.git/hooks/):".bold());
-    for event in &hook_events {
-        let hook_path = git_root.join(".git/hooks").join(event.hook_filename());
-
-        if hook_path.exists() {
-            any_hook_installed = true;
-            println!("{} {} [project]", "✓".green(), hook_path.display());
-            println!("    {}", event.description().dimmed());
-
-            if let Ok(content) = std::fs::read_to_string(&hook_path) {
-                let has_linthis = content.contains("linthis");
-                let has_prek = content.contains("prek");
-                let has_precommit = content.contains("pre-commit");
-                let has_husky = content.contains("husky");
-
-                if has_linthis {
-                    println!("    {} linthis", "✓".green());
-                }
-                if has_prek {
-                    println!("    {} prek", "ℹ".cyan());
-                }
-                if has_precommit {
-                    println!("    {} pre-commit", "ℹ".cyan());
-                }
-                if has_husky {
-                    println!("    {} husky", "ℹ".cyan());
-                }
-
-                if !has_linthis && !has_prek && !has_precommit && !has_husky {
-                    println!("    {} Custom hook", "ℹ".cyan());
-                }
-            }
-        } else {
-            println!("{} {} (not installed)", "✗".red(), event.hook_filename());
-        }
-    }
-
-    // --- Global hooks ---
-    println!();
-    println!("{}", "Global Hooks (~/.config/git/hooks/):".bold());
-    let global_hooks_path = global_hooks_dir();
-    // Check if core.hooksPath is configured
-    let core_hooks_path = std::process::Command::new("git")
-        .args(["config", "--global", "core.hooksPath"])
-        .output()
-        .ok()
-        .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None });
-
-    if let Some(ref path_str) = core_hooks_path {
-        println!("  {} = {}", "core.hooksPath".cyan(), path_str);
-    } else {
-        println!("  {} (core.hooksPath not set)", "ℹ".cyan());
-    }
-
-    let mut any_global_hook = false;
-    if let Some(ref ghooks_dir) = global_hooks_path {
-        for event in &hook_events {
-            let hook_path = ghooks_dir.join(event.hook_filename());
-            if hook_path.exists() {
-                any_global_hook = true;
-                if let Ok(content) = std::fs::read_to_string(&hook_path) {
-                    let has_linthis = content.contains("# linthis-hook") || content.contains("linthis hook run");
-                    if has_linthis {
-                        println!("{} {} [global]", "✓".green(), hook_path.display());
-                        println!("    {} Strategy B: local hook takes priority", "ℹ".dimmed());
-                    } else {
-                        println!("{} {} [global, not by linthis]", "⚠".yellow(), hook_path.display());
-                    }
-                }
-            }
-        }
-    }
-    if !any_global_hook {
-        println!("  {} No global linthis hooks installed", "ℹ".cyan());
-    }
+    let any_hook_installed = print_project_hook_status(&git_root, &hook_events);
+    print_global_hook_status(&hook_events);
 
     // Check for prek/pre-commit config
     if prek_config.exists() {
         println!("\n{} {}", "✓".green(), prek_config.display());
-
         if let Ok(content) = std::fs::read_to_string(prek_config) {
             if content.contains("linthis") {
                 println!("  {} Contains linthis configuration", "✓".green());
@@ -1322,41 +1395,8 @@ fn handle_hook_status() -> ExitCode {
     println!("  {} - runs before push to remote", "pre-push".cyan());
     println!("  {} - validates commit message format", "commit-msg".cyan());
 
-    // Check agent integration status (project-level only for status display)
-    println!("\n{}", "Agent Integration".bold());
-    let status_skill_names_cfg = linthis::config::Config::load_merged(&git_root).hook.agent.skill_names;
-    let status_skill_names = Some(&status_skill_names_cfg);
-    let mut any_agent_installed = false;
-    for p in ALL_AGENT_PROVIDERS {
-        let installed = agent_is_installed(&git_root, p, false, status_skill_names);
-        if installed {
-            any_agent_installed = true;
-            println!("{} {}", "✓".green(), p);
-            let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
-            for event in &events {
-                let path = agent_skill_path(&git_root, p, false, event, status_skill_names);
-                if path.exists() {
-                    let event_name = match event {
-                        HookEvent::PreCommit => "pre-commit",
-                        HookEvent::CommitMsg => "commit-msg",
-                        HookEvent::PrePush => "pre-push",
-                    };
-                    println!("  {} {} ({})", "✓".green().dimmed(), path.display(), event_name);
-                }
-            }
-            if let Some(settings_path) = agent_stop_hook_settings_path(&git_root, p) {
-                let has_stop_hook = settings_path.exists()
-                    && std::fs::read_to_string(&settings_path)
-                        .map(|c| c.contains("linthis"))
-                        .unwrap_or(false);
-                if has_stop_hook {
-                    println!("  {} Stop Hook ({})", "✓".green().dimmed(), settings_path.display());
-                }
-            }
-        } else {
-            println!("{} {} (not installed)", "✗".red(), p);
-        }
-    }
+    let skill_names_cfg = linthis::config::Config::load_merged(&git_root).hook.agent.skill_names;
+    let any_agent_installed = print_agent_status(&git_root, Some(&skill_names_cfg));
 
     println!("\n{}", "Commands:".bold());
     if !any_hook_installed {
@@ -1378,183 +1418,87 @@ fn handle_hook_status() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// List all installed linthis hooks.
-///
-/// When `global` is false (default), shows project-level hooks only.
-/// When `global` is true (`-g`), shows global-level hooks only.
-///
-/// Combines two data sources:
-/// 1. **TOML registry** (`~/.linthis/installed-hooks.toml`) — authoritative record written at
-///    install time, contains hook_type, event, provider, scope, etc.
-/// 2. **Live detection** — agent skill files on disk, git hook scripts.
-fn handle_hook_list(global: bool) -> ExitCode {
-    let toml = load_installed_hooks();
-
-    // ── load configured skill name aliases ───────────────────────────────
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let skill_names_cfg = linthis::config::Config::load_merged(&cwd).hook.agent.skill_names;
-    let skill_names = Some(&skill_names_cfg);
-
-    let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
-    let scope_label = if global { "Global" } else { "Project" };
-
-    println!("{}", format!("Installed Hooks ({})", scope_label).bold());
-    println!();
-
-    let mut count: usize = 0;
-
-    if global {
-        // ═══════════════════════════════════════════════════════════════════
-        // Global shell hooks
-        // ═══════════════════════════════════════════════════════════════════
-        println!("{}", "Shell Hooks (~/.config/git/hooks/)".bold());
-        let global_dir = global_hooks_dir();
-        let mut any_global = false;
-        if let Some(ref ghooks) = global_dir {
-            for event in &hook_events {
-                let hook_path = ghooks.join(event.hook_filename());
-                if !hook_path.exists() {
-                    continue;
-                }
-                let content = std::fs::read_to_string(&hook_path).unwrap_or_default();
-                if !content.contains("linthis") {
-                    continue;
-                }
-                any_global = true;
-                count += 1;
-
-                let hook_type = detect_hook_type_from_content(&content, &toml, "global", &PathBuf::new(), event);
-                let provider = detect_provider_from_content(&content, &toml, "global", &PathBuf::new(), event);
-
-                println!(
-                    "  {} {} {} {}",
-                    "✓".green(),
-                    event.hook_filename(),
-                    format!("[{}]", hook_type).dimmed(),
-                    if provider.is_empty() { String::new() } else { format!("(provider: {})", provider) }
-                );
-            }
+/// List shell hooks in a given hooks directory. Returns the count of hooks found.
+fn list_shell_hooks(
+    hooks_dir: &std::path::Path,
+    scope: &str,
+    project: &std::path::Path,
+    hook_events: &[HookEvent],
+    toml: &InstalledHooksFile,
+) -> usize {
+    let mut count = 0;
+    let mut any = false;
+    for event in hook_events {
+        let hook_path = hooks_dir.join(event.hook_filename());
+        if !hook_path.exists() {
+            continue;
         }
-        if !any_global {
-            println!("  {} No global linthis shell hooks installed", "—".dimmed());
+        let content = std::fs::read_to_string(&hook_path).unwrap_or_default();
+        if !content.contains("linthis") {
+            continue;
         }
+        any = true;
+        count += 1;
 
-        // ═══════════════════════════════════════════════════════════════════
-        // Global agent skills
-        // ═══════════════════════════════════════════════════════════════════
-        println!();
-        println!("{}", "Agent Skills (~/)".bold());
-        let home = dirs::home_dir();
-        if let Some(ref home_dir) = home {
-            let mut any_global_agent = false;
-            for p in ALL_AGENT_PROVIDERS {
-                if !agent_is_installed(home_dir, p, true, skill_names) {
-                    continue;
-                }
-                any_global_agent = true;
-                let mut event_tags: Vec<&str> = Vec::new();
-                for event in &hook_events {
-                    let path = agent_skill_path(home_dir, p, true, event, skill_names);
-                    if path.exists() {
-                        count += 1;
-                        event_tags.push(event.hook_filename());
-                    }
-                }
-                let stop_hook = agent_stop_hook_settings_path(home_dir, p)
-                    .map(|sp| sp.exists() && std::fs::read_to_string(&sp).map(|c| c.contains("linthis")).unwrap_or(false))
-                    .unwrap_or(false);
-                println!(
-                    "  {} {} [{}]{}",
-                    "✓".green(),
-                    p,
-                    event_tags.join(", "),
-                    if stop_hook { format!(" + {}", "stop-hook".dimmed()) } else { String::new() }
-                );
-            }
-            if !any_global_agent {
-                println!("  {} No global agent skills installed", "—".dimmed());
-            }
-        }
-    } else {
-        // ═══════════════════════════════════════════════════════════════════
-        // Project-level shell hooks
-        // ═══════════════════════════════════════════════════════════════════
-        let git_root = find_git_root();
-        let project_root_display = git_root.as_ref().map(|r| r.display().to_string())
-            .unwrap_or_else(|| "(not in a git repository)".to_string());
+        let hook_type = detect_hook_type_from_content(&content, toml, scope, project, event);
+        let provider = detect_provider_from_content(&content, toml, scope, project, event);
 
-        println!("{}", "Shell Hooks (.git/hooks/)".bold());
-        if let Some(ref root) = git_root {
-            let mut any = false;
-            for event in &hook_events {
-                let hook_path = root.join(".git/hooks").join(event.hook_filename());
-                if !hook_path.exists() {
-                    continue;
-                }
-                let content = std::fs::read_to_string(&hook_path).unwrap_or_default();
-                if !content.contains("linthis") {
-                    continue;
-                }
-                any = true;
-                count += 1;
-
-                let hook_type = detect_hook_type_from_content(&content, &toml, "local", root, event);
-                let provider = detect_provider_from_content(&content, &toml, "local", root, event);
-
-                println!(
-                    "  {} {} {} {}",
-                    "✓".green(),
-                    event.hook_filename(),
-                    format!("[{}]", hook_type).dimmed(),
-                    if provider.is_empty() { String::new() } else { format!("(provider: {})", provider) }
-                );
-            }
-            if !any {
-                println!("  {} No linthis shell hooks installed", "—".dimmed());
-            }
-        } else {
-            println!("  {} {}", "—".dimmed(), project_root_display);
-        }
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Project-level agent skills
-        // ═══════════════════════════════════════════════════════════════════
-        println!();
-        println!("{}", "Agent Skills".bold());
-        if let Some(ref root) = git_root {
-            let mut any_agent = false;
-            for p in ALL_AGENT_PROVIDERS {
-                if !agent_is_installed(root, p, false, skill_names) {
-                    continue;
-                }
-                any_agent = true;
-                let mut event_tags: Vec<&str> = Vec::new();
-                for event in &hook_events {
-                    let path = agent_skill_path(root, p, false, event, skill_names);
-                    if path.exists() {
-                        count += 1;
-                        event_tags.push(event.hook_filename());
-                    }
-                }
-                let stop_hook = agent_stop_hook_settings_path(root, p)
-                    .map(|sp| sp.exists() && std::fs::read_to_string(&sp).map(|c| c.contains("linthis")).unwrap_or(false))
-                    .unwrap_or(false);
-                println!(
-                    "  {} {} [{}]{}",
-                    "✓".green(),
-                    p,
-                    event_tags.join(", "),
-                    if stop_hook { format!(" + {}", "stop-hook".dimmed()) } else { String::new() }
-                );
-            }
-            if !any_agent {
-                println!("  {} No agent skills installed", "—".dimmed());
-            }
-        } else {
-            println!("  {} {}", "—".dimmed(), project_root_display);
-        }
+        println!(
+            "  {} {} {} {}",
+            "✓".green(),
+            event.hook_filename(),
+            format!("[{}]", hook_type).dimmed(),
+            if provider.is_empty() { String::new() } else { format!("(provider: {})", provider) }
+        );
     }
+    if !any {
+        println!("  {} No linthis shell hooks installed", "—".dimmed());
+    }
+    count
+}
 
+/// List agent skills for a given base directory. Returns the count of skill entries found.
+fn list_agent_skills(
+    base: &std::path::Path,
+    global: bool,
+    hook_events: &[HookEvent],
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> usize {
+    let mut count = 0;
+    let mut any = false;
+    for p in ALL_AGENT_PROVIDERS {
+        if !agent_is_installed(base, p, global, skill_names) {
+            continue;
+        }
+        any = true;
+        let mut event_tags: Vec<&str> = Vec::new();
+        for event in hook_events {
+            let path = agent_skill_path(base, p, global, event, skill_names);
+            if path.exists() {
+                count += 1;
+                event_tags.push(event.hook_filename());
+            }
+        }
+        let stop_hook = agent_stop_hook_settings_path(base, p)
+            .map(|sp| sp.exists() && std::fs::read_to_string(&sp).map(|c| c.contains("linthis")).unwrap_or(false))
+            .unwrap_or(false);
+        println!(
+            "  {} {} [{}]{}",
+            "✓".green(),
+            p,
+            event_tags.join(", "),
+            if stop_hook { format!(" + {}", "stop-hook".dimmed()) } else { String::new() }
+        );
+    }
+    if !any {
+        let label = if global { "No global agent skills installed" } else { "No agent skills installed" };
+        println!("  {} {}", "—".dimmed(), label);
+    }
+    count
+}
+
+/// Print the summary footer for `hook list`.
+fn print_list_footer(count: usize, global: bool) {
     println!();
     if count == 0 {
         if global {
@@ -1572,7 +1516,59 @@ fn handle_hook_list(global: bool) -> ExitCode {
         };
         println!("{} {} hook entries found{}", "Total:".bold(), count, hint);
     }
+}
 
+/// List all installed linthis hooks.
+fn handle_hook_list(global: bool) -> ExitCode {
+    let toml = load_installed_hooks();
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let skill_names_cfg = linthis::config::Config::load_merged(&cwd).hook.agent.skill_names;
+    let skill_names = Some(&skill_names_cfg);
+
+    let hook_events = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
+    let scope_label = if global { "Global" } else { "Project" };
+
+    println!("{}", format!("Installed Hooks ({})", scope_label).bold());
+    println!();
+
+    let mut count: usize = 0;
+
+    if global {
+        println!("{}", "Shell Hooks (~/.config/git/hooks/)".bold());
+        if let Some(ref ghooks) = global_hooks_dir() {
+            count += list_shell_hooks(ghooks, "global", &PathBuf::new(), &hook_events, &toml);
+        } else {
+            println!("  {} No global linthis shell hooks installed", "—".dimmed());
+        }
+
+        println!();
+        println!("{}", "Agent Skills (~/)".bold());
+        if let Some(ref home_dir) = dirs::home_dir() {
+            count += list_agent_skills(home_dir, true, &hook_events, skill_names);
+        }
+    } else {
+        let git_root = find_git_root();
+        let project_root_display = git_root.as_ref().map(|r| r.display().to_string())
+            .unwrap_or_else(|| "(not in a git repository)".to_string());
+
+        println!("{}", "Shell Hooks (.git/hooks/)".bold());
+        if let Some(ref root) = git_root {
+            count += list_shell_hooks(&root.join(".git/hooks"), "local", root, &hook_events, &toml);
+        } else {
+            println!("  {} {}", "—".dimmed(), project_root_display);
+        }
+
+        println!();
+        println!("{}", "Agent Skills".bold());
+        if let Some(ref root) = git_root {
+            count += list_agent_skills(root, false, &hook_events, skill_names);
+        } else {
+            println!("  {} {}", "—".dimmed(), project_root_display);
+        }
+    }
+
+    print_list_footer(count, global);
     ExitCode::SUCCESS
 }
 
@@ -1662,52 +1658,37 @@ fn detect_provider_from_content(
 /// - `--all`        : uninstall every type × every event (both git files and agent hooks)
 /// - `--all-types`  : uninstall every type for the specified `--event`(s)
 /// - `--all-events` : uninstall every event for the specified `--type`(s)
-fn handle_hook_uninstall(
-    hook_types: Vec<HookTool>,
-    hook_events: Vec<HookEvent>,
-    all: bool,
-    all_types: bool,
+/// Uninstall global hooks (git + agent) for the given events.
+fn uninstall_global_hooks(
+    effective_events: &[HookEvent],
+    include_git: bool,
+    include_agent: bool,
     all_events: bool,
     yes: bool,
-    global: bool,
 ) -> ExitCode {
-    const ALL_EVENTS: [HookEvent; 3] = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
-
-    // Resolve effective events: --all / --all-events expand to all three events.
-    let effective_events: Vec<HookEvent> = if all || all_events {
-        ALL_EVENTS.to_vec()
-    } else {
-        hook_events.clone()
-    };
-
-    // Resolve whether agent hooks should be included:
-    // --all / --all-types always include agent; otherwise only if Agent is in the type list.
-    let include_agent = all || all_types || hook_types.iter().any(|t| matches!(t, HookTool::Agent));
-
-    // Resolve whether git hook files should be touched:
-    // --all / --all-types always include git hooks; otherwise only if a non-agent type is listed.
-    let include_git = all || all_types || hook_types.iter().any(|t| !matches!(t, HookTool::Agent));
-
-    if global {
-        let mut result = ExitCode::SUCCESS;
-        if include_git {
-            // When all events are needed, delegate to handle_global_hook_uninstall with all=true
-            // (it iterates all three events internally). Otherwise iterate effective_events explicitly.
-            if all || all_events {
-                result = handle_global_hook_uninstall(None, true, yes);
-            } else {
-                for event in &effective_events {
-                    result = handle_global_hook_uninstall(Some(event.clone()), false, yes);
-                }
+    let mut result = ExitCode::SUCCESS;
+    if include_git {
+        if all_events {
+            result = handle_global_hook_uninstall(None, true, yes);
+        } else {
+            for event in effective_events {
+                result = handle_global_hook_uninstall(Some(event.clone()), false, yes);
             }
         }
-        if include_agent {
-            handle_agent_hook_uninstall(yes, true, &effective_events);
-        }
-        return result;
     }
+    if include_agent {
+        handle_agent_hook_uninstall(yes, true, effective_events);
+    }
+    result
+}
 
-    // Find git root
+/// Uninstall local (project-level) hooks for the given events.
+fn uninstall_local_hooks(
+    effective_events: &[HookEvent],
+    include_git: bool,
+    include_agent: bool,
+    yes: bool,
+) -> ExitCode {
     let git_root = match find_git_root() {
         Some(root) => root,
         None => {
@@ -1717,41 +1698,94 @@ fn handle_hook_uninstall(
     };
 
     let mut any_uninstalled = false;
-
     if include_git {
-        for event in &effective_events {
-            let result = uninstall_single_hook(&git_root, event, yes);
-            if result == ExitCode::SUCCESS {
+        for event in effective_events {
+            if uninstall_single_hook(&git_root, event, yes) == ExitCode::SUCCESS {
                 any_uninstalled = true;
             }
         }
     }
-
     if include_agent {
-        let agent_result = handle_agent_hook_uninstall(yes, false, &effective_events);
-        if agent_result == ExitCode::SUCCESS {
+        if handle_agent_hook_uninstall(yes, false, effective_events) == ExitCode::SUCCESS {
             any_uninstalled = true;
         }
     }
-
     if !any_uninstalled {
         println!("{}: No hooks with linthis found", "Info".cyan());
     }
-
     ExitCode::SUCCESS
+}
+
+fn handle_hook_uninstall(
+    hook_types: Vec<HookTool>,
+    hook_events: Vec<HookEvent>,
+    all: bool,
+    all_types: bool,
+    all_events: bool,
+    yes: bool,
+    global: bool,
+) -> ExitCode {
+    const ALL_EVENTS_LIST: [HookEvent; 3] = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
+
+    let effective_events: Vec<HookEvent> = if all || all_events {
+        ALL_EVENTS_LIST.to_vec()
+    } else {
+        hook_events
+    };
+
+    let include_agent = all || all_types || hook_types.iter().any(|t| matches!(t, HookTool::Agent));
+    let include_git = all || all_types || hook_types.iter().any(|t| !matches!(t, HookTool::Agent));
+
+    if global {
+        uninstall_global_hooks(&effective_events, include_git, include_agent, all || all_events, yes)
+    } else {
+        uninstall_local_hooks(&effective_events, include_git, include_agent, yes)
+    }
+}
+
+/// Remove only linthis lines from a hook file, keeping other content.
+fn remove_linthis_lines_from_hook(hook_path: &std::path::Path, existing_content: &str) -> Result<(), ExitCode> {
+    let new_content: String = existing_content
+        .lines()
+        .filter(|line| !line.contains("linthis") && !line.contains("# linthis-hook"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if let Err(e) = std::fs::write(hook_path, new_content + "\n") {
+        eprintln!("{}: Failed to update hook: {}", "Error".red(), e);
+        return Err(ExitCode::from(2));
+    }
+    Ok(())
+}
+
+/// Delete a hook file entirely.
+fn delete_hook_file(hook_path: &std::path::Path) -> Result<(), ExitCode> {
+    if let Err(e) = std::fs::remove_file(hook_path) {
+        eprintln!("{}: Failed to delete hook: {}", "Error".red(), e);
+        return Err(ExitCode::from(2));
+    }
+    Ok(())
+}
+
+/// Check if hook content has non-linthis executable lines.
+fn hook_has_other_content(content: &str) -> bool {
+    content.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && !trimmed.starts_with("#!/")
+            && !trimmed.contains("linthis")
+    })
 }
 
 /// Uninstall a single hook
 fn uninstall_single_hook(git_root: &std::path::Path, hook_event: &HookEvent, yes: bool) -> ExitCode {
-    use std::io::{self, Write};
-
     let hook_path = git_root.join(".git/hooks").join(hook_event.hook_filename());
 
     if !hook_path.exists() {
-        return ExitCode::from(1); // Not an error, just not installed
+        return ExitCode::from(1);
     }
 
-    // Read existing hook
     let existing_content = match std::fs::read_to_string(&hook_path) {
         Ok(content) => content,
         Err(e) => {
@@ -1760,114 +1794,124 @@ fn uninstall_single_hook(git_root: &std::path::Path, hook_event: &HookEvent, yes
         }
     };
 
-    let has_linthis = existing_content.contains("linthis");
-    let has_other_content = existing_content.lines()
-        .any(|line| {
-            let trimmed = line.trim();
-            !trimmed.is_empty()
-                && !trimmed.starts_with('#')
-                && !trimmed.starts_with("#!/")
-                && !trimmed.contains("linthis")
-        });
-
-    if !has_linthis {
-        return ExitCode::from(1); // Not an error, just no linthis
+    if !existing_content.contains("linthis") {
+        return ExitCode::from(1);
     }
 
-    if !yes {
-        println!("{}: {} contains:", "Warning".yellow(), hook_path.display());
-        if has_linthis {
-            println!("  {} linthis", "✓".green());
-        }
-        if has_other_content {
-            println!("  {} Other hooks/commands", "⚠".yellow());
-        }
+    let has_other = hook_has_other_content(&existing_content);
 
-        println!("\nOptions:");
-        if has_other_content {
-            println!("  1. {} - Remove only linthis lines", "Remove linthis".cyan());
-            println!("  2. {} - Delete entire hook file", "Delete all".cyan());
-        } else {
-            println!("  1. {} - Delete hook file", "Delete".cyan());
-        }
-        println!("  3. {} - Cancel", "Cancel".cyan());
-
-        print!("\nChoose an option: ");
-        io::stdout().flush().unwrap();
-
-        let mut choice = String::new();
-        io::stdin().read_line(&mut choice).ok();
-
-        match choice.trim() {
-            "1" => {
-                if has_other_content {
-                    // Remove only linthis lines
-                    let new_content: String = existing_content
-                        .lines()
-                        .filter(|line| !line.contains("linthis") && !line.contains("# linthis-hook"))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-
-                    if let Err(e) = std::fs::write(&hook_path, new_content + "\n") {
-                        eprintln!("{}: Failed to update hook: {}", "Error".red(), e);
-                        return ExitCode::from(2);
-                    }
-                    println!("{} Removed linthis from {}", "✓".green(), hook_path.display());
-                } else {
-                    // Delete entire file
-                    if let Err(e) = std::fs::remove_file(&hook_path) {
-                        eprintln!("{}: Failed to delete hook: {}", "Error".red(), e);
-                        return ExitCode::from(2);
-                    }
-                    println!("{} Deleted {}", "✓".green(), hook_path.display());
-                }
-            }
-            "2" if has_other_content => {
-                // Delete entire file
-                if let Err(e) = std::fs::remove_file(&hook_path) {
-                    eprintln!("{}: Failed to delete hook: {}", "Error".red(), e);
-                    return ExitCode::from(2);
-                }
-                println!("{} Deleted {}", "✓".green(), hook_path.display());
-            }
-            _ => {
-                println!("Uninstall cancelled");
-                return ExitCode::SUCCESS;
-            }
-        }
+    let result = if yes {
+        uninstall_hook_auto(&hook_path, &existing_content, has_other, hook_event)
     } else {
-        // Non-interactive mode: remove only linthis if there's other content, otherwise delete file
-        if has_other_content {
-            let new_content: String = existing_content
-                .lines()
-                .filter(|line| !line.contains("linthis") && !line.contains("# linthis-hook"))
-                .collect::<Vec<_>>()
-                .join("\n");
+        uninstall_hook_interactive(&hook_path, &existing_content, has_other)
+    };
 
-            if let Err(e) = std::fs::write(&hook_path, new_content + "\n") {
-                eprintln!("{}: Failed to update hook: {}", "Error".red(), e);
-                return ExitCode::from(2);
-            }
-            println!("{} Removed linthis from {} hook", "✓".green(), hook_event.hook_filename());
-        } else {
-            if let Err(e) = std::fs::remove_file(&hook_path) {
-                eprintln!("{}: Failed to delete hook: {}", "Error".red(), e);
-                return ExitCode::from(2);
-            }
-            println!("{} Deleted {} hook", "✓".green(), hook_event.hook_filename());
-        }
+    if let Err(code) = result {
+        return code;
     }
 
-    // Remove the TOML record for this hook
     let project_str = git_root.to_str().unwrap_or("").to_string();
     remove_installed_hook("local", &project_str, hook_event);
-
     ExitCode::SUCCESS
+}
+
+/// Non-interactive hook uninstall: remove linthis lines or delete file.
+fn uninstall_hook_auto(
+    hook_path: &std::path::Path,
+    existing_content: &str,
+    has_other: bool,
+    hook_event: &HookEvent,
+) -> Result<(), ExitCode> {
+    if has_other {
+        remove_linthis_lines_from_hook(hook_path, existing_content)?;
+        println!("{} Removed linthis from {} hook", "✓".green(), hook_event.hook_filename());
+    } else {
+        delete_hook_file(hook_path)?;
+        println!("{} Deleted {} hook", "✓".green(), hook_event.hook_filename());
+    }
+    Ok(())
+}
+
+/// Interactive hook uninstall: prompt user for action.
+fn uninstall_hook_interactive(
+    hook_path: &std::path::Path,
+    existing_content: &str,
+    has_other: bool,
+) -> Result<(), ExitCode> {
+    use std::io::{self, Write};
+
+    println!("{}: {} contains:", "Warning".yellow(), hook_path.display());
+    println!("  {} linthis", "✓".green());
+    if has_other {
+        println!("  {} Other hooks/commands", "⚠".yellow());
+    }
+
+    println!("\nOptions:");
+    if has_other {
+        println!("  1. {} - Remove only linthis lines", "Remove linthis".cyan());
+        println!("  2. {} - Delete entire hook file", "Delete all".cyan());
+    } else {
+        println!("  1. {} - Delete hook file", "Delete".cyan());
+    }
+    println!("  3. {} - Cancel", "Cancel".cyan());
+
+    print!("\nChoose an option: ");
+    io::stdout().flush().unwrap();
+
+    let mut choice = String::new();
+    io::stdin().read_line(&mut choice).ok();
+
+    match choice.trim() {
+        "1" => {
+            if has_other {
+                remove_linthis_lines_from_hook(hook_path, existing_content)?;
+                println!("{} Removed linthis from {}", "✓".green(), hook_path.display());
+            } else {
+                delete_hook_file(hook_path)?;
+                println!("{} Deleted {}", "✓".green(), hook_path.display());
+            }
+        }
+        "2" if has_other => {
+            delete_hook_file(hook_path)?;
+            println!("{} Deleted {}", "✓".green(), hook_path.display());
+        }
+        _ => {
+            println!("Uninstall cancelled");
+            // Return success but don't remove TOML record (cancelled)
+        }
+    }
+    Ok(())
+}
+
+/// Check hook file for multiple tool conflicts. Returns (has_conflicts, warnings).
+fn check_hook_tool_conflicts(hook_path: &std::path::Path) -> (bool, Vec<&'static str>) {
+    let mut warnings = Vec::new();
+    if !hook_path.exists() {
+        return (false, warnings);
+    }
+    if let Ok(content) = std::fs::read_to_string(hook_path) {
+        let tools = [
+            content.contains("prek"),
+            content.contains("pre-commit"),
+            content.contains("husky"),
+            content.contains("linthis"),
+        ];
+        let tool_count = tools.iter().filter(|&&x| x).count();
+        if tool_count > 1 {
+            println!("{} Multiple hook tools detected in {}", "⚠".yellow(), hook_path.display());
+            if content.contains("linthis") { println!("  {} linthis", "✓".green()); }
+            if content.contains("prek") { println!("  {} prek", "⚠".yellow()); }
+            if content.contains("pre-commit") { println!("  {} pre-commit", "⚠".yellow()); }
+            if content.contains("husky") { println!("  {} husky", "⚠".yellow()); }
+            warnings.push("Consider using only one hook management tool");
+            return (true, warnings);
+        }
+    }
+    (false, warnings)
 }
 
 /// Check for hook conflicts
 fn handle_hook_check() -> ExitCode {
-    // Find git root
     let git_root = match find_git_root() {
         Some(root) => root,
         None => {
@@ -1883,43 +1927,8 @@ fn handle_hook_check() -> ExitCode {
     println!("{}", "Checking for hook conflicts...".bold());
     println!();
 
-    let mut has_conflicts = false;
-    let mut warnings = Vec::new();
+    let (mut has_conflicts, mut warnings) = check_hook_tool_conflicts(&hook_path);
 
-    // Check pre-commit hook
-    if hook_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&hook_path) {
-            let has_linthis = content.contains("linthis");
-            let has_prek = content.contains("prek");
-            let has_precommit = content.contains("pre-commit");
-            let has_husky = content.contains("husky");
-
-            let tool_count = [has_prek, has_precommit, has_husky, has_linthis]
-                .iter()
-                .filter(|&&x| x)
-                .count();
-
-            if tool_count > 1 {
-                has_conflicts = true;
-                println!("{} Multiple hook tools detected in {}", "⚠".yellow(), hook_path.display());
-                if has_linthis {
-                    println!("  {} linthis", "✓".green());
-                }
-                if has_prek {
-                    println!("  {} prek", "⚠".yellow());
-                }
-                if has_precommit {
-                    println!("  {} pre-commit", "⚠".yellow());
-                }
-                if has_husky {
-                    println!("  {} husky", "⚠".yellow());
-                }
-                warnings.push("Consider using only one hook management tool");
-            }
-        }
-    }
-
-    // Check for prek/pre-commit config without hook
     if prek_config.exists() {
         if let Ok(content) = std::fs::read_to_string(prek_config) {
             if content.contains("linthis") && !hook_path.exists() {
@@ -1930,14 +1939,10 @@ fn handle_hook_check() -> ExitCode {
         }
     }
 
-    // Check for husky
-    if husky_dir.exists() {
-        let husky_pre_commit = husky_dir.join("pre-commit");
-        if husky_pre_commit.exists() {
-            println!("{} Husky detected: {}", "ℹ".cyan(), husky_pre_commit.display());
-            warnings.push("Husky manages its own hooks in .husky/ directory");
-            warnings.push("To use linthis with husky, add linthis command to .husky/pre-commit");
-        }
+    if husky_dir.exists() && husky_dir.join("pre-commit").exists() {
+        println!("{} Husky detected: {}", "ℹ".cyan(), husky_dir.join("pre-commit").display());
+        warnings.push("Husky manages its own hooks in .husky/ directory");
+        warnings.push("To use linthis with husky, add linthis command to .husky/pre-commit");
     }
 
     println!();
@@ -2054,47 +2059,57 @@ fn describe_hook_source(tool: &HookTool, hook_event: &HookEvent) -> String {
     use linthis::config::Config;
     use linthis::hooks::resolver;
 
-    let tool_type_dir = match tool {
-        HookTool::Git => "git",
-        HookTool::GitWithAgent => "git-with-agent",
-        HookTool::Prek => "prek",
-        HookTool::PrekWithAgent => "prek-with-agent",
-        HookTool::Agent => return "built-in (agent)".to_string(),
+    let dir = match tool_type_dir(tool) {
+        Some(d) => d,
+        None => return "built-in (agent)".to_string(),
     };
 
     let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-    // Tier 1: fixed-path auto-discovery
-    if resolver::fixed_git_hook_path(&project_root, tool_type_dir, hook_event.hook_filename()).is_some() {
-        return format!("hooks/{}/{} (fixed path)", tool_type_dir, hook_event.hook_filename());
+    if resolver::fixed_git_hook_path(&project_root, dir, hook_event.hook_filename()).is_some() {
+        return format!("hooks/{}/{} (fixed path)", dir, hook_event.hook_filename());
     }
 
-    // Tier 2: TOML source mapping
     let config = Config::load_merged(&project_root);
-    let hook_cfg = &config.hook;
     let event_key = hook_event.hook_filename();
 
-    let entry = match tool {
-        HookTool::Git => hook_cfg.git.get(event_key),
-        HookTool::GitWithAgent => hook_cfg.git_with_agent.get(event_key),
-        HookTool::Prek => hook_cfg.prek.get(event_key),
-        HookTool::PrekWithAgent => hook_cfg.prek_with_agent.get(event_key),
-        HookTool::Agent => unreachable!(),
-    };
-
-    if let Some(entry) = entry {
-        // e.g. "git-with-agent" → "[hook.git-with-agent]"
-        let section = format!("[hook.{}]", tool_type_dir);
+    if let Some(entry) = lookup_hook_config_entry(&config.hook, tool, event_key) {
+        let section = format!("[hook.{}]", dir);
         let source_str = format_hook_source(&entry.source);
         return format!("{}\n{} = {{ source = {} }}", section, event_key, source_str);
     }
 
-    // Tier 3: built-in
     let cmd = build_hook_command(hook_event, &None);
     format!("built-in → {}", cmd)
 }
 
-/// Create hook configuration file based on the selected tool and event
+/// Map a HookTool to its directory name for hook override lookups.
+/// Returns None for Agent (handled separately).
+fn tool_type_dir(tool: &HookTool) -> Option<&'static str> {
+    match tool {
+        HookTool::Git => Some("git"),
+        HookTool::GitWithAgent => Some("git-with-agent"),
+        HookTool::Prek => Some("prek"),
+        HookTool::PrekWithAgent => Some("prek-with-agent"),
+        HookTool::Agent => None,
+    }
+}
+
+/// Look up the TOML hook config entry for a given tool and event key.
+fn lookup_hook_config_entry<'a>(
+    hook_cfg: &'a linthis::config::HookConfig,
+    tool: &HookTool,
+    event_key: &str,
+) -> Option<&'a linthis::config::HookSourceEntry> {
+    match tool {
+        HookTool::Git => hook_cfg.git.get(event_key),
+        HookTool::GitWithAgent => hook_cfg.git_with_agent.get(event_key),
+        HookTool::Prek => hook_cfg.prek.get(event_key),
+        HookTool::PrekWithAgent => hook_cfg.prek_with_agent.get(event_key),
+        HookTool::Agent => None,
+    }
+}
+
 /// Resolve hook script content from Tier-1 (fixed path) or Tier-2 (TOML config),
 /// returning `Ok(Some(content))` if an override is found, `Ok(None)` to fall through
 /// to the built-in generator, or `Err(ExitCode)` for a hard resolution error.
@@ -2102,18 +2117,15 @@ fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> Result<Opti
     use linthis::config::Config;
     use linthis::hooks::resolver;
 
-    let tool_type_dir = match tool {
-        HookTool::Git => "git",
-        HookTool::GitWithAgent => "git-with-agent",
-        HookTool::Prek => "prek",
-        HookTool::PrekWithAgent => "prek-with-agent",
-        HookTool::Agent => return Ok(None), // agent handled separately
+    let dir = match tool_type_dir(tool) {
+        Some(d) => d,
+        None => return Ok(None),
     };
 
     let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     // Tier 1: fixed-path auto-discovery
-    if let Some(fixed) = resolver::fixed_git_hook_path(&project_root, tool_type_dir, hook_event.hook_filename()) {
+    if let Some(fixed) = resolver::fixed_git_hook_path(&project_root, dir, hook_event.hook_filename()) {
         match std::fs::read_to_string(fixed.as_path()) {
             Ok(content) => return Ok(Some(content)),
             Err(e) => {
@@ -2125,319 +2137,193 @@ fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> Result<Opti
 
     // Tier 2: TOML source mapping
     let config = Config::load_merged(&project_root);
-    let hook_cfg = &config.hook;
-    let event_key = hook_event.hook_filename(); // "pre-commit", "commit-msg", "pre-push"
-
-    let entry = match tool {
-        HookTool::Git => hook_cfg.git.get(event_key),
-        HookTool::GitWithAgent => hook_cfg.git_with_agent.get(event_key),
-        HookTool::Prek => hook_cfg.prek.get(event_key),
-        HookTool::PrekWithAgent => hook_cfg.prek_with_agent.get(event_key),
-        HookTool::Agent => return Ok(None),
-    };
-
-    if let Some(entry) = entry {
-        match resolver::resolve_to_string(&entry.source, &project_root, &hook_cfg.marketplaces) {
+    let event_key = hook_event.hook_filename();
+    if let Some(entry) = lookup_hook_config_entry(&config.hook, tool, event_key) {
+        match resolver::resolve_to_string(&entry.source, &project_root, &config.hook.marketplaces) {
             Ok(content) => return Ok(Some(content)),
             Err(e) => {
-                eprintln!("{}: Failed to resolve hook override for '{}/{}': {}", "Error".red(), tool_type_dir, event_key, e);
+                eprintln!("{}: Failed to resolve hook override for '{}/{}': {}", "Error".red(), dir, event_key, e);
                 return Err(ExitCode::from(2));
             }
         }
     }
 
-    // Tier 3: no override — caller uses built-in generator
     Ok(None)
 }
 
-fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args: &Option<String>) -> Result<(), ExitCode> {
-    use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
+/// Create prek/pre-commit config file for a hook event.
+fn create_prek_config(
+    tool: &HookTool,
+    hook_event: &HookEvent,
+    force: bool,
+    args: &Option<String>,
+) -> Result<(), ExitCode> {
+    let config_path = std::path::PathBuf::from(".pre-commit-config.yaml");
     let hook_filename = hook_event.hook_filename();
 
+    if config_path.exists() && !force {
+        eprintln!("{}: {} already exists, skipping", "Warning".yellow(), config_path.display());
+        return Ok(());
+    }
+
+    if let Some(override_content) = resolve_hook_override(tool, hook_event)? {
+        std::fs::write(&config_path, override_content)
+            .map_err(|e| { eprintln!("{}: Failed to write '{}': {}", "Error".red(), config_path.display(), e); ExitCode::from(2) })?;
+        println!("{} Created {} [override]", "✓".green(), config_path.display());
+        return Ok(());
+    }
+
+    let hook_cmd = build_hook_command(hook_event, args);
+    let stage = hook_event.hook_filename();
+    let content = format!(
+        "repos:\n  - repo: local\n    hooks:\n      - id: linthis-{}\n        name: linthis ({})\n        entry: {}\n        language: system\n        stages: [{}]\n        pass_filenames: false\n",
+        hook_filename, hook_event.description(), hook_cmd, stage
+    );
+
+    std::fs::write(&config_path, content)
+        .map_err(|e| { eprintln!("{}: Failed to create {}: {}", "Error".red(), config_path.display(), e); ExitCode::from(2) })?;
+
+    let tool_name = "prek";
+    println!("{} Created {} ({}/pre-commit compatible)", "✓".green(), config_path.display(), tool_name);
+    print_prek_next_steps(tool, hook_event, hook_filename);
+    Ok(())
+}
+
+/// Print next steps after prek config creation (auto-install or manual instructions).
+fn print_prek_next_steps(tool: &HookTool, hook_event: &HookEvent, hook_filename: &str) {
+    let tool_name = "prek";
+    if is_command_available(tool_name) {
+        println!("\n{} Detected installed", tool_name.cyan());
+        print!("{} Installing hooks... ", "→".cyan());
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+        match install_hooks(tool, hook_event) {
+            Ok(_) => {
+                println!("{}", "✓".green());
+                println!("\n{} {} hooks are ready!", "✓".green().bold(), hook_filename);
+                println!("  Hooks will run automatically on {}", format!("git {}", hook_action(hook_event)).cyan());
+            }
+            Err(e) => {
+                println!("{}", "✗".red());
+                eprintln!("{}: {}", "Warning".yellow(), e);
+                println!("\nPlease run manually: {}", format!("{} install --hook-type {}", tool_name, hook_filename).cyan());
+            }
+        }
+    } else {
+        println!("\nNext steps:");
+        if matches!(tool, HookTool::Prek) {
+            println!("  1. Install prek: {}", "pip install prek".cyan());
+            println!("  2. Set up hooks: {}", format!("prek install --hook-type {}", hook_filename).cyan());
+        } else {
+            println!("  1. Install pre-commit: {}", "pip install pre-commit".cyan());
+            println!("  2. Set up hooks: {}", format!("pre-commit install --hook-type {}", hook_filename).cyan());
+        }
+    }
+}
+
+/// Create a git hook file (thin wrapper or append to existing).
+fn create_git_hook_config(
+    tool: &HookTool,
+    hook_event: &HookEvent,
+    force: bool,
+    args: &Option<String>,
+) -> Result<(), ExitCode> {
+    use std::fs;
+
+    let hook_filename = hook_event.hook_filename();
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => {
+            eprintln!("{}: Not in a git repository, cannot create .git/hooks/{}", "Error".red(), hook_filename);
+            return Err(ExitCode::from(1));
+        }
+    };
+
+    let git_hooks_dir = git_root.join(".git/hooks");
+    let hook_path = git_hooks_dir.join(hook_filename);
+
+    if !git_hooks_dir.exists() {
+        fs::create_dir_all(&git_hooks_dir)
+            .map_err(|e| { eprintln!("{}: Failed to create hooks directory {}: {}", "Error".red(), git_hooks_dir.display(), e); ExitCode::from(2) })?;
+    }
+
+    // Tier-1/2 override check
+    if let Some(override_content) = resolve_hook_override(tool, hook_event)? {
+        return write_git_hook_override(&hook_path, &override_content, force);
+    }
+
+    let linthis_hook_line = build_hook_command(hook_event, args);
+
+    if hook_path.exists() {
+        return append_linthis_to_existing_hook(&hook_path, &linthis_hook_line);
+    }
+
+    // Create new hook file as thin wrapper
+    let content = build_thin_wrapper_script(hook_event, &HookTool::Git, None, false, None);
+    write_hook_script(&hook_path, &content)?;
+
+    println!("{} Created {} [project]", "✓".green(), hook_path.display());
+    println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
+    #[cfg(not(unix))]
+    {
+        println!("\nNext steps:");
+        println!("  Make sure the hook is executable:");
+        println!("    {}", format!("chmod +x .git/hooks/{}", hook_filename).cyan());
+    }
+    let project = git_root.to_str().unwrap_or("").to_string();
+    save_installed_hook("local", &project, hook_event, &HookTool::Git, None, None);
+    Ok(())
+}
+
+/// Write an override hook script, optionally appending to existing content.
+fn write_git_hook_override(
+    hook_path: &std::path::Path,
+    override_content: &str,
+    force: bool,
+) -> Result<(), ExitCode> {
+    let content = if hook_path.exists() && !force {
+        let mut existing = std::fs::read_to_string(hook_path).unwrap_or_default();
+        if !existing.ends_with('\n') { existing.push('\n'); }
+        existing.push_str("\n# linthis-hook (override)\n");
+        existing.push_str(override_content);
+        existing
+    } else {
+        override_content.to_string()
+    };
+    write_hook_script(hook_path, &content)?;
+    println!("{} Created {} [project, override]", "✓".green(), hook_path.display());
+    Ok(())
+}
+
+/// Append linthis to an existing hook file, or report if already present.
+fn append_linthis_to_existing_hook(
+    hook_path: &std::path::Path,
+    linthis_hook_line: &str,
+) -> Result<(), ExitCode> {
+    let existing_content = std::fs::read_to_string(hook_path)
+        .map_err(|e| { eprintln!("{}: Failed to read existing hook file: {}", "Error".red(), e); ExitCode::from(2) })?;
+
+    if existing_content.contains(linthis_hook_line) || existing_content.contains("linthis hook run") {
+        println!("{}: linthis hook already exists in {}", "Info".cyan(), hook_path.display());
+        return Ok(());
+    }
+
+    let mut new_content = existing_content;
+    if !new_content.ends_with('\n') { new_content.push('\n'); }
+    new_content.push_str("\n# linthis-hook\n");
+    new_content.push_str(linthis_hook_line);
+    new_content.push('\n');
+
+    std::fs::write(hook_path, new_content)
+        .map_err(|e| { eprintln!("{}: Failed to update {}: {}", "Error".red(), hook_path.display(), e); ExitCode::from(2) })?;
+    println!("{} Added linthis to existing {} {} [project]", "✓".green(), hook_path.display(), "(appended)".dimmed());
+    Ok(())
+}
+
+fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args: &Option<String>) -> Result<(), ExitCode> {
     match tool {
-        HookTool::Agent
-        | HookTool::GitWithAgent | HookTool::PrekWithAgent => {
-            // Handled separately before create_hook_config is called
-            return Ok(());
-        }
-        HookTool::Prek => {
-            let config_path = std::path::PathBuf::from(".pre-commit-config.yaml");
-
-            if config_path.exists() && !force {
-                eprintln!(
-                    "{}: {} already exists, skipping",
-                    "Warning".yellow(),
-                    config_path.display()
-                );
-                return Ok(());
-            }
-
-            // ── Tier-1/2 override check ──────────────────────────────────────
-            if let Some(override_content) = resolve_hook_override(tool, hook_event)? {
-                match std::fs::write(&config_path, override_content) {
-                    Ok(_) => {
-                        println!("{} Created {} [override]", "✓".green(), config_path.display());
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        eprintln!("{}: Failed to write '{}': {}", "Error".red(), config_path.display(), e);
-                        return Err(ExitCode::from(2));
-                    }
-                }
-            }
-            // ── End override check — fall through to built-in generator ──────
-
-            // Build hook command based on options and event type
-            let hook_cmd = build_hook_command(hook_event, args);
-
-            // For prek/pre-commit, we need to specify the stage for different hook types
-            let stage = match hook_event {
-                HookEvent::PreCommit => "pre-commit",
-                HookEvent::PrePush => "pre-push",
-                HookEvent::CommitMsg => "commit-msg",
-            };
-
-            let content = format!(r#"repos:
-  - repo: local
-    hooks:
-      - id: linthis-{}
-        name: linthis ({})
-        entry: {}
-        language: system
-        stages: [{}]
-        pass_filenames: false
-"#, hook_filename, hook_event.description(), hook_cmd, stage);
-
-            match fs::write(&config_path, content) {
-                Ok(_) => {
-                    let tool_name = "prek";
-                    println!(
-                        "{} Created {} ({}/pre-commit compatible)",
-                        "✓".green(),
-                        config_path.display(),
-                        tool_name
-                    );
-
-                    // Check if tool is installed and auto-install hooks
-                    let cmd_name = tool_name;
-                    if is_command_available(cmd_name) {
-                        println!("\n{} Detected installed", tool_name.cyan());
-                        print!("{} Installing hooks... ", "→".cyan());
-                        std::io::Write::flush(&mut std::io::stdout()).ok();
-
-                        match install_hooks(tool, hook_event) {
-                            Ok(_) => {
-                                println!("{}", "✓".green());
-                                println!("\n{} {} hooks are ready!", "✓".green().bold(), hook_filename);
-                                println!("  Hooks will run automatically on {}", format!("git {}", hook_action(hook_event)).cyan());
-                            }
-                            Err(e) => {
-                                println!("{}", "✗".red());
-                                eprintln!("{}: {}", "Warning".yellow(), e);
-                                println!("\nPlease run manually: {}", format!("{} install --hook-type {}", tool_name, hook_filename).cyan());
-                            }
-                        }
-                    } else {
-                        // Tool not installed, show installation instructions
-                        // Both prek and pre-commit can be installed via pip
-                        println!("\nNext steps:");
-                        if matches!(tool, HookTool::Prek) {
-                            println!("  1. Install prek: {}", "pip install prek".cyan());
-                            println!("  2. Set up hooks: {}", format!("prek install --hook-type {}", hook_filename).cyan());
-                        } else {
-                            println!("  1. Install pre-commit: {}", "pip install pre-commit".cyan());
-                            println!("  2. Set up hooks: {}", format!("pre-commit install --hook-type {}", hook_filename).cyan());
-                        }
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{}: Failed to create {}: {}",
-                        "Error".red(),
-                        config_path.display(),
-                        e
-                    );
-                    Err(ExitCode::from(2))
-                }
-            }
-        }
-        HookTool::Git => {
-            // Find git repository root directory
-            let git_root = match find_git_root() {
-                Some(root) => root,
-                None => {
-                    eprintln!(
-                        "{}: Not in a git repository, cannot create .git/hooks/{}",
-                        "Error".red(),
-                        hook_filename
-                    );
-                    return Err(ExitCode::from(1));
-                }
-            };
-
-            let git_hooks_dir = git_root.join(".git/hooks");
-            let hook_path = git_hooks_dir.join(hook_filename);
-
-            // Create hooks directory if it doesn't exist
-            if !git_hooks_dir.exists() {
-                if let Err(e) = fs::create_dir_all(&git_hooks_dir) {
-                    eprintln!(
-                        "{}: Failed to create hooks directory {}: {}",
-                        "Error".red(),
-                        git_hooks_dir.display(),
-                        e
-                    );
-                    return Err(ExitCode::from(2));
-                }
-            }
-
-            // ── Tier-1/2 override check ──────────────────────────────────────
-            // If a fixed-path file or TOML source entry exists, use its content
-            // as the complete hook script.  On resolution error, abort (no fallback).
-            if let Some(override_content) = resolve_hook_override(tool, hook_event)? {
-                let content = if hook_path.exists() && !force {
-                    // Append override content to existing hook
-                    let mut existing = fs::read_to_string(&hook_path).unwrap_or_default();
-                    if !existing.ends_with('\n') { existing.push('\n'); }
-                    existing.push_str("\n# linthis-hook (override)\n");
-                    existing.push_str(&override_content);
-                    existing
-                } else {
-                    override_content
-                };
-                match fs::write(&hook_path, &content) {
-                    Ok(_) => {
-                        #[cfg(unix)]
-                        {
-                            use std::os::unix::fs::PermissionsExt;
-                            if let Ok(meta) = fs::metadata(&hook_path) {
-                                let mut perms = meta.permissions();
-                                perms.set_mode(0o755);
-                                let _ = fs::set_permissions(&hook_path, perms);
-                            }
-                        }
-                        println!("{} Created {} [project, override]", "✓".green(), hook_path.display());
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        eprintln!("{}: Failed to write hook '{}': {}", "Error".red(), hook_path.display(), e);
-                        return Err(ExitCode::from(2));
-                    }
-                }
-            }
-            // ── End override check — fall through to built-in generator ──────
-
-            // Build hook command based on options and event type (used for append detection)
-            let linthis_hook_line = build_hook_command(hook_event, args);
-
-            // Check if hook file already exists
-            if hook_path.exists() {
-                // Read existing content
-                let existing_content = match fs::read_to_string(&hook_path) {
-                    Ok(content) => content,
-                    Err(e) => {
-                        eprintln!(
-                            "{}: Failed to read existing hook file: {}",
-                            "Error".red(),
-                            e
-                        );
-                        return Err(ExitCode::from(2));
-                    }
-                };
-
-                // Check if linthis is already in the hook (direct command or thin wrapper)
-                if existing_content.contains(&linthis_hook_line)
-                    || existing_content.contains("linthis hook run")
-                {
-                    println!(
-                        "{}: linthis hook already exists in {}",
-                        "Info".cyan(),
-                        hook_path.display()
-                    );
-                    return Ok(());
-                }
-
-                // Append linthis to the existing hook (keep appended line, not thin wrapper,
-                // to avoid overwriting unrelated existing hook logic)
-                let mut new_content = existing_content.clone();
-                if !new_content.ends_with('\n') {
-                    new_content.push('\n');
-                }
-                new_content.push_str("\n# linthis-hook\n");
-                new_content.push_str(&linthis_hook_line);
-                new_content.push('\n');
-
-                match fs::write(&hook_path, new_content) {
-                    Ok(_) => {
-                        println!(
-                            "{} Added linthis to existing {} {} [project]",
-                            "✓".green(),
-                            hook_path.display(),
-                            "(appended)".dimmed()
-                        );
-                        Ok(())
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "{}: Failed to update {}: {}",
-                            "Error".red(),
-                            hook_path.display(),
-                            e
-                        );
-                        Err(ExitCode::from(2))
-                    }
-                }
-            } else {
-                // Create new hook file as thin wrapper (hook logic auto-updates with linthis)
-                let content = build_thin_wrapper_script(hook_event, &HookTool::Git, None, false, None);
-
-                match fs::write(&hook_path, &content) {
-                    Ok(_) => {
-                        // Make the hook executable
-                        #[cfg(unix)]
-                        {
-                            let mut perms = fs::metadata(&hook_path)
-                                .map_err(|e| {
-                                    eprintln!("{}: Failed to get file metadata: {}", "Error".red(), e);
-                                    ExitCode::from(2)
-                                })?
-                                .permissions();
-                            perms.set_mode(0o755);
-                            fs::set_permissions(&hook_path, perms).map_err(|e| {
-                                eprintln!("{}: Failed to set permissions: {}", "Error".red(), e);
-                                ExitCode::from(2)
-                            })?;
-                        }
-
-                        println!("{} Created {} [project]", "✓".green(), hook_path.display());
-                        println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
-                        #[cfg(not(unix))]
-                        {
-                            println!("\nNext steps:");
-                            println!("  Make sure the hook is executable:");
-                            println!("    {}", format!("chmod +x .git/hooks/{}", hook_filename).cyan());
-                        }
-                        // Persist metadata for `linthis hook sync`
-                        let project = git_root.to_str().unwrap_or("").to_string();
-                        save_installed_hook("local", &project, hook_event, &HookTool::Git, None, None);
-                        Ok(())
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "{}: Failed to create {}: {}",
-                            "Error".red(),
-                            hook_path.display(),
-                            e
-                        );
-                        Err(ExitCode::from(2))
-                    }
-                }
-            }
-        }
+        HookTool::Agent | HookTool::GitWithAgent | HookTool::PrekWithAgent => Ok(()),
+        HookTool::Prek => create_prek_config(tool, hook_event, force, args),
+        HookTool::Git => create_git_hook_config(tool, hook_event, force, args),
     }
 }
 
@@ -2828,25 +2714,25 @@ stop_timer() {
 "#
 }
 
+/// The review prompt for the pre-push agent code review.
+fn prepush_review_prompt() -> &'static str {
+    "Perform a structured pre-push code review using the lt.review skill. \
+     Steps: \
+     (1) Run: BASE_SHA=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD~1); \
+     git diff $BASE_SHA..HEAD --stat; git diff $BASE_SHA..HEAD --name-status; git diff $BASE_SHA..HEAD. \
+     (2) Review for Critical (security, data loss, broken API, logic errors), \
+     Important (missing error handling, performance), and Minor issues. \
+     (3) Write the review to .linthis/review/result/review-$(date +%Y%m%d-%H%M%S).md \
+     (create the directory if needed). \
+     (4) If Critical issues found: print '❌ Push blocked — fix Critical issues first' and exit 1. \
+     If Important issues only: print '⚠️ Push with caution'. \
+     If Minor or none: print '✅ Review passed'. \
+     Exit 0 unless Critical issues were found."
+}
+
 /// Build the pre-push hook script that ALWAYS triggers an agent code review.
-///
-/// Unlike pre-commit (agent only called on failure), pre-push always invokes
-/// the agent to perform a structured review of the diff before pushing.
-/// The agent's exit code gates the push: non-zero = block, zero = allow.
 fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, provider_args: Option<&str>) -> String {
-    let review_prompt = "Perform a structured pre-push code review using the lt.review skill. \
-        Steps: \
-        (1) Run: BASE_SHA=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD~1); \
-        git diff $BASE_SHA..HEAD --stat; git diff $BASE_SHA..HEAD --name-status; git diff $BASE_SHA..HEAD. \
-        (2) Review for Critical (security, data loss, broken API, logic errors), \
-        Important (missing error handling, performance), and Minor issues. \
-        (3) Write the review to .linthis/review/result/review-$(date +%Y%m%d-%H%M%S).md \
-        (create the directory if needed). \
-        (4) If Critical issues found: print '❌ Push blocked — fix Critical issues first' and exit 1. \
-        If Important issues only: print '⚠️ Push with caution'. \
-        If Minor or none: print '✅ Review passed'. \
-        Exit 0 unless Critical issues were found.";
-    let agent_cmd = agent_fix_headless_cmd(fix_provider, review_prompt, provider_args);
+    let agent_cmd = agent_fix_headless_cmd(fix_provider, prepush_review_prompt(), provider_args);
     let timer_fns = shell_timer_functions();
     let review_box = shell_review_box_fn();
     format!(
@@ -2990,6 +2876,33 @@ fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixPr
     )
 }
 
+/// Resolve the hook path, scope, and project string for a hook install (local or global).
+fn resolve_hook_install_target(
+    hook_filename: &str,
+    global: bool,
+) -> Result<(PathBuf, &'static str, String), ExitCode> {
+    if global {
+        let hooks_dir = match global_hooks_dir() {
+            Some(d) => d,
+            None => {
+                eprintln!("{}: Could not determine global hooks directory", "Error".red());
+                return Err(ExitCode::from(1));
+            }
+        };
+        Ok((hooks_dir.join(hook_filename), "global", String::new()))
+    } else {
+        let git_root = match find_git_root() {
+            Some(root) => root,
+            None => {
+                eprintln!("{}: Not in a git repository", "Error".red());
+                return Err(ExitCode::from(1));
+            }
+        };
+        let project_str = git_root.to_str().unwrap_or("").to_string();
+        Ok((git_root.join(".git/hooks").join(hook_filename), "local", project_str))
+    }
+}
+
 /// Install a git hook with agent fix fallback
 fn handle_git_with_agent_install(
     hook_event: &HookEvent,
@@ -3001,82 +2914,26 @@ fn handle_git_with_agent_install(
     provider_args: Option<&str>,
 ) -> ExitCode {
     use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-    use std::io::{self, Write};
 
     let hook_filename = hook_event.hook_filename();
-    let _ = args; // args are embedded in binary logic at run time, not in the thin wrapper
+    let _ = args;
 
-    let (hook_path, scope, project) = if global {
-        let hooks_dir = match global_hooks_dir() {
-            Some(d) => d,
-            None => {
-                eprintln!("{}: Could not determine global hooks directory", "Error".red());
-                return ExitCode::from(1);
-            }
-        };
-        (hooks_dir.join(hook_filename), "global", String::new())
-    } else {
-        let git_root = match find_git_root() {
-            Some(root) => root,
-            None => {
-                eprintln!("{}: Not in a git repository", "Error".red());
-                return ExitCode::from(1);
-            }
-        };
-        let project_str = git_root.to_str().unwrap_or("").to_string();
-        (git_root.join(".git/hooks").join(hook_filename), "local", project_str)
+    let (hook_path, scope, project) = match resolve_hook_install_target(hook_filename, global) {
+        Ok(t) => t,
+        Err(code) => return code,
     };
 
-    // Confirm with user for global installs unless --yes was passed.
-    // Global installs also set core.hooksPath so warn the user.
-    if global && !yes {
-        println!(
-            "This will install a global {} hook at {}",
-            hook_filename.cyan(),
-            hook_path.display()
-        );
-        println!(
-            "and set {} in your global git config.",
-            "core.hooksPath".cyan()
-        );
-        print!("Continue? [y/N]: ");
-        io::stdout().flush().ok();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).ok();
-        if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
-            println!("Installation cancelled");
-            return ExitCode::SUCCESS;
-        }
+    if global && !yes && !confirm_global_install(hook_filename, &hook_path) {
+        println!("Installation cancelled");
+        return ExitCode::SUCCESS;
     }
 
     let content = build_thin_wrapper_script(
-        hook_event,
-        &HookTool::GitWithAgent,
-        Some(fix_provider.as_str()),
-        global,
-        provider_args,
+        hook_event, &HookTool::GitWithAgent, Some(fix_provider.as_str()), global, provider_args,
     );
 
-    if hook_path.exists() && !force {
-        if let Ok(existing) = fs::read_to_string(&hook_path) {
-            if existing.contains("# linthis-hook") || existing.contains("linthis hook run") {
-                println!(
-                    "{}: {} hook already installed at {}",
-                    "Info".cyan(),
-                    hook_filename,
-                    hook_path.display()
-                );
-                return ExitCode::SUCCESS;
-            }
-        }
-        eprintln!(
-            "{}: {} already exists. Use --force to overwrite.",
-            "Warning".yellow(),
-            hook_path.display()
-        );
-        return ExitCode::from(1);
+    if let Err(code) = check_existing_global_hook(&hook_path, hook_filename, force) {
+        return code;
     }
 
     if let Some(parent) = hook_path.parent() {
@@ -3086,40 +2943,26 @@ fn handle_git_with_agent_install(
         }
     }
 
-    match fs::write(&hook_path, &content) {
-        Ok(_) => {
-            #[cfg(unix)]
-            {
-                if let Ok(meta) = fs::metadata(&hook_path) {
-                    let mut perms = meta.permissions();
-                    perms.set_mode(0o755);
-                    let _ = fs::set_permissions(&hook_path, perms);
-                }
-            }
-            println!("{} Created {} (git-with-agent, {})", "✓".green(), hook_path.display(), fix_provider);
-            println!("  {} On lint failure: {}", "→".dimmed(), agent_fix_bin(fix_provider).cyan());
-            println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
+    if let Err(code) = write_hook_script(&hook_path, &content) {
+        return code;
+    }
 
-            // For global installs, also set core.hooksPath
-            if global {
-                if let Some(hooks_dir) = global_hooks_dir() {
-                    let hooks_dir_str = hooks_dir.to_string_lossy().to_string();
-                    let _ = std::process::Command::new("git")
-                        .args(["config", "--global", "core.hooksPath", &hooks_dir_str])
-                        .status();
-                    println!("{} Set {} = {}", "✓".green(), "core.hooksPath".cyan(), hooks_dir_str);
-                }
-            }
+    println!("{} Created {} (git-with-agent, {})", "✓".green(), hook_path.display(), fix_provider);
+    println!("  {} On lint failure: {}", "→".dimmed(), agent_fix_bin(fix_provider).cyan());
+    println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
 
-            // Persist metadata for `linthis hook sync`
-            save_installed_hook(scope, &project, hook_event, &HookTool::GitWithAgent, Some(fix_provider.as_str()), provider_args);
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("{}: Failed to create {}: {}", "Error".red(), hook_path.display(), e);
-            ExitCode::from(2)
+    if global {
+        if let Some(hooks_dir) = global_hooks_dir() {
+            let hooks_dir_str = hooks_dir.to_string_lossy().to_string();
+            let _ = std::process::Command::new("git")
+                .args(["config", "--global", "core.hooksPath", &hooks_dir_str])
+                .status();
+            println!("{} Set {} = {}", "✓".green(), "core.hooksPath".cyan(), hooks_dir_str);
         }
     }
+
+    save_installed_hook(scope, &project, hook_event, &HookTool::GitWithAgent, Some(fix_provider.as_str()), provider_args);
+    ExitCode::SUCCESS
 }
 
 /// Install prek/pre-commit config + a wrapper git hook with agent fix fallback
@@ -3488,11 +3331,30 @@ fn agent_stop_hook_json_ref() -> &'static str {
     AGENT_STOP_HOOK_JSON
 }
 
+/// Get the short event name used for skill file naming.
+fn event_short_name(event: &HookEvent) -> &'static str {
+    match event {
+        HookEvent::PreCommit => "lint",
+        HookEvent::CommitMsg => "cmsg",
+        HookEvent::PrePush   => "review",
+    }
+}
+
+/// Resolve the custom or default skill name for an event.
+fn resolve_skill_name(
+    event: &HookEvent,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+    prefix: &str,
+) -> String {
+    let custom: Option<&str> = skill_names.and_then(|sn| match event {
+        HookEvent::PreCommit => sn.pre_commit.as_deref(),
+        HookEvent::CommitMsg => sn.commit_msg.as_deref(),
+        HookEvent::PrePush   => sn.pre_push.as_deref(),
+    });
+    custom.map_or_else(|| format!("{}{}", prefix, event_short_name(event)), |n| n.to_string())
+}
+
 /// Get the skill file path for a given agent provider and hook event.
-///
-/// When `global` is true, `base` is the user home directory; otherwise it is
-/// the project git root.  Each event maps to a distinct file so that agents
-/// receive focused instructions per hook type.
 fn agent_skill_path(
     base: &std::path::Path,
     provider: &AgentProvider,
@@ -3500,49 +3362,36 @@ fn agent_skill_path(
     event: &HookEvent,
     skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> PathBuf {
-    let event_name = match event {
-        HookEvent::PreCommit => "lint",
-        HookEvent::CommitMsg => "cmsg",
-        HookEvent::PrePush   => "review",
-    };
-    // Check for a configured skill name override for this event
-    let custom_name: Option<&str> = skill_names.and_then(|sn| match event {
-        HookEvent::PreCommit => sn.pre_commit.as_deref(),
-        HookEvent::CommitMsg => sn.commit_msg.as_deref(),
-        HookEvent::PrePush   => sn.pre_push.as_deref(),
-    });
     match provider {
         AgentProvider::Claude => {
-            // Skills subdirectory: .claude/skills/<name>/SKILL.md
-            let dir_name = custom_name.map_or_else(|| format!("lt-{}", event_name), |n| n.to_string());
+            let dir_name = resolve_skill_name(event, skill_names, "lt-");
             base.join(".claude/skills").join(dir_name).join("SKILL.md")
         }
         AgentProvider::Codex => {
-            // Section-based: AGENTS.md (path doesn't change per event; event handled by section content)
             if global { base.join(".codex/AGENTS.md") } else { base.join("AGENTS.md") }
         }
         AgentProvider::Gemini => {
-            let name = custom_name.map_or_else(|| format!("linthis-{}", event_name), |n| n.to_string());
+            let name = resolve_skill_name(event, skill_names, "linthis-");
             base.join(".gemini").join(format!("{}.md", name))
         }
         AgentProvider::Cursor => {
-            let name = custom_name.map_or_else(|| format!("linthis-{}", event_name), |n| n.to_string());
+            let name = resolve_skill_name(event, skill_names, "linthis-");
             base.join(".cursor/rules").join(format!("{}.mdc", name))
         }
         AgentProvider::Droid => {
-            let name = custom_name.map_or_else(|| format!("linthis-{}", event_name), |n| n.to_string());
+            let name = resolve_skill_name(event, skill_names, "linthis-");
             base.join(".droid/rules").join(format!("{}.md", name))
         }
         AgentProvider::Auggie => {
-            let name = custom_name.map_or_else(|| format!("linthis-{}", event_name), |n| n.to_string());
+            let name = resolve_skill_name(event, skill_names, "linthis-");
             base.join(".augment/rules").join(format!("{}.md", name))
         }
         AgentProvider::Codebuddy => {
-            let dir_name = custom_name.map_or_else(|| format!("lt-{}", event_name), |n| n.to_string());
+            let dir_name = resolve_skill_name(event, skill_names, "lt-");
             base.join(".codebuddy/skills").join(dir_name).join("SKILL.md")
         }
         AgentProvider::Openclaw => {
-            let dir_name = custom_name.map_or_else(|| format!("lt-{}", event_name), |n| n.to_string());
+            let dir_name = resolve_skill_name(event, skill_names, "lt-");
             base.join(".openclaw/skills").join(dir_name).join("SKILL.md")
         }
     }
@@ -3766,16 +3615,8 @@ fn agent_command_dir(base: &std::path::Path, provider: &AgentProvider) -> Option
     }
 }
 
-/// Resolve and install agent plugin components (skill, command, memory, hooks) from a plugin directory.
-///
-/// New layout — `plugin_dir` must contain:
-/// - `skills/<skill_name>/SKILL.md`  (skill_name from `agent_event_skill_metadata`)
-/// - `commands/`                      (optional; all files copied)
-/// - `memories/TOPLEVEL.md`           (optional; injected into provider root instruction file)
-/// - `hooks/hooks.json`               (optional; stop hook settings merged into provider settings)
-///
-/// Each is optional; missing subdirs are silently skipped.
-fn install_agent_plugin_from_dir(
+/// Install skill component from a plugin directory.
+fn install_plugin_skill(
     plugin_dir: &std::path::Path,
     base: &std::path::Path,
     provider: &AgentProvider,
@@ -3784,111 +3625,151 @@ fn install_agent_plugin_from_dir(
     target: Option<&linthis::config::AgentTargetConfig>,
 ) -> Result<(), String> {
     use std::fs;
-
     let (skill_name, _) = agent_event_skill_metadata(event, skill_names);
-
-    // ── skill ───────────────────────────────────────────────────────────
     let skill_src_dir = plugin_dir.join("skills").join(&skill_name);
     let skill_src = skill_src_dir.join("SKILL.md");
-    if skill_src.is_file() {
-        if let Some(target_skills) = target.and_then(|t| t.skills.as_deref()) {
-            // Custom target: skill-dir style — {base}/{target.skills}/{skill_name}/SKILL.md
-            let custom_skill_dir = base.join(target_skills).join(&skill_name);
-            copy_dir_recursive(&skill_src_dir, &custom_skill_dir)?;
-        } else {
-            let skill_path = agent_skill_path(base, provider, false, event, skill_names);
-            match provider {
-                AgentProvider::Codex => {
-                    let content = fs::read_to_string(&skill_src)
-                        .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
-                    let section_marker = agent_event_section_marker(event);
-                    install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
-                }
-                AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
-                    let target_dir = skill_path.parent().unwrap();
-                    copy_dir_recursive(&skill_src_dir, target_dir)?;
-                    if matches!(provider, AgentProvider::Openclaw) {
-                        openclaw_post_install_skill(target_dir);
-                    }
-                }
-                _ => {
-                    let content = fs::read_to_string(&skill_src)
-                        .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
-                    install_agent_dedicated_file(&skill_path, &content)?;
-                }
-            }
-        }
+    if !skill_src.is_file() {
+        return Ok(());
     }
 
-    // ── command ─────────────────────────────────────────────────────────
+    if let Some(target_skills) = target.and_then(|t| t.skills.as_deref()) {
+        let custom_skill_dir = base.join(target_skills).join(&skill_name);
+        return copy_dir_recursive(&skill_src_dir, &custom_skill_dir);
+    }
+
+    let skill_path = agent_skill_path(base, provider, false, event, skill_names);
+    match provider {
+        AgentProvider::Codex => {
+            let content = fs::read_to_string(&skill_src)
+                .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
+            install_agent_append_section(&skill_path, &content, agent_event_section_marker(event), "# Agent Instructions\n")
+        }
+        AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
+            let target_dir = skill_path.parent().unwrap();
+            copy_dir_recursive(&skill_src_dir, target_dir)?;
+            if matches!(provider, AgentProvider::Openclaw) {
+                openclaw_post_install_skill(target_dir);
+            }
+            Ok(())
+        }
+        _ => {
+            let content = fs::read_to_string(&skill_src)
+                .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
+            install_agent_dedicated_file(&skill_path, &content)
+        }
+    }
+}
+
+/// Install command files from a plugin directory.
+fn install_plugin_commands(
+    plugin_dir: &std::path::Path,
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    target: Option<&linthis::config::AgentTargetConfig>,
+) -> Result<(), String> {
+    use std::fs;
     let cmd_src_dir = plugin_dir.join("commands");
-    if cmd_src_dir.is_dir() {
-        let cmd_dir_opt = if let Some(target_commands) = target.and_then(|t| t.commands.as_deref()) {
-            Some(base.join(target_commands))
-        } else {
-            agent_command_dir(base, provider)
-        };
-        if let Some(cmd_dir) = cmd_dir_opt {
-            if let Ok(entries) = fs::read_dir(&cmd_src_dir) {
-                for entry in entries.flatten() {
-                    if entry.path().is_file() {
-                        let filename = entry.file_name();
-                        let cmd_target = cmd_dir.join(&filename);
-                        let content = fs::read_to_string(entry.path())
-                            .map_err(|e| format!("Failed to read command file '{}': {}", entry.path().display(), e))?;
-                        install_agent_dedicated_file(&cmd_target, &content)?;
-                    }
+    if !cmd_src_dir.is_dir() {
+        return Ok(());
+    }
+    let cmd_dir = if let Some(target_commands) = target.and_then(|t| t.commands.as_deref()) {
+        Some(base.join(target_commands))
+    } else {
+        agent_command_dir(base, provider)
+    };
+    if let Some(cmd_dir) = cmd_dir {
+        if let Ok(entries) = fs::read_dir(&cmd_src_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_file() {
+                    let cmd_target = cmd_dir.join(entry.file_name());
+                    let content = fs::read_to_string(entry.path())
+                        .map_err(|e| format!("Failed to read command file '{}': {}", entry.path().display(), e))?;
+                    install_agent_dedicated_file(&cmd_target, &content)?;
                 }
             }
         }
     }
+    Ok(())
+}
 
-    // ── memory ──────────────────────────────────────────────────────────
+/// Get the default memory file path for a provider.
+fn agent_memory_path(base: &std::path::Path, provider: &AgentProvider) -> Option<PathBuf> {
+    match provider {
+        AgentProvider::Claude    => Some(base.join("CLAUDE.md")),
+        AgentProvider::Codebuddy => Some(base.join("CODEBUDDY.md")),
+        AgentProvider::Gemini    => Some(base.join(".gemini/GEMINI.md")),
+        AgentProvider::Cursor    => Some(base.join(".cursor/CURSOR.md")),
+        AgentProvider::Droid     => Some(base.join(".droid/DROID.md")),
+        AgentProvider::Auggie    => Some(base.join(".augment/AUGMENT.md")),
+        AgentProvider::Codex     => None,
+        AgentProvider::Openclaw  => Some(base.join("AGENTS.md")),
+    }
+}
+
+/// Install memory component from a plugin directory.
+fn install_plugin_memory(
+    plugin_dir: &std::path::Path,
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    event: &HookEvent,
+    target: Option<&linthis::config::AgentTargetConfig>,
+) -> Result<(), String> {
     let mem_src = plugin_dir.join("memories").join("TOPLEVEL.md");
-    if mem_src.is_file() {
-        let memory_target = if let Some(target_memory) = target.and_then(|t| t.memory.as_deref()) {
-            Some(base.join(target_memory))
-        } else {
-            match provider {
-                AgentProvider::Claude    => Some(base.join("CLAUDE.md")),
-                AgentProvider::Codebuddy => Some(base.join("CODEBUDDY.md")),
-                AgentProvider::Gemini    => Some(base.join(".gemini/GEMINI.md")),
-                AgentProvider::Cursor    => Some(base.join(".cursor/CURSOR.md")),
-                AgentProvider::Droid     => Some(base.join(".droid/DROID.md")),
-                AgentProvider::Auggie    => Some(base.join(".augment/AUGMENT.md")),
-                AgentProvider::Codex     => None,
-                AgentProvider::Openclaw  => Some(base.join("AGENTS.md")),
-            }
-        };
-        if let Some(mem_target) = memory_target {
-            let content = fs::read_to_string(&mem_src)
-                .map_err(|e| format!("Failed to read memory file '{}': {}", mem_src.display(), e))?;
-            let plugin_id = agent_plugin_id(event);
-            let section_marker = &format!("linthis-memory-{}", plugin_id);
-            install_agent_append_section(&mem_target, &content, section_marker, "")?;
-        }
+    if !mem_src.is_file() {
+        return Ok(());
     }
+    let memory_target = if let Some(target_memory) = target.and_then(|t| t.memory.as_deref()) {
+        Some(base.join(target_memory))
+    } else {
+        agent_memory_path(base, provider)
+    };
+    if let Some(mem_target) = memory_target {
+        let content = std::fs::read_to_string(&mem_src)
+            .map_err(|e| format!("Failed to read memory file '{}': {}", mem_src.display(), e))?;
+        let plugin_id = agent_plugin_id(event);
+        let section_marker = &format!("linthis-memory-{}", plugin_id);
+        install_agent_append_section(&mem_target, &content, section_marker, "")?;
+    }
+    Ok(())
+}
 
-    // ── stop hook (from plugin's hooks/hooks.json) ──────────────────────
+/// Install stop hook from a plugin's hooks/hooks.json.
+fn install_plugin_stop_hook(
+    plugin_dir: &std::path::Path,
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    target: Option<&linthis::config::AgentTargetConfig>,
+) -> Result<(), String> {
     let hooks_json_src = plugin_dir.join("hooks").join("hooks.json");
-    if hooks_json_src.is_file() {
-        if matches!(provider, AgentProvider::Openclaw) {
-            // OpenClaw uses its own event-based hooks system (HOOK.md + handler.ts).
-            // No direct mapping to the stop-hook concept; skip for now.
-        } else {
-            let settings_path_opt = if let Some(target_settings) = target.and_then(|t| t.settings.as_deref()) {
-                Some(base.join(target_settings))
-            } else {
-                agent_stop_hook_settings_path(base, provider)
-            };
-            if let Some(settings_path) = settings_path_opt {
-                let override_json = fs::read_to_string(&hooks_json_src)
-                    .map_err(|e| format!("Failed to read hooks.json '{}': {}", hooks_json_src.display(), e))?;
-                install_agent_stop_hook_from_json(base, &settings_path, &override_json)?;
-            }
-        }
+    if !hooks_json_src.is_file() || matches!(provider, AgentProvider::Openclaw) {
+        return Ok(());
     }
+    let settings_path = if let Some(target_settings) = target.and_then(|t| t.settings.as_deref()) {
+        Some(base.join(target_settings))
+    } else {
+        agent_stop_hook_settings_path(base, provider)
+    };
+    if let Some(settings_path) = settings_path {
+        let override_json = std::fs::read_to_string(&hooks_json_src)
+            .map_err(|e| format!("Failed to read hooks.json '{}': {}", hooks_json_src.display(), e))?;
+        install_agent_stop_hook_from_json(base, &settings_path, &override_json)?;
+    }
+    Ok(())
+}
 
+/// Resolve and install agent plugin components (skill, command, memory, hooks) from a plugin directory.
+fn install_agent_plugin_from_dir(
+    plugin_dir: &std::path::Path,
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    event: &HookEvent,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+    target: Option<&linthis::config::AgentTargetConfig>,
+) -> Result<(), String> {
+    install_plugin_skill(plugin_dir, base, provider, event, skill_names, target)?;
+    install_plugin_commands(plugin_dir, base, provider, target)?;
+    install_plugin_memory(plugin_dir, base, provider, event, target)?;
+    install_plugin_stop_hook(plugin_dir, base, provider, target)?;
     Ok(())
 }
 
@@ -4591,138 +4472,75 @@ fn uninstall_agent_legacy(base: &std::path::Path, provider: &AgentProvider) {
     }
 }
 
-fn handle_agent_hook_install(
-    provider: Option<AgentProvider>,
+/// Resolve the base directory for agent hook installation (home for global, git root for local).
+fn resolve_agent_base(global: bool) -> Result<PathBuf, ExitCode> {
+    if global {
+        dirs::home_dir().ok_or_else(|| {
+            eprintln!("{}: Could not determine home directory", "Error".red());
+            ExitCode::from(1)
+        })
+    } else {
+        find_git_root().ok_or_else(|| {
+            eprintln!("{}: Not in a git repository", "Error".red());
+            eprintln!("  Run this command from within a git repository, or use --global / -g to install user-level skills");
+            ExitCode::from(1)
+        })
+    }
+}
+
+/// Install agent skills for a list of providers across all events. Returns true if any succeeded.
+fn install_agent_providers_batch(
+    providers: &[&AgentProvider],
+    base: &std::path::Path,
     events: &[HookEvent],
     force: bool,
-    yes: bool,
     global: bool,
-) -> ExitCode {
-    use std::io::{self, Write};
-
-    // Resolve the base directory: home dir for global, git root for project-level.
-    let base = if global {
-        match dirs::home_dir() {
-            Some(home) => home,
-            None => {
-                eprintln!("{}: Could not determine home directory", "Error".red());
-                return ExitCode::from(1);
-            }
+    scope: &str,
+    project_str: &str,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> bool {
+    let mut any_installed = false;
+    for p in providers {
+        if agent_is_installed(base, p, global, skill_names) && !force {
+            println!("{}: {} already installed", "Info".cyan(), p);
+            print_agent_installed_info(base, p, global, skill_names);
+            continue;
         }
-    } else {
-        match find_git_root() {
-            Some(root) => root,
-            None => {
-                eprintln!("{}: Not in a git repository", "Error".red());
-                eprintln!("  Run this command from within a git repository, or use --global / -g to install user-level skills");
-                return ExitCode::from(1);
-            }
-        }
-    };
-
-    let scope = if global { "global" } else { "local" };
-    let project_str = if global {
-        String::new()
-    } else {
-        base.to_str().unwrap_or("").to_string()
-    };
-
-    // Load configured skill name aliases
-    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hook.agent.skill_names;
-    let skill_names = Some(&skill_names_cfg);
-
-    println!("{}", "🤖 AI Coding Agent Integration".bold());
-    if global {
-        println!("  {} Installing user-level skills in {}", "→".dimmed(), base.display());
-    }
-    println!();
-
-    // If a specific provider was given, install just that one
-    if let Some(ref p) = provider {
-        let installed = agent_is_installed(&base, p, global, skill_names);
-        if installed && !force {
-            println!(
-                "{}: {} is already installed",
-                "Info".cyan(),
-                p
-            );
-            print_agent_installed_info(&base, p, global, skill_names);
-            return ExitCode::SUCCESS;
-        }
-
-        warn_legacy_if_present(&base, p);
+        warn_legacy_if_present(base, p);
         let provider_name = format!("{}", p).to_lowercase();
+        let mut provider_ok = true;
         for event in events {
-            match install_agent_skill(&base, p, global, event, skill_names) {
+            match install_agent_skill(base, p, global, event, skill_names) {
                 Ok(_) => {
-                    let path = agent_skill_path(&base, p, global, event, skill_names);
+                    let path = agent_skill_path(base, p, global, event, skill_names);
                     println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
-                    add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
+                    add_skill_provider_to_hook(scope, project_str, event, &provider_name);
                 }
                 Err(e) => {
                     eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
-                    return ExitCode::from(2);
+                    provider_ok = false;
                 }
             }
         }
-        print_extra_installed(&base, p);
-        return ExitCode::SUCCESS;
-    }
-
-    // Auto-detect and install all if -y
-    if yes {
-        let detected = detect_agent_providers(&base);
-        let targets: Vec<AgentProvider> = if detected.is_empty() {
-            ALL_AGENT_PROVIDERS.to_vec()
-        } else {
-            detected
-        };
-
-        let mut any_installed = false;
-        for p in &targets {
-            if agent_is_installed(&base, p, global, skill_names) && !force {
-                println!("{}: {} already installed", "Info".cyan(), p);
-                print_agent_installed_info(&base, p, global, skill_names);
-                continue;
-            }
-            warn_legacy_if_present(&base, p);
-            let provider_name = format!("{}", p).to_lowercase();
-            let mut provider_ok = true;
-            for event in events {
-                match install_agent_skill(&base, p, global, event, skill_names) {
-                    Ok(_) => {
-                        let path = agent_skill_path(&base, p, global, event, skill_names);
-                        println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
-                        add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
-                    }
-                    Err(e) => {
-                        eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
-                        provider_ok = false;
-                    }
-                }
-            }
-            if provider_ok {
-                print_extra_installed(&base, p);
-                any_installed = true;
-            }
+        if provider_ok {
+            print_extra_installed(base, p);
+            any_installed = true;
         }
-
-        if any_installed {
-            println!();
-            println!("{}", "Agents will auto-check code quality after edits.".bold());
-        }
-        return ExitCode::SUCCESS;
     }
+    any_installed
+}
 
-    // Interactive menu
-    let detected = detect_agent_providers(&base);
-
-    // Build ordered list: detected/installed first, then others
+/// Build an ordered list of providers: detected/installed first, then others.
+fn build_ordered_provider_list<'a>(
+    base: &std::path::Path,
+    detected: &[AgentProvider],
+    global: bool,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> Vec<&'a AgentProvider> {
     let mut ordered: Vec<&AgentProvider> = Vec::new();
     for p in ALL_AGENT_PROVIDERS {
         if detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p))
-            || agent_is_installed(&base, p, global, skill_names)
+            || agent_is_installed(base, p, global, skill_names)
         {
             ordered.push(p);
         }
@@ -4732,33 +4550,33 @@ fn handle_agent_hook_install(
             ordered.push(p);
         }
     }
-    let provider_count = ordered.len();
+    ordered
+}
 
+/// Prompt user to select agents from an interactive menu.
+/// Returns None if cancelled.
+fn prompt_agent_selection<'a>(
+    ordered: &[&'a AgentProvider],
+    detected: &'a [AgentProvider],
+    base: &std::path::Path,
+    global: bool,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> Option<Vec<&'a AgentProvider>> {
+    use std::io::{self, Write};
+
+    let provider_count = ordered.len();
     println!("Select agent(s) to integrate with linthis:");
     println!();
 
     for (i, p) in ordered.iter().enumerate() {
-        let is_installed = agent_is_installed(&base, p, global, skill_names);
+        let is_installed = agent_is_installed(base, p, global, skill_names);
         let is_detected = detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p));
-        let mut status_parts = Vec::new();
-        if is_installed {
-            status_parts.push("installed".to_string());
-        }
-        if is_detected && !is_installed {
-            status_parts.push("detected".to_string());
-        }
-        let status = if status_parts.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", status_parts.join(", "))
+        let status = match (is_installed, is_detected) {
+            (true, _) => format!(" {}", "(installed)".yellow()),
+            (false, true) => format!(" {}", "(detected)".cyan()),
+            _ => String::new(),
         };
-        println!("  {}. {}{}", i + 1, p, if is_installed {
-            format!(" {}", status.yellow())
-        } else if is_detected {
-            format!(" {}", status.cyan())
-        } else {
-            status
-        });
+        println!("  {}. {}{}", i + 1, p, status);
     }
 
     println!();
@@ -4773,115 +4591,124 @@ fn handle_agent_hook_install(
     io::stdin().read_line(&mut choice).ok();
     let choice = choice.trim();
 
-    let cancel_num = provider_count + 3;
-    if choice == cancel_num.to_string() || choice.is_empty() {
-        println!("Installation cancelled");
-        return ExitCode::SUCCESS;
+    if choice == (provider_count + 3).to_string() || choice.is_empty() {
+        return None;
     }
 
-    let all_detected_num = provider_count + 1;
-    let all_agents_num = provider_count + 2;
-
-    let selected: Vec<&AgentProvider> = if choice == all_detected_num.to_string() {
+    if choice == (provider_count + 1).to_string() {
         if detected.is_empty() {
             println!("{}: No agents detected, installing all", "Info".cyan());
-            ordered.clone()
-        } else {
-            detected.iter().collect()
+            return Some(ordered.to_vec());
         }
-    } else if choice == all_agents_num.to_string() {
-        ordered.clone()
-    } else {
-        let mut selected = Vec::new();
-        for part in choice.split(',') {
-            if let Ok(num) = part.trim().parse::<usize>() {
-                if num >= 1 && num <= provider_count {
-                    selected.push(ordered[num - 1]);
-                }
-            }
-        }
-        if selected.is_empty() {
-            println!("Installation cancelled");
-            return ExitCode::SUCCESS;
-        }
-        selected
-    };
-
-    println!();
-    let mut any_installed = false;
-    for p in &selected {
-        if agent_is_installed(&base, p, global, skill_names) && !force {
-            println!("{}: {} already installed", "Info".cyan(), p);
-            print_agent_installed_info(&base, p, global, skill_names);
-            continue;
-        }
-        warn_legacy_if_present(&base, p);
-        let provider_name = format!("{}", p).to_lowercase();
-        let mut provider_ok = true;
-        for event in events {
-            match install_agent_skill(&base, p, global, event, skill_names) {
-                Ok(_) => {
-                    let path = agent_skill_path(&base, p, global, event, skill_names);
-                    println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
-                    add_skill_provider_to_hook(scope, &project_str, event, &provider_name);
-                }
-                Err(e) => {
-                    eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
-                    provider_ok = false;
-                }
-            }
-        }
-        if provider_ok {
-            print_extra_installed(&base, p);
-            any_installed = true;
-        }
+        return Some(detected.iter().collect());
+    }
+    if choice == (provider_count + 2).to_string() {
+        return Some(ordered.to_vec());
     }
 
-    if any_installed {
-        println!();
-        println!("{}", "Agents will auto-check code quality after edits.".bold());
-    }
+    let selected: Vec<&AgentProvider> = choice.split(',')
+        .filter_map(|s| s.trim().parse::<usize>().ok())
+        .filter(|&n| n >= 1 && n <= provider_count)
+        .map(|n| ordered[n - 1])
+        .collect();
 
-    ExitCode::SUCCESS
+    if selected.is_empty() { None } else { Some(selected) }
 }
 
-/// Uninstall agent hooks for all installed providers.
-///
-/// When `global` is true, removes skills from the user home directory;
-/// otherwise removes from the project git root.
-fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) -> ExitCode {
-    use std::io::{self, Write};
-
-    let base = if global {
-        match dirs::home_dir() {
-            Some(home) => home,
-            None => {
-                eprintln!("{}: Could not determine home directory", "Error".red());
-                return ExitCode::from(1);
-            }
-        }
-    } else {
-        match find_git_root() {
-            Some(root) => root,
-            None => {
-                return ExitCode::from(1);
-            }
-        }
+fn handle_agent_hook_install(
+    provider: Option<AgentProvider>,
+    events: &[HookEvent],
+    force: bool,
+    yes: bool,
+    global: bool,
+) -> ExitCode {
+    let base = match resolve_agent_base(global) {
+        Ok(b) => b,
+        Err(code) => return code,
     };
 
-    // Load configured skill name aliases
+    let scope = if global { "global" } else { "local" };
+    let project_str = if global { String::new() } else { base.to_str().unwrap_or("").to_string() };
+
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hook.agent.skill_names;
     let skill_names = Some(&skill_names_cfg);
 
-    // Find all installed providers in the target scope
+    println!("{}", "🤖 AI Coding Agent Integration".bold());
+    if global {
+        println!("  {} Installing user-level skills in {}", "→".dimmed(), base.display());
+    }
+    println!();
+
+    // Single provider specified
+    if let Some(ref p) = provider {
+        if agent_is_installed(&base, p, global, skill_names) && !force {
+            println!("{}: {} is already installed", "Info".cyan(), p);
+            print_agent_installed_info(&base, p, global, skill_names);
+            return ExitCode::SUCCESS;
+        }
+        let providers = vec![p];
+        install_agent_providers_batch(&providers, &base, events, force, global, scope, &project_str, skill_names);
+        return ExitCode::SUCCESS;
+    }
+
+    // Auto-detect with -y
+    if yes {
+        let detected = detect_agent_providers(&base);
+        let targets: Vec<&AgentProvider> = if detected.is_empty() {
+            ALL_AGENT_PROVIDERS.iter().collect()
+        } else {
+            detected.iter().collect()
+        };
+        let any = install_agent_providers_batch(&targets, &base, events, force, global, scope, &project_str, skill_names);
+        if any {
+            println!();
+            println!("{}", "Agents will auto-check code quality after edits.".bold());
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    // Interactive menu
+    let detected = detect_agent_providers(&base);
+    let ordered = build_ordered_provider_list(&base, &detected, global, skill_names);
+
+    let selected = match prompt_agent_selection(&ordered, &detected, &base, global, skill_names) {
+        Some(s) => s,
+        None => {
+            println!("Installation cancelled");
+            return ExitCode::SUCCESS;
+        }
+    };
+
+    println!();
+    let any = install_agent_providers_batch(&selected, &base, events, force, global, scope, &project_str, skill_names);
+    if any {
+        println!();
+        println!("{}", "Agents will auto-check code quality after edits.".bold());
+    }
+    ExitCode::SUCCESS
+}
+
+/// Uninstall agent hooks for all installed providers.
+fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) -> ExitCode {
+    use std::io::{self, Write};
+
+    let base = match resolve_agent_base(global) {
+        Ok(b) => b,
+        Err(code) => return code,
+    };
+
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hook.agent.skill_names;
+    let skill_names = Some(&skill_names_cfg);
+
     let installed: Vec<&AgentProvider> = ALL_AGENT_PROVIDERS
         .iter()
         .filter(|p| agent_is_installed(&base, p, global, skill_names))
         .collect();
 
     if installed.is_empty() {
-        return ExitCode::from(1); // Nothing to uninstall
+        return ExitCode::from(1);
     }
 
     if !yes {
@@ -4893,7 +4720,6 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) ->
         println!();
         print!("Remove agent integration? [y/N]: ");
         io::stdout().flush().unwrap();
-
         let mut answer = String::new();
         io::stdin().read_line(&mut answer).ok();
         if !answer.trim().eq_ignore_ascii_case("y") {
@@ -4903,41 +4729,46 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) ->
     }
 
     let scope = if global { "global" } else { "local" };
-    let project_str = if global {
-        String::new()
-    } else {
-        base.to_str().unwrap_or("").to_string()
-    };
+    let project_str = if global { String::new() } else { base.to_str().unwrap_or("").to_string() };
 
     let mut any_removed = false;
     for p in &installed {
-        let mut provider_ok = true;
         let provider_name = format!("{}", p).to_lowercase();
-        for event in events {
-            let event_name = event.hook_filename();
-            match uninstall_agent_skill(&base, p, global, event, skill_names) {
-                Ok(_) => {
-                    println!("{} Uninstalled {} ({}) skill", "✓".green(), p, event_name);
-                    // Remove this provider from the skill_providers list in TOML
-                    remove_skill_provider_from_hook(scope, &project_str, event, &provider_name);
-                }
-                Err(e) => {
-                    eprintln!("{}: Failed to uninstall {} ({}): {}", "Error".red(), p, event_name, e);
-                    provider_ok = false;
-                }
-            }
-        }
-        if provider_ok {
+        let ok = uninstall_provider_events(&base, p, events, global, skill_names, scope, &project_str, &provider_name);
+        if ok {
             uninstall_agent_legacy(&base, p);
             any_removed = true;
         }
     }
 
-    if any_removed {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
+    if any_removed { ExitCode::SUCCESS } else { ExitCode::from(1) }
+}
+
+/// Uninstall all event skills for a single provider. Returns true if all succeeded.
+fn uninstall_provider_events(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+    events: &[HookEvent],
+    global: bool,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+    scope: &str,
+    project_str: &str,
+    provider_name: &str,
+) -> bool {
+    let mut ok = true;
+    for event in events {
+        match uninstall_agent_skill(base, provider, global, event, skill_names) {
+            Ok(_) => {
+                println!("{} Uninstalled {} ({}) skill", "✓".green(), provider, event.hook_filename());
+                remove_skill_provider_from_hook(scope, project_str, event, provider_name);
+            }
+            Err(e) => {
+                eprintln!("{}: Failed to uninstall {} ({}): {}", "Error".red(), provider, event.hook_filename(), e);
+                ok = false;
+            }
+        }
     }
+    ok
 }
 
 /// Handle commit message validation
@@ -4949,70 +4780,54 @@ fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) ->
 ///
 ///   linthis hook commit-msg-check .git/COMMIT_EDITMSG
 ///   linthis hook commit-msg-check "feat: add new feature"
-pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Option<&str>) -> ExitCode {
-    use linthis::config::Config;
-    use regex::Regex;
-    use std::fs;
-
-    // Load config to get hooks settings
-    let project_root = linthis::utils::get_project_root();
-    let config = Config::load_merged(&project_root);
-
-    // Accept either a file path or a raw message string
+/// Read the commit message from a file path or treat the string as the message itself.
+fn read_commit_msg(msg_or_file: &str) -> Result<(String, bool), ExitCode> {
     let path = std::path::Path::new(msg_or_file);
-    let is_file = path.exists();
-    let commit_msg = if is_file {
-        match fs::read_to_string(path) {
-            Ok(content) => content,
+    if path.exists() {
+        match std::fs::read_to_string(path) {
+            Ok(content) => Ok((content, true)),
             Err(e) => {
                 eprintln!("{}: Failed to read commit message file: {}", "Error".red(), e);
-                return ExitCode::from(1);
+                Err(ExitCode::from(1))
             }
         }
     } else {
-        // Treat as a direct commit message string
-        msg_or_file.to_string()
-    };
-
-    // Skip if empty (allows empty commits with --allow-empty-message)
-    let first_line = commit_msg.lines().next().unwrap_or("").trim();
-    if first_line.is_empty() || first_line.starts_with('#') {
-        return ExitCode::SUCCESS;
+        Ok((msg_or_file.to_string(), false))
     }
+}
 
-    // Use pattern from config
-    let pattern = &config.cmsg.commit_msg_pattern;
+/// Validate a commit message against the configured pattern and ticket requirement.
+/// Returns a list of validation errors (empty if valid).
+fn validate_commit_msg(
+    first_line: &str,
+    config: &linthis::config::Config,
+) -> Result<Vec<String>, ExitCode> {
+    use regex::Regex;
+    let mut errors = Vec::new();
 
-    let regex = match Regex::new(pattern) {
+    let regex = match Regex::new(&config.cmsg.commit_msg_pattern) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{}: Invalid commit message pattern in config: {}", "Error".red(), e);
-            return ExitCode::from(2);
+            return Err(ExitCode::from(2));
         }
     };
 
-    // Collect validation errors for auto-fix context
-    let mut errors: Vec<String> = Vec::new();
-
-    // Check main pattern
     if !regex.is_match(first_line) {
-        errors.push(format!(
-            "Does not match Conventional Commits format (type(scope)?: description). Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
-        ));
+        errors.push(
+            "Does not match Conventional Commits format (type(scope)?: description). Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert".to_string()
+        );
     }
 
-    // Check for ticket reference if required
     if config.cmsg.require_ticket {
-        let ticket_pattern = config.cmsg.ticket_pattern.as_deref()
-            .unwrap_or(r"\[\w+-\d+\]");
+        let ticket_pattern = config.cmsg.ticket_pattern.as_deref().unwrap_or(r"\[\w+-\d+\]");
         let ticket_regex = match Regex::new(ticket_pattern) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("{}: Invalid ticket pattern in config: {}", "Error".red(), e);
-                return ExitCode::from(2);
+                return Err(ExitCode::from(2));
             }
         };
-
         if !ticket_regex.is_match(first_line) {
             errors.push(format!(
                 "Missing ticket reference (pattern: {}). Example: feat: [PROJ-123] add feature",
@@ -5020,6 +4835,49 @@ pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Opti
             ));
         }
     }
+
+    Ok(errors)
+}
+
+/// Print the ticket reference required error box.
+fn print_ticket_error(first_line: &str, ticket_pattern: &str) {
+    eprintln!("{}", "╭────────────────────────────────────────╮".red());
+    eprintln!("{}", "│ 🔴 Ticket Reference Required          │".red());
+    eprintln!("{}", "├────────────────────────────────────────┤".red());
+    eprintln!("│ Your message:                          │");
+    eprintln!("│   {}", first_line);
+    eprintln!("│                                        │");
+    eprintln!("│ Ticket reference is required.          │");
+    eprintln!("│ Pattern: {}                            │", ticket_pattern);
+    eprintln!("│                                        │");
+    eprintln!("│ Example:                               │");
+    eprintln!("│   feat: [PROJ-123] add feature         │");
+    eprintln!("{}", "├────────────────────────────────────────┤".red());
+    eprintln!("│ To skip this check:                    │");
+    eprintln!("│   git commit --no-verify               │");
+    eprintln!("{}", "╰────────────────────────────────────────╯".red());
+}
+
+pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Option<&str>) -> ExitCode {
+    use linthis::config::Config;
+
+    let project_root = linthis::utils::get_project_root();
+    let config = Config::load_merged(&project_root);
+
+    let (commit_msg, is_file) = match read_commit_msg(msg_or_file) {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+
+    let first_line = commit_msg.lines().next().unwrap_or("").trim();
+    if first_line.is_empty() || first_line.starts_with('#') {
+        return ExitCode::SUCCESS;
+    }
+
+    let errors = match validate_commit_msg(first_line, &config) {
+        Ok(e) => e,
+        Err(code) => return code,
+    };
 
     if errors.is_empty() {
         println!("{}", linthis::utils::output::format_cmsg_result(true, ""));
@@ -5030,67 +4888,24 @@ pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Opti
         return ExitCode::SUCCESS;
     }
 
-    // Validation failed - try auto-fix if enabled
     if auto_fix {
-        return handle_cmsg_auto_fix(
-            &commit_msg,
-            &errors,
-            is_file,
-            path,
-            provider,
-            config.ai.provider.as_deref(),
-        );
+        let path = std::path::Path::new(msg_or_file);
+        return handle_cmsg_auto_fix(&commit_msg, &errors, is_file, path, provider, config.ai.provider.as_deref());
     }
 
-    // No auto-fix - print errors normally
     if errors.iter().any(|e| e.contains("Conventional Commits")) {
         print_commit_msg_error(first_line);
     } else {
-        // Ticket reference error
-        let ticket_pattern = config.cmsg.ticket_pattern.as_deref()
-            .unwrap_or(r"\[\w+-\d+\]");
-        eprintln!("{}", "╭────────────────────────────────────────╮".red());
-        eprintln!("{}", "│ 🔴 Ticket Reference Required          │".red());
-        eprintln!("{}", "├────────────────────────────────────────┤".red());
-        eprintln!("│ Your message:                          │");
-        eprintln!("│   {}", first_line);
-        eprintln!("│                                        │");
-        eprintln!("│ Ticket reference is required.          │");
-        eprintln!("│ Pattern: {}                            │", ticket_pattern);
-        eprintln!("│                                        │");
-        eprintln!("│ Example:                               │");
-        eprintln!("│   feat: [PROJ-123] add feature         │");
-        eprintln!("{}", "├────────────────────────────────────────┤".red());
-        eprintln!("│ To skip this check:                    │");
-        eprintln!("│   git commit --no-verify               │");
-        eprintln!("{}", "╰────────────────────────────────────────╯".red());
+        let ticket_pattern = config.cmsg.ticket_pattern.as_deref().unwrap_or(r"\[\w+-\d+\]");
+        print_ticket_error(first_line, ticket_pattern);
     }
     ExitCode::from(1)
 }
 
-/// Handle AI auto-fix for commit messages
-fn handle_cmsg_auto_fix(
-    original_msg: &str,
-    errors: &[String],
-    is_file: bool,
-    file_path: &std::path::Path,
-    cli_provider: Option<&str>,
-    config_provider: Option<&str>,
-) -> ExitCode {
-    use crate::cli::helpers::resolve_ai_provider;
-    use linthis::ai::{AiProvider, AiProviderConfig, AiProviderKind, AiProviderTrait};
-    use std::fs;
-
-    let provider_name = resolve_ai_provider(cli_provider, config_provider);
-    let kind: AiProviderKind = match provider_name.parse() {
-        Ok(k) => k,
-        Err(_) => {
-            eprintln!("{}: Unknown AI provider: {}", "Error".red(), provider_name);
-            return ExitCode::from(2);
-        }
-    };
-
-    let provider_config = match &kind {
+/// Resolve an AiProviderConfig from its kind.
+fn ai_provider_config_from_kind(kind: &linthis::ai::AiProviderKind) -> linthis::ai::AiProviderConfig {
+    use linthis::ai::{AiProviderConfig, AiProviderKind};
+    match kind {
         AiProviderKind::Claude => AiProviderConfig::claude(),
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
         AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
@@ -5105,28 +4920,42 @@ fn handle_cmsg_auto_fix(
             ..AiProviderConfig::default()
         },
         AiProviderKind::Mock => AiProviderConfig::mock(),
-    };
-    let provider = AiProvider::new(provider_config);
+    }
+}
 
-    eprintln!(
-        "{} Rewriting commit message with AI (provider: {})...",
-        "→".cyan(),
-        provider_name.cyan()
-    );
+/// Handle AI auto-fix for commit messages
+fn handle_cmsg_auto_fix(
+    original_msg: &str,
+    errors: &[String],
+    is_file: bool,
+    file_path: &std::path::Path,
+    cli_provider: Option<&str>,
+    config_provider: Option<&str>,
+) -> ExitCode {
+    use crate::cli::helpers::resolve_ai_provider;
+    use linthis::ai::{AiProvider, AiProviderKind, AiProviderTrait};
+
+    let provider_name = resolve_ai_provider(cli_provider, config_provider);
+    let kind: AiProviderKind = match provider_name.parse() {
+        Ok(k) => k,
+        Err(_) => {
+            eprintln!("{}: Unknown AI provider: {}", "Error".red(), provider_name);
+            return ExitCode::from(2);
+        }
+    };
+
+    let provider = AiProvider::new(ai_provider_config_from_kind(&kind));
+
+    eprintln!("{} Rewriting commit message with AI (provider: {})...", "→".cyan(), provider_name.cyan());
 
     let first_line = original_msg.lines().next().unwrap_or("").trim();
     let rest_of_msg: String = original_msg.lines().skip(1).collect::<Vec<_>>().join("\n");
-
     let error_desc = errors.join("; ");
+
     let prompt = format!(
-        "Rewrite the following git commit message to conform to the Conventional Commits format.\n\
-         \n\
-         Original message: {}\n\
-         \n\
-         Validation errors: {}\n\
-         \n\
-         Rules:\n\
-         - Format: type(scope)?: description\n\
+        "Rewrite the following git commit message to conform to the Conventional Commits format.\n\n\
+         Original message: {}\n\nValidation errors: {}\n\n\
+         Rules:\n- Format: type(scope)?: description\n\
          - Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n\
          - Keep the original intent and meaning\n\
          - Output ONLY the rewritten first line, nothing else (no quotes, no explanation)",
@@ -5136,8 +4965,6 @@ fn handle_cmsg_auto_fix(
     match provider.complete(&prompt, Some("You are a git commit message formatter. Output only the corrected commit message first line.")) {
         Ok(fixed_line) => {
             let fixed_line = fixed_line.trim().trim_matches('"').trim_matches('\'').trim();
-
-            // Reassemble: fixed first line + rest of original message
             let fixed_msg = if rest_of_msg.is_empty() {
                 format!("{}\n", fixed_line)
             } else {
@@ -5145,25 +4972,14 @@ fn handle_cmsg_auto_fix(
             };
 
             if is_file {
-                if let Err(e) = fs::write(file_path, &fixed_msg) {
+                if let Err(e) = std::fs::write(file_path, &fixed_msg) {
                     eprintln!("{}: Failed to write fixed message: {}", "Error".red(), e);
                     return ExitCode::from(1);
                 }
-                eprintln!(
-                    "{} Commit message rewritten: {} → {}",
-                    "✓".green(),
-                    first_line.dimmed(),
-                    fixed_line.green()
-                );
+                eprintln!("{} Commit message rewritten: {} → {}", "✓".green(), first_line.dimmed(), fixed_line.green());
             } else {
-                // Can't write back to a string arg, just print the fixed message
-                eprintln!(
-                    "{} Suggested rewrite: {}",
-                    "✓".green(),
-                    fixed_line.green()
-                );
+                eprintln!("{} Suggested rewrite: {}", "✓".green(), fixed_line.green());
             }
-
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -5204,6 +5020,44 @@ fn print_commit_msg_error(first_line: &str) {
 /// (each with their own PID) don't interfere with each other's re-entrancy detection.
 const LINTHIS_HOOK_RUNNING_PREFIX: &str = "LINTHIS_HOOK_RUNNING_";
 
+/// Parse a provider string into an AgentFixProvider.
+fn parse_agent_fix_provider_name(name: &str) -> Option<AgentFixProvider> {
+    match name.to_lowercase().as_str() {
+        "claude"    => Some(AgentFixProvider::Claude),
+        "codex"     => Some(AgentFixProvider::Codex),
+        "gemini"    => Some(AgentFixProvider::Gemini),
+        "cursor"    => Some(AgentFixProvider::Cursor),
+        "droid"     => Some(AgentFixProvider::Droid),
+        "auggie" | "aug" | "augment" => Some(AgentFixProvider::Auggie),
+        "codebuddy" => Some(AgentFixProvider::Codebuddy),
+        "openclaw"  => Some(AgentFixProvider::Openclaw),
+        _ => None,
+    }
+}
+
+/// Build the re-entrant (direct) script for a git hook.
+fn build_reentrant_git_script(event: &HookEvent) -> String {
+    let linthis_cmd = build_hook_command(event, &None);
+    if matches!(event, HookEvent::PrePush) {
+        format!(
+            "#!/bin/sh\n\
+             _BASE=$(git rev-parse '@{{u}}' 2>/dev/null || \\\n\
+             \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
+             _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
+             if [ -n \"$_PUSHED_FILES\" ]; then\n\
+             \x20 set --\n\
+             \x20 while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
+             $_PUSHED_FILES\n\
+             _EOF_\n\
+             \x20 {linthis} \"$@\"\n\
+             fi\n",
+            linthis = linthis_cmd
+        )
+    } else {
+        format!("#!/bin/sh\n{linthis_cmd} \"$@\"\n")
+    }
+}
+
 fn handle_hook_run(
     event: &HookEvent,
     hook_type: &HookTool,
@@ -5212,7 +5066,6 @@ fn handle_hook_run(
     _global: bool,
     hook_args: &[String],
 ) -> i32 {
-    // Support provider/model syntax at runtime too (e.g. "claude/opus")
     let (provider_name, merged_pa) = if let Some(raw) = raw_provider {
         let (name, model) = parse_provider_with_model(raw);
         (Some(name), merge_model_into_provider_args(model, raw_provider_args))
@@ -5222,62 +5075,21 @@ fn handle_hook_run(
     let provider: Option<&str> = provider_name;
     let provider_args: Option<&str> = merged_pa.as_deref();
 
-    // Detect re-entrant calls: the parent hook execution sets LINTHIS_HOOK_RUNNING_<pid>=1
-    // before exec-ing the child hook.  If any such var is present, skip local delegation.
     let already_running = std::env::vars()
         .any(|(k, _)| k.starts_with(LINTHIS_HOOK_RUNNING_PREFIX));
 
     let script = match hook_type {
         HookTool::Git => {
             if already_running {
-                // Re-entrant: we were delegated to from a parent hook invocation.
-                // Run linthis directly without further local-hook delegation.
-                let linthis_cmd = build_hook_command(event, &None);
-                if matches!(event, HookEvent::PrePush) {
-                    // For pre-push, $@ = remote name/url (NOT file paths).
-                    // Compute the pushed files from git diff and pass with -i.
-                    format!(
-                        "#!/bin/sh\n\
-                         _BASE=$(git rev-parse '@{{u}}' 2>/dev/null || \\\n\
-                         \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
-                         _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
-                         if [ -n \"$_PUSHED_FILES\" ]; then\n\
-                         \x20 set --\n\
-                         \x20 while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
-                         $_PUSHED_FILES\n\
-                         _EOF_\n\
-                         \x20 {linthis} \"$@\"\n\
-                         fi\n",
-                        linthis = linthis_cmd
-                    )
-                } else {
-                    format!("#!/bin/sh\n{linthis_cmd} \"$@\"\n")
-                }
+                build_reentrant_git_script(event)
             } else {
-                // First invocation: full script that handles local-hook delegation.
                 build_global_hook_script_for_event(event, &None, None)
             }
         }
         HookTool::GitWithAgent => {
-            let fix_provider = match provider
-                .and_then(|p| match p.to_lowercase().as_str() {
-                    "claude"    => Some(AgentFixProvider::Claude),
-                    "codex"     => Some(AgentFixProvider::Codex),
-                    "gemini"    => Some(AgentFixProvider::Gemini),
-                    "cursor"    => Some(AgentFixProvider::Cursor),
-                    "droid"     => Some(AgentFixProvider::Droid),
-                    "auggie" | "aug" | "augment" => Some(AgentFixProvider::Auggie),
-                    "codebuddy" => Some(AgentFixProvider::Codebuddy),
-                    _ => None,
-                })
-                .or(Some(AgentFixProvider::Claude))
-            {
-                Some(p) => p,
-                None => {
-                    eprintln!("{}: hook run: unknown provider '{}'", "Error".red(), provider.unwrap_or(""));
-                    return 1;
-                }
-            };
+            let fix_provider = provider
+                .and_then(parse_agent_fix_provider_name)
+                .unwrap_or(AgentFixProvider::Claude);
             let linthis_cmd = build_hook_command(event, &None);
             build_git_with_agent_hook_script(&linthis_cmd, &fix_provider, event, provider_args)
         }
@@ -5287,23 +5099,18 @@ fn handle_hook_run(
         }
     };
 
-    // Show where this hook's behavior is configured from (Tier 1/2/3)
     {
         let description = describe_hook_source(hook_type, event);
         eprintln!("{}", format!("📄 Config: {}", description).dimmed());
     }
 
-    // Inject LINTHIS_HOOK_RUNNING_<pid>=1 so delegated child hooks can detect re-entry.
-    // Using PID as part of the variable NAME (not value) ensures concurrent commit
-    // operations don't interfere: each process has its own uniquely-named env var.
     let pid = std::process::id().to_string();
     let env_key = format!("{}{}", LINTHIS_HOOK_RUNNING_PREFIX, pid);
 
-    // Execute the generated script, passing through git hook arguments
     let status = std::process::Command::new("sh")
         .arg("-c")
         .arg(&script)
-        .arg("--") // placeholder for $0 (script name)
+        .arg("--")
         .args(hook_args)
         .env(&env_key, "1")
         .status();
@@ -5321,17 +5128,111 @@ fn handle_hook_run(
 // `linthis hook sync` — re-sync installed hooks from persisted metadata
 // =============================================================================
 
+/// Detect hook type from thin wrapper content.
+fn detect_hook_type_from_thin_wrapper(content: &str) -> HookTool {
+    if content.contains("--type git-with-agent") {
+        HookTool::GitWithAgent
+    } else if content.contains("--type agent") {
+        HookTool::Agent
+    } else if content.contains("--type prek-with-agent") {
+        HookTool::PrekWithAgent
+    } else if content.contains("--type prek") {
+        HookTool::Prek
+    } else {
+        HookTool::Git
+    }
+}
+
+/// Detect provider from old-format hook content using heuristics.
+fn detect_provider_from_old_hook(content: &str) -> Option<&'static str> {
+    if content.contains("codebuddy") {
+        Some("codebuddy")
+    } else if content.contains("codex") {
+        Some("codex")
+    } else if content.contains("gemini") {
+        Some("gemini")
+    } else if content.contains("cursor") {
+        Some("cursor")
+    } else if content.contains("claude") {
+        Some("claude")
+    } else {
+        None
+    }
+}
+
+/// Detect whether an old-format hook has agent-fix patterns.
+fn old_hook_has_agent(content: &str) -> bool {
+    content.contains("start_timer")
+        || content.contains("AGENT_PROVIDER")
+        || content.contains("claude")
+        || content.contains("codebuddy")
+        || content.contains("codex")
+}
+
+/// Record metadata for a thin wrapper that already exists on disk.
+fn record_thin_wrapper_metadata(
+    content: &str,
+    name: &str,
+    event: &HookEvent,
+    global: bool,
+    project: &str,
+) {
+    let provider_opt = content
+        .split("--provider ")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .map(|s| s.trim_end_matches('"').to_string());
+    let hook_type = detect_hook_type_from_thin_wrapper(content);
+    let scope = if global { "global" } else { "local" };
+    save_installed_hook(scope, project, event, &hook_type, provider_opt.as_deref(), None);
+    println!("  {} recorded thin wrapper {} {} ({})", "✓".green(), name, hook_type.as_str(), scope);
+}
+
+/// Migrate an old-format linthis hook to a thin wrapper.
+fn migrate_old_hook(
+    path: &std::path::Path,
+    content: &str,
+    name: &str,
+    event: &HookEvent,
+    global: bool,
+    project: &str,
+) -> bool {
+    let hook_type = if old_hook_has_agent(content) { HookTool::GitWithAgent } else { HookTool::Git };
+    let provider_opt = detect_provider_from_old_hook(content);
+    let thin = build_thin_wrapper_script(event, &hook_type, provider_opt, global, None);
+
+    if let Err(e) = std::fs::write(path, &thin) {
+        eprintln!("  {} Failed to migrate {}: {}", "✗".red(), name, e);
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
+
+    let scope = if global { "global" } else { "local" };
+    save_installed_hook(scope, project, event, &hook_type, provider_opt, None);
+    println!("  {} migrated {} → thin wrapper {} ({})", "✓".green(), name, hook_type.as_str(), scope);
+    eprintln!(
+        "  {} Hook type inferred from old script content (heuristic). \
+         If incorrect, re-install with the right type:\n  \
+         linthis hook install{} --event {} --type <type> --force",
+        "⚠".yellow(),
+        if global { " -g" } else { "" },
+        event.as_str(),
+    );
+    true
+}
+
 /// Scan `hook_dir` for old-format linthis hook scripts, migrate each to a thin
 /// wrapper, save metadata, and return the number of hooks migrated.
-///
-/// A file is considered a linthis hook if its content contains the marker
-/// `# linthis-hook` or already calls `linthis hook run`.
 fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, project: &str) -> usize {
-    use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
-    // Map filename → HookEvent
     let event_map: &[(&str, HookEvent)] = &[
         ("pre-commit", HookEvent::PreCommit),
         ("pre-push", HookEvent::PrePush),
@@ -5339,8 +5240,7 @@ fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, p
     ];
 
     let mut migrated = 0_usize;
-
-    let entries = match fs::read_dir(hook_dir) {
+    let entries = match std::fs::read_dir(hook_dir) {
         Ok(e) => e,
         Err(_) => return 0,
     };
@@ -5352,133 +5252,297 @@ fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, p
             None => continue,
         };
 
-        // Only consider known git hook filenames
-        let event_opt = event_map.iter().find(|(n, _)| *n == name);
-        let event = match event_opt {
+        let event = match event_map.iter().find(|(n, _)| *n == name) {
             Some((_, e)) => e,
             None => continue,
         };
 
         let path = entry.path();
-        let content = match fs::read_to_string(&path) {
+        let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };
 
-        // Skip if not a linthis-managed hook (old format or thin wrapper)
         let is_old_format = content.contains("# linthis-hook");
         let is_thin_wrapper = content.contains("linthis hook run");
         if !is_old_format && !is_thin_wrapper {
             continue;
         }
 
-        // If already a thin wrapper, just record metadata if missing
         if is_thin_wrapper {
-            // Parse provider from existing thin wrapper: --provider <p>
-            let provider_opt = content
-                .split("--provider ")
-                .nth(1)
-                .and_then(|s| s.split_whitespace().next())
-                .map(|s| s.trim_end_matches('"').to_string());
-            let hook_type = if content.contains("--type git-with-agent") {
-                HookTool::GitWithAgent
-            } else if content.contains("--type agent") {
-                HookTool::Agent
-            } else if content.contains("--type prek-with-agent") {
-                HookTool::PrekWithAgent
-            } else if content.contains("--type prek") {
-                HookTool::Prek
-            } else {
-                HookTool::Git
-            };
-            let scope = if global { "global" } else { "local" };
-            save_installed_hook(scope, project, event, &hook_type, provider_opt.as_deref(), None);
-            println!("  {} recorded thin wrapper {} {} ({})", "✓".green(), name, hook_type.as_str(), scope);
+            record_thin_wrapper_metadata(&content, name, event, global, project);
             migrated += 1;
             continue;
         }
 
-        // Old-format hook — detect hook_type from content heuristics
-        // Presence of "start_timer" or agent-specific patterns → git-with-agent
-        let has_agent = content.contains("start_timer")
-            || content.contains("AGENT_PROVIDER")
-            || content.contains("claude")
-            || content.contains("codebuddy")
-            || content.contains("codex");
-        let hook_type = if has_agent {
-            HookTool::GitWithAgent
-        } else {
-            HookTool::Git
-        };
-
-        // Try to detect provider from old script content
-        let provider_opt: Option<&str> = if content.contains("codebuddy") {
-            Some("codebuddy")
-        } else if content.contains("codex") {
-            Some("codex")
-        } else if content.contains("gemini") {
-            Some("gemini")
-        } else if content.contains("cursor") {
-            Some("cursor")
-        } else if content.contains("claude") {
-            Some("claude")
-        } else {
-            None
-        };
-
-        // Build thin wrapper and overwrite the hook file
-        let thin = build_thin_wrapper_script(event, &hook_type, provider_opt, global, None);
-        match fs::write(&path, &thin) {
-            Ok(_) => {
-                #[cfg(unix)]
-                {
-                    if let Ok(meta) = fs::metadata(&path) {
-                        let mut perms = meta.permissions();
-                        perms.set_mode(0o755);
-                        let _ = fs::set_permissions(&path, perms);
-                    }
-                }
-                let scope = if global { "global" } else { "local" };
-                save_installed_hook(scope, project, event, &hook_type, provider_opt, None);
-                println!(
-                    "  {} migrated {} → thin wrapper {} ({})",
-                    "✓".green(),
-                    name,
-                    hook_type.as_str(),
-                    scope
-                );
-                eprintln!(
-                    "  {} Hook type inferred from old script content (heuristic). \
-                     If incorrect, re-install with the right type:\n  \
-                     linthis hook install{} --event {} --type <type> --force",
-                    "⚠".yellow(),
-                    if global { " -g" } else { "" },
-                    event.as_str(),
-                );
-                migrated += 1;
-            }
-            Err(e) => {
-                eprintln!("  {} Failed to migrate {}: {}", "✗".red(), name, e);
-            }
+        if migrate_old_hook(&path, &content, name, event, global, project) {
+            migrated += 1;
         }
     }
 
     migrated
 }
 
-/// Re-sync installed hooks for local project or global scope.
-///
-/// Reads `~/.linthis/installed-hooks.toml` and re-generates thin wrapper
-/// scripts and agent skill components for each recorded hook installation.
-pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
-    use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
+/// Parse event string back to HookEvent enum.
+fn parse_hook_event(s: &str) -> Option<HookEvent> {
+    match s {
+        "pre-commit" => Some(HookEvent::PreCommit),
+        "pre-push"   => Some(HookEvent::PrePush),
+        "commit-msg" => Some(HookEvent::CommitMsg),
+        _ => None,
+    }
+}
 
+/// Parse hook type string back to HookTool enum.
+fn parse_hook_tool(s: &str) -> Option<HookTool> {
+    match s {
+        "git"             => Some(HookTool::Git),
+        "git-with-agent"  => Some(HookTool::GitWithAgent),
+        "agent"           => Some(HookTool::Agent),
+        "prek"            => Some(HookTool::Prek),
+        "prek-with-agent" => Some(HookTool::PrekWithAgent),
+        _ => None,
+    }
+}
+
+/// Parse a provider name string to AgentProvider. Used by sync to resolve skill_providers.
+fn parse_sync_agent_provider(name: &str) -> Option<AgentProvider> {
+    match name.to_lowercase().as_str() {
+        "claude"    => Some(AgentProvider::Claude),
+        "codex"     => Some(AgentProvider::Codex),
+        "gemini"    => Some(AgentProvider::Gemini),
+        "cursor"    => Some(AgentProvider::Cursor),
+        "droid"     => Some(AgentProvider::Droid),
+        "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
+        "codebuddy" => Some(AgentProvider::Codebuddy),
+        "openclaw"  => Some(AgentProvider::Openclaw),
+        _ => None,
+    }
+}
+
+/// Group filtered hooks by hook_type for structured output.
+fn group_hooks_by_type<'a>(filtered: &'a [&'a InstalledHook]) -> Vec<(&'a str, Vec<&'a &'a InstalledHook>)> {
+    let type_order = ["agent", "git-with-agent", "prek-with-agent", "git", "prek"];
+    let mut grouped: Vec<(&str, Vec<&&InstalledHook>)> = Vec::new();
+    for ht in &type_order {
+        let group: Vec<&&InstalledHook> = filtered.iter().filter(|h| h.hook_type == *ht).collect();
+        if !group.is_empty() {
+            grouped.push((ht, group));
+        }
+    }
+    for hook in filtered {
+        if !type_order.contains(&hook.hook_type.as_str()) {
+            let existing = grouped.iter().any(|(ht, _)| *ht == hook.hook_type.as_str());
+            if !existing {
+                let group: Vec<&&InstalledHook> = filtered.iter().filter(|h| h.hook_type == hook.hook_type).collect();
+                grouped.push((hook.hook_type.as_str(), group));
+            }
+        }
+    }
+    grouped
+}
+
+/// Re-write a thin wrapper hook script for a single hook entry. Returns Ok(()) or increments errors.
+fn sync_thin_wrapper(
+    hook: &InstalledHook,
+    event: &HookEvent,
+    hook_type: &HookTool,
+    provider_opt: Option<&str>,
+    global: bool,
+    project_root: &std::path::Path,
+) -> Result<(), ()> {
+    if matches!(hook_type, HookTool::Agent | HookTool::Prek) {
+        return Ok(());
+    }
+
+    let hook_dir = if global {
+        match global_hooks_dir() {
+            Some(d) => d,
+            None => {
+                eprintln!("  {} Could not determine global hooks directory", "✗".red());
+                return Err(());
+            }
+        }
+    } else {
+        project_root.join(".git/hooks")
+    };
+
+    let hook_file = hook_dir.join(event.hook_filename());
+    let pa_opt: Option<&str> = if hook.provider_args.is_empty() { None } else { Some(&hook.provider_args) };
+    let thin_script = build_thin_wrapper_script(event, hook_type, provider_opt, global, pa_opt);
+    if let Some(parent) = hook_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(code) = write_hook_script(&hook_file, &thin_script) {
+        let _ = code;
+        eprintln!("  {} Failed to write {}", "✗".red(), hook_file.display());
+        return Err(());
+    }
+    Ok(())
+}
+
+/// Re-sync agent skills for a single "agent" type hook entry.
+fn sync_agent_skills(
+    hook: &InstalledHook,
+    event: &HookEvent,
+    provider_opt: Option<&str>,
+    global: bool,
+    project_root: &std::path::Path,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> u32 {
+    let base = if global { dirs::home_dir().unwrap_or_default() } else { project_root.to_path_buf() };
+
+    let mut skill_targets: Vec<AgentProvider> = hook.skill_providers.iter()
+        .filter_map(|name| parse_sync_agent_provider(name))
+        .collect();
+
+    // Backward compatibility: if no skill_providers, fall back to fix provider
+    if skill_targets.is_empty() {
+        if let Some(fb) = provider_opt.and_then(parse_sync_agent_provider) {
+            skill_targets.push(fb);
+        }
+    }
+
+    let mut errors = 0_u32;
+    for provider in &skill_targets {
+        let skill_path = agent_skill_path(&base, provider, global, event, skill_names);
+        if let Err(e) = install_agent_skill(&base, provider, global, event, skill_names) {
+            eprintln!("     {} agent sync error ({}): {}", "✗".red(), provider, e);
+            errors += 1;
+            continue;
+        }
+        println!("     {} {} skill → {}", "↳".dimmed(), provider, skill_path.display());
+        if let Some(cmd_dir) = agent_command_dir(&base, provider) {
+            if cmd_dir.exists() {
+                println!("     {} {} command → {}", "↳".dimmed(), provider, cmd_dir.display());
+            }
+        }
+        if matches!(event, HookEvent::PreCommit) {
+            if let Some(settings_path) = agent_stop_hook_settings_path(&base, provider) {
+                if settings_path.exists() {
+                    println!("     {} {} stop hook → {}", "↳".dimmed(), provider, settings_path.display());
+                }
+            }
+        }
+    }
+    errors
+}
+
+/// Disk-scan pass: refresh skills for providers that exist on disk but aren't in the TOML.
+fn sync_disk_scan_pass(
+    base: &std::path::Path,
+    global: bool,
+    filtered: &[&InstalledHook],
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) {
+    let all_scan_providers = [
+        AgentProvider::Claude, AgentProvider::Codebuddy, AgentProvider::Gemini,
+        AgentProvider::Cursor, AgentProvider::Droid, AgentProvider::Auggie,
+    ];
+    let all_scan_events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
+    for scan_event in &all_scan_events {
+        for scan_provider in &all_scan_providers {
+            let skill_path = agent_skill_path(base, scan_provider, global, scan_event, skill_names);
+            if !skill_path.exists() {
+                continue;
+            }
+            let provider_name_lower = format!("{}", scan_provider).to_lowercase();
+            let already_registered = filtered.iter().any(|h| {
+                h.event == scan_event.as_str()
+                    && matches!(h.hook_type.as_str(), "git-with-agent" | "agent" | "prek-with-agent")
+                    && h.skill_providers.iter().any(|sp| sp.to_lowercase() == provider_name_lower)
+            });
+            if already_registered {
+                continue;
+            }
+            if let Err(e) = install_agent_skill(base, scan_provider, global, scan_event, skill_names) {
+                eprintln!("  {} skill refresh error ({:?}/{}): {}", "⚠".yellow(), scan_provider, scan_event.as_str(), e);
+            }
+        }
+    }
+}
+
+/// Handle empty metadata case: auto-detect and migrate existing hooks.
+fn handle_sync_no_metadata(global: bool, project_root: &std::path::Path) -> i32 {
+    let hook_dir = if global {
+        match global_hooks_dir() {
+            Some(d) => d,
+            None => {
+                eprintln!("{}: Could not determine global hooks directory", "Error".red());
+                return 1;
+            }
+        }
+    } else {
+        project_root.join(".git/hooks")
+    };
+
+    let detected = detect_and_migrate_existing_hooks(
+        &hook_dir, global,
+        if global { "" } else { project_root.to_str().unwrap_or("") },
+    );
+
+    if detected == 0 {
+        if global {
+            println!("No global linthis hooks found to sync.");
+            println!("  Run {} to install global hooks", "linthis hook install -g".cyan());
+        } else {
+            println!("No local linthis hooks found for this project.");
+            println!("  Run {} to install and record hooks", "linthis hook install".cyan());
+            println!("  Use {} to sync global hooks.", "linthis hook sync -g".cyan());
+        }
+    }
+    0
+}
+
+/// Sync a single hook entry: re-write thin wrapper and optionally re-sync agent skills.
+/// Returns the number of errors encountered.
+fn sync_single_hook(
+    hook: &InstalledHook,
+    hook_index: &mut usize,
+    target_scope: &str,
+    global: bool,
+    project_root: &std::path::Path,
+    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
+) -> u32 {
+    let mut errors = 0_u32;
+
+    let event = match parse_hook_event(&hook.event) {
+        Some(e) => e,
+        None => { eprintln!("  {} Unknown event '{}', skipping", "✗".red(), hook.event); return 1; }
+    };
+    let hook_type = match parse_hook_tool(&hook.hook_type) {
+        Some(t) => t,
+        None => { eprintln!("  {} Unknown hook type '{}', skipping", "✗".red(), hook.hook_type); return 1; }
+    };
+    let prov_str: &str = &hook.provider;
+    let provider_opt: Option<&str> = if prov_str.is_empty() { None } else { Some(prov_str) };
+
+    if sync_thin_wrapper(hook, &event, &hook_type, provider_opt, global, project_root).is_err() {
+        return 1;
+    }
+
+    *hook_index += 1;
+    let mut details = vec![target_scope.to_string()];
+    if let Some(fp) = provider_opt {
+        if !fp.is_empty() { details.push(format!("fix: {}", fp)); }
+    }
+    if !hook.skill_providers.is_empty() {
+        details.push(format!("skills: {}", hook.skill_providers.join(",")));
+    }
+    println!("  {}. {} synced {} {} ({})", hook_index, "✓".green(), hook.event, hook.hook_type, details.join(", "));
+
+    if matches!(hook_type, HookTool::Agent) {
+        errors += sync_agent_skills(hook, &event, provider_opt, global, project_root, skill_names);
+    }
+
+    errors
+}
+
+/// Re-sync installed hooks for local project or global scope.
+pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
     let hooks_file = load_installed_hooks();
     let target_scope = if global { "global" } else { "local" };
 
-    // Determine project root for local scope
     let project_root: PathBuf = if !global {
         match find_git_root() {
             Some(r) => r,
@@ -5491,289 +5555,38 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
         PathBuf::new()
     };
 
-    // Load configured skill name aliases
     let sync_project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let skill_names_cfg = linthis::config::Config::load_merged(&sync_project_root).hook.agent.skill_names;
     let skill_names = Some(&skill_names_cfg);
 
-    let filtered: Vec<&InstalledHook> = hooks_file
-        .hooks
-        .iter()
+    let filtered: Vec<&InstalledHook> = hooks_file.hooks.iter()
         .filter(|h| h.scope == target_scope)
-        .filter(|h| {
-            if global {
-                true
-            } else {
-                h.project.is_empty()
-                    || h.project == project_root.to_str().unwrap_or("")
-            }
-        })
+        .filter(|h| global || h.project.is_empty() || h.project == project_root.to_str().unwrap_or(""))
         .collect();
 
     if filtered.is_empty() {
-        // No metadata recorded — try auto-detecting existing linthis hooks on disk
-        // (hooks installed before the thin-wrapper / metadata feature was added).
-        let hook_dir = if global {
-            match global_hooks_dir() {
-                Some(d) => d,
-                None => {
-                    eprintln!("{}: Could not determine global hooks directory", "Error".red());
-                    return 1;
-                }
-            }
-        } else {
-            project_root.join(".git/hooks")
-        };
-
-        let detected = detect_and_migrate_existing_hooks(
-            &hook_dir,
-            global,
-            if global { "" } else { project_root.to_str().unwrap_or("") },
-        );
-
-        if detected == 0 {
-            if global {
-                println!("No global linthis hooks found to sync.");
-                println!("  Run {} to install global hooks", "linthis hook install -g".cyan());
-            } else {
-                println!("No local linthis hooks found for this project.");
-                println!("  Run {} to install and record hooks", "linthis hook install".cyan());
-                println!("  Use {} to sync global hooks.", "linthis hook sync -g".cyan());
-            }
-        }
-        return 0;
+        return handle_sync_no_metadata(global, &project_root);
     }
 
-    // Group entries by hook_type for structured output
-    let type_order = ["agent", "git-with-agent", "prek-with-agent", "git", "prek"];
-    let mut grouped: Vec<(&str, Vec<&&InstalledHook>)> = Vec::new();
-    for ht in &type_order {
-        let group: Vec<&&InstalledHook> = filtered.iter().filter(|h| h.hook_type == *ht).collect();
-        if !group.is_empty() {
-            grouped.push((ht, group));
-        }
-    }
-    // Catch any hook_types not in type_order
-    for hook in &filtered {
-        if !type_order.contains(&hook.hook_type.as_str()) {
-            let existing = grouped.iter().any(|(ht, _)| *ht == hook.hook_type.as_str());
-            if !existing {
-                let group: Vec<&&InstalledHook> = filtered.iter().filter(|h| h.hook_type == hook.hook_type).collect();
-                grouped.push((hook.hook_type.as_str(), group));
-            }
-        }
-    }
+    let grouped = group_hooks_by_type(&filtered);
 
     println!("{} Syncing {} hook(s)...", "→".cyan(), filtered.len());
-
     let mut errors = 0_u32;
-
     let mut hook_index = 0_usize;
 
     for (group_type, group_hooks) in &grouped {
-    println!();
-    println!("{} Type: {} ({} hook{})", "→".cyan(), group_type.cyan(), group_hooks.len(), if group_hooks.len() == 1 { "" } else { "s" });
+        println!();
+        let gt: &str = group_type;
+        let gh_len = group_hooks.len();
+        println!("{} Type: {} ({} hook{})", "→".cyan(), gt.cyan(), gh_len, if gh_len == 1 { "" } else { "s" });
 
-    for hook in group_hooks {
-        // Parse event and hook_type back from stored strings
-        let event = match hook.event.as_str() {
-            "pre-commit" => HookEvent::PreCommit,
-            "pre-push"   => HookEvent::PrePush,
-            "commit-msg" => HookEvent::CommitMsg,
-            other => {
-                eprintln!("  {} Unknown event '{}', skipping", "✗".red(), other);
-                errors += 1;
-                continue;
-            }
-        };
-        let hook_type = match hook.hook_type.as_str() {
-            "git"                  => HookTool::Git,
-            "git-with-agent"       => HookTool::GitWithAgent,
-            "agent"                => HookTool::Agent,
-            "prek"                 => HookTool::Prek,
-            "prek-with-agent"      => HookTool::PrekWithAgent,
-            other => {
-                eprintln!("  {} Unknown hook type '{}', skipping", "✗".red(), other);
-                errors += 1;
-                continue;
-            }
-        };
-        let provider_opt: Option<&str> = if hook.provider.is_empty() {
-            None
-        } else {
-            Some(&hook.provider)
-        };
-
-        // 1. Re-generate thin wrapper git hook script
-        let hook_dir = if global {
-            match global_hooks_dir() {
-                Some(d) => d,
-                None => {
-                    eprintln!("  {} Could not determine global hooks directory", "✗".red());
-                    errors += 1;
-                    continue;
-                }
-            }
-        } else {
-            project_root.join(".git/hooks")
-        };
-
-        // Only re-write thin wrapper for types that have one
-        if !matches!(hook_type, HookTool::Agent | HookTool::Prek) {
-            let hook_file = hook_dir.join(event.hook_filename());
-            let pa_opt: Option<&str> = if hook.provider_args.is_empty() { None } else { Some(&hook.provider_args) };
-            let thin_script = build_thin_wrapper_script(&event, &hook_type, provider_opt, global, pa_opt);
-            if let Some(parent) = hook_file.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            match fs::write(&hook_file, &thin_script) {
-                Ok(_) => {
-                    #[cfg(unix)]
-                    {
-                        if let Ok(meta) = fs::metadata(&hook_file) {
-                            let mut perms = meta.permissions();
-                            perms.set_mode(0o755);
-                            let _ = fs::set_permissions(&hook_file, perms);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("  {} Failed to write {}: {}", "✗".red(), hook_file.display(), e);
-                    errors += 1;
-                    continue;
-                }
-            }
-        }
-
-        // Print summary line FIRST (总), then details (分)
-        hook_index += 1;
-        let mut details = Vec::new();
-        details.push(target_scope.to_string());
-        if let Some(fp) = provider_opt {
-            if !fp.is_empty() {
-                details.push(format!("fix: {}", fp));
-            }
-        }
-        if !hook.skill_providers.is_empty() {
-            details.push(format!("skills: {}", hook.skill_providers.join(",")));
-        }
-        println!(
-            "  {}. {} synced {} {} ({})",
-            hook_index,
-            "✓".green(),
-            hook.event,
-            hook.hook_type,
-            details.join(", ")
-        );
-
-        // 2. Re-sync agent skills (only for "agent" type entries).
-        //    git-with-agent / prek-with-agent entries only sync thin wrappers;
-        //    their agent skills are tracked via separate "agent" TOML entries.
-        if matches!(hook_type, HookTool::Agent) {
-            let base = if global {
-                dirs::home_dir().unwrap_or_default()
-            } else {
-                project_root.clone()
-            };
-
-            // Build target list from TOML skill_providers
-            let mut skill_targets: Vec<AgentProvider> = hook.skill_providers.iter().filter_map(|name| {
-                match name.to_lowercase().as_str() {
-                    "claude"    => Some(AgentProvider::Claude),
-                    "codex"     => Some(AgentProvider::Codex),
-                    "gemini"    => Some(AgentProvider::Gemini),
-                    "cursor"    => Some(AgentProvider::Cursor),
-                    "droid"     => Some(AgentProvider::Droid),
-                    "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
-                    "codebuddy" => Some(AgentProvider::Codebuddy),
-                    "openclaw"  => Some(AgentProvider::Openclaw),
-                    _ => None,
-                }
-            }).collect();
-
-            // Backward compatibility: if no skill_providers recorded, fall back to fix provider
-            if skill_targets.is_empty() {
-                if let Some(fb) = provider_opt.and_then(|p| match p.to_lowercase().as_str() {
-                    "claude"    => Some(AgentProvider::Claude),
-                    "codex"     => Some(AgentProvider::Codex),
-                    "gemini"    => Some(AgentProvider::Gemini),
-                    "cursor"    => Some(AgentProvider::Cursor),
-                    "droid"     => Some(AgentProvider::Droid),
-                    "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
-                    "codebuddy" => Some(AgentProvider::Codebuddy),
-                    "openclaw"  => Some(AgentProvider::Openclaw),
-                    _ => None,
-                }) {
-                    skill_targets.push(fb);
-                }
-            }
-
-            for provider in &skill_targets {
-                let skill_path = agent_skill_path(&base, provider, global, &event, skill_names);
-                if let Err(e) = install_agent_skill(&base, provider, global, &event, skill_names) {
-                    eprintln!("     {} agent sync error ({}): {}", "✗".red(), provider, e);
-                    errors += 1;
-                    continue;
-                }
-                println!("     {} {} skill → {}", "↳".dimmed(), provider, skill_path.display());
-                if let Some(cmd_dir) = agent_command_dir(&base, provider) {
-                    if cmd_dir.exists() {
-                        println!("     {} {} command → {}", "↳".dimmed(), provider, cmd_dir.display());
-                    }
-                }
-                if matches!(event, HookEvent::PreCommit) {
-                    if let Some(settings_path) = agent_stop_hook_settings_path(&base, provider) {
-                        if settings_path.exists() {
-                            println!("     {} {} stop hook → {}", "↳".dimmed(), provider, settings_path.display());
-                        }
-                    }
-                }
-            }
-        }
-    } // end for hook in group_hooks
-    } // end for (group_type, group_hooks) in &grouped
-
-    // ── Disk-scan pass: refresh skills for providers not in the TOML ────────────
-    // Covers backward-compat: if the user previously installed codebuddy skills
-    // then reinstalled with claude (overwriting the TOML entry), the skill files
-    // on disk still exist but no TOML entry records them.  Refresh any we find.
-    let base_for_scan = if global {
-        dirs::home_dir().unwrap_or_default()
-    } else {
-        project_root.clone()
-    };
-    let all_scan_providers = [
-        AgentProvider::Claude,
-        AgentProvider::Codebuddy,
-        AgentProvider::Gemini,
-        AgentProvider::Cursor,
-        AgentProvider::Droid,
-        AgentProvider::Auggie,
-    ];
-    let all_scan_events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
-    for scan_event in &all_scan_events {
-        for scan_provider in &all_scan_providers {
-            let skill_path = agent_skill_path(&base_for_scan, scan_provider, global, scan_event, skill_names);
-            if !skill_path.exists() {
-                continue;
-            }
-            // Already handled above (registered in TOML skill_providers)? skip to avoid double output.
-            let provider_name_lower = format!("{}", scan_provider).to_lowercase();
-            let already_registered = filtered.iter().any(|h| {
-                h.event == scan_event.as_str()
-                    && matches!(h.hook_type.as_str(), "git-with-agent" | "agent" | "prek-with-agent")
-                    && h.skill_providers.iter().any(|sp| sp.to_lowercase() == provider_name_lower)
-            });
-            if already_registered {
-                continue;
-            }
-            // Unregistered but exists on disk — refresh silently
-            if let Err(e) = install_agent_skill(&base_for_scan, scan_provider, global, scan_event, skill_names) {
-                eprintln!("  {} skill refresh error ({:?}/{}): {}", "⚠".yellow(), scan_provider, scan_event.as_str(), e);
-            }
+        for hook in group_hooks {
+            errors += sync_single_hook(hook, &mut hook_index, target_scope, global, &project_root, skill_names);
         }
     }
-    // ── End disk-scan pass ──────────────────────────────────────────────────────
+
+    let base_for_scan = if global { dirs::home_dir().unwrap_or_default() } else { project_root.clone() };
+    sync_disk_scan_pass(&base_for_scan, global, &filtered, skill_names);
 
     if errors > 0 {
         eprintln!("{} {} error(s) during sync", "⚠".yellow(), errors);
