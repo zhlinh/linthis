@@ -957,9 +957,15 @@ pub fn format_result_hook_with_width(
     config_width: Option<u32>,
 ) -> String {
     let ctx = HookBoxContext::new(config_width);
-    let total_issues = result.issues.len();
 
-    if total_issues == 0 && result.exit_code == 0 {
+    // Only error + warning trigger Blocked box; info-only is considered passed
+    let actionable_issues: usize = result
+        .issues
+        .iter()
+        .filter(|i| i.severity == Severity::Error || i.severity == Severity::Warning)
+        .count();
+
+    if actionable_issues == 0 && result.exit_code == 0 {
         return format_hook_success_box(result, hook_type, &ctx);
     }
 
@@ -973,6 +979,18 @@ pub fn format_result_hook_with_width(
         .iter()
         .filter(|i| i.severity == Severity::Warning)
         .count();
+    // Only count files with error/warning (not info)
+    let files_with_issues = {
+        let mut files = std::collections::HashSet::new();
+        for i in result
+            .issues
+            .iter()
+            .filter(|i| i.severity != Severity::Info)
+        {
+            files.insert(&i.file_path);
+        }
+        files.len()
+    };
 
     let hook_name = hook_display_name(hook_type);
     let mut output = String::new();
@@ -983,35 +1001,36 @@ pub fn format_result_hook_with_width(
     output.push_str(&format!("{}\n", ctx.pad_line(&header, 1).red()));
     output.push_str(&format!("{}\n", ctx.mid_border.red()));
 
-    // Summary line
+    // Summary line (only errors + warnings, consistent with lint behavior)
     let summary = format!(
         "{} error{}, {} warning{} in {} file{}",
         error_count,
         if error_count == 1 { "" } else { "s" },
         warning_count,
         if warning_count == 1 { "" } else { "s" },
-        result.files_with_issues,
-        if result.files_with_issues == 1 {
-            ""
-        } else {
-            "s"
-        }
+        files_with_issues,
+        if files_with_issues == 1 { "" } else { "s" },
     );
     output.push_str(&format!("{}\n", ctx.pad_line(&summary, 0)));
     output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
 
-    // List issues
+    // List issues (only errors + warnings, skip info)
+    let actionable: Vec<_> = result
+        .issues
+        .iter()
+        .filter(|i| i.severity != Severity::Info)
+        .collect();
     let max_issues = 8;
-    for issue in result.issues.iter().take(max_issues) {
+    for issue in actionable.iter().take(max_issues) {
         let line_content = format_hook_issue_line(issue, ctx.content_width);
         output.push_str(&format!("{}\n", ctx.pad_line(&line_content, 0)));
     }
 
-    if total_issues > max_issues {
+    if actionable.len() > max_issues {
         let more_line = format!(
             " ... and {} more issue{}",
-            total_issues - max_issues,
-            if total_issues - max_issues == 1 {
+            actionable.len() - max_issues,
+            if actionable.len() - max_issues == 1 {
                 ""
             } else {
                 "s"
