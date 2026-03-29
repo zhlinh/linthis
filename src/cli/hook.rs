@@ -799,12 +799,31 @@ fn build_global_hook_script_for_event(
     // For other events (pre-commit receives nothing, commit-msg receives $1 =
     // message file via "$@") the existing "$@" passthrough is correct.
     let (pre_push_preamble, local_hook_orig_args) = if matches!(hook_event, HookEvent::PrePush) {
-        let preamble = "# For pre-push: save remote args, compute pushed files as -i flags\n\
+        let preamble = "# For pre-push: save remote args, read stdin for push info\n\
              _REMOTE_NAME=\"$1\"\n\
              _REMOTE_URL=\"$2\"\n\
-             _BASE=$(git rev-parse '@{u}' 2>/dev/null || \\\n\
-             \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
-             _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
+             # Read push info from stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>\n\
+             _IS_TAG=0\n\
+             _LOCAL_SHA=\"\"\n\
+             _REMOTE_SHA=\"\"\n\
+             while read -r _LREF _LSHA _RREF _RSHA; do\n\
+             \x20 # Skip tag pushes — no source code to check\n\
+             \x20 case \"$_LREF\" in refs/tags/*) _IS_TAG=1 ;; esac\n\
+             \x20 _LOCAL_SHA=\"$_LSHA\"\n\
+             \x20 _REMOTE_SHA=\"$_RSHA\"\n\
+             done\n\
+             if [ \"$_IS_TAG\" = \"1\" ]; then\n\
+             \x20 exit 0\n\
+             fi\n\
+             # Compute changed files between remote and local\n\
+             _ZERO_SHA=\"0000000000000000000000000000000000000000\"\n\
+             if [ \"$_REMOTE_SHA\" = \"$_ZERO_SHA\" ]; then\n\
+             \x20 # New branch: diff against default branch\n\
+             \x20 _BASE=$(git rev-parse 'HEAD~1' 2>/dev/null || echo \"$_LOCAL_SHA\")\n\
+             else\n\
+             \x20 _BASE=\"$_REMOTE_SHA\"\n\
+             fi\n\
+             _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..\"$_LOCAL_SHA\" 2>/dev/null | grep -v '^$')\n\
              # No files to push = nothing to check\n\
              if [ -z \"$_PUSHED_FILES\" ]; then\n\
              \x20 exit 0\n\
