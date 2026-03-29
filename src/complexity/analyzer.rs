@@ -136,7 +136,7 @@ impl AnalysisResult {
     }
 
     /// Calculate summary statistics
-    fn calculate_summary(&mut self) {
+    pub fn calculate_summary(&mut self) {
         self.summary.total_files = self.files.len();
         self.summary.total_functions = self.files.iter().map(|f| f.functions.len()).sum();
         self.summary.total_loc = self.files.iter().map(|f| f.metrics.loc as u64).sum();
