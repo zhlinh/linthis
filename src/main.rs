@@ -92,177 +92,65 @@ fn inject_dynamic_help(cmd: &mut clap::Command) {
     }
 }
 
-fn main() -> ExitCode {
-    env_logger::init();
-
-    let mut cmd = Cli::command();
-    inject_dynamic_help(&mut cmd);
-    let matches = cmd.get_matches();
-    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
-
-    // Handle plugin subcommands first
-    if let Some(Commands::Plugin { action }) = cli.command {
-        return handle_plugin_command(action);
-    }
-
-    // Handle config subcommands
-    if let Some(Commands::Config { action }) = cli.command {
-        return handle_config_command(action);
-    }
-
-    // Handle hook subcommands
-    if let Some(Commands::Hook { action }) = cli.command {
-        return handle_hook_command(action);
-    }
-
-    // Handle cmsg subcommand (commit message validation)
-    if let Some(Commands::Cmsg { msg_or_file, auto_fix, provider }) = cli.command {
-        return handle_commit_msg_check(&msg_or_file, auto_fix, provider.as_deref());
-    }
-
-    // Handle init subcommand
-    if let Some(Commands::Init { global, with_hook, force }) = cli.command {
-        return handle_init_command(global, with_hook, force);
-    }
-
-    // Handle doctor subcommand
-    if let Some(Commands::Doctor { all, output }) = cli.command {
-        return handle_doctor_command(all, &output);
-    }
-
-    // Handle cache subcommand
-    if let Some(Commands::Cache { action }) = cli.command {
-        return handle_cache_command(action);
-    }
-
-    // Handle lint subcommand → delegate to main flow with check_only + checks=["lint"]
-    if matches!(cli.command, Some(Commands::Lint { .. })) {
-        if let Some(Commands::Lint {
-            paths,
-            staged,
-            modified,
-            since,
-            lang,
-            exclude,
-            no_default_excludes,
-            no_gitignore,
-            output,
-            no_cache,
+/// Dispatch early-return subcommands that don't need the main lint flow.
+/// Returns `Some(ExitCode)` if a subcommand was handled, `None` otherwise.
+fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
+    match command {
+        Commands::Plugin { action } => Some(handle_plugin_command(action)),
+        Commands::Config { action } => Some(handle_config_command(action)),
+        Commands::Hook { action } => Some(handle_hook_command(action)),
+        Commands::Cmsg {
+            msg_or_file,
+            auto_fix,
+            provider,
+        } => Some(handle_commit_msg_check(
+            &msg_or_file,
+            auto_fix,
+            provider.as_deref(),
+        )),
+        Commands::Init {
+            global,
+            with_hook,
+            force,
+        } => Some(handle_init_command(global, with_hook, force)),
+        Commands::Doctor { all, output } => Some(handle_doctor_command(all, &output)),
+        Commands::Cache { action } => Some(handle_cache_command(action)),
+        Commands::Security {
+            path,
+            scan_type,
+            severity,
+            include_dev,
+            fix,
+            ignore,
+            format,
+            sbom,
+            fail_on,
+            sast_config,
             verbose,
-            quiet,
-        }) = cli.command.take()
-        {
-            cli.paths = paths;
-            cli.staged = staged;
-            cli.modified = modified;
-            cli.since = since;
-            cli.lang = lang;
-            cli.exclude = exclude;
-            cli.no_default_excludes = no_default_excludes;
-            cli.no_gitignore = no_gitignore;
-            cli.output = output;
-            cli.no_cache = no_cache;
-            cli.verbose = verbose;
-            cli.quiet = quiet;
-            cli.check_only = true;
-            cli.checks = Some(vec!["lint".to_string()]);
-        }
-        // Fall through to main lint flow below
-    }
-
-    // Handle check subcommand → delegate to main flow with check_only
-    if matches!(cli.command, Some(Commands::Check { .. })) {
-        if let Some(Commands::Check {
-            paths,
-            staged,
-            modified,
-            since,
-            checks,
-            lang,
-            exclude,
-            no_default_excludes,
-            no_gitignore,
-            output,
-            no_cache,
-            verbose,
-            quiet,
-        }) = cli.command.take()
-        {
-            cli.paths = paths;
-            cli.staged = staged;
-            cli.modified = modified;
-            cli.since = since;
-            cli.checks = checks;
-            cli.lang = lang;
-            cli.exclude = exclude;
-            cli.no_default_excludes = no_default_excludes;
-            cli.no_gitignore = no_gitignore;
-            cli.output = output;
-            cli.no_cache = no_cache;
-            cli.verbose = verbose;
-            cli.quiet = quiet;
-            cli.check_only = true;
-        }
-        // Fall through to main lint flow below
-    }
-
-    // Handle security subcommand
-    if let Some(Commands::Security {
-        path,
-        scan_type,
-        severity,
-        include_dev,
-        fix,
-        ignore,
-        format,
-        sbom,
-        fail_on,
-        sast_config,
-        verbose,
-    }) = cli.command
-    {
-        return handle_security_command(
+        } => Some(handle_security_command(
             path, scan_type, severity, include_dev, fix, ignore, format, sbom, fail_on,
             sast_config, verbose,
-        );
-    }
-
-    // Handle license subcommand
-    if let Some(Commands::License {
-        path,
-        policy,
-        policy_file,
-        include_dev,
-        format,
-        sbom,
-        fail_on_violation,
-        verbose,
-    }) = cli.command
-    {
-        return handle_license_command(
-            path, policy, policy_file, include_dev, format, sbom, fail_on_violation, verbose,
-        );
-    }
-
-    // Handle complexity subcommand
-    if let Some(Commands::Complexity {
-        path,
-        staged,
-        modified,
-        include,
-        exclude,
-        threshold,
-        preset,
-        format,
-        with_trends,
-        trend_count,
-        only_high,
-        sort,
-        no_parallel,
-        verbose,
-    }) = cli.command
-    {
-        return handle_complexity_command(ComplexityCommandOptions {
+        )),
+        Commands::License {
+            path,
+            policy,
+            policy_file,
+            include_dev,
+            format,
+            sbom,
+            fail_on_violation,
+            verbose,
+        } => Some(handle_license_command(
+            path,
+            policy,
+            policy_file,
+            include_dev,
+            format,
+            sbom,
+            fail_on_violation,
+            verbose,
+        )),
+        Commands::Complexity {
             path,
             staged,
             modified,
@@ -277,23 +165,23 @@ fn main() -> ExitCode {
             sort,
             no_parallel,
             verbose,
-        });
-    }
-
-    // Handle format subcommand
-    if let Some(Commands::Format {
-        paths,
-        staged,
-        modified,
-        exclude,
-        undo,
-        source,
-        list_backups,
-        verbose,
-        quiet,
-    }) = cli.command
-    {
-        return handle_format_command(FormatCommandOptions {
+        } => Some(handle_complexity_command(ComplexityCommandOptions {
+            path,
+            staged,
+            modified,
+            include,
+            exclude,
+            threshold,
+            preset,
+            format,
+            with_trends,
+            trend_count,
+            only_high,
+            sort,
+            no_parallel,
+            verbose,
+        })),
+        Commands::Format {
             paths,
             staged,
             modified,
@@ -303,43 +191,22 @@ fn main() -> ExitCode {
             list_backups,
             verbose,
             quiet,
-        });
-    }
-
-    // Handle fix subcommand
-    if let Some(Commands::Fix {
-        source,
-        check,
-        format_only,
-        auto_fix,
-        ai,
-        provider,
-        model,
-        max_suggestions,
-        accept_all,
-        jobs,
-        file,
-        line,
-        message,
-        rule,
-        output,
-        with_context,
-        verbose,
-        quiet,
-        undo,
-        list_backups,
-    }) = cli.command
-    {
-        // --auto expands to --ai -y
-        let (ai, accept_all) = if auto_fix {
-            (true, true)
-        } else {
-            (ai, accept_all)
-        };
-        return handle_fix_command(FixCommandOptions {
+        } => Some(handle_format_command(FormatCommandOptions {
+            paths,
+            staged,
+            modified,
+            exclude,
+            undo,
+            source,
+            list_backups,
+            verbose,
+            quiet,
+        })),
+        Commands::Fix {
             source,
             check,
             format_only,
+            auto_fix,
             ai,
             provider,
             model,
@@ -356,27 +223,35 @@ fn main() -> ExitCode {
             quiet,
             undo,
             list_backups,
-        });
-    }
-
-    // Handle review subcommand
-    if let Some(Commands::Review {
-        background,
-        auto_fix,
-        auto_fix_mode,
-        reviewers,
-        provider,
-        base,
-        head,
-        no_pr,
-        notify,
-        status,
-        dry_run,
-        clean,
-        output,
-    }) = cli.command
-    {
-        return handle_review_command(ReviewCommandOptions {
+        } => {
+            let (ai, accept_all) = if auto_fix {
+                (true, true)
+            } else {
+                (ai, accept_all)
+            };
+            Some(handle_fix_command(FixCommandOptions {
+                source,
+                check,
+                format_only,
+                ai,
+                provider,
+                model,
+                max_suggestions,
+                accept_all,
+                jobs,
+                file,
+                line,
+                message,
+                rule,
+                output,
+                with_context,
+                verbose,
+                quiet,
+                undo,
+                list_backups,
+            }))
+        }
+        Commands::Review {
             background,
             auto_fix,
             auto_fix_mode,
@@ -390,139 +265,1256 @@ fn main() -> ExitCode {
             dry_run,
             clean,
             output,
-        });
+        } => Some(handle_review_command(ReviewCommandOptions {
+            background,
+            auto_fix,
+            auto_fix_mode,
+            reviewers,
+            provider,
+            base,
+            head,
+            no_pr,
+            notify,
+            status,
+            dry_run,
+            clean,
+            output,
+        })),
+        Commands::Lsp {
+            mode,
+            port,
+            use_plugin,
+        } => Some(handle_lsp_subcommand(mode, port, use_plugin)),
+        Commands::Report { action } => Some(handle_report_command(action)),
+        Commands::Watch {
+            paths,
+            check_only,
+            format_only,
+            debounce,
+            notify,
+            no_tui,
+            clear,
+            lang,
+            exclude,
+            verbose,
+        } => Some(handle_watch_subcommand(
+            paths,
+            check_only,
+            format_only,
+            debounce,
+            notify,
+            no_tui,
+            clear,
+            lang,
+            exclude,
+            verbose,
+        )),
+        // Lint and Check fall through to main flow
+        Commands::Lint { .. } | Commands::Check { .. } => None,
+    }
+}
+
+/// Handle the `lsp` subcommand.
+fn handle_lsp_subcommand(
+    mode: String,
+    port: u16,
+    use_plugin: Option<Vec<String>>,
+) -> ExitCode {
+    let mut lsp_config_resolver = ConfigResolver::new();
+
+    if let Some(ref plugin_specs) = use_plugin {
+        use linthis::plugin::{PluginLoader, PluginSource};
+
+        for spec in plugin_specs {
+            let (url_or_path, git_ref) = parse_plugin_spec(spec);
+
+            let name = plugin_name_from_path(&url_or_path);
+
+            let source = if let Some(ref r) = git_ref {
+                PluginSource::new(&url_or_path).with_ref(r)
+            } else {
+                PluginSource::new(&url_or_path)
+            };
+
+            if let Ok(loader) = PluginLoader::new() {
+                if let Ok(configs) = loader.load_configs(&[source], false) {
+                    for config in &configs {
+                        lsp_config_resolver.add_config(ResolvedConfig::new(
+                            config.language.clone(),
+                            config.tool.clone(),
+                            config.config_path.clone(),
+                            ConfigSource::CliPlugin,
+                            name.clone(),
+                        ));
+                    }
+                    eprintln!(
+                        "[lsp] Loaded {} config(s) from plugin '{}'",
+                        configs.len(),
+                        name
+                    );
+                }
+            }
+        }
     }
 
-    // Handle lsp subcommand
-    if let Some(Commands::Lsp { mode, port, use_plugin }) = cli.command {
-        // Build ConfigResolver for LSP (instead of copying configs)
-        let mut lsp_config_resolver = ConfigResolver::new();
+    let lsp_mode = match mode.parse::<LspMode>() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red(), e);
+            return ExitCode::from(1);
+        }
+    };
 
-        // Load plugins before starting LSP
-        if let Some(ref plugin_specs) = use_plugin {
-            use linthis::plugin::{PluginLoader, PluginSource};
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("{}: Failed to create async runtime: {}", "Error".red(), e);
+            return ExitCode::from(1);
+        }
+    };
 
-            for spec in plugin_specs {
-                // Parse plugin spec: URL[@ref] or local path
-                let (url_or_path, git_ref) = if spec.contains('@') && !spec.starts_with('/') {
-                    let parts: Vec<&str> = spec.rsplitn(2, '@').collect();
-                    if parts.len() == 2 {
-                        (parts[1].to_string(), Some(parts[0].to_string()))
+    let resolver = if lsp_config_resolver.is_empty() {
+        None
+    } else {
+        Some(Arc::new(lsp_config_resolver))
+    };
+
+    match runtime.block_on(run_lsp_server_with_config(lsp_mode, port, resolver)) {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{}: LSP server error: {}", "Error".red(), e);
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Handle the `watch` subcommand.
+fn handle_watch_subcommand(
+    paths: Vec<PathBuf>,
+    check_only: bool,
+    format_only: bool,
+    debounce: u64,
+    notify: bool,
+    no_tui: bool,
+    clear: bool,
+    lang: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    verbose: bool,
+) -> ExitCode {
+    let languages: Vec<Language> = lang
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| Language::from_name(s))
+        .collect();
+
+    let config = linthis::watch::WatchConfig {
+        paths,
+        check_only,
+        format_only,
+        debounce_ms: debounce,
+        notify,
+        no_tui,
+        clear,
+        verbose,
+        languages,
+        exclude_patterns: exclude.unwrap_or_default(),
+    };
+
+    match run_watch(config) {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red(), e);
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Apply lint subcommand fields onto the top-level CLI struct so they fall through
+/// to the main lint flow.
+fn apply_lint_subcommand(cli: &mut Cli) {
+    if let Some(Commands::Lint {
+        paths,
+        staged,
+        modified,
+        since,
+        lang,
+        exclude,
+        no_default_excludes,
+        no_gitignore,
+        output,
+        no_cache,
+        verbose,
+        quiet,
+    }) = cli.command.take()
+    {
+        cli.paths = paths;
+        cli.staged = staged;
+        cli.modified = modified;
+        cli.since = since;
+        cli.lang = lang;
+        cli.exclude = exclude;
+        cli.no_default_excludes = no_default_excludes;
+        cli.no_gitignore = no_gitignore;
+        cli.output = output;
+        cli.no_cache = no_cache;
+        cli.verbose = verbose;
+        cli.quiet = quiet;
+        cli.check_only = true;
+        cli.checks = Some(vec!["lint".to_string()]);
+    }
+}
+
+/// Apply check subcommand fields onto the top-level CLI struct so they fall through
+/// to the main lint flow.
+fn apply_check_subcommand(cli: &mut Cli) {
+    if let Some(Commands::Check {
+        paths,
+        staged,
+        modified,
+        since,
+        checks,
+        lang,
+        exclude,
+        no_default_excludes,
+        no_gitignore,
+        output,
+        no_cache,
+        verbose,
+        quiet,
+    }) = cli.command.take()
+    {
+        cli.paths = paths;
+        cli.staged = staged;
+        cli.modified = modified;
+        cli.since = since;
+        cli.checks = checks;
+        cli.lang = lang;
+        cli.exclude = exclude;
+        cli.no_default_excludes = no_default_excludes;
+        cli.no_gitignore = no_gitignore;
+        cli.output = output;
+        cli.no_cache = no_cache;
+        cli.verbose = verbose;
+        cli.quiet = quiet;
+        cli.check_only = true;
+    }
+}
+
+/// Validate flag dependencies that clap cannot express.
+/// Returns `Some(ExitCode)` on validation failure.
+fn validate_cli_flags(cli: &Cli) -> Option<ExitCode> {
+    if cli.ai && !cli.fix {
+        eprintln!("{}: --ai requires --fix or --auto-fix", "Error".red());
+        return Some(ExitCode::from(2));
+    }
+    if cli.provider.is_some() && !cli.ai && !cli.auto_fix {
+        eprintln!(
+            "{}: --provider requires --ai or --auto-fix",
+            "Error".red()
+        );
+        return Some(ExitCode::from(2));
+    }
+    if cli.accept_all && !cli.fix {
+        eprintln!(
+            "{}: -y/--yes requires --fix or --auto-fix",
+            "Error".red()
+        );
+        return Some(ExitCode::from(2));
+    }
+    None
+}
+
+/// Parse a plugin spec string into (url_or_path, optional_git_ref).
+fn parse_plugin_spec(spec: &str) -> (String, Option<String>) {
+    if spec.contains('@') && !spec.starts_with('/') {
+        let parts: Vec<&str> = spec.rsplitn(2, '@').collect();
+        if parts.len() == 2 {
+            (parts[1].to_string(), Some(parts[0].to_string()))
+        } else {
+            (spec.to_string(), None)
+        }
+    } else {
+        (spec.to_string(), None)
+    }
+}
+
+/// Derive a short plugin name from a URL or filesystem path.
+fn plugin_name_from_path(url_or_path: &str) -> String {
+    url_or_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(url_or_path)
+        .trim_end_matches(".git")
+        .to_string()
+}
+
+/// Load plugins and build a `ConfigResolver`.
+/// Returns `(loaded_plugin_names, config_resolver)` or an error exit code.
+fn load_plugins(cli: &Cli) -> Result<(Vec<String>, ConfigResolver), ExitCode> {
+    use linthis::plugin::{PluginConfigManager, PluginLoader, PluginSource};
+
+    let mut loaded_plugins: Vec<String> = Vec::new();
+    let mut config_resolver = ConfigResolver::new();
+
+    if cli.no_plugin {
+        return Ok((loaded_plugins, config_resolver));
+    }
+
+    let mut cli_plugins: Vec<(String, PluginSource)> = Vec::new();
+    let mut project_plugins: Vec<(String, PluginSource)> = Vec::new();
+    let mut global_plugins: Vec<(String, PluginSource)> = Vec::new();
+
+    if let Some(ref plugin_specs) = cli.use_plugin {
+        for spec in plugin_specs {
+            let (url_or_path, git_ref) = parse_plugin_spec(spec);
+            let name = plugin_name_from_path(&url_or_path);
+
+            let source = if let Some(ref r) = git_ref {
+                PluginSource::new(&url_or_path).with_ref(r)
+            } else {
+                PluginSource::new(&url_or_path)
+            };
+
+            if cli.verbose {
+                eprintln!("Using plugin from CLI: {} ({})", name, url_or_path);
+            }
+            cli_plugins.push((name, source));
+        }
+    } else {
+        if let Ok(project_manager) = PluginConfigManager::project() {
+            if let Ok(plugins) = project_manager.list_plugins() {
+                for (name, url, git_ref) in plugins {
+                    let source = if let Some(ref r) = git_ref {
+                        PluginSource::new(&url).with_ref(r)
                     } else {
-                        (spec.clone(), None)
-                    }
-                } else {
-                    (spec.clone(), None)
-                };
-
-                let name = url_or_path
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&url_or_path)
-                    .trim_end_matches(".git")
-                    .to_string();
-
-                let source = if let Some(ref r) = git_ref {
-                    PluginSource::new(&url_or_path).with_ref(r)
-                } else {
-                    PluginSource::new(&url_or_path)
-                };
-
-                if let Ok(loader) = PluginLoader::new() {
-                    if let Ok(configs) = loader.load_configs(&[source], false) {
-                        // Add configs to resolver (no more copying to .linthis/configs/)
-                        for config in &configs {
-                            lsp_config_resolver.add_config(ResolvedConfig::new(
-                                config.language.clone(),
-                                config.tool.clone(),
-                                config.config_path.clone(),
-                                ConfigSource::CliPlugin,
-                                name.clone(),
-                            ));
-                        }
-                        eprintln!("[lsp] Loaded {} config(s) from plugin '{}'", configs.len(), name);
-                    }
+                        PluginSource::new(&url)
+                    };
+                    project_plugins.push((name, source));
                 }
             }
         }
 
-        let lsp_mode = match mode.parse::<LspMode>() {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("{}: {}", "Error".red(), e);
-                return ExitCode::from(1);
-            }
-        };
-
-        // Run LSP server using tokio runtime with ConfigResolver
-        let runtime = match tokio::runtime::Runtime::new() {
-            Ok(rt) => rt,
-            Err(e) => {
-                eprintln!("{}: Failed to create async runtime: {}", "Error".red(), e);
-                return ExitCode::from(1);
-            }
-        };
-
-        let resolver = if lsp_config_resolver.is_empty() {
-            None
-        } else {
-            Some(Arc::new(lsp_config_resolver))
-        };
-
-        match runtime.block_on(run_lsp_server_with_config(lsp_mode, port, resolver)) {
-            Ok(_) => return ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("{}: LSP server error: {}", "Error".red(), e);
-                return ExitCode::from(1);
+        if project_plugins.is_empty() {
+            if let Ok(global_manager) = PluginConfigManager::global() {
+                if let Ok(plugins) = global_manager.list_plugins() {
+                    for (name, url, git_ref) in plugins {
+                        let source = if let Some(ref r) = git_ref {
+                            PluginSource::new(&url).with_ref(r)
+                        } else {
+                            PluginSource::new(&url)
+                        };
+                        global_plugins.push((name, source));
+                    }
+                }
             }
         }
     }
 
-    // Handle report subcommand
-    if let Some(Commands::Report { action }) = cli.command {
-        return handle_report_command(action);
-    }
+    let all_plugins = [
+        (cli_plugins, ConfigSource::CliPlugin),
+        (project_plugins, ConfigSource::ProjectPlugin),
+        (global_plugins, ConfigSource::GlobalPlugin),
+    ];
 
-    // Handle watch subcommand
-    if let Some(Commands::Watch {
-        paths,
-        check_only,
-        format_only,
-        debounce,
-        notify,
-        no_tui,
-        clear,
-        lang,
-        exclude,
-        verbose,
-    }) = cli.command
-    {
-        // Parse languages
-        let languages: Vec<Language> = lang
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|s| Language::from_name(s))
-            .collect();
+    for (plugins, source_type) in all_plugins {
+        if plugins.is_empty() {
+            continue;
+        }
 
-        let config = linthis::watch::WatchConfig {
-            paths,
-            check_only,
-            format_only,
-            debounce_ms: debounce,
-            notify,
-            no_tui,
-            clear,
-            verbose,
-            languages,
-            exclude_patterns: exclude.unwrap_or_default(),
+        let loader = match PluginLoader::with_verbose(cli.verbose) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!(
+                    "{}: Failed to initialize plugin loader: {}",
+                    "Error".red(),
+                    e
+                );
+                return Err(ExitCode::from(1));
+            }
         };
 
-        match run_watch(config) {
-            Ok(_) => return ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("{}: {}", "Error".red(), e);
-                return ExitCode::from(1);
+        for (plugin_name, source) in plugins {
+            match loader.load_configs(&[source], false) {
+                Ok(configs) => {
+                    loaded_plugins.push(plugin_name.clone());
+                    if cli.verbose {
+                        eprintln!(
+                            "Loaded {} config(s) from plugin '{}' (priority: {:?})",
+                            configs.len(),
+                            plugin_name,
+                            source_type
+                        );
+                    }
+
+                    for config in &configs {
+                        config_resolver.add_config(ResolvedConfig::new(
+                            config.language.clone(),
+                            config.tool.clone(),
+                            config.config_path.clone(),
+                            source_type,
+                            plugin_name.clone(),
+                        ));
+
+                        if cli.verbose {
+                            eprintln!(
+                                "  - {}/{}: {} (from plugin cache)",
+                                config.language,
+                                config.tool,
+                                config.config_path.display()
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{}: Failed to load plugin '{}': {}",
+                        "Warning".yellow(),
+                        plugin_name,
+                        e
+                    );
+                }
             }
+        }
+    }
+
+    Ok((loaded_plugins, config_resolver))
+}
+
+/// Handle the `--init` flag (create a default config file).
+fn handle_init_flag() -> ExitCode {
+    let config_path = linthis::config::Config::project_config_path(
+        &std::env::current_dir().unwrap_or_default(),
+    );
+    if config_path.exists() {
+        eprintln!(
+            "{}: {} already exists",
+            "Warning".yellow(),
+            config_path.display()
+        );
+        return ExitCode::from(1);
+    }
+
+    let content = linthis::config::Config::generate_default_toml();
+    match std::fs::write(&config_path, content) {
+        Ok(_) => {
+            println!("{} Created {}", "✓".green(), config_path.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{}: Failed to create config: {}", "Error".red(), e);
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// Resolve the `ToolInstallMode` from CLI flags and config.
+fn resolve_tool_install_mode(
+    no_tool_auto_install: bool,
+    runtime_config: &linthis::config::Config,
+) -> ToolInstallMode {
+    if no_tool_auto_install {
+        ToolInstallMode::Disabled
+    } else {
+        match &runtime_config.tool_auto_install {
+            Some(cfg) if !cfg.enabled => ToolInstallMode::Disabled,
+            Some(cfg) => match cfg.mode.as_str() {
+                "auto" => ToolInstallMode::Auto,
+                "disabled" => ToolInstallMode::Disabled,
+                _ => ToolInstallMode::Prompt,
+            },
+            None => ToolInstallMode::Prompt,
+        }
+    }
+}
+
+/// Resolve which checks to run from CLI flags and config.
+fn resolve_checks_list(
+    cli_checks: &Option<Vec<String>>,
+    config_checks: &[String],
+) -> Vec<String> {
+    if let Some(ref cli_checks) = cli_checks {
+        if cli_checks.iter().any(|c| c == "all") {
+            vec!["lint".into(), "security".into(), "complexity".into()]
+        } else {
+            cli_checks.clone()
+        }
+    } else {
+        config_checks.to_vec()
+    }
+}
+
+/// Run the security SAST check and merge results into the main result.
+fn run_security_check(
+    result: &mut linthis::utils::types::RunResult,
+    runtime_project_root: &std::path::Path,
+    target_files: &[std::path::PathBuf],
+    security_config: &linthis::config::SecurityChecksConfig,
+    security_cache_path: &std::path::Path,
+    no_cache: bool,
+    quiet: bool,
+) {
+    let mut cache = PerFileCache::load(security_cache_path);
+    let partition = cache.partition_files(target_files, no_cache);
+
+    if !quiet {
+        eprintln!("{}", PerFileCache::format_status("security", &partition));
+    }
+
+    let fresh_result = if !partition.changed.is_empty() {
+        let r = run_sast_scan(runtime_project_root, &partition.changed, security_config);
+        cache.update_from_sast(&partition.changed, &r);
+        cache.save(security_cache_path);
+        r
+    } else {
+        linthis::security::sast::SastResult {
+            findings: vec![],
+            by_severity: std::collections::HashMap::new(),
+            by_tool: std::collections::HashMap::new(),
+            scanner_status: vec![],
+            unavailable_tools: vec![],
+            duration_ms: 0,
+            errors: vec![],
+        }
+    };
+
+    let mut merged = fresh_result;
+    let mut all_findings = partition.cached_findings;
+    all_findings.append(&mut merged.findings);
+    merged.findings = all_findings;
+    merged.by_severity.clear();
+    for f in &merged.findings {
+        *merged
+            .by_severity
+            .entry(f.severity.to_string())
+            .or_insert(0) += 1;
+    }
+    merged.by_tool.clear();
+    for f in &merged.findings {
+        *merged.by_tool.entry(f.source.clone()).or_insert(0) += 1;
+    }
+
+    let sec_fail_on = security_config.fail_on.clone().unwrap_or_default();
+    let sec_errors = merged
+        .findings
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.severity,
+                linthis::security::Severity::Critical | linthis::security::Severity::High
+            )
+        })
+        .count();
+    let sec_warnings = merged
+        .findings
+        .iter()
+        .filter(|f| f.severity == linthis::security::Severity::Medium)
+        .count();
+    let sec_infos = merged
+        .findings
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.severity,
+                linthis::security::Severity::Low
+                    | linthis::security::Severity::None
+                    | linthis::security::Severity::Unknown
+            )
+        })
+        .count();
+    let sec_exit = sec_fail_on.exit_code(sec_errors, sec_warnings, sec_infos);
+    result.exit_code = std::cmp::max(result.exit_code, sec_exit);
+
+    for ut in &merged.unavailable_tools {
+        result.unavailable_tools.push(
+            linthis::utils::types::UnavailableTool::new(
+                &ut.tool,
+                &ut.languages.join(", "),
+                "sast",
+                &ut.install_hint,
+            ),
+        );
+    }
+    result.security = Some(merged);
+    result.checks_run.push("security".to_string());
+}
+
+/// Run the complexity analysis check and merge results into the main result.
+fn run_complexity_check(
+    result: &mut linthis::utils::types::RunResult,
+    runtime_project_root: &std::path::Path,
+    target_files: &[std::path::PathBuf],
+    complexity_config: &linthis::config::ComplexityChecksConfig,
+    complexity_cache_path: &std::path::Path,
+    no_cache: bool,
+    quiet: bool,
+) {
+    let mut cache = PerFileCache::load(complexity_cache_path);
+    let partition = cache.partition_files(target_files, no_cache);
+
+    if !quiet {
+        eprintln!(
+            "{}",
+            PerFileCache::format_status("complexity", &partition)
+        );
+    }
+
+    if !partition.changed.is_empty() {
+        let analysis_result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_complexity_analysis(
+                    runtime_project_root,
+                    &partition.changed,
+                    complexity_config,
+                )
+            }));
+        match analysis_result {
+            Ok(Ok(analysis)) => {
+                cache.update_from_complexity(&partition.changed, &analysis);
+                cache.save(complexity_cache_path);
+
+                apply_complexity_exit_code(result, &analysis, complexity_config);
+                result.complexity = Some(analysis);
+            }
+            Ok(Err(e)) => {
+                if !quiet {
+                    eprintln!("Complexity analysis error: {}", e);
+                }
+            }
+            Err(_) => {
+                if !quiet {
+                    eprintln!("Complexity analysis encountered an internal error");
+                }
+            }
+        }
+    }
+
+    if result.complexity.is_none() && partition.cache_hits > 0 {
+        let cached_metrics = cache.get_cached_file_metrics(target_files);
+        let mut cached_result = linthis::complexity::AnalysisResult::new();
+        cached_result.files = cached_metrics;
+        cached_result.calculate_summary();
+
+        if let Some(t) = complexity_config.threshold {
+            cached_result.thresholds.cyclomatic.good = t;
+            cached_result.thresholds.cyclomatic.warning = t + 10;
+            cached_result.thresholds.cyclomatic.high = t + 20;
+        }
+        if let Some(w) = complexity_config.warning_threshold {
+            cached_result.thresholds.cyclomatic.warning = w;
+        }
+        if let Some(e) = complexity_config.error_threshold {
+            cached_result.thresholds.cyclomatic.high = e;
+        }
+        cached_result.thresholds.cyclomatic.normalize();
+
+        apply_complexity_exit_code(result, &cached_result, complexity_config);
+        result.complexity = Some(cached_result);
+    }
+    result.checks_run.push("complexity".to_string());
+}
+
+/// Calculate and apply the complexity exit code onto the result.
+fn apply_complexity_exit_code(
+    result: &mut linthis::utils::types::RunResult,
+    analysis: &linthis::complexity::AnalysisResult,
+    complexity_config: &linthis::config::ComplexityChecksConfig,
+) {
+    let cx_fail_on = complexity_config.fail_on.clone().unwrap_or_default();
+    let cx_high = analysis.thresholds.cyclomatic.high;
+    let cx_warning = analysis.thresholds.cyclomatic.warning;
+    let cx_threshold = analysis.thresholds.cyclomatic.good;
+    let cx_errors = analysis
+        .files
+        .iter()
+        .flat_map(|f| &f.functions)
+        .filter(|func| func.metrics.cyclomatic > cx_high)
+        .count();
+    let cx_warns = analysis
+        .files
+        .iter()
+        .flat_map(|f| &f.functions)
+        .filter(|func| {
+            func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high
+        })
+        .count();
+    let cx_infos = analysis
+        .files
+        .iter()
+        .flat_map(|f| &f.functions)
+        .filter(|func| {
+            func.metrics.cyclomatic > cx_threshold
+                && func.metrics.cyclomatic <= cx_warning
+        })
+        .count();
+    let cx_exit = cx_fail_on.exit_code(cx_errors, cx_warns, cx_infos);
+    result.exit_code = std::cmp::max(result.exit_code, cx_exit);
+}
+
+/// Save results to file and clean up old result files.
+fn save_results(
+    result: &linthis::utils::types::RunResult,
+    output: &str,
+    cli: &Cli,
+) {
+    use chrono::Local;
+    use std::fs::{self, File};
+    use std::io::Write;
+
+    let project_root = linthis::utils::get_project_root();
+
+    let output_file = if let Some(ref custom_path) = cli.output_file {
+        if let Some(parent) = custom_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                let _ = fs::create_dir_all(parent);
+            }
+        }
+        custom_path.clone()
+    } else {
+        let result_dir = project_root.join(".linthis").join("result");
+        if let Err(e) = fs::create_dir_all(&result_dir) {
+            eprintln!(
+                "{}: Failed to create {}: {}",
+                "Warning".yellow(),
+                result_dir.display(),
+                e
+            );
+            return;
+        }
+        let timestamp = Local::now().format("%Y%m%d-%H%M%S");
+        result_dir.join(format!("result-{}.json", timestamp))
+    };
+
+    let file_content = if cli.output_file.is_some() {
+        strip_ansi_codes(output)
+    } else {
+        linthis::utils::output::format_result_json(result)
+    };
+
+    match File::create(&output_file) {
+        Ok(mut file) => {
+            if let Err(e) = writeln!(file, "{}", file_content) {
+                eprintln!(
+                    "{}: Failed to write to {}: {}",
+                    "Warning".yellow(),
+                    output_file.display(),
+                    e
+                );
+            } else if !cli.quiet {
+                eprintln!(
+                    "{} Results saved to {}",
+                    "✓".green(),
+                    output_file.display()
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "{}: Failed to create {}: {}",
+                "Warning".yellow(),
+                output_file.display(),
+                e
+            );
+        }
+    }
+
+    if !cli.no_save_result && cli.output_file.is_none() && cli.keep_results > 0 {
+        cleanup_old_results(cli.keep_results, cli.verbose);
+    }
+}
+
+/// Remove old result files beyond the keep limit.
+fn cleanup_old_results(keep_results: usize, verbose: bool) {
+    use std::fs;
+
+    let result_dir = PathBuf::from(".linthis").join("result");
+    if let Ok(entries) = fs::read_dir(&result_dir) {
+        let mut result_files: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with("result-")
+                    && (name.ends_with(".json") || name.ends_with(".txt"))
+            })
+            .collect();
+
+        result_files.sort_by(|a, b| {
+            let a_time = a.metadata().and_then(|m| m.modified()).ok();
+            let b_time = b.metadata().and_then(|m| m.modified()).ok();
+            b_time.cmp(&a_time)
+        });
+
+        let files_to_remove = result_files.iter().skip(keep_results);
+        let mut removed_count = 0;
+        for entry in files_to_remove {
+            if fs::remove_file(entry.path()).is_ok() {
+                removed_count += 1;
+            }
+        }
+        if removed_count > 0 && verbose {
+            eprintln!(
+                "{} Cleaned up {} old result file(s)",
+                "✓".green(),
+                removed_count
+            );
+        }
+    }
+}
+
+/// Print the failure summary with per-check details.
+fn print_failure_summary(result: &linthis::utils::types::RunResult) {
+    eprintln!();
+
+    let checks_label = if result.checks_run.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", result.checks_run.join(", "))
+    };
+    let is_info_only = result.exit_code == 3;
+    if is_info_only {
+        eprintln!(
+            "{} {}",
+            "\u{26a0}".yellow().bold(),
+            format!("Linthis check completed with issues{}", checks_label)
+                .yellow()
+                .bold()
+        );
+    } else {
+        eprintln!(
+            "{} {}",
+            "\u{2717}".red().bold(),
+            format!("Linthis check failed{}", checks_label)
+                .red()
+                .bold()
+        );
+    }
+
+    // Formatting
+    let fmt_errors = result
+        .format_results
+        .iter()
+        .filter(|r| r.error.is_some())
+        .count();
+    if fmt_errors > 0 {
+        eprintln!(
+            "  {}: {}",
+            "formatting".red(),
+            format!("{} file(s) with errors", fmt_errors).red()
+        );
+    }
+
+    print_lint_summary(result);
+    print_security_summary(result);
+    print_complexity_summary(result);
+}
+
+/// Print lint detail line in the failure summary.
+fn print_lint_summary(result: &linthis::utils::types::RunResult) {
+    if !result.checks_run.iter().any(|c| c == "lint") {
+        return;
+    }
+    let lint_errors = result
+        .issues
+        .iter()
+        .filter(|i| i.severity == linthis::utils::types::Severity::Error)
+        .count();
+    let lint_warnings = result
+        .issues
+        .iter()
+        .filter(|i| i.severity == linthis::utils::types::Severity::Warning)
+        .count();
+    let lint_infos = result
+        .issues
+        .iter()
+        .filter(|i| i.severity == linthis::utils::types::Severity::Info)
+        .count();
+    if lint_errors > 0 || lint_warnings > 0 || lint_infos > 0 {
+        let mut parts = Vec::new();
+        if lint_errors > 0 {
+            parts.push(format!("{} error(s)", lint_errors));
+        }
+        if lint_warnings > 0 {
+            parts.push(format!("{} warning(s)", lint_warnings));
+        }
+        if lint_infos > 0 {
+            parts.push(format!("{} info", lint_infos));
+        }
+        eprintln!("  {}: {}", "lint".red(), parts.join(", ").red());
+    } else if result.exit_code != 0 {
+        eprintln!("  {}: {}", "lint", "\u{2713}".green());
+    }
+}
+
+/// Print security detail line in the failure summary.
+fn print_security_summary(result: &linthis::utils::types::RunResult) {
+    if !result.checks_run.iter().any(|c| c == "security") {
+        return;
+    }
+    if let Some(ref sec) = result.security {
+        let sec_errors = sec
+            .findings
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.severity,
+                    linthis::security::Severity::Critical
+                        | linthis::security::Severity::High
+                )
+            })
+            .count();
+        let sec_warnings = sec
+            .findings
+            .iter()
+            .filter(|f| f.severity == linthis::security::Severity::Medium)
+            .count();
+        let sec_infos = sec
+            .findings
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.severity,
+                    linthis::security::Severity::Low
+                        | linthis::security::Severity::None
+                        | linthis::security::Severity::Unknown
+                )
+            })
+            .count();
+        if sec_errors > 0 || sec_warnings > 0 || sec_infos > 0 {
+            let mut parts = Vec::new();
+            if sec_errors > 0 {
+                parts.push(format!("{} error(s)", sec_errors));
+            }
+            if sec_warnings > 0 {
+                parts.push(format!("{} warning(s)", sec_warnings));
+            }
+            if sec_infos > 0 {
+                parts.push(format!("{} info", sec_infos));
+            }
+            eprintln!(
+                "  {}: {}",
+                "security".red(),
+                parts.join(", ").red()
+            );
+        } else {
+            eprintln!("  {}: {}", "security", "\u{2713}".green());
+        }
+    }
+}
+
+/// Print complexity detail line in the failure summary.
+fn print_complexity_summary(result: &linthis::utils::types::RunResult) {
+    if !result.checks_run.iter().any(|c| c == "complexity") {
+        return;
+    }
+    if let Some(ref cx) = result.complexity {
+        let cx_high = cx.thresholds.cyclomatic.high;
+        let cx_warning = cx.thresholds.cyclomatic.warning;
+        let cx_good = cx.thresholds.cyclomatic.good;
+        let cx_errors = cx
+            .files
+            .iter()
+            .flat_map(|f| &f.functions)
+            .filter(|func| func.metrics.cyclomatic > cx_high)
+            .count();
+        let cx_warns = cx
+            .files
+            .iter()
+            .flat_map(|f| &f.functions)
+            .filter(|func| {
+                func.metrics.cyclomatic > cx_warning
+                    && func.metrics.cyclomatic <= cx_high
+            })
+            .count();
+        let cx_infos = cx
+            .files
+            .iter()
+            .flat_map(|f| &f.functions)
+            .filter(|func| {
+                func.metrics.cyclomatic > cx_good
+                    && func.metrics.cyclomatic <= cx_warning
+            })
+            .count();
+        if cx_errors > 0 || cx_warns > 0 || cx_infos > 0 {
+            let mut parts = Vec::new();
+            if cx_errors > 0 {
+                parts.push(format!("{} error(s)", cx_errors));
+            }
+            if cx_warns > 0 {
+                parts.push(format!("{} warning(s)", cx_warns));
+            }
+            if cx_infos > 0 {
+                parts.push(format!("{} info", cx_infos));
+            }
+            eprintln!(
+                "  {}: {}",
+                "complexity".red(),
+                parts.join(", ").red()
+            );
+        } else {
+            eprintln!("  {}: {}", "complexity", "\u{2713}".green());
+        }
+    }
+}
+
+/// Handle --fix mode (AI or interactive) after lint results are available.
+/// Returns `Some(ExitCode)` if fix mode was entered, `None` otherwise.
+fn handle_fix_mode(cli: &Cli, result: &linthis::utils::types::RunResult) -> Option<ExitCode> {
+    if !cli.fix || result.issues.is_empty() {
+        return None;
+    }
+
+    use cli::resolve_ai_provider;
+    use linthis::config::Config;
+    use linthis::interactive::{run_ai_fix_all, run_interactive, AiFixConfig};
+
+    let project_root = linthis::utils::get_project_root();
+    let config = Config::load_merged(&project_root);
+
+    if cli.ai {
+        let interactive_provider = if cli.provider.is_none()
+            && std::env::var("LINTHIS_AI_PROVIDER").is_err()
+            && config.ai.provider.is_none()
+            && std::io::IsTerminal::is_terminal(&std::io::stdin())
+        {
+            cli::select_ai_provider_interactive()
+        } else {
+            None
+        };
+
+        let provider_ref =
+            interactive_provider.as_deref().or(cli.provider.as_deref());
+
+        let provider =
+            resolve_ai_provider(provider_ref, config.ai.provider.as_deref());
+        let ai_config = AiFixConfig::with_provider(&provider)
+            .with_accept_all(cli.accept_all)
+            .with_verbose(cli.verbose);
+
+        if !cli.quiet {
+            eprintln!(
+                "\n{} Entering AI fix mode with provider: {}",
+                "\u{2192}".cyan(),
+                provider.cyan()
+            );
+        }
+
+        let ai_result = run_ai_fix_all(result, &ai_config);
+
+        if !cli.quiet && ai_result.applied > 0 {
+            eprintln!(
+                "{} Applied {} fix(es)",
+                "\u{2713}".green(),
+                ai_result.applied
+            );
+        }
+
+        if ai_result.applied > 0 && ai_result.errors == 0 {
+            return Some(ExitCode::SUCCESS);
+        }
+    } else {
+        if !cli.quiet {
+            eprintln!(
+                "\n{} Entering interactive fix mode",
+                "\u{2192}".cyan()
+            );
+        }
+
+        let interactive_result = run_interactive(result);
+
+        if !cli.quiet {
+            let count = interactive_result.edited + interactive_result.ignored;
+            if count > 0 {
+                eprintln!(
+                    "{} Processed {} issue(s)",
+                    "\u{2713}".green(),
+                    count
+                );
+            }
+        }
+    }
+
+    Some(ExitCode::from(result.exit_code as u8))
+}
+
+/// Auto re-stage formatted files when running in staged mode (-s).
+fn auto_restage_formatted(result: &linthis::utils::types::RunResult, quiet: bool) {
+    if result.format_results.is_empty() {
+        return;
+    }
+    let formatted_files: Vec<&PathBuf> = result
+        .format_results
+        .iter()
+        .filter(|r| r.changed)
+        .map(|r| &r.file_path)
+        .collect();
+    if formatted_files.is_empty() {
+        return;
+    }
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("add");
+    for f in &formatted_files {
+        cmd.arg((*f).as_os_str());
+    }
+    match cmd.output() {
+        Ok(output) if output.status.success() => {
+            if !quiet {
+                eprintln!(
+                    "{} Re-staged {} formatted file{}",
+                    "\u{2713}".green(),
+                    formatted_files.len(),
+                    if formatted_files.len() == 1 { "" } else { "s" }
+                );
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!(
+                "{}: Failed to re-stage formatted files: {}",
+                "Warning".yellow(),
+                stderr.trim()
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "{}: Failed to run git add: {}",
+                "Warning".yellow(),
+                e
+            );
+        }
+    }
+}
+
+/// Run additional checks (security, complexity) and merge into the result.
+fn run_additional_checks(
+    result: &mut linthis::utils::types::RunResult,
+    cli: &Cli,
+    runtime_config: &linthis::config::Config,
+    runtime_project_root: &std::path::Path,
+) {
+    let checks_list = resolve_checks_list(&cli.checks, &runtime_config.checks.run);
+
+    if checks_list.iter().any(|c| c == "lint") {
+        result.checks_run.push("lint".to_string());
+    }
+
+    let target_files: Vec<std::path::PathBuf> = cli
+        .paths
+        .iter()
+        .filter(|p| p.is_file())
+        .map(|p| p.to_path_buf())
+        .collect();
+
+    let cache_dir = runtime_project_root.join(".linthis");
+    let security_cache_path = cache_dir.join("security-cache.json");
+    let complexity_cache_path = cache_dir.join("complexity-cache.json");
+
+    if checks_list.iter().any(|c| c == "security") {
+        let security_config = runtime_config
+            .checks
+            .security
+            .clone()
+            .unwrap_or_default();
+        run_security_check(
+            result,
+            runtime_project_root,
+            &target_files,
+            &security_config,
+            &security_cache_path,
+            cli.no_cache,
+            cli.quiet,
+        );
+    }
+
+    if checks_list.iter().any(|c| c == "complexity") {
+        let complexity_config = runtime_config
+            .checks
+            .complexity
+            .clone()
+            .unwrap_or_default();
+        run_complexity_check(
+            result,
+            runtime_project_root,
+            &target_files,
+            &complexity_config,
+            &complexity_cache_path,
+            cli.no_cache,
+            cli.quiet,
+        );
+    }
+}
+
+/// Process a successful lint result: run additional checks, output, save, fix.
+fn process_lint_result(
+    mut result: linthis::utils::types::RunResult,
+    cli: &Cli,
+    runtime_config: &linthis::config::Config,
+    runtime_project_root: &std::path::Path,
+    output_format: OutputFormat,
+    hook_type: Option<String>,
+) -> ExitCode {
+    if cli.staged {
+        auto_restage_formatted(&result, cli.quiet);
+    }
+
+    let lint_fail_on = runtime_config
+        .checks
+        .lint
+        .as_ref()
+        .and_then(|c| c.fail_on.clone())
+        .unwrap_or_default();
+    result.calculate_exit_code_with_fail_on(&lint_fail_on);
+
+    result.target_paths = cli
+        .paths
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    run_additional_checks(&mut result, cli, runtime_config, runtime_project_root);
+
+    let output =
+        format_result_with_hook_type(&result, output_format, hook_type.as_deref());
+
+    if (!cli.quiet || result.exit_code != 0) && !output.is_empty() {
+        println!("{}", output);
+    }
+
+    if !cli.no_save_result || cli.output_file.is_some() {
+        save_results(&result, &output, cli);
+    }
+
+    if result.exit_code != 0 && !cli.quiet {
+        print_failure_summary(&result);
+    }
+
+    if let Some(exit) = handle_fix_mode(cli, &result) {
+        return exit;
+    }
+
+    if !cli.quiet && !result.issues.is_empty() {
+        print_fix_hint(&result.issues);
+    }
+
+    ExitCode::from(result.exit_code as u8)
+}
+
+fn main() -> ExitCode {
+    env_logger::init();
+
+    let mut cmd = Cli::command();
+    inject_dynamic_help(&mut cmd);
+    let matches = cmd.get_matches();
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+
+    // Handle subcommands that return early (all except Lint/Check which fall through)
+    if let Some(command) = cli.command.take() {
+        if matches!(command, Commands::Lint { .. }) {
+            cli.command = Some(command);
+            apply_lint_subcommand(&mut cli);
+        } else if matches!(command, Commands::Check { .. }) {
+            cli.command = Some(command);
+            apply_check_subcommand(&mut cli);
+        } else if let Some(exit) = dispatch_subcommand(command) {
+            return exit;
         }
     }
 
@@ -534,9 +1526,8 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
         if !cli.quiet {
-            println!("{} Cache cleared", "✓".green());
+            println!("{} Cache cleared", "\u{2713}".green());
         }
-        // If only --clear-cache is specified, exit
         if cli.paths.is_empty() && !cli.check_only && !cli.format_only {
             return ExitCode::SUCCESS;
         }
@@ -549,216 +1540,27 @@ fn main() -> ExitCode {
         cli.accept_all = true;
     }
 
-    // Validate flag dependencies (since we removed clap `requires` for --auto-fix compat)
-    if cli.ai && !cli.fix {
-        eprintln!("{}: --ai requires --fix or --auto-fix", "Error".red());
-        return ExitCode::from(2);
-    }
-    if cli.provider.is_some() && !cli.ai && !cli.auto_fix {
-        eprintln!("{}: --provider requires --ai or --auto-fix", "Error".red());
-        return ExitCode::from(2);
-    }
-    if cli.accept_all && !cli.fix {
-        eprintln!("{}: -y/--yes requires --fix or --auto-fix", "Error".red());
-        return ExitCode::from(2);
+    if let Some(exit) = validate_cli_flags(&cli) {
+        return exit;
     }
 
-    // Perform self-update and auto-sync checks (before loading plugins)
-    // Load config to get self_auto_update and plugin_auto_sync settings
+    // Perform self-update and auto-sync checks
     {
         let project_root = linthis::utils::get_project_root();
         let config = linthis::config::Config::load_merged(&project_root);
-
-        // Perform self-update if configured
-        let self_update_config = config.self_auto_update.as_ref();
-        perform_self_update(self_update_config);
-
-        // Perform auto-sync if configured
-        let auto_sync_config = config.plugin_auto_sync.as_ref();
-        perform_auto_sync(auto_sync_config);
+        perform_self_update(config.self_auto_update.as_ref());
+        perform_auto_sync(config.plugin_auto_sync.as_ref());
     }
 
-    // Track loaded plugins for display
-    let mut loaded_plugins: Vec<String> = Vec::new();
-
-    // Build ConfigResolver for plugin configs (instead of copying to .linthis/configs/)
-    // Priority order: CLI plugins (2) > Project plugins (3) > Global plugins (4)
-    // Local manual configs (1) are checked first by the resolver at runtime
-    let mut config_resolver = ConfigResolver::new();
-
-    // Load plugins: --use-plugin takes priority, then config files
-    if !cli.no_plugin {
-        use linthis::plugin::{PluginConfigManager, PluginLoader, PluginSource};
-
-        // Track plugins with their source type for ConfigResolver
-        let mut cli_plugins: Vec<(String, PluginSource)> = Vec::new();
-        let mut project_plugins: Vec<(String, PluginSource)> = Vec::new();
-        let mut global_plugins: Vec<(String, PluginSource)> = Vec::new();
-
-        // Check --use-plugin first (takes priority over config files)
-        if let Some(ref plugin_specs) = cli.use_plugin {
-            for spec in plugin_specs {
-                // Parse plugin spec: URL[@ref] or local path
-                let (url_or_path, git_ref) = if spec.contains('@') && !spec.starts_with('/') {
-                    // URL with ref: https://github.com/org/plugin.git@v1.0
-                    let parts: Vec<&str> = spec.rsplitn(2, '@').collect();
-                    if parts.len() == 2 {
-                        (parts[1].to_string(), Some(parts[0].to_string()))
-                    } else {
-                        (spec.clone(), None)
-                    }
-                } else {
-                    (spec.clone(), None)
-                };
-
-                // Generate plugin name from URL/path
-                let name = url_or_path
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&url_or_path)
-                    .trim_end_matches(".git")
-                    .to_string();
-
-                let source = if let Some(ref r) = git_ref {
-                    PluginSource::new(&url_or_path).with_ref(r)
-                } else {
-                    PluginSource::new(&url_or_path)
-                };
-
-                if cli.verbose {
-                    eprintln!("Using plugin from CLI: {} ({})", name, url_or_path);
-                }
-                cli_plugins.push((name, source));
-            }
-        } else {
-            // No --use-plugin, load from config files (project first, then global)
-            // Check project config first
-            if let Ok(project_manager) = PluginConfigManager::project() {
-                if let Ok(plugins) = project_manager.list_plugins() {
-                    for (name, url, git_ref) in plugins {
-                        let source = if let Some(ref r) = git_ref {
-                            PluginSource::new(&url).with_ref(r)
-                        } else {
-                            PluginSource::new(&url)
-                        };
-                        project_plugins.push((name, source));
-                    }
-                }
-            }
-
-            // If no project plugins, check global config
-            if project_plugins.is_empty() {
-                if let Ok(global_manager) = PluginConfigManager::global() {
-                    if let Ok(plugins) = global_manager.list_plugins() {
-                        for (name, url, git_ref) in plugins {
-                            let source = if let Some(ref r) = git_ref {
-                                PluginSource::new(&url).with_ref(r)
-                            } else {
-                                PluginSource::new(&url)
-                            };
-                            global_plugins.push((name, source));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Load all plugins and build ConfigResolver
-        let all_plugins = [
-            (cli_plugins, ConfigSource::CliPlugin),
-            (project_plugins, ConfigSource::ProjectPlugin),
-            (global_plugins, ConfigSource::GlobalPlugin),
-        ];
-
-        for (plugins, source_type) in all_plugins {
-            if plugins.is_empty() {
-                continue;
-            }
-
-            let loader = match PluginLoader::with_verbose(cli.verbose) {
-                Ok(l) => l,
-                Err(e) => {
-                    eprintln!(
-                        "{}: Failed to initialize plugin loader: {}",
-                        "Error".red(),
-                        e
-                    );
-                    return ExitCode::from(1);
-                }
-            };
-
-            for (plugin_name, source) in plugins {
-                match loader.load_configs(&[source], false) {
-                    Ok(configs) => {
-                        loaded_plugins.push(plugin_name.clone());
-                        if cli.verbose {
-                            eprintln!(
-                                "Loaded {} config(s) from plugin '{}' (priority: {:?})",
-                                configs.len(),
-                                plugin_name,
-                                source_type
-                            );
-                        }
-
-                        // Add configs to resolver (no more copying to .linthis/configs/)
-                        for config in &configs {
-                            config_resolver.add_config(ResolvedConfig::new(
-                                config.language.clone(),
-                                config.tool.clone(),
-                                config.config_path.clone(),
-                                source_type,
-                                plugin_name.clone(),
-                            ));
-
-                            if cli.verbose {
-                                eprintln!(
-                                    "  - {}/{}: {} (from plugin cache)",
-                                    config.language,
-                                    config.tool,
-                                    config.config_path.display()
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "{}: Failed to load plugin '{}': {}",
-                            "Warning".yellow(),
-                            plugin_name,
-                            e
-                        );
-                        // Continue with defaults - don't fail the entire run
-                    }
-                }
-            }
-        }
-    }
+    // Load plugins
+    let (loaded_plugins, config_resolver) = match load_plugins(&cli) {
+        Ok(result) => result,
+        Err(exit) => return exit,
+    };
 
     // Handle --init flag
     if cli.init {
-        let config_path = linthis::config::Config::project_config_path(
-            &std::env::current_dir().unwrap_or_default(),
-        );
-        if config_path.exists() {
-            eprintln!(
-                "{}: {} already exists",
-                "Warning".yellow(),
-                config_path.display()
-            );
-            return ExitCode::from(1);
-        }
-
-        let content = linthis::config::Config::generate_default_toml();
-        match std::fs::write(&config_path, content) {
-            Ok(_) => {
-                println!("{} Created {}", "✓".green(), config_path.display());
-                return ExitCode::SUCCESS;
-            }
-            Err(e) => {
-                eprintln!("{}: Failed to create config: {}", "Error".red(), e);
-                return ExitCode::from(2);
-            }
-        }
+        return handle_init_flag();
     }
 
     // Handle --init-configs flag
@@ -785,12 +1587,13 @@ fn main() -> ExitCode {
     // Parse languages
     let languages: Vec<Language> = cli
         .lang
+        .clone()
         .unwrap_or_default()
         .iter()
         .filter_map(|s| Language::from_name(s))
         .collect();
 
-    // Collect paths using the paths module
+    // Collect paths
     let path_options = PathCollectionOptions {
         staged: cli.staged,
         since: cli.since.clone(),
@@ -816,26 +1619,14 @@ fn main() -> ExitCode {
         }
     };
 
-    // Load config for tool_auto_install and other runtime settings
+    // Load runtime config
     let runtime_project_root = linthis::utils::get_project_root();
-    let runtime_config = linthis::config::Config::load_merged(&runtime_project_root);
+    let runtime_config =
+        linthis::config::Config::load_merged(&runtime_project_root);
 
-    // Resolve tool_install_mode: CLI flag > config > default
-    let tool_install_mode = if cli.no_tool_auto_install {
-        ToolInstallMode::Disabled
-    } else {
-        match &runtime_config.tool_auto_install {
-            Some(cfg) if !cfg.enabled => ToolInstallMode::Disabled,
-            Some(cfg) => match cfg.mode.as_str() {
-                "auto" => ToolInstallMode::Auto,
-                "disabled" => ToolInstallMode::Disabled,
-                _ => ToolInstallMode::Prompt,
-            },
-            None => ToolInstallMode::Prompt,
-        }
-    };
+    let tool_install_mode =
+        resolve_tool_install_mode(cli.no_tool_auto_install, &runtime_config);
 
-    // Build options with ConfigResolver for plugin configs
     let options = RunOptions {
         paths,
         mode,
@@ -853,11 +1644,14 @@ fn main() -> ExitCode {
         tool_install_mode,
     };
 
-    // Parse output format (hook_mode overrides output format)
+    // Parse output format
     let (output_format, hook_type) = if let Some(ref hook) = cli.hook_mode {
         (OutputFormat::Hook, Some(hook.clone()))
     } else {
-        (OutputFormat::parse(&cli.output).unwrap_or(OutputFormat::Human), None)
+        (
+            OutputFormat::parse(&cli.output).unwrap_or(OutputFormat::Human),
+            None,
+        )
     };
 
     if cli.verbose {
@@ -869,583 +1663,25 @@ fn main() -> ExitCode {
         eprintln!("Paths: {:?}", options.paths);
     }
 
-    // Backup files before formatting (Both or FormatOnly mode)
+    // Backup files before formatting
     if matches!(mode, RunMode::Both | RunMode::FormatOnly) {
-        cli::create_backup(&options.paths, "format (linthis main command)", cli.quiet);
+        cli::create_backup(
+            &options.paths,
+            "format (linthis main command)",
+            cli.quiet,
+        );
     }
 
     // Run linthis
     match run(&options) {
-        Ok(mut result) => {
-            // Auto re-stage formatted files when running in staged mode (-s)
-            if cli.staged && !result.format_results.is_empty() {
-                let formatted_files: Vec<&PathBuf> = result
-                    .format_results
-                    .iter()
-                    .filter(|r| r.changed)
-                    .map(|r| &r.file_path)
-                    .collect();
-                if !formatted_files.is_empty() {
-                    let mut cmd = std::process::Command::new("git");
-                    cmd.arg("add");
-                    for f in &formatted_files {
-                        cmd.arg(f.as_os_str());
-                    }
-                    match cmd.output() {
-                        Ok(output) if output.status.success() => {
-                            if !cli.quiet {
-                                eprintln!(
-                                    "{} Re-staged {} formatted file{}",
-                                    "✓".green(),
-                                    formatted_files.len(),
-                                    if formatted_files.len() == 1 { "" } else { "s" }
-                                );
-                            }
-                        }
-                        Ok(output) => {
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            eprintln!(
-                                "{}: Failed to re-stage formatted files: {}",
-                                "Warning".yellow(),
-                                stderr.trim()
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "{}: Failed to run git add: {}",
-                                "Warning".yellow(),
-                                e
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Apply lint fail_on from config
-            let lint_fail_on = runtime_config
-                .checks
-                .lint
-                .as_ref()
-                .and_then(|c| c.fail_on.clone())
-                .unwrap_or_default();
-            result.calculate_exit_code_with_fail_on(&lint_fail_on);
-
-            // Record target paths for trend analysis scope tracking
-            result.target_paths = cli.paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
-
-            // --- Run additional checks (--checks / config checks.run) ---
-            let checks_list: Vec<String> = if let Some(ref cli_checks) = cli.checks {
-                if cli_checks.iter().any(|c| c == "all") {
-                    vec!["lint".into(), "security".into(), "complexity".into()]
-                } else {
-                    cli_checks.clone()
-                }
-            } else {
-                runtime_config.checks.run.clone()
-            };
-
-            // Mark lint as run (it always runs unless explicitly excluded via --checks)
-            if checks_list.iter().any(|c| c == "lint") {
-                result.checks_run.push("lint".to_string());
-            }
-
-            // Collect target files for security/complexity
-            let target_files: Vec<std::path::PathBuf> = cli
-                .paths
-                .iter()
-                .filter(|p| p.is_file())
-                .map(|p| p.to_path_buf())
-                .collect();
-
-            // Per-file cache paths
-            let cache_dir = runtime_project_root.join(".linthis");
-            let security_cache_path = cache_dir.join("security-cache.json");
-            let complexity_cache_path = cache_dir.join("complexity-cache.json");
-
-            // Run security check if in checks list
-            if checks_list.iter().any(|c| c == "security") {
-                let security_config = runtime_config
-                    .checks
-                    .security
-                    .clone()
-                    .unwrap_or_default();
-
-                // Per-file cache: only scan files whose content changed
-                let mut cache = PerFileCache::load(&security_cache_path);
-                let partition = cache.partition_files(&target_files, cli.no_cache);
-
-                if !cli.quiet {
-                    eprintln!("{}", PerFileCache::format_status("security", &partition));
-                }
-
-                // Scan only changed files
-                let fresh_result = if !partition.changed.is_empty() {
-                    let r = run_sast_scan(&runtime_project_root, &partition.changed, &security_config);
-                    cache.update_from_sast(&partition.changed, &r);
-                    cache.save(&security_cache_path);
-                    r
-                } else {
-                    linthis::security::sast::SastResult {
-                        findings: vec![],
-                        by_severity: std::collections::HashMap::new(),
-                        by_tool: std::collections::HashMap::new(),
-                        scanner_status: vec![],
-                        unavailable_tools: vec![],
-                        duration_ms: 0,
-                        errors: vec![],
-                    }
-                };
-
-                // Merge cached + fresh findings
-                let mut merged = fresh_result;
-                let mut all_findings = partition.cached_findings;
-                all_findings.append(&mut merged.findings);
-                merged.findings = all_findings;
-                // Rebuild counts
-                merged.by_severity.clear();
-                for f in &merged.findings {
-                    *merged.by_severity.entry(f.severity.to_string()).or_insert(0) += 1;
-                }
-                merged.by_tool.clear();
-                for f in &merged.findings {
-                    *merged.by_tool.entry(f.source.clone()).or_insert(0) += 1;
-                }
-
-                // Apply security fail_on
-                let sec_fail_on = security_config
-                    .fail_on
-                    .clone()
-                    .unwrap_or_default();
-                let sec_errors = merged.findings.iter().filter(|f| {
-                    matches!(f.severity, linthis::security::Severity::Critical | linthis::security::Severity::High)
-                }).count();
-                let sec_warnings = merged.findings.iter().filter(|f| {
-                    f.severity == linthis::security::Severity::Medium
-                }).count();
-                let sec_infos = merged.findings.iter().filter(|f| {
-                    matches!(f.severity, linthis::security::Severity::Low | linthis::security::Severity::None | linthis::security::Severity::Unknown)
-                }).count();
-                let sec_exit = sec_fail_on.exit_code(sec_errors, sec_warnings, sec_infos);
-                result.exit_code = std::cmp::max(result.exit_code, sec_exit);
-                // Merge SAST unavailable tools into main result
-                for ut in &merged.unavailable_tools {
-                    result.unavailable_tools.push(
-                        linthis::utils::types::UnavailableTool::new(
-                            &ut.tool,
-                            &ut.languages.join(", "),
-                            "sast",
-                            &ut.install_hint,
-                        ),
-                    );
-                }
-                result.security = Some(merged);
-                result.checks_run.push("security".to_string());
-            }
-
-            // Run complexity check if in checks list
-            if checks_list.iter().any(|c| c == "complexity") {
-                let complexity_config = runtime_config
-                    .checks
-                    .complexity
-                    .clone()
-                    .unwrap_or_default();
-
-                // Per-file cache: only analyze files whose content changed
-                let mut cache = PerFileCache::load(&complexity_cache_path);
-                let partition = cache.partition_files(&target_files, cli.no_cache);
-
-                if !cli.quiet {
-                    eprintln!("{}", PerFileCache::format_status("complexity", &partition));
-                }
-
-                // Analyze only changed files
-                if !partition.changed.is_empty() {
-                    let analysis_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        run_complexity_analysis(
-                            &runtime_project_root,
-                            &partition.changed,
-                            &complexity_config,
-                        )
-                    }));
-                    match analysis_result {
-                        Ok(Ok(analysis)) => {
-                            // Update cache for analyzed files
-                            cache.update_from_complexity(&partition.changed, &analysis);
-                            cache.save(&complexity_cache_path);
-
-                            // Apply complexity fail_on
-                            let cx_fail_on = complexity_config
-                                .fail_on
-                                .clone()
-                                .unwrap_or_default();
-                            let cx_high = analysis.thresholds.cyclomatic.high;
-                            let cx_warning = analysis.thresholds.cyclomatic.warning;
-                            let cx_threshold = analysis.thresholds.cyclomatic.good;
-                            let cx_errors = analysis.files.iter().flat_map(|f| &f.functions)
-                                .filter(|func| func.metrics.cyclomatic > cx_high).count();
-                            let cx_warns = analysis.files.iter().flat_map(|f| &f.functions)
-                                .filter(|func| func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high).count();
-                            let cx_infos = analysis.files.iter().flat_map(|f| &f.functions)
-                                .filter(|func| func.metrics.cyclomatic > cx_threshold && func.metrics.cyclomatic <= cx_warning).count();
-                            let cx_exit = cx_fail_on.exit_code(cx_errors, cx_warns, cx_infos);
-                            result.exit_code = std::cmp::max(result.exit_code, cx_exit);
-                            result.complexity = Some(analysis);
-                        }
-                        Ok(Err(e)) => {
-                            if !cli.quiet {
-                                eprintln!("Complexity analysis error: {}", e);
-                            }
-                        }
-                        Err(_) => {
-                            if !cli.quiet {
-                                eprintln!("Complexity analysis encountered an internal error");
-                            }
-                        }
-                    }
-                }
-                // If all files were cached, rebuild AnalysisResult from cached FileMetrics
-                if result.complexity.is_none() && partition.cache_hits > 0 {
-                    let cached_metrics = cache.get_cached_file_metrics(&target_files);
-                    let mut cached_result = linthis::complexity::AnalysisResult::new();
-                    cached_result.files = cached_metrics;
-                    cached_result.calculate_summary();
-
-                    // Apply config thresholds
-                    if let Some(t) = complexity_config.threshold {
-                        cached_result.thresholds.cyclomatic.good = t;
-                        cached_result.thresholds.cyclomatic.warning = t + 10;
-                        cached_result.thresholds.cyclomatic.high = t + 20;
-                    }
-                    if let Some(w) = complexity_config.warning_threshold {
-                        cached_result.thresholds.cyclomatic.warning = w;
-                    }
-                    if let Some(e) = complexity_config.error_threshold {
-                        cached_result.thresholds.cyclomatic.high = e;
-                    }
-                    cached_result.thresholds.cyclomatic.normalize();
-
-                    // Calculate exit code from cached result
-                    let cx_fail_on = complexity_config.fail_on.clone().unwrap_or_default();
-                    let cx_high = cached_result.thresholds.cyclomatic.high;
-                    let cx_warning = cached_result.thresholds.cyclomatic.warning;
-                    let cx_threshold = cached_result.thresholds.cyclomatic.good;
-                    let cx_errors = cached_result.files.iter().flat_map(|f| &f.functions)
-                        .filter(|func| func.metrics.cyclomatic > cx_high).count();
-                    let cx_warns = cached_result.files.iter().flat_map(|f| &f.functions)
-                        .filter(|func| func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high).count();
-                    let cx_infos = cached_result.files.iter().flat_map(|f| &f.functions)
-                        .filter(|func| func.metrics.cyclomatic > cx_threshold && func.metrics.cyclomatic <= cx_warning).count();
-                    let cx_exit = cx_fail_on.exit_code(cx_errors, cx_warns, cx_infos);
-                    result.exit_code = std::cmp::max(result.exit_code, cx_exit);
-
-                    result.complexity = Some(cached_result);
-                }
-                result.checks_run.push("complexity".to_string());
-            }
-
-            // Output results
-            let output = format_result_with_hook_type(&result, output_format, hook_type.as_deref());
-
-            // Print to console
-            if (!cli.quiet || result.exit_code != 0) && !output.is_empty() {
-                println!("{}", output);
-            }
-
-            // Save to file by default (unless --no-save-result is specified)
-            // Default format is JSON for programmatic access (--last, --from-result)
-            if !cli.no_save_result || cli.output_file.is_some() {
-                use chrono::Local;
-                use std::fs::{self, File};
-                use std::io::Write;
-
-                // Get project root for .linthis directory
-                let project_root = linthis::utils::get_project_root();
-
-                // Determine actual output path
-                let output_file = if let Some(ref custom_path) = cli.output_file {
-                    // Use specified path, create parent directory if needed
-                    if let Some(parent) = custom_path.parent() {
-                        if !parent.as_os_str().is_empty() {
-                            let _ = fs::create_dir_all(parent);
-                        }
-                    }
-                    custom_path.clone()
-                } else {
-                    // Use default path: <project_root>/.linthis/result/result-{timestamp}.json
-                    let result_dir = project_root.join(".linthis").join("result");
-                    if let Err(e) = fs::create_dir_all(&result_dir) {
-                        eprintln!(
-                            "{}: Failed to create {}: {}",
-                            "Warning".yellow(),
-                            result_dir.display(),
-                            e
-                        );
-                        return ExitCode::from(result.exit_code as u8);
-                    }
-                    let timestamp = Local::now().format("%Y%m%d-%H%M%S");
-                    result_dir.join(format!("result-{}.json", timestamp))
-                };
-
-                // Serialize result as JSON for default files, or use specified format for custom path
-                let file_content = if cli.output_file.is_some() {
-                    // Custom path: use the output format specified by user
-                    strip_ansi_codes(&output)
-                } else {
-                    // Default path: always save as unified JSON for --last/--from-result support
-                    linthis::utils::output::format_result_json(&result)
-                };
-
-                match File::create(&output_file) {
-                    Ok(mut file) => {
-                        if let Err(e) = writeln!(file, "{}", file_content) {
-                            eprintln!(
-                                "{}: Failed to write to {}: {}",
-                                "Warning".yellow(),
-                                output_file.display(),
-                                e
-                            );
-                        } else if !cli.quiet {
-                            eprintln!(
-                                "{} Results saved to {}",
-                                "✓".green(),
-                                output_file.display()
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "{}: Failed to create {}: {}",
-                            "Warning".yellow(),
-                            output_file.display(),
-                            e
-                        );
-                    }
-                }
-
-                // Clean up old result files if using default directory and keep_results > 0
-                if !cli.no_save_result && cli.output_file.is_none() && cli.keep_results > 0 {
-                    let result_dir = PathBuf::from(".linthis").join("result");
-                    if let Ok(entries) = fs::read_dir(&result_dir) {
-                        let mut result_files: Vec<_> = entries
-                            .filter_map(|e| e.ok())
-                            .filter(|e| {
-                                let name = e.file_name().to_string_lossy().to_string();
-                                name.starts_with("result-")
-                                    && (name.ends_with(".json") || name.ends_with(".txt"))
-                            })
-                            .collect();
-
-                        // Sort by modification time, newest first
-                        result_files.sort_by(|a, b| {
-                            let a_time = a.metadata().and_then(|m| m.modified()).ok();
-                            let b_time = b.metadata().and_then(|m| m.modified()).ok();
-                            b_time.cmp(&a_time)
-                        });
-
-                        // Remove files beyond keep_results limit
-                        let files_to_remove = result_files.iter().skip(cli.keep_results);
-                        let mut removed_count = 0;
-                        for entry in files_to_remove {
-                            if fs::remove_file(entry.path()).is_ok() {
-                                removed_count += 1;
-                            }
-                        }
-                        if removed_count > 0 && cli.verbose {
-                            eprintln!(
-                                "{} Cleaned up {} old result file(s)",
-                                "✓".green(),
-                                removed_count
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Show failure message if exit code is non-zero
-            if result.exit_code != 0 && !cli.quiet {
-                eprintln!();
-
-                // Header: icon + checks list
-                let checks_label = if result.checks_run.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{}]", result.checks_run.join(", "))
-                };
-                let is_info_only = result.exit_code == 3;
-                if is_info_only {
-                    eprintln!("{} {}",
-                        "⚠".yellow().bold(),
-                        format!("Linthis check completed with issues{}", checks_label).yellow().bold()
-                    );
-                } else {
-                    eprintln!("{} {}",
-                        "✗".red().bold(),
-                        format!("Linthis check failed{}", checks_label).red().bold()
-                    );
-                }
-
-                // Per-check detail lines
-                // Formatting
-                let fmt_errors = result.format_results.iter().filter(|r| r.error.is_some()).count();
-                if fmt_errors > 0 {
-                    eprintln!("  {}: {}",
-                        "formatting".red(),
-                        format!("{} file(s) with errors", fmt_errors).red()
-                    );
-                }
-
-                // Lint
-                if result.checks_run.iter().any(|c| c == "lint") {
-                    let lint_errors = result.issues.iter()
-                        .filter(|i| i.severity == linthis::utils::types::Severity::Error).count();
-                    let lint_warnings = result.issues.iter()
-                        .filter(|i| i.severity == linthis::utils::types::Severity::Warning).count();
-                    let lint_infos = result.issues.iter()
-                        .filter(|i| i.severity == linthis::utils::types::Severity::Info).count();
-                    if lint_errors > 0 || lint_warnings > 0 || lint_infos > 0 {
-                        let mut parts = Vec::new();
-                        if lint_errors > 0 { parts.push(format!("{} error(s)", lint_errors)); }
-                        if lint_warnings > 0 { parts.push(format!("{} warning(s)", lint_warnings)); }
-                        if lint_infos > 0 { parts.push(format!("{} info", lint_infos)); }
-                        eprintln!("  {}: {}", "lint".red(), parts.join(", ").red());
-                    } else if result.exit_code != 0 {
-                        eprintln!("  {}: {}", "lint", "✓".green());
-                    }
-                }
-
-                // Security
-                if result.checks_run.iter().any(|c| c == "security") {
-                    if let Some(ref sec) = result.security {
-                        let sec_errors = sec.findings.iter().filter(|f| {
-                            matches!(f.severity, linthis::security::Severity::Critical | linthis::security::Severity::High)
-                        }).count();
-                        let sec_warnings = sec.findings.iter().filter(|f| {
-                            f.severity == linthis::security::Severity::Medium
-                        }).count();
-                        let sec_infos = sec.findings.iter().filter(|f| {
-                            matches!(f.severity, linthis::security::Severity::Low | linthis::security::Severity::None | linthis::security::Severity::Unknown)
-                        }).count();
-                        if sec_errors > 0 || sec_warnings > 0 || sec_infos > 0 {
-                            let mut parts = Vec::new();
-                            if sec_errors > 0 { parts.push(format!("{} error(s)", sec_errors)); }
-                            if sec_warnings > 0 { parts.push(format!("{} warning(s)", sec_warnings)); }
-                            if sec_infos > 0 { parts.push(format!("{} info", sec_infos)); }
-                            eprintln!("  {}: {}", "security".red(), parts.join(", ").red());
-                        } else {
-                            eprintln!("  {}: {}", "security", "✓".green());
-                        }
-                    }
-                }
-
-                // Complexity
-                if result.checks_run.iter().any(|c| c == "complexity") {
-                    if let Some(ref cx) = result.complexity {
-                        let cx_high = cx.thresholds.cyclomatic.high;
-                        let cx_warning = cx.thresholds.cyclomatic.warning;
-                        let cx_good = cx.thresholds.cyclomatic.good;
-                        let cx_errors = cx.files.iter().flat_map(|f| &f.functions)
-                            .filter(|func| func.metrics.cyclomatic > cx_high).count();
-                        let cx_warns = cx.files.iter().flat_map(|f| &f.functions)
-                            .filter(|func| func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high).count();
-                        let cx_infos = cx.files.iter().flat_map(|f| &f.functions)
-                            .filter(|func| func.metrics.cyclomatic > cx_good && func.metrics.cyclomatic <= cx_warning).count();
-                        if cx_errors > 0 || cx_warns > 0 || cx_infos > 0 {
-                            let mut parts = Vec::new();
-                            if cx_errors > 0 { parts.push(format!("{} error(s)", cx_errors)); }
-                            if cx_warns > 0 { parts.push(format!("{} warning(s)", cx_warns)); }
-                            if cx_infos > 0 { parts.push(format!("{} info", cx_infos)); }
-                            eprintln!("  {}: {}", "complexity".red(), parts.join(", ").red());
-                        } else {
-                            eprintln!("  {}: {}", "complexity", "✓".green());
-                        }
-                    }
-                }
-            }
-
-            // If --fix is specified and there are issues, enter fix mode
-            if cli.fix && !result.issues.is_empty() {
-                use cli::resolve_ai_provider;
-                use linthis::config::Config;
-                use linthis::interactive::{run_ai_fix_all, run_interactive, AiFixConfig};
-
-                let project_root = linthis::utils::get_project_root();
-                let config = Config::load_merged(&project_root);
-
-                if cli.ai {
-                    // Interactive provider selection when --ai without --provider
-                    let interactive_provider = if cli.provider.is_none()
-                        && std::env::var("LINTHIS_AI_PROVIDER").is_err()
-                        && config.ai.provider.is_none()
-                        && std::io::IsTerminal::is_terminal(&std::io::stdin())
-                    {
-                        cli::select_ai_provider_interactive()
-                    } else {
-                        None
-                    };
-
-                    let provider_ref = interactive_provider.as_deref().or(cli.provider.as_deref());
-
-                    // AI-powered fix mode
-                    let provider = resolve_ai_provider(
-                        provider_ref,
-                        config.ai.provider.as_deref(),
-                    );
-                    let ai_config = AiFixConfig::with_provider(&provider)
-                        .with_accept_all(cli.accept_all)
-                        .with_verbose(cli.verbose);
-
-                    if !cli.quiet {
-                        eprintln!(
-                            "\n{} Entering AI fix mode with provider: {}",
-                            "→".cyan(),
-                            provider.cyan()
-                        );
-                    }
-
-                    let ai_result = run_ai_fix_all(&result, &ai_config);
-
-                    if !cli.quiet && ai_result.applied > 0 {
-                        eprintln!(
-                            "{} Applied {} fix(es)",
-                            "✓".green(),
-                            ai_result.applied
-                        );
-                    }
-
-                    // Return success if all issues were fixed
-                    if ai_result.applied > 0 && ai_result.errors == 0 {
-                        return ExitCode::SUCCESS;
-                    }
-                } else {
-                    // Interactive fix mode
-                    if !cli.quiet {
-                        eprintln!("\n{} Entering interactive fix mode", "→".cyan());
-                    }
-
-                    let interactive_result = run_interactive(&result);
-
-                    if !cli.quiet {
-                        let count = interactive_result.edited + interactive_result.ignored;
-                        if count > 0 {
-                            eprintln!(
-                                "{} Processed {} issue(s)",
-                                "✓".green(),
-                                count
-                            );
-                        }
-                    }
-                }
-
-                return ExitCode::from(result.exit_code as u8);
-            }
-
-            // Show hint for fix mode if there are issues
-            if !cli.quiet && !result.issues.is_empty() {
-                print_fix_hint(&result.issues);
-            }
-
-            ExitCode::from(result.exit_code as u8)
-        }
+        Ok(result) => process_lint_result(
+            result,
+            &cli,
+            &runtime_config,
+            &runtime_project_root,
+            output_format,
+            hook_type,
+        ),
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
             ExitCode::from(2)

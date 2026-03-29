@@ -53,14 +53,52 @@ pub fn format_complexity_report(result: &AnalysisResult, format: ComplexityRepor
 
 fn format_human(result: &AnalysisResult) -> String {
     let mut output = String::new();
-    let reset = "\x1b[0m";
 
     let threshold = result.thresholds.cyclomatic.good;
     let warning_threshold = result.thresholds.cyclomatic.warning;
     let high_threshold = result.thresholds.cyclomatic.high;
 
-    // Collect all functions exceeding threshold, sorted by severity
-    let mut issues: Vec<(&FileMetrics, &super::metrics::FunctionMetrics)> = Vec::new();
+    let mut issues = collect_issues(result, threshold);
+    issues.sort_by(|a, b| b.1.metrics.cyclomatic.cmp(&a.1.metrics.cyclomatic));
+
+    format_human_header(
+        &mut output,
+        result,
+        &issues,
+        threshold,
+        warning_threshold,
+        high_threshold,
+    );
+
+    if issues.is_empty() {
+        output.push_str("  All functions within complexity threshold.\n");
+    } else {
+        let counts = format_human_issues(
+            &mut output,
+            &issues,
+            threshold,
+            warning_threshold,
+            high_threshold,
+        );
+        format_human_summary(&mut output, result, &issues, &counts);
+    }
+
+    if !result.errors.is_empty() {
+        output.push_str("\nErrors:\n");
+        for error in &result.errors {
+            output.push_str(&format!("  - {}\n", error));
+        }
+    }
+
+    output
+}
+
+/// Collect all functions exceeding the threshold.
+fn collect_issues(
+    result: &AnalysisResult,
+    threshold: u32,
+) -> Vec<(&FileMetrics, &super::metrics::FunctionMetrics)> {
+    let mut issues = Vec::new();
     for file in &result.files {
         for func in &file.functions {
             if func.metrics.cyclomatic > threshold {
@@ -68,9 +106,18 @@ fn format_human(result: &AnalysisResult) -> String {
             }
         }
     }
-    issues.sort_by(|a, b| b.1.metrics.cyclomatic.cmp(&a.1.metrics.cyclomatic));
+    issues
+}
 
-    // Summary line with threshold levels
+/// Write the header lines (file/function counts and threshold info).
+fn format_human_header(
+    output: &mut String,
+    result: &AnalysisResult,
+    issues: &[(&FileMetrics, &super::metrics::FunctionMetrics)],
+    threshold: u32,
+    warning_threshold: u32,
+    high_threshold: u32,
+) {
     output.push_str(&format!(
         "\nComplexity: {} file(s) analyzed, {} function(s), {} issue(s)\n",
         result.summary.total_files,
@@ -81,94 +128,111 @@ fn format_human(result: &AnalysisResult) -> String {
         "  Threshold: info > {}, warning > {}, error > {}\n\n",
         threshold, warning_threshold, high_threshold,
     ));
+}
 
-    if issues.is_empty() {
-        output.push_str("  All functions within complexity threshold.\n");
-    } else {
-        let mut error_count = 0usize;
-        let mut warn_count = 0usize;
-        let mut info_count = 0usize;
-        let mut files_with_issues: std::collections::HashSet<String> = std::collections::HashSet::new();
+/// Severity counts returned by `format_human_issues`.
+struct IssueCounts {
+    errors: usize,
+    warnings: usize,
+    infos: usize,
+    files_with_issues: std::collections::HashSet<String>,
+}
 
-        for (i, (file, func)) in issues.iter().enumerate() {
-            let severity = if func.metrics.cyclomatic > high_threshold {
-                error_count += 1;
-                "error"
-            } else if func.metrics.cyclomatic > warning_threshold {
-                warn_count += 1;
-                "warning"
-            } else {
-                info_count += 1;
-                "info"
-            };
-            files_with_issues.insert(file.path.to_string_lossy().to_string());
+/// Write each issue line and return severity counts.
+fn format_human_issues(
+    output: &mut String,
+    issues: &[(&FileMetrics, &super::metrics::FunctionMetrics)],
+    threshold: u32,
+    warning_threshold: u32,
+    high_threshold: u32,
+) -> IssueCounts {
+    let reset = "\x1b[0m";
+    let mut counts = IssueCounts {
+        errors: 0,
+        warnings: 0,
+        infos: 0,
+        files_with_issues: std::collections::HashSet::new(),
+    };
 
-            let color = match severity {
-                "error" => "\x1b[1;31m",   // bold red
-                "warning" => "\x1b[33m",   // yellow
-                _ => "\x1b[36m",           // cyan
-            };
-            let severity_label = match severity {
-                "error" => "[ERROR]",
-                "warning" => "[WARN]",
-                _ => "[INFO]",
-            };
-
-            output.push_str(&format!(
-                "  {}. {}{}{} `{}` cyclomatic complexity {} exceeds threshold {}\n",
-                i + 1,
-                color,
-                severity_label,
-                reset,
-                func.name,
-                func.metrics.cyclomatic,
-                threshold,
-            ));
-            output.push_str(&format!(
-                "     {}:{}-{} (cognitive: {}, nesting: {})\n",
-                file.path.display(),
-                func.start_line,
-                func.end_line,
-                func.metrics.cognitive,
-                func.metrics.max_nesting,
-            ));
-        }
-
-        // Summary
-        let duration_str = if result.duration_ms >= 1000 {
-            format!("{:.2}s", result.duration_ms as f64 / 1000.0)
+    for (i, (file, func)) in issues.iter().enumerate() {
+        let severity = if func.metrics.cyclomatic > high_threshold {
+            counts.errors += 1;
+            "error"
+        } else if func.metrics.cyclomatic > warning_threshold {
+            counts.warnings += 1;
+            "warning"
         } else {
-            format!("{}ms", result.duration_ms)
+            counts.infos += 1;
+            "info"
+        };
+        counts
+            .files_with_issues
+            .insert(file.path.to_string_lossy().to_string());
+
+        let color = match severity {
+            "error" => "\x1b[1;31m",
+            "warning" => "\x1b[33m",
+            _ => "\x1b[36m",
+        };
+        let severity_label = match severity {
+            "error" => "[ERROR]",
+            "warning" => "[WARN]",
+            _ => "[INFO]",
         };
 
         output.push_str(&format!(
-            "\n\x1b[31m✗\x1b[0m {} issue(s) ({} error, {} warning, {} info) in {} of {} file(s)\n",
-            issues.len(),
-            error_count,
-            warn_count,
-            info_count,
-            files_with_issues.len(),
-            result.summary.total_files,
+            "  {}. {}{}{} `{}` cyclomatic complexity {} exceeds threshold {}\n",
+            i + 1,
+            color,
+            severity_label,
+            reset,
+            func.name,
+            func.metrics.cyclomatic,
+            threshold,
         ));
-        output.push_str(&format!("Done in {}\n", duration_str));
-
-        if error_count > 0 {
-            output.push_str(&format!(
-                "\n{}\n",
-                "\x1b[31m✗ Complexity check failed. Consider refactoring high-complexity functions.\x1b[0m"
-            ));
-        }
+        output.push_str(&format!(
+            "     {}:{}-{} (cognitive: {}, nesting: {})\n",
+            file.path.display(),
+            func.start_line,
+            func.end_line,
+            func.metrics.cognitive,
+            func.metrics.max_nesting,
+        ));
     }
 
-    // Errors
-    if !result.errors.is_empty() {
-        output.push_str("\nErrors:\n");
-        for error in &result.errors {
-            output.push_str(&format!("  - {}\n", error));
-        }
-    }
+    counts
+}
 
-    output
+/// Write the bottom summary (total counts, duration, failure notice).
+fn format_human_summary(
+    output: &mut String,
+    result: &AnalysisResult,
+    issues: &[(&FileMetrics, &super::metrics::FunctionMetrics)],
+    counts: &IssueCounts,
+) {
+    let duration_str = if result.duration_ms >= 1000 {
+        format!("{:.2}s", result.duration_ms as f64 / 1000.0)
+    } else {
+        format!("{}ms", result.duration_ms)
+    };
+
+    output.push_str(&format!(
+        "\n\x1b[31m✗\x1b[0m {} issue(s) ({} error, {} warning, {} info) in {} of {} file(s)\n",
+        issues.len(),
+        counts.errors,
+        counts.warnings,
+        counts.infos,
+        counts.files_with_issues.len(),
+        result.summary.total_files,
+    ));
+    output.push_str(&format!("Done in {}\n", duration_str));
+
+    if counts.errors > 0 {
+        output.push_str(&format!(
+            "\n{}\n",
+            "\x1b[31m✗ Complexity check failed. Consider refactoring high-complexity functions.\x1b[0m"
+        ));
+    }
 }
 
 fn format_json(result: &AnalysisResult) -> String {
@@ -430,7 +494,7 @@ mod tests {
     fn test_format_human() {
         let result = AnalysisResult::new();
         let output = format_complexity_report(&result, ComplexityReportFormat::Human);
-        assert!(output.contains("Code Complexity Analysis"));
+        assert!(output.contains("Complexity:"));
     }
 
     #[test]

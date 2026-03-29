@@ -80,6 +80,114 @@ fn load_result_from_source(source: &str) -> Option<RunResult> {
     }
 }
 
+/// Filter issues by severity flags and apply a display limit.
+fn filter_and_limit_issues(
+    issues: &[linthis::utils::types::LintIssue],
+    errors_only: bool,
+    warnings_only: bool,
+    limit: usize,
+) -> (Vec<&linthis::utils::types::LintIssue>, usize) {
+    let filtered: Vec<_> = issues
+        .iter()
+        .filter(|i| {
+            if errors_only {
+                i.severity == Severity::Error
+            } else if warnings_only {
+                i.severity == Severity::Warning
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    let total = filtered.len();
+    let display: Vec<_> = if limit > 0 {
+        filtered.into_iter().take(limit).collect()
+    } else {
+        filtered
+    };
+    (display, total)
+}
+
+/// Output a JSON representation of the result with filtered issues.
+fn print_json_report(
+    result: &RunResult,
+    filtered_issues: Vec<&linthis::utils::types::LintIssue>,
+    limit: usize,
+) {
+    let mut filtered_result = result.clone();
+    filtered_result.issues = filtered_issues.into_iter().cloned().collect();
+    if limit > 0 {
+        filtered_result.issues.truncate(limit);
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&filtered_result).unwrap_or_default()
+    );
+}
+
+/// Print a single numbered issue line in either compact or full format.
+fn print_numbered_issue(
+    issue: &linthis::utils::types::LintIssue,
+    idx: usize,
+    prefix: &str,
+    compact: bool,
+    is_error: bool,
+) {
+    let lang_tag = issue
+        .language
+        .map(|l| format!("[{}]", l.name()))
+        .unwrap_or_default();
+    let tool_tag = issue
+        .source
+        .as_ref()
+        .map(|s| format!("[{}]", s))
+        .unwrap_or_default();
+
+    if compact {
+        let location = if let Some(col) = issue.column {
+            format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
+        } else {
+            format!("{}:{}", issue.file_path.display(), issue.line)
+        };
+        if is_error {
+            println!(
+                "{}{}{} {}: {}",
+                format!("[{}{}]", prefix, idx + 1).red().bold(),
+                lang_tag.red(),
+                tool_tag.red(),
+                location.bold(),
+                issue.message
+            );
+        } else {
+            println!(
+                "{}{}{} {}: {}",
+                format!("[{}{}]", prefix, idx + 1).yellow().bold(),
+                lang_tag.yellow(),
+                tool_tag.yellow(),
+                location.bold(),
+                issue.message
+            );
+        }
+    } else if is_error {
+        println!(
+            "{}{}{} {}",
+            format!("[{}{}]", prefix, idx + 1).red().bold(),
+            lang_tag.red(),
+            tool_tag.red(),
+            format_issue_human(issue)
+        );
+    } else {
+        println!(
+            "{}{}{} {}",
+            format!("[{}{}]", prefix, idx + 1).yellow().bold(),
+            lang_tag.yellow(),
+            tool_tag.yellow(),
+            format_issue_human(issue)
+        );
+    }
+}
+
 /// Show lint results in human-readable format
 fn handle_show_report(
     source: &str,
@@ -103,43 +211,15 @@ fn handle_show_report(
     // Merge security/complexity findings into unified issues list
     result.merge_all_check_issues();
 
-    // Filter issues based on flags
-    let filtered_issues: Vec<_> = result
-        .issues
-        .iter()
-        .filter(|i| {
-            if errors_only {
-                i.severity == Severity::Error
-            } else if warnings_only {
-                i.severity == Severity::Warning
-            } else {
-                true
-            }
-        })
-        .collect();
-
-    // Apply limit
-    let display_issues: Vec<_> = if limit > 0 {
-        filtered_issues.iter().take(limit).collect()
-    } else {
-        filtered_issues.iter().collect()
-    };
-
-    let total_filtered = filtered_issues.len();
+    let (display_issues, total_filtered) =
+        filter_and_limit_issues(&result.issues, errors_only, warnings_only, limit);
     let displayed_count = display_issues.len();
 
     // Handle JSON format
     if format == "json" {
-        // Create a modified result with filtered issues for JSON output
-        let mut filtered_result = result.clone();
-        filtered_result.issues = filtered_issues.into_iter().cloned().collect();
-        if limit > 0 {
-            filtered_result.issues.truncate(limit);
-        }
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&filtered_result).unwrap_or_default()
-        );
+        let (json_issues, _) =
+            filter_and_limit_issues(&result.issues, errors_only, warnings_only, 0);
+        print_json_report(&result, json_issues, limit);
         return ExitCode::SUCCESS;
     }
 
@@ -157,91 +237,11 @@ fn handle_show_report(
     }
 
     // Separate errors and warnings for numbered output
-    let errors: Vec<_> = display_issues
-        .iter()
-        .filter(|i| i.severity == Severity::Error)
-        .collect();
-    let warnings: Vec<_> = display_issues
-        .iter()
-        .filter(|i| i.severity == Severity::Warning)
-        .collect();
-
-    // Output errors
-    for (idx, issue) in errors.iter().enumerate() {
-        let lang_tag = issue
-            .language
-            .map(|l| format!("[{}]", l.name()))
-            .unwrap_or_default();
-        let tool_tag = issue
-            .source
-            .as_ref()
-            .map(|s| format!("[{}]", s))
-            .unwrap_or_default();
-
-        if compact {
-            // Compact format: [E1] file:line:col message
-            let location = if let Some(col) = issue.column {
-                format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
-            } else {
-                format!("{}:{}", issue.file_path.display(), issue.line)
-            };
-            println!(
-                "{}{}{} {}: {}",
-                format!("[E{}]", idx + 1).red().bold(),
-                lang_tag.red(),
-                tool_tag.red(),
-                location.bold(),
-                issue.message
-            );
-        } else {
-            // Full format with code context
-            println!(
-                "{}{}{} {}",
-                format!("[E{}]", idx + 1).red().bold(),
-                lang_tag.red(),
-                tool_tag.red(),
-                format_issue_human(issue)
-            );
-        }
+    for (idx, issue) in display_issues.iter().filter(|i| i.severity == Severity::Error).enumerate() {
+        print_numbered_issue(issue, idx, "E", compact, true);
     }
-
-    // Output warnings
-    for (idx, issue) in warnings.iter().enumerate() {
-        let lang_tag = issue
-            .language
-            .map(|l| format!("[{}]", l.name()))
-            .unwrap_or_default();
-        let tool_tag = issue
-            .source
-            .as_ref()
-            .map(|s| format!("[{}]", s))
-            .unwrap_or_default();
-
-        if compact {
-            // Compact format: [W1] file:line:col message
-            let location = if let Some(col) = issue.column {
-                format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
-            } else {
-                format!("{}:{}", issue.file_path.display(), issue.line)
-            };
-            println!(
-                "{}{}{} {}: {}",
-                format!("[W{}]", idx + 1).yellow().bold(),
-                lang_tag.yellow(),
-                tool_tag.yellow(),
-                location.bold(),
-                issue.message
-            );
-        } else {
-            // Full format with code context
-            println!(
-                "{}{}{} {}",
-                format!("[W{}]", idx + 1).yellow().bold(),
-                lang_tag.yellow(),
-                tool_tag.yellow(),
-                format_issue_human(issue)
-            );
-        }
+    for (idx, issue) in display_issues.iter().filter(|i| i.severity == Severity::Warning).enumerate() {
+        print_numbered_issue(issue, idx, "W", compact, false);
     }
 
     // Show summary

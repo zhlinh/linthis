@@ -41,106 +41,16 @@ pub struct ComplexityCommandOptions {
 
 /// Handle the complexity analysis command
 pub fn handle_complexity_command(options: ComplexityCommandOptions) -> ExitCode {
-    // Resolve file list from --staged or --modified
-    let target_files: Option<Vec<PathBuf>> = if options.staged {
-        match get_staged_files() {
-            Ok(files) => {
-                if files.is_empty() {
-                    eprintln!("No staged files found.");
-                    return ExitCode::SUCCESS;
-                }
-                if options.verbose {
-                    println!("Analyzing {} staged file(s)", files.len());
-                }
-                Some(files)
-            }
-            Err(e) => {
-                eprintln!("Failed to get staged files: {}", e);
-                return ExitCode::FAILURE;
-            }
-        }
-    } else if options.modified {
-        match get_uncommitted_files() {
-            Ok(files) => {
-                if files.is_empty() {
-                    eprintln!("No modified files found.");
-                    return ExitCode::SUCCESS;
-                }
-                if options.verbose {
-                    println!("Analyzing {} modified file(s)", files.len());
-                }
-                Some(files)
-            }
-            Err(e) => {
-                eprintln!("Failed to get modified files: {}", e);
-                return ExitCode::FAILURE;
-            }
-        }
-    } else {
-        if options.verbose {
-            println!("Analyzing code complexity in: {}", options.path.display());
-        }
-        None
+    let target_files = match resolve_target_files(&options) {
+        Ok(files) => files,
+        Err(code) => return code,
     };
 
-    // Create analyzer
-    let analyzer = ComplexityAnalyzer::new();
+    let analysis_options = build_analysis_options(&options, &target_files);
 
-    // Build analysis options
-    let mut analysis_options = AnalysisOptions::new(options.path.clone());
+    show_cache_status(&analysis_options, &options);
 
-    // If we have specific files from --staged/--modified, add them as include patterns
-    if let Some(ref files) = target_files {
-        analysis_options.files = files.clone();
-    }
-
-    analysis_options.include = options.include.unwrap_or_default();
-    analysis_options.exclude = options.exclude.unwrap_or_default();
-    analysis_options.threshold = options.threshold;
-    analysis_options.format = options.format.clone();
-    analysis_options.with_trends = options.with_trends;
-    analysis_options.trend_count = options.trend_count;
-    analysis_options.verbose = options.verbose;
-    analysis_options.parallel = !options.no_parallel;
-
-    // Per-file cache: show cache status
-    let project_root = linthis::utils::get_project_root();
-    let cache_path = project_root.join(".linthis").join("complexity-cache.json");
-    let cache = PerFileCache::load(&cache_path);
-    // Use target_files if set (from --staged/--modified), otherwise collect from path
-    let cache_target = if !analysis_options.files.is_empty() {
-        analysis_options.files.clone()
-    } else {
-        // Collect files that would be analyzed
-        walkdir::WalkDir::new(&analysis_options.path)
-            .max_depth(10)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| {
-                        matches!(
-                            ext,
-                            "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java"
-                                | "kt" | "c" | "h" | "cpp" | "cc" | "rb" | "php"
-                                | "swift" | "scala" | "mm" | "m" | "lua" | "sh"
-                        )
-                    })
-                    .unwrap_or(false)
-            })
-            .map(|e| e.into_path())
-            .collect()
-    };
-    let partition = cache.partition_files(&cache_target, false);
-    if options.verbose || !partition.changed.is_empty() || partition.cache_hits > 0 {
-        eprintln!("{}", PerFileCache::format_status("complexity", &partition));
-    }
-
-    // Run analysis
-    let mut result = match analyzer.analyze(&analysis_options) {
+    let mut result = match ComplexityAnalyzer::new().analyze(&analysis_options) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error during analysis: {}", e);
@@ -148,34 +58,165 @@ pub fn handle_complexity_command(options: ComplexityCommandOptions) -> ExitCode 
         }
     };
 
-    // Update cache after analysis
-    {
-        let mut cache = PerFileCache::load(&cache_path);
-        let analyzed_files: Vec<PathBuf> = result.files.iter().map(|f| f.path.clone()).collect();
-        cache.update_from_complexity(&analyzed_files, &result);
-        cache.save(&cache_path);
+    update_cache_after_analysis(&result);
+    apply_thresholds(&mut result, &options);
+
+    let format = options
+        .format
+        .parse::<ComplexityReportFormat>()
+        .unwrap_or_default();
+
+    filter_and_sort(&mut result, &options);
+
+    let report = format_complexity_report(&result, format);
+    println!("{}", report);
+
+    save_complexity_result(&result, options.verbose);
+
+    compute_complexity_exit_code(&result)
+}
+
+/// Resolve target files from --staged, --modified, or default path.
+/// Returns `Err(ExitCode)` for early exit, `Ok(None)` for full-directory mode.
+fn resolve_target_files(
+    options: &ComplexityCommandOptions,
+) -> Result<Option<Vec<PathBuf>>, ExitCode> {
+    if options.staged {
+        match get_staged_files() {
+            Ok(files) => {
+                if files.is_empty() {
+                    eprintln!("No staged files found.");
+                    return Err(ExitCode::SUCCESS);
+                }
+                if options.verbose {
+                    println!("Analyzing {} staged file(s)", files.len());
+                }
+                Ok(Some(files))
+            }
+            Err(e) => {
+                eprintln!("Failed to get staged files: {}", e);
+                Err(ExitCode::FAILURE)
+            }
+        }
+    } else if options.modified {
+        match get_uncommitted_files() {
+            Ok(files) => {
+                if files.is_empty() {
+                    eprintln!("No modified files found.");
+                    return Err(ExitCode::SUCCESS);
+                }
+                if options.verbose {
+                    println!("Analyzing {} modified file(s)", files.len());
+                }
+                Ok(Some(files))
+            }
+            Err(e) => {
+                eprintln!("Failed to get modified files: {}", e);
+                Err(ExitCode::FAILURE)
+            }
+        }
+    } else {
+        if options.verbose {
+            println!("Analyzing code complexity in: {}", options.path.display());
+        }
+        Ok(None)
+    }
+}
+
+/// Build `AnalysisOptions` from command options and resolved files.
+fn build_analysis_options(
+    options: &ComplexityCommandOptions,
+    target_files: &Option<Vec<PathBuf>>,
+) -> AnalysisOptions {
+    let mut analysis_options = AnalysisOptions::new(options.path.clone());
+
+    if let Some(ref files) = target_files {
+        analysis_options.files = files.clone();
     }
 
-    // Apply threshold preset
+    analysis_options.include = options.include.clone().unwrap_or_default();
+    analysis_options.exclude = options.exclude.clone().unwrap_or_default();
+    analysis_options.threshold = options.threshold;
+    analysis_options.format = options.format.clone();
+    analysis_options.with_trends = options.with_trends;
+    analysis_options.trend_count = options.trend_count;
+    analysis_options.verbose = options.verbose;
+    analysis_options.parallel = !options.no_parallel;
+
+    analysis_options
+}
+
+/// Display per-file cache status.
+fn show_cache_status(analysis_options: &AnalysisOptions, options: &ComplexityCommandOptions) {
+    let project_root = linthis::utils::get_project_root();
+    let cache_path = project_root.join(".linthis").join("complexity-cache.json");
+    let cache = PerFileCache::load(&cache_path);
+
+    let cache_target = if !analysis_options.files.is_empty() {
+        analysis_options.files.clone()
+    } else {
+        collect_complexity_files(&analysis_options.path)
+    };
+
+    let partition = cache.partition_files(&cache_target, false);
+    if options.verbose || !partition.changed.is_empty() || partition.cache_hits > 0 {
+        eprintln!("{}", PerFileCache::format_status("complexity", &partition));
+    }
+}
+
+/// Collect source files eligible for complexity analysis from a directory.
+fn collect_complexity_files(path: &Path) -> Vec<PathBuf> {
+    walkdir::WalkDir::new(path)
+        .max_depth(10)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| {
+                    matches!(
+                        ext,
+                        "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java"
+                            | "kt" | "c" | "h" | "cpp" | "cc" | "rb" | "php"
+                            | "swift" | "scala" | "mm" | "m" | "lua" | "sh"
+                    )
+                })
+                .unwrap_or(false)
+        })
+        .map(|e| e.into_path())
+        .collect()
+}
+
+/// Update the per-file cache after analysis.
+fn update_cache_after_analysis(result: &AnalysisResult) {
+    let project_root = linthis::utils::get_project_root();
+    let cache_path = project_root.join(".linthis").join("complexity-cache.json");
+    let mut cache = PerFileCache::load(&cache_path);
+    let analyzed_files: Vec<PathBuf> = result.files.iter().map(|f| f.path.clone()).collect();
+    cache.update_from_complexity(&analyzed_files, result);
+    cache.save(&cache_path);
+}
+
+/// Apply threshold preset and custom overrides.
+fn apply_thresholds(result: &mut AnalysisResult, options: &ComplexityCommandOptions) {
     result.thresholds = match options.preset.as_str() {
         "strict" => Thresholds::strict(),
         "lenient" => Thresholds::lenient(),
         _ => Thresholds::default(),
     };
 
-    // Override with custom threshold if provided
     if let Some(threshold) = options.threshold {
         result.thresholds.cyclomatic.good = threshold;
         result.thresholds.cyclomatic.warning = threshold + 10;
         result.thresholds.cyclomatic.high = threshold + 20;
     }
-    // Normalize: ensure good <= warning <= high
     result.thresholds.cyclomatic.normalize();
+}
 
-    // Parse output format
-    let format = options.format.parse::<ComplexityReportFormat>().unwrap_or_default();
-
-    // Filter to only high complexity if requested
+/// Filter to high-complexity files and sort results.
+fn filter_and_sort(result: &mut AnalysisResult, options: &ComplexityCommandOptions) {
     if options.only_high {
         result.files.retain(|f| {
             f.metrics.overall_level() == MetricLevel::High
@@ -183,69 +224,93 @@ pub fn handle_complexity_command(options: ComplexityCommandOptions) -> ExitCode 
         });
     }
 
-    // Sort results
     match options.sort.as_str() {
         "cognitive" => {
-            result.files.sort_by(|a, b| b.metrics.cognitive.cmp(&a.metrics.cognitive));
+            result
+                .files
+                .sort_by(|a, b| b.metrics.cognitive.cmp(&a.metrics.cognitive));
         }
         "lines" | "loc" => {
-            result.files.sort_by(|a, b| b.metrics.loc.cmp(&a.metrics.loc));
+            result
+                .files
+                .sort_by(|a, b| b.metrics.loc.cmp(&a.metrics.loc));
         }
         "name" => {
             result.files.sort_by(|a, b| a.path.cmp(&b.path));
         }
         _ => {
-            // Default: cyclomatic
-            result.files.sort_by(|a, b| b.metrics.cyclomatic.cmp(&a.metrics.cyclomatic));
+            result
+                .files
+                .sort_by(|a, b| b.metrics.cyclomatic.cmp(&a.metrics.cyclomatic));
         }
     }
+}
 
-    // Generate and print report
-    let report = format_complexity_report(&result, format);
-    println!("{}", report);
+/// Save complexity result as JSON to .linthis/result/.
+fn save_complexity_result(result: &AnalysisResult, verbose: bool) {
+    use chrono::Local;
+    use std::fs::{self, File};
+    use std::io::Write;
 
-    // Save result to .linthis/result/
-    {
-        use chrono::Local;
-        use std::fs::{self, File};
-        use std::io::Write;
+    let project_root = linthis::utils::get_project_root();
+    let result_dir = project_root.join(".linthis").join("result");
+    if let Err(e) = fs::create_dir_all(&result_dir) {
+        eprintln!("Warning: Failed to create {}: {}", result_dir.display(), e);
+        return;
+    }
 
-        let project_root = linthis::utils::get_project_root();
-        let result_dir = project_root.join(".linthis").join("result");
-        if let Err(e) = fs::create_dir_all(&result_dir) {
-            eprintln!("Warning: Failed to create {}: {}", result_dir.display(), e);
-        } else {
-            let timestamp = Local::now().format("%Y%m%d-%H%M%S");
-            let result_file = result_dir.join(format!("complexity-{}.json", timestamp));
-            match serde_json::to_string_pretty(&result) {
-                Ok(json) => match File::create(&result_file) {
-                    Ok(mut f) => {
-                        let _ = writeln!(f, "{}", json);
-                        if !options.verbose {
-                            eprintln!("\x1b[32m✓\x1b[0m Results saved to {}", result_file.display());
-                        }
-                    }
-                    Err(e) => eprintln!("Warning: Failed to write {}: {}", result_file.display(), e),
-                },
-                Err(e) => eprintln!("Warning: Failed to serialize result: {}", e),
+    let timestamp = Local::now().format("%Y%m%d-%H%M%S");
+    let result_file = result_dir.join(format!("complexity-{}.json", timestamp));
+    match serde_json::to_string_pretty(result) {
+        Ok(json) => match File::create(&result_file) {
+            Ok(mut f) => {
+                let _ = writeln!(f, "{}", json);
+                if !verbose {
+                    eprintln!(
+                        "\x1b[32m✓\x1b[0m Results saved to {}",
+                        result_file.display()
+                    );
+                }
             }
-        }
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to write {}: {}",
+                    result_file.display(),
+                    e
+                );
+            }
+        },
+        Err(e) => eprintln!("Warning: Failed to serialize result: {}", e),
     }
+}
 
-    // Calculate exit code using fail_on (default: warning)
-    let cx_errors = result.files.iter().flat_map(|f| &f.functions)
-        .filter(|func| func.metrics.cyclomatic > result.thresholds.cyclomatic.high).count();
-    let cx_warns = result.files.iter().flat_map(|f| &f.functions)
+/// Calculate exit code based on complexity thresholds and FailOn level.
+fn compute_complexity_exit_code(result: &AnalysisResult) -> ExitCode {
+    let cx_errors = result
+        .files
+        .iter()
+        .flat_map(|f| &f.functions)
+        .filter(|func| func.metrics.cyclomatic > result.thresholds.cyclomatic.high)
+        .count();
+    let cx_warns = result
+        .files
+        .iter()
+        .flat_map(|f| &f.functions)
         .filter(|func| {
             func.metrics.cyclomatic > result.thresholds.cyclomatic.warning
                 && func.metrics.cyclomatic <= result.thresholds.cyclomatic.high
-        }).count();
-    let cx_infos = result.files.iter().flat_map(|f| &f.functions)
+        })
+        .count();
+    let cx_infos = result
+        .files
+        .iter()
+        .flat_map(|f| &f.functions)
         .filter(|func| {
             func.metrics.cyclomatic > result.thresholds.cyclomatic.good
                 && func.metrics.cyclomatic <= result.thresholds.cyclomatic.warning
-        }).count();
-    let fail_on = linthis::config::FailOn::default(); // warning
+        })
+        .count();
+    let fail_on = linthis::config::FailOn::default();
     let code = fail_on.exit_code(cx_errors, cx_warns, cx_infos);
     ExitCode::from(code as u8)
 }

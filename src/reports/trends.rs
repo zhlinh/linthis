@@ -349,111 +349,195 @@ pub fn load_result_from_file(path: &Path) -> Option<RunResult> {
     if let Ok(unified) = serde_json::from_str::<serde_json::Value>(&content) {
         let mut result = RunResult::new();
 
-        // Extract lint data
-        if let Some(lint) = unified.get("lint") {
-            result.total_files = lint.get("total_files").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            if let Some(issues) = lint.get("issues").and_then(|v| v.as_array()) {
-                for iv in issues {
-                    let file_str = iv.get("file").or_else(|| iv.get("file_path"))
-                        .and_then(|v| v.as_str()).unwrap_or("");
-                    let line = iv.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    let message = iv.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let severity = match iv.get("severity").and_then(|v| v.as_str()).unwrap_or("error") {
-                        "error" => crate::utils::types::Severity::Error,
-                        "warning" => crate::utils::types::Severity::Warning,
-                        _ => crate::utils::types::Severity::Info,
-                    };
-                    let mut issue = crate::utils::types::LintIssue::new(
-                        std::path::PathBuf::from(file_str), line, message, severity,
-                    );
-                    if let Some(col) = iv.get("column").and_then(|v| v.as_u64()) {
-                        issue = issue.with_column(col as usize);
-                    }
-                    if let Some(code) = iv.get("code").and_then(|v| v.as_str()) {
-                        issue = issue.with_code(code.to_string());
-                    }
-                    if let Some(source) = iv.get("source").and_then(|v| v.as_str()) {
-                        issue = issue.with_source(source.to_string());
-                    }
-                    if let Some(suggestion) = iv.get("suggestion").and_then(|v| v.as_str()) {
-                        issue = issue.with_suggestion(suggestion.to_string());
-                    }
-                    result.issues.push(issue);
-                }
-            }
-            result.files_with_issues = lint.get("files_with_issues").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            result.files_formatted = lint.get("files_formatted").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        }
-
-        result.exit_code = unified.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        result.duration_ms = unified.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
-
-        if let Some(checks) = unified.get("checks_run").and_then(|v| v.as_array()) {
-            result.checks_run = checks.iter().filter_map(|v| v.as_str().map(String::from)).collect();
-        }
-        if let Some(paths) = unified.get("target_paths").and_then(|v| v.as_array()) {
-            result.target_paths = paths.iter().filter_map(|v| v.as_str().map(String::from)).collect();
-        }
-
-        // Parse security issues from unified format into result.issues
-        if let Some(sec) = unified.get("security") {
-            if let Some(issues) = sec.get("issues").and_then(|v| v.as_array()) {
-                for iv in issues {
-                    let file_str = iv.get("file").and_then(|v| v.as_str()).unwrap_or("");
-                    let line = iv.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    let message = iv.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                    let severity = match iv.get("severity").and_then(|v| v.as_str()).unwrap_or("info") {
-                        "error" => crate::utils::types::Severity::Error,
-                        "warning" => crate::utils::types::Severity::Warning,
-                        _ => crate::utils::types::Severity::Info,
-                    };
-                    let source = iv.get("source").and_then(|v| v.as_str()).unwrap_or("security");
-                    let mut issue = crate::utils::types::LintIssue::new(
-                        std::path::PathBuf::from(file_str), line,
-                        format!("[security] {}", message), severity,
-                    );
-                    issue = issue.with_source(format!("security/{}", source));
-                    if let Some(code) = iv.get("code").and_then(|v| v.as_str()) {
-                        issue = issue.with_code(code.to_string());
-                    }
-                    if let Some(sug) = iv.get("suggestion").and_then(|v| v.as_str()) {
-                        issue = issue.with_suggestion(sug.to_string());
-                    }
-                    result.issues.push(issue);
-                }
-            }
-        }
-
-        // Parse complexity issues from unified format into result.issues
-        if let Some(cx) = unified.get("complexity") {
-            if let Some(issues) = cx.get("issues").and_then(|v| v.as_array()) {
-                for iv in issues {
-                    let file_str = iv.get("file").and_then(|v| v.as_str()).unwrap_or("");
-                    let line = iv.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    let message = iv.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                    let severity = match iv.get("severity").and_then(|v| v.as_str()).unwrap_or("info") {
-                        "error" => crate::utils::types::Severity::Error,
-                        "warning" => crate::utils::types::Severity::Warning,
-                        _ => crate::utils::types::Severity::Info,
-                    };
-                    let mut issue = crate::utils::types::LintIssue::new(
-                        std::path::PathBuf::from(file_str), line,
-                        format!("[complexity] {}", message), severity,
-                    );
-                    issue = issue.with_source("linthis-complexity".to_string());
-                    if let Some(sug) = iv.get("suggestion").and_then(|v| v.as_str()) {
-                        issue = issue.with_suggestion(sug.to_string());
-                    }
-                    result.issues.push(issue);
-                }
-            }
-        }
+        parse_unified_lint_section(&unified, &mut result);
+        parse_unified_metadata(&unified, &mut result);
+        parse_unified_security_issues(&unified, &mut result);
+        parse_unified_complexity_issues(&unified, &mut result);
 
         result.count_files_with_issues();
         return Some(result);
     }
 
     None
+}
+
+/// Parse a severity string into a `Severity` enum value.
+fn parse_severity(value: &serde_json::Value, default: &str) -> Severity {
+    match value.get("severity").and_then(|v| v.as_str()).unwrap_or(default) {
+        "error" => Severity::Error,
+        "warning" => Severity::Warning,
+        _ => Severity::Info,
+    }
+}
+
+/// Extract lint issues from the unified format's "lint" section.
+fn parse_unified_lint_section(
+    unified: &serde_json::Value,
+    result: &mut RunResult,
+) {
+    let lint = match unified.get("lint") {
+        Some(l) => l,
+        None => return,
+    };
+
+    result.total_files = lint
+        .get("total_files")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+
+    if let Some(issues) = lint.get("issues").and_then(|v| v.as_array()) {
+        for iv in issues {
+            result.issues.push(parse_lint_issue(iv));
+        }
+    }
+
+    result.files_with_issues = lint
+        .get("files_with_issues")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    result.files_formatted = lint
+        .get("files_formatted")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+}
+
+/// Parse a single lint issue JSON value into a `LintIssue`.
+fn parse_lint_issue(iv: &serde_json::Value) -> crate::utils::types::LintIssue {
+    let file_str = iv
+        .get("file")
+        .or_else(|| iv.get("file_path"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let line = iv.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let message = iv
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let severity = parse_severity(iv, "error");
+
+    let mut issue = crate::utils::types::LintIssue::new(
+        std::path::PathBuf::from(file_str),
+        line,
+        message,
+        severity,
+    );
+    if let Some(col) = iv.get("column").and_then(|v| v.as_u64()) {
+        issue = issue.with_column(col as usize);
+    }
+    if let Some(code) = iv.get("code").and_then(|v| v.as_str()) {
+        issue = issue.with_code(code.to_string());
+    }
+    if let Some(source) = iv.get("source").and_then(|v| v.as_str()) {
+        issue = issue.with_source(source.to_string());
+    }
+    if let Some(suggestion) = iv.get("suggestion").and_then(|v| v.as_str()) {
+        issue = issue.with_suggestion(suggestion.to_string());
+    }
+    issue
+}
+
+/// Extract top-level metadata (exit_code, duration, checks_run, target_paths).
+fn parse_unified_metadata(
+    unified: &serde_json::Value,
+    result: &mut RunResult,
+) {
+    result.exit_code = unified
+        .get("exit_code")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+    result.duration_ms = unified
+        .get("duration_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    if let Some(checks) = unified.get("checks_run").and_then(|v| v.as_array()) {
+        result.checks_run = checks
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+    }
+    if let Some(paths) = unified.get("target_paths").and_then(|v| v.as_array()) {
+        result.target_paths = paths
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+    }
+}
+
+/// Parse security issues from the unified format's "security" section.
+fn parse_unified_security_issues(
+    unified: &serde_json::Value,
+    result: &mut RunResult,
+) {
+    let sec = match unified.get("security") {
+        Some(s) => s,
+        None => return,
+    };
+    let issues = match sec.get("issues").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return,
+    };
+
+    for iv in issues {
+        let file_str = iv.get("file").and_then(|v| v.as_str()).unwrap_or("");
+        let line = iv.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let message = iv.get("message").and_then(|v| v.as_str()).unwrap_or("");
+        let severity = parse_severity(iv, "info");
+        let source = iv
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("security");
+
+        let mut issue = crate::utils::types::LintIssue::new(
+            std::path::PathBuf::from(file_str),
+            line,
+            format!("[security] {}", message),
+            severity,
+        );
+        issue = issue.with_source(format!("security/{}", source));
+        if let Some(code) = iv.get("code").and_then(|v| v.as_str()) {
+            issue = issue.with_code(code.to_string());
+        }
+        if let Some(sug) = iv.get("suggestion").and_then(|v| v.as_str()) {
+            issue = issue.with_suggestion(sug.to_string());
+        }
+        result.issues.push(issue);
+    }
+}
+
+/// Parse complexity issues from the unified format's "complexity" section.
+fn parse_unified_complexity_issues(
+    unified: &serde_json::Value,
+    result: &mut RunResult,
+) {
+    let cx = match unified.get("complexity") {
+        Some(c) => c,
+        None => return,
+    };
+    let issues = match cx.get("issues").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return,
+    };
+
+    for iv in issues {
+        let file_str = iv.get("file").and_then(|v| v.as_str()).unwrap_or("");
+        let line = iv.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let message = iv.get("message").and_then(|v| v.as_str()).unwrap_or("");
+        let severity = parse_severity(iv, "info");
+
+        let mut issue = crate::utils::types::LintIssue::new(
+            std::path::PathBuf::from(file_str),
+            line,
+            format!("[complexity] {}", message),
+            severity,
+        );
+        issue = issue.with_source("linthis-complexity".to_string());
+        if let Some(sug) = iv.get("suggestion").and_then(|v| v.as_str()) {
+            issue = issue.with_suggestion(sug.to_string());
+        }
+        result.issues.push(issue);
+    }
 }
 
 /// Parse timestamp from result filename (result-20260118-172630.json).
