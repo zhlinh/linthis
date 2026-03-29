@@ -180,6 +180,11 @@ fn format_human_issues(
             _ => "[INFO]",
         };
 
+        let exceeded_threshold = match severity {
+            "error" => high_threshold,
+            "warning" => warning_threshold,
+            _ => threshold,
+        };
         output.push_str(&format!(
             "  {}. {}{}{} `{}` cyclomatic complexity {} exceeds threshold {}\n",
             i + 1,
@@ -188,7 +193,7 @@ fn format_human_issues(
             reset,
             func.name,
             func.metrics.cyclomatic,
-            threshold,
+            exceeded_threshold,
         ));
         output.push_str(&format!(
             "     {}:{}-{} (cognitive: {}, nesting: {})\n",

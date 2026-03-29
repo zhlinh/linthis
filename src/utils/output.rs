@@ -591,6 +591,11 @@ fn build_complexity_view(analysis: &crate::complexity::AnalysisResult) -> CheckR
                     "info"
                 };
 
+                let exceeded_threshold = match severity {
+                    "error" => high_threshold,
+                    "warning" => warning_threshold,
+                    _ => threshold,
+                };
                 issues.push(IssueView {
                     file: file.path.to_string_lossy().to_string(),
                     line: func.start_line as usize,
@@ -599,7 +604,7 @@ fn build_complexity_view(analysis: &crate::complexity::AnalysisResult) -> CheckR
                     severity: severity.to_string(),
                     message: format!(
                         "function `{}` cyclomatic complexity {} exceeds threshold {}",
-                        func.name, func.metrics.cyclomatic, threshold,
+                        func.name, func.metrics.cyclomatic, exceeded_threshold,
                     ),
                     source: "linthis-complexity".to_string(),
                     code: None,
@@ -958,39 +963,13 @@ pub fn format_result_hook_with_width(
 ) -> String {
     let ctx = HookBoxContext::new(config_width);
 
-    // Only error + warning trigger Blocked box; info-only is considered passed
-    let actionable_issues: usize = result
-        .issues
-        .iter()
-        .filter(|i| i.severity == Severity::Error || i.severity == Severity::Warning)
-        .count();
-
-    if actionable_issues == 0 && result.exit_code == 0 {
+    // exit_code is already computed based on fail_on config:
+    //   0 = pass, 1 = error, 2 = warning, 3 = info, 4 = format error
+    if result.exit_code == 0 {
         return format_hook_success_box(result, hook_type, &ctx);
     }
 
-    let error_count = result
-        .issues
-        .iter()
-        .filter(|i| i.severity == Severity::Error)
-        .count();
-    let warning_count = result
-        .issues
-        .iter()
-        .filter(|i| i.severity == Severity::Warning)
-        .count();
-    // Only count files with error/warning (not info)
-    let files_with_issues = {
-        let mut files = std::collections::HashSet::new();
-        for i in result
-            .issues
-            .iter()
-            .filter(|i| i.severity != Severity::Info)
-        {
-            files.insert(&i.file_path);
-        }
-        files.len()
-    };
+    let shown_issues = filter_issues_by_exit_code(&result.issues, result.exit_code);
 
     let hook_name = hook_display_name(hook_type);
     let mut output = String::new();
@@ -1001,43 +980,9 @@ pub fn format_result_hook_with_width(
     output.push_str(&format!("{}\n", ctx.pad_line(&header, 1).red()));
     output.push_str(&format!("{}\n", ctx.mid_border.red()));
 
-    // Summary line (only errors + warnings, consistent with lint behavior)
-    let summary = format!(
-        "{} error{}, {} warning{} in {} file{}",
-        error_count,
-        if error_count == 1 { "" } else { "s" },
-        warning_count,
-        if warning_count == 1 { "" } else { "s" },
-        files_with_issues,
-        if files_with_issues == 1 { "" } else { "s" },
-    );
-    output.push_str(&format!("{}\n", ctx.pad_line(&summary, 0)));
-    output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
-
-    // List issues (only errors + warnings, skip info)
-    let actionable: Vec<_> = result
-        .issues
-        .iter()
-        .filter(|i| i.severity != Severity::Info)
-        .collect();
-    let max_issues = 8;
-    for issue in actionable.iter().take(max_issues) {
-        let line_content = format_hook_issue_line(issue, ctx.content_width);
-        output.push_str(&format!("{}\n", ctx.pad_line(&line_content, 0)));
-    }
-
-    if actionable.len() > max_issues {
-        let more_line = format!(
-            " ... and {} more issue{}",
-            actionable.len() - max_issues,
-            if actionable.len() - max_issues == 1 {
-                ""
-            } else {
-                "s"
-            }
-        );
-        output.push_str(&format!("{}\n", ctx.pad_line(&more_line, 0)));
-    }
+    // Summary + issue list
+    append_issue_summary(&mut output, &shown_issues, &ctx);
+    append_issue_list(&mut output, &shown_issues, &ctx);
 
     output.push_str(&format!("{}\n", ctx.mid_border.red()));
 
@@ -1048,6 +993,70 @@ pub fn format_result_hook_with_width(
     output.push_str(&format_hook_paths_footer(hook_type));
 
     output
+}
+
+/// Filter issues based on exit_code severity level.
+fn filter_issues_by_exit_code(issues: &[LintIssue], exit_code: i32) -> Vec<&LintIssue> {
+    issues
+        .iter()
+        .filter(|i| match exit_code {
+            2 => i.severity == Severity::Error || i.severity == Severity::Warning,
+            3 => true,
+            _ => i.severity == Severity::Error,
+        })
+        .collect()
+}
+
+/// Append summary line (e.g. "2 errors, 1 warning in 3 files") to output.
+fn append_issue_summary(output: &mut String, issues: &[&LintIssue], ctx: &HookBoxContext) {
+    let error_count = issues.iter().filter(|i| i.severity == Severity::Error).count();
+    let warning_count = issues.iter().filter(|i| i.severity == Severity::Warning).count();
+    let info_count = issues.iter().filter(|i| i.severity == Severity::Info).count();
+    let files_with_issues = {
+        let mut files = std::collections::HashSet::new();
+        for i in issues {
+            files.insert(&i.file_path);
+        }
+        files.len()
+    };
+
+    let mut parts = Vec::new();
+    if error_count > 0 {
+        parts.push(format!("{} error{}", error_count, if error_count == 1 { "" } else { "s" }));
+    }
+    if warning_count > 0 {
+        parts.push(format!("{} warning{}", warning_count, if warning_count == 1 { "" } else { "s" }));
+    }
+    if info_count > 0 {
+        parts.push(format!("{} info", info_count));
+    }
+    let summary = format!(
+        "{} in {} file{}",
+        parts.join(", "),
+        files_with_issues,
+        if files_with_issues == 1 { "" } else { "s" },
+    );
+    output.push_str(&format!("{}\n", ctx.pad_line(&summary, 0)));
+    output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
+}
+
+/// Append truncated issue list (max 8 items) to output.
+fn append_issue_list(output: &mut String, issues: &[&LintIssue], ctx: &HookBoxContext) {
+    let max_issues = 8;
+    for issue in issues.iter().take(max_issues) {
+        let line_content = format_hook_issue_line(issue, ctx.content_width);
+        output.push_str(&format!("{}\n", ctx.pad_line(&line_content, 0)));
+    }
+
+    if issues.len() > max_issues {
+        let remaining = issues.len() - max_issues;
+        let more_line = format!(
+            " ... and {} more issue{}",
+            remaining,
+            if remaining == 1 { "" } else { "s" }
+        );
+        output.push_str(&format!("{}\n", ctx.pad_line(&more_line, 0)));
+    }
 }
 
 /// Format result according to the specified output format.
