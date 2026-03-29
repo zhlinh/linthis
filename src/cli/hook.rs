@@ -805,12 +805,14 @@ fn build_global_hook_script_for_event(
              _BASE=$(git rev-parse '@{u}' 2>/dev/null || \\\n\
              \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
              _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
+             # No files to push = nothing to check\n\
+             if [ -z \"$_PUSHED_FILES\" ]; then\n\
+             \x20 exit 0\n\
+             fi\n\
              set --\n\
-             if [ -n \"$_PUSHED_FILES\" ]; then\n\
-             \x20 while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
+             while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
              $_PUSHED_FILES\n\
              _EOF_\n\
-             fi\n\
              \n"
             .to_string();
         (preamble, "\"$_REMOTE_NAME\" \"$_REMOTE_URL\"")
