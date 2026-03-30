@@ -25,6 +25,7 @@ pub enum SecurityReportFormat {
 }
 
 impl SecurityReportFormat {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "json" => SecurityReportFormat::Json,
@@ -193,7 +194,7 @@ fn format_human(result: &ScanResult) -> String {
 
         // Sort by severity (critical first)
         let mut vulns: Vec<_> = result.vulnerabilities.iter().collect();
-        vulns.sort_by(|a, b| b.severity().cmp(&a.severity()));
+        vulns.sort_by_key(|v| std::cmp::Reverse(v.severity()));
 
         for vuln in vulns {
             output.push_str(&format_vulnerability(vuln));

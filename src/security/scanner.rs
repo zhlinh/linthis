@@ -86,7 +86,7 @@ impl ScanOptions {
 }
 
 /// Result of a fix attempt
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FixResult {
     /// Vulnerabilities that were fixed
     pub fixed: Vec<String>,
@@ -98,18 +98,6 @@ pub struct FixResult {
     pub needs_review: bool,
     /// Messages for the user
     pub messages: Vec<String>,
-}
-
-impl Default for FixResult {
-    fn default() -> Self {
-        Self {
-            fixed: Vec::new(),
-            unfixed: Vec::new(),
-            commands: Vec::new(),
-            needs_review: false,
-            messages: Vec::new(),
-        }
-    }
 }
 
 /// Aggregated scan result
