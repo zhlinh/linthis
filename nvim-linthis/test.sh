@@ -5,7 +5,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEST_DIR=$(mktemp -d)
-trap "rm -rf $TEST_DIR" EXIT
+trap 'rm -rf "$TEST_DIR"' EXIT
 
 echo "=== nvim-linthis Test ==="
 echo "Plugin dir: $SCRIPT_DIR"
@@ -13,7 +13,7 @@ echo "Test dir: $TEST_DIR"
 
 # Create minimal Neovim config
 mkdir -p "$TEST_DIR/nvim"
-cat > "$TEST_DIR/nvim/init.lua" << 'EOF'
+cat >"$TEST_DIR/nvim/init.lua" <<'EOF'
 -- Add plugin to runtime path
 vim.opt.rtp:prepend(vim.env.PLUGIN_DIR)
 
@@ -69,7 +69,7 @@ end, 100)
 EOF
 
 # Create test file
-cat > "$TEST_DIR/test.py" << 'EOF'
+cat >"$TEST_DIR/test.py" <<'EOF'
 def hello():
     print("hello world")
 EOF
@@ -80,7 +80,7 @@ echo "Running Neovim tests..."
 echo ""
 
 PLUGIN_DIR="$SCRIPT_DIR" XDG_CONFIG_HOME="$TEST_DIR" \
-  nvim --headless -u "$TEST_DIR/nvim/init.lua" "$TEST_DIR/test.py" 2>&1
+	nvim --headless -u "$TEST_DIR/nvim/init.lua" "$TEST_DIR/test.py" 2>&1
 
 echo ""
 echo "=== Done ==="
