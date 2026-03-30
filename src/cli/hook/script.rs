@@ -89,7 +89,10 @@ pub(crate) fn build_pre_push_preamble() -> (String, &'static str) {
 }
 
 /// Build the agent fix command for a given hook event.
-pub(crate) fn agent_fix_cmd_for_event(provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
+pub(crate) fn agent_fix_cmd_for_event(
+    provider: &AgentFixProvider,
+    hook_event: &HookEvent,
+) -> String {
     if matches!(hook_event, HookEvent::CommitMsg) {
         agent_fix_headless_cmd_commit_msg(provider, None)
     } else {
@@ -99,10 +102,7 @@ pub(crate) fn agent_fix_cmd_for_event(provider: &AgentFixProvider, hook_event: &
 }
 
 /// Build the shell fix block that invokes an agent on lint failure.
-pub(crate) fn build_agent_fix_block(
-    provider: &AgentFixProvider,
-    hook_event: &HookEvent,
-) -> String {
+pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
     let agent_cmd = agent_fix_cmd_for_event(provider, hook_event);
     let agent_check = shell_agent_availability_check(provider);
     let error_msg = agent_fix_error_msg(hook_event);
@@ -157,15 +157,23 @@ pub(crate) fn resolve_global_hook_blocks(
     hook_event: &HookEvent,
     fix_provider: Option<&AgentFixProvider>,
 ) -> (String, String, &'static str, &'static str) {
-    let fix_block = fix_provider.map(|p| build_agent_fix_block(p, hook_event)).unwrap_or_default();
-    let fix_block_direct = fix_provider.map(|p| build_agent_fix_block(p, hook_event)).unwrap_or_default();
+    let fix_block = fix_provider
+        .map(|p| build_agent_fix_block(p, hook_event))
+        .unwrap_or_default();
+    let fix_block_direct = fix_provider
+        .map(|p| build_agent_fix_block(p, hook_event))
+        .unwrap_or_default();
     let review_block = if matches!(hook_event, HookEvent::PrePush) {
         "\n# Trigger background AI code review (non-blocking)\n\
          linthis review --background 2>/dev/null &\n"
     } else {
         ""
     };
-    let timer_block = if fix_provider.is_some() { shell_timer_functions() } else { "" };
+    let timer_block = if fix_provider.is_some() {
+        shell_timer_functions()
+    } else {
+        ""
+    };
     (fix_block, fix_block_direct, review_block, timer_block)
 }
 
@@ -177,7 +185,8 @@ pub(crate) fn build_global_hook_script_for_event(
 ) -> String {
     let linthis_cmd_var = build_linthis_cmd_var(hook_event, args);
     let (pre_push_preamble, local_hook_orig_args) = resolve_event_preamble(hook_event);
-    let (fix_block, fix_block_direct, review_block, timer_block) = resolve_global_hook_blocks(hook_event, fix_provider);
+    let (fix_block, fix_block_direct, review_block, timer_block) =
+        resolve_global_hook_blocks(hook_event, fix_provider);
     let event_name = hook_event.hook_filename();
 
     format!(
@@ -231,12 +240,12 @@ pub(crate) fn build_global_hook_script_for_event(
 /// Used for PATH detection via `which`.
 pub(crate) fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
     match provider {
-        AgentFixProvider::Claude    => "claude",
-        AgentFixProvider::Codex     => "codex",
-        AgentFixProvider::Gemini    => "gemini",
-        AgentFixProvider::Cursor    => "cursor-agent",
-        AgentFixProvider::Droid     => "droid",
-        AgentFixProvider::Auggie    => "auggie",
+        AgentFixProvider::Claude => "claude",
+        AgentFixProvider::Codex => "codex",
+        AgentFixProvider::Gemini => "gemini",
+        AgentFixProvider::Cursor => "cursor-agent",
+        AgentFixProvider::Droid => "droid",
+        AgentFixProvider::Auggie => "auggie",
         AgentFixProvider::Codebuddy => "codebuddy",
         AgentFixProvider::Openclaw => "openclaw",
     }
@@ -252,7 +261,11 @@ pub(crate) fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
 /// - Droid:     `droid exec --auto low '...'` (droid exec with --auto for edits)
 /// - Auggie:    `auggie --print '...'`        (auggie --print for headless/non-interactive)
 /// - Codebuddy: `codebuddy -p '...'`         (codebuddy -p / --prompt)
-pub(crate) fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str, provider_args: Option<&str>) -> String {
+pub(crate) fn agent_fix_headless_cmd(
+    provider: &AgentFixProvider,
+    prompt: &str,
+    provider_args: Option<&str>,
+) -> String {
     // Escape single quotes in prompt for shell safety
     let escaped = prompt.replace('\'', "'\\''");
     let extra = provider_args
@@ -260,13 +273,23 @@ pub(crate) fn agent_fix_headless_cmd(provider: &AgentFixProvider, prompt: &str, 
         .map(|a| format!(" {a}"))
         .unwrap_or_default();
     match provider {
-        AgentFixProvider::Claude    => format!("claude -p{extra} --dangerously-skip-permissions '{}'", escaped),
-        AgentFixProvider::Codex     => format!("codex exec{extra} --ask-for-approval never '{}'", escaped),
-        AgentFixProvider::Gemini    => format!("gemini -p{extra} --approval-mode=auto_edit '{}'", escaped),
-        AgentFixProvider::Cursor    => format!("cursor-agent chat{extra} --force '{}'", escaped),
-        AgentFixProvider::Droid     => format!("droid exec{extra} --auto high '{}'", escaped),
-        AgentFixProvider::Auggie    => format!("auggie{extra} --print '{}'", escaped),
-        AgentFixProvider::Codebuddy => format!("codebuddy -p{extra} --dangerously-skip-permissions '{}'", escaped),
+        AgentFixProvider::Claude => format!(
+            "claude -p{extra} --dangerously-skip-permissions '{}'",
+            escaped
+        ),
+        AgentFixProvider::Codex => {
+            format!("codex exec{extra} --ask-for-approval never '{}'", escaped)
+        }
+        AgentFixProvider::Gemini => {
+            format!("gemini -p{extra} --approval-mode=auto_edit '{}'", escaped)
+        }
+        AgentFixProvider::Cursor => format!("cursor-agent chat{extra} --force '{}'", escaped),
+        AgentFixProvider::Droid => format!("droid exec{extra} --auto high '{}'", escaped),
+        AgentFixProvider::Auggie => format!("auggie{extra} --print '{}'", escaped),
+        AgentFixProvider::Codebuddy => format!(
+            "codebuddy -p{extra} --dangerously-skip-permissions '{}'",
+            escaped
+        ),
         AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message '{}'", escaped),
     }
 }
@@ -316,7 +339,10 @@ pub(crate) fn agent_fix_show_fixed_cmsg(indent: &str) -> String {
 
 /// Build the agent command for commit-msg hook: captures $1 in _MSG_FILE then invokes agent.
 /// Uses double-quoted prompt string so $_MSG_FILE expands at shell runtime.
-pub(crate) fn agent_fix_headless_cmd_commit_msg(provider: &AgentFixProvider, provider_args: Option<&str>) -> String {
+pub(crate) fn agent_fix_headless_cmd_commit_msg(
+    provider: &AgentFixProvider,
+    provider_args: Option<&str>,
+) -> String {
     let prompt = "Commit message validation failed (not in Conventional Commits format). \
         Fix the commit message file at $_MSG_FILE: \
         (1) run 'git diff --cached --stat' to understand what actually changed, \
@@ -334,13 +360,23 @@ pub(crate) fn agent_fix_headless_cmd_commit_msg(provider: &AgentFixProvider, pro
         .map(|a| format!(" {a}"))
         .unwrap_or_default();
     let bin_cmd = match provider {
-        AgentFixProvider::Claude    => format!("claude -p{extra} --dangerously-skip-permissions \"{}\"", escaped),
-        AgentFixProvider::Codex     => format!("codex exec{extra} --ask-for-approval never \"{}\"", escaped),
-        AgentFixProvider::Gemini    => format!("gemini -p{extra} --approval-mode=auto_edit \"{}\"", escaped),
-        AgentFixProvider::Cursor    => format!("cursor-agent chat{extra} --force \"{}\"", escaped),
-        AgentFixProvider::Droid     => format!("droid exec{extra} --auto high \"{}\"", escaped),
-        AgentFixProvider::Auggie    => format!("auggie{extra} --print \"{}\"", escaped),
-        AgentFixProvider::Codebuddy => format!("codebuddy -p{extra} --dangerously-skip-permissions \"{}\"", escaped),
+        AgentFixProvider::Claude => format!(
+            "claude -p{extra} --dangerously-skip-permissions \"{}\"",
+            escaped
+        ),
+        AgentFixProvider::Codex => {
+            format!("codex exec{extra} --ask-for-approval never \"{}\"", escaped)
+        }
+        AgentFixProvider::Gemini => {
+            format!("gemini -p{extra} --approval-mode=auto_edit \"{}\"", escaped)
+        }
+        AgentFixProvider::Cursor => format!("cursor-agent chat{extra} --force \"{}\"", escaped),
+        AgentFixProvider::Droid => format!("droid exec{extra} --auto high \"{}\"", escaped),
+        AgentFixProvider::Auggie => format!("auggie{extra} --print \"{}\"", escaped),
+        AgentFixProvider::Codebuddy => format!(
+            "codebuddy -p{extra} --dangerously-skip-permissions \"{}\"",
+            escaped
+        ),
         AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message \"{}\"", escaped),
     };
     // Prepend variable capture so $_MSG_FILE is available in the double-quoted prompt
@@ -445,7 +481,11 @@ pub(crate) fn prepush_review_prompt() -> &'static str {
 }
 
 /// Build the pre-push hook script that ALWAYS triggers an agent code review.
-pub(crate) fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, provider_args: Option<&str>) -> String {
+pub(crate) fn build_git_with_agent_prepush_script(
+    linthis_cmd: &str,
+    fix_provider: &AgentFixProvider,
+    provider_args: Option<&str>,
+) -> String {
     let agent_cmd = agent_fix_headless_cmd(fix_provider, prepush_review_prompt(), provider_args);
     let timer_fns = shell_timer_functions();
     let review_box = shell_review_box_fn();
@@ -521,7 +561,12 @@ pub(crate) fn build_git_with_agent_prepush_script(linthis_cmd: &str, fix_provide
 }
 
 /// Build the full git hook shell script with agent fix fallback.
-pub(crate) fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: &AgentFixProvider, hook_event: &HookEvent, provider_args: Option<&str>) -> String {
+pub(crate) fn build_git_with_agent_hook_script(
+    linthis_cmd: &str,
+    fix_provider: &AgentFixProvider,
+    hook_event: &HookEvent,
+    provider_args: Option<&str>,
+) -> String {
     // Pre-push uses a dedicated review flow (always triggers agent, not only on failure)
     if matches!(hook_event, HookEvent::PrePush) {
         return build_git_with_agent_prepush_script(linthis_cmd, fix_provider, provider_args);
@@ -591,10 +636,7 @@ pub(crate) fn build_git_with_agent_hook_script(linthis_cmd: &str, fix_provider: 
 }
 
 /// Build the linthis command for a hook based on event type and extra args
-pub(crate) fn build_hook_command(
-    hook_event: &HookEvent,
-    args: &Option<String>,
-) -> String {
+pub(crate) fn build_hook_command(hook_event: &HookEvent, args: &Option<String>) -> String {
     match hook_event {
         HookEvent::PreCommit => {
             // For pre-commit: check + format staged files
@@ -653,7 +695,10 @@ pub(crate) fn parse_provider_with_model(raw: &str) -> (&str, Option<&str>) {
 ///
 /// If `--provider-args` already contains `--model`, the `/model` part is ignored
 /// and a warning is printed (explicit `--provider-args` takes precedence).
-pub(crate) fn merge_model_into_provider_args(model: Option<&str>, existing: Option<&str>) -> Option<String> {
+pub(crate) fn merge_model_into_provider_args(
+    model: Option<&str>,
+    existing: Option<&str>,
+) -> Option<String> {
     use colored::Colorize;
     // Check if existing provider_args already specifies --model
     if let (Some(m), Some(pa)) = (model, existing) {
@@ -667,9 +712,9 @@ pub(crate) fn merge_model_into_provider_args(model: Option<&str>, existing: Opti
     }
     match (model, existing) {
         (Some(m), Some(pa)) => Some(format!("--model {} {}", m, pa)),
-        (Some(m), None)     => Some(format!("--model {}", m)),
-        (None, Some(pa))    => Some(pa.to_string()),
-        (None, None)        => None,
+        (Some(m), None) => Some(format!("--model {}", m)),
+        (None, Some(pa)) => Some(pa.to_string()),
+        (None, None) => None,
     }
 }
 
@@ -695,14 +740,14 @@ pub(crate) fn resolve_agent_fix_provider(
 
     if let Some(p) = provider {
         let parsed = match p.to_lowercase().as_str() {
-            "claude"             => Some(AgentFixProvider::Claude),
-            "codex"              => Some(AgentFixProvider::Codex),
-            "gemini"             => Some(AgentFixProvider::Gemini),
-            "cursor"             => Some(AgentFixProvider::Cursor),
-            "droid"              => Some(AgentFixProvider::Droid),
+            "claude" => Some(AgentFixProvider::Claude),
+            "codex" => Some(AgentFixProvider::Codex),
+            "gemini" => Some(AgentFixProvider::Gemini),
+            "cursor" => Some(AgentFixProvider::Cursor),
+            "droid" => Some(AgentFixProvider::Droid),
             "auggie" | "aug" | "augment" => Some(AgentFixProvider::Auggie),
-            "codebuddy"          => Some(AgentFixProvider::Codebuddy),
-            "openclaw"           => Some(AgentFixProvider::Openclaw),
+            "codebuddy" => Some(AgentFixProvider::Codebuddy),
+            "openclaw" => Some(AgentFixProvider::Openclaw),
             _ => None,
         };
         return parsed.ok_or_else(|| {
@@ -718,7 +763,10 @@ pub(crate) fn resolve_agent_fix_provider(
 
     if yes {
         // Auto-detect: use first available, default to claude
-        return Ok(detected.into_iter().next().unwrap_or(AgentFixProvider::Claude));
+        return Ok(detected
+            .into_iter()
+            .next()
+            .unwrap_or(AgentFixProvider::Claude));
     }
 
     // Interactive menu
@@ -755,14 +803,14 @@ pub(crate) fn resolve_agent_fix_provider(
 /// Parse a provider string into an AgentFixProvider.
 pub(crate) fn parse_agent_fix_provider_name(name: &str) -> Option<AgentFixProvider> {
     match name.to_lowercase().as_str() {
-        "claude"    => Some(AgentFixProvider::Claude),
-        "codex"     => Some(AgentFixProvider::Codex),
-        "gemini"    => Some(AgentFixProvider::Gemini),
-        "cursor"    => Some(AgentFixProvider::Cursor),
-        "droid"     => Some(AgentFixProvider::Droid),
+        "claude" => Some(AgentFixProvider::Claude),
+        "codex" => Some(AgentFixProvider::Codex),
+        "gemini" => Some(AgentFixProvider::Gemini),
+        "cursor" => Some(AgentFixProvider::Cursor),
+        "droid" => Some(AgentFixProvider::Droid),
         "auggie" | "aug" | "augment" => Some(AgentFixProvider::Auggie),
         "codebuddy" => Some(AgentFixProvider::Codebuddy),
-        "openclaw"  => Some(AgentFixProvider::Openclaw),
+        "openclaw" => Some(AgentFixProvider::Openclaw),
         _ => None,
     }
 }

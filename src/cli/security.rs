@@ -21,49 +21,65 @@ use linthis::cache::PerFileCache;
 use linthis::config::SecurityChecksConfig;
 use linthis::security::report::SecurityReportFormat;
 use linthis::security::sast::{format_sast_report, SastAggregator, SastResult, SastScanOptions};
-use linthis::security::{format_security_report, ScanOptions, ScanResult, SecurityScanner, Severity};
+use linthis::security::{
+    format_security_report, ScanOptions, ScanResult, SecurityScanner, Severity,
+};
+
+/// Parameters for the security subcommand.
+pub struct SecurityCommandParams {
+    pub path: PathBuf,
+    pub scan_type: String,
+    pub severity: Option<String>,
+    pub include_dev: bool,
+    pub fix: bool,
+    pub ignore: Option<Vec<String>>,
+    pub format: String,
+    pub sbom: bool,
+    pub fail_on: Option<String>,
+    pub sast_config: Option<PathBuf>,
+    pub verbose: bool,
+}
 
 /// Handle the security subcommand
-pub fn handle_security_command(
-    path: PathBuf,
-    scan_type: String,
-    severity: Option<String>,
-    include_dev: bool,
-    fix: bool,
-    ignore: Option<Vec<String>>,
-    format: String,
-    sbom: bool,
-    fail_on: Option<String>,
-    sast_config: Option<PathBuf>,
-    verbose: bool,
-) -> ExitCode {
+pub fn handle_security_command(params: SecurityCommandParams) -> ExitCode {
+    let SecurityCommandParams {
+        path,
+        scan_type,
+        severity,
+        include_dev,
+        fix,
+        ignore,
+        format,
+        sbom,
+        fail_on,
+        sast_config,
+        verbose,
+    } = params;
     let report_format = SecurityReportFormat::from_str(&format);
     let run_sca = scan_type == "all" || scan_type == "sca";
     let run_sast = scan_type == "all" || scan_type == "sast";
 
     if run_sca {
-        let sca_exit = handle_sca(
-            &path,
-            &severity,
+        let sca_exit = handle_sca(ScaParams {
+            path: &path,
+            severity: &severity,
             include_dev,
             fix,
             ignore,
-            &format,
+            format: &format,
             sbom,
-            &fail_on,
+            fail_on: &fail_on,
             report_format,
             run_sast,
             verbose,
-        );
+        });
         if let Some(code) = sca_exit {
             return code;
         }
     }
 
     if run_sast {
-        let sast_exit = handle_sast(
-            &path, &severity, sast_config, report_format, verbose,
-        );
+        let sast_exit = handle_sast(&path, &severity, sast_config, report_format, verbose);
         if let Some(code) = sast_exit {
             return code;
         }
@@ -72,28 +88,31 @@ pub fn handle_security_command(
     ExitCode::SUCCESS
 }
 
-/// Run SCA scanning. Returns `Some(ExitCode)` for early return, `None` to continue.
-fn handle_sca(
-    path: &Path,
-    severity: &Option<String>,
+/// Parameters for SCA scanning.
+struct ScaParams<'a> {
+    path: &'a Path,
+    severity: &'a Option<String>,
     include_dev: bool,
     fix: bool,
     ignore: Option<Vec<String>>,
-    format: &str,
+    format: &'a str,
     sbom: bool,
-    fail_on: &Option<String>,
+    fail_on: &'a Option<String>,
     report_format: SecurityReportFormat,
     run_sast: bool,
     verbose: bool,
-) -> Option<ExitCode> {
+}
+
+/// Run SCA scanning. Returns `Some(ExitCode)` for early return, `None` to continue.
+fn handle_sca(params: ScaParams<'_>) -> Option<ExitCode> {
     let scanner = SecurityScanner::new();
 
-    if verbose {
+    if params.verbose {
         print_sca_scanners(&scanner);
     }
 
-    let languages = scanner.detect_languages(path);
-    if languages.is_empty() && !run_sast {
+    let languages = scanner.detect_languages(params.path);
+    if languages.is_empty() && !params.run_sast {
         println!("{}", "No supported project files detected.".yellow());
         println!(
             "Supported files: Cargo.toml, package.json, requirements.txt, go.mod, pom.xml, build.gradle"
@@ -105,41 +124,44 @@ fn handle_sca(
         return None;
     }
 
-    if verbose {
+    if params.verbose {
         println!("Detected languages: {}", languages.join(", "));
         println!();
     }
 
     let options = ScanOptions {
-        path: path.to_path_buf(),
-        severity_threshold: severity.clone(),
-        include_dev,
+        path: params.path.to_path_buf(),
+        severity_threshold: params.severity.clone(),
+        include_dev: params.include_dev,
         packages: vec![],
-        ignore: ignore.unwrap_or_default(),
-        format: format.to_string(),
-        generate_sbom: sbom,
-        fail_on: fail_on.clone(),
-        verbose,
+        ignore: params.ignore.unwrap_or_default(),
+        format: params.format.to_string(),
+        generate_sbom: params.sbom,
+        fail_on: params.fail_on.clone(),
+        verbose: params.verbose,
     };
 
-    if report_format == SecurityReportFormat::Human {
-        println!("{}", "🔍 SCA: Scanning dependencies for vulnerabilities...".bold());
+    if params.report_format == SecurityReportFormat::Human {
+        println!(
+            "{}",
+            "🔍 SCA: Scanning dependencies for vulnerabilities...".bold()
+        );
     } else {
         eprintln!("🔍 SCA: Scanning dependencies for vulnerabilities...");
     }
 
     match scanner.scan(&options) {
         Ok(result) => {
-            let output = format_security_report(&result, report_format);
+            let output = format_security_report(&result, params.report_format);
             println!("{}", output);
 
-            if fix && !result.vulnerabilities.is_empty() {
-                print_fix_suggestions(&scanner, path, &result);
+            if params.fix && !result.vulnerabilities.is_empty() {
+                print_fix_suggestions(&scanner, params.path, &result);
             }
         }
         Err(e) => {
             eprintln!("{}: {}", "SCA scan failed".red().bold(), e);
-            if !run_sast {
+            if !params.run_sast {
                 return Some(ExitCode::from(1));
             }
         }
@@ -163,11 +185,7 @@ fn print_sca_scanners(scanner: &SecurityScanner) {
 }
 
 /// Print fix suggestions for SCA vulnerabilities.
-fn print_fix_suggestions(
-    scanner: &SecurityScanner,
-    path: &Path,
-    result: &ScanResult,
-) {
+fn print_fix_suggestions(scanner: &SecurityScanner, path: &Path, result: &ScanResult) {
     println!("{}", "\n📋 Fix Suggestions:".bold());
     println!("{}", "-".repeat(50));
 
@@ -193,11 +211,7 @@ fn print_fix_suggestions(
             }
         }
         Err(e) => {
-            eprintln!(
-                "{}: {}",
-                "Failed to generate fix suggestions".red(),
-                e
-            );
+            eprintln!("{}: {}", "Failed to generate fix suggestions".red(), e);
         }
     }
 }
@@ -279,11 +293,34 @@ fn collect_sast_target_files(path: &Path) -> Vec<PathBuf> {
                 .map(|ext| {
                     matches!(
                         ext,
-                        "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java"
-                            | "kt" | "c" | "h" | "cpp" | "cc" | "rb" | "php"
-                            | "swift" | "scala" | "cs" | "yaml" | "yml" | "toml"
-                            | "json" | "env" | "cfg" | "ini" | "conf" | "sh"
-                            | "mm" | "m"
+                        "py" | "js"
+                            | "jsx"
+                            | "ts"
+                            | "tsx"
+                            | "go"
+                            | "rs"
+                            | "java"
+                            | "kt"
+                            | "c"
+                            | "h"
+                            | "cpp"
+                            | "cc"
+                            | "rb"
+                            | "php"
+                            | "swift"
+                            | "scala"
+                            | "cs"
+                            | "yaml"
+                            | "yml"
+                            | "toml"
+                            | "json"
+                            | "env"
+                            | "cfg"
+                            | "ini"
+                            | "conf"
+                            | "sh"
+                            | "mm"
+                            | "m"
                     )
                 })
                 .unwrap_or(false)
@@ -344,7 +381,10 @@ fn run_cached_sast_scan(
 fn rebuild_sast_counts(result: &mut SastResult) {
     result.by_severity.clear();
     for f in &result.findings {
-        *result.by_severity.entry(f.severity.to_string()).or_insert(0) += 1;
+        *result
+            .by_severity
+            .entry(f.severity.to_string())
+            .or_insert(0) += 1;
     }
     result.by_tool.clear();
     for f in &result.findings {
@@ -389,11 +429,7 @@ fn compute_sast_exit_code(result: &SastResult) -> i32 {
 ///
 /// When `files` is non-empty, only those files are scanned.
 /// When empty, scans the entire `path` directory.
-pub fn run_sast_scan(
-    path: &Path,
-    files: &[PathBuf],
-    config: &SecurityChecksConfig,
-) -> SastResult {
+pub fn run_sast_scan(path: &Path, files: &[PathBuf], config: &SecurityChecksConfig) -> SastResult {
     let sast = SastAggregator::with_config(config.sast_config.as_deref());
     let sast_options = SastScanOptions {
         severity_threshold: None, // report all findings, fail_on controls exit code

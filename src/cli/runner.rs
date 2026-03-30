@@ -19,7 +19,9 @@ use super::plugin::{check_plugins_for_updates, sync_plugins};
 
 /// Perform self-update check and optionally upgrade linthis itself
 /// Returns true if update was performed, false otherwise
-pub fn perform_self_update(self_update_config: Option<&linthis::self_update::SelfUpdateConfig>) -> bool {
+pub fn perform_self_update(
+    self_update_config: Option<&linthis::self_update::SelfUpdateConfig>,
+) -> bool {
     use linthis::self_update::{SelfUpdateConfig, SelfUpdateManager};
 
     // Use default config if none provided
@@ -28,7 +30,11 @@ pub fn perform_self_update(self_update_config: Option<&linthis::self_update::Sel
 
     // Validate config
     if let Err(e) = config.validate() {
-        eprintln!("{}: Invalid self_auto_update config: {}", "Warning".yellow(), e);
+        eprintln!(
+            "{}: Invalid self_auto_update config: {}",
+            "Warning".yellow(),
+            e
+        );
         return false;
     }
 
@@ -52,15 +58,16 @@ pub fn perform_self_update(self_update_config: Option<&linthis::self_update::Sel
     }
 
     let current = manager.get_current_version();
-    let latest = manager.get_latest_version().unwrap_or_else(|| "unknown".to_string());
+    let latest = manager
+        .get_latest_version()
+        .unwrap_or_else(|| "unknown".to_string());
 
     // Prompt user if needed
-    if config.should_prompt()
-        && !manager.prompt_user(&current, &latest) {
-            // User declined, update timestamp to avoid repeated prompts
-            let _ = manager.update_last_check_time();
-            return false;
-        }
+    if config.should_prompt() && !manager.prompt_user(&current, &latest) {
+        // User declined, update timestamp to avoid repeated prompts
+        let _ = manager.update_last_check_time();
+        return false;
+    }
 
     // Perform upgrade
     match manager.upgrade() {
@@ -88,7 +95,11 @@ pub fn perform_auto_sync(auto_sync_config: Option<&linthis::plugin::AutoSyncConf
 
     // Validate config
     if let Err(e) = config.validate() {
-        eprintln!("{}: Invalid plugin_auto_sync config: {}", "Warning".yellow(), e);
+        eprintln!(
+            "{}: Invalid plugin_auto_sync config: {}",
+            "Warning".yellow(),
+            e
+        );
         return false;
     }
 
@@ -101,7 +112,11 @@ pub fn perform_auto_sync(auto_sync_config: Option<&linthis::plugin::AutoSyncConf
     let manager = match AutoSyncManager::new() {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("{}: Failed to create auto-sync manager: {}", "Warning".yellow(), e);
+            eprintln!(
+                "{}: Failed to create auto-sync manager: {}",
+                "Warning".yellow(),
+                e
+            );
             return false;
         }
     };
@@ -200,7 +215,11 @@ pub fn perform_auto_sync(auto_sync_config: Option<&linthis::plugin::AutoSyncConf
     // Update last sync timestamp
     if synced {
         if let Err(e) = manager.update_last_sync_time() {
-            eprintln!("{}: Failed to update sync timestamp: {}", "Warning".yellow(), e);
+            eprintln!(
+                "{}: Failed to update sync timestamp: {}",
+                "Warning".yellow(),
+                e
+            );
         }
     }
 

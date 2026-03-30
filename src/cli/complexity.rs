@@ -178,9 +178,26 @@ fn collect_complexity_files(path: &Path) -> Vec<PathBuf> {
                 .map(|ext| {
                     matches!(
                         ext,
-                        "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java"
-                            | "kt" | "c" | "h" | "cpp" | "cc" | "rb" | "php"
-                            | "swift" | "scala" | "mm" | "m" | "lua" | "sh"
+                        "py" | "js"
+                            | "jsx"
+                            | "ts"
+                            | "tsx"
+                            | "go"
+                            | "rs"
+                            | "java"
+                            | "kt"
+                            | "c"
+                            | "h"
+                            | "cpp"
+                            | "cc"
+                            | "rb"
+                            | "php"
+                            | "swift"
+                            | "scala"
+                            | "mm"
+                            | "m"
+                            | "lua"
+                            | "sh"
                     )
                 })
                 .unwrap_or(false)
@@ -273,11 +290,7 @@ fn save_complexity_result(result: &AnalysisResult, verbose: bool) {
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to write {}: {}",
-                    result_file.display(),
-                    e
-                );
+                eprintln!("Warning: Failed to write {}: {}", result_file.display(), e);
             }
         },
         Err(e) => eprintln!("Warning: Failed to serialize result: {}", e),

@@ -48,11 +48,11 @@ pub use helpers::{
 };
 pub use hook::{handle_commit_msg_check, handle_hook_command};
 pub use init::{handle_config_command, handle_init_command, init_linter_configs};
-pub use license::handle_license_command;
+pub use license::{handle_license_command, LicenseCommandParams};
 pub use paths::{collect_paths, PathCollectionOptions, PathCollectionResult};
 pub use plugin::handle_plugin_command;
 pub use report::handle_report_command;
 pub use review::{handle_review_command, ReviewCommandOptions};
 pub use runner::{perform_auto_sync, perform_self_update};
-pub use security::{handle_security_command, run_sast_scan};
+pub use security::{handle_security_command, run_sast_scan, SecurityCommandParams};
 pub use watch::run_watch;

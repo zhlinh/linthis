@@ -76,7 +76,15 @@ pub(crate) fn save_installed_hook(
     provider: Option<&str>,
     provider_args: Option<&str>,
 ) {
-    save_installed_hook_inner(scope, project, event, hook_type, provider, &[], provider_args);
+    save_installed_hook_inner(
+        scope,
+        project,
+        event,
+        hook_type,
+        provider,
+        &[],
+        provider_args,
+    );
 }
 
 /// Save hook metadata with optional skill_providers list.
@@ -192,9 +200,8 @@ pub(crate) fn remove_installed_hook(scope: &str, project: &str, event: &HookEven
     let mut file = load_installed_hooks();
     let event_str = event.as_str();
 
-    file.hooks.retain(|h| {
-        !(h.scope == scope && h.project == project && h.event == event_str)
-    });
+    file.hooks
+        .retain(|h| !(h.scope == scope && h.project == project && h.event == event_str));
 
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -242,7 +249,10 @@ pub(crate) fn deduplicate_hook_types(types: Vec<HookTool>) -> Vec<HookTool> {
     let mut result: Vec<HookTool> = Vec::new();
     for t in types {
         // Skip exact duplicates
-        if result.iter().any(|r| std::mem::discriminant(r) == std::mem::discriminant(&t)) {
+        if result
+            .iter()
+            .any(|r| std::mem::discriminant(r) == std::mem::discriminant(&t))
+        {
             continue;
         }
         // If the with-agent variant of this type is already present, skip the base
@@ -288,10 +298,13 @@ pub(crate) fn apply_yes_fallback(
         types
     };
     let resolved_events = if events.is_empty() {
-        let agent_only =
-            resolved_types.len() == 1 && matches!(resolved_types[0], HookTool::Agent);
+        let agent_only = resolved_types.len() == 1 && matches!(resolved_types[0], HookTool::Agent);
         if agent_only {
-            vec![HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush]
+            vec![
+                HookEvent::PreCommit,
+                HookEvent::CommitMsg,
+                HookEvent::PrePush,
+            ]
         } else {
             vec![HookEvent::PreCommit]
         }

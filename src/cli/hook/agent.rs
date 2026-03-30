@@ -15,10 +15,10 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use crate::cli::commands::{AgentProvider, HookEvent};
 use super::dirs;
 use super::metadata::{add_skill_provider_to_hook, remove_skill_provider_from_hook};
 use super::{find_git_root, is_command_available};
+use crate::cli::commands::{AgentProvider, HookEvent};
 
 /// All supported agent providers (in display order)
 pub(crate) const ALL_AGENT_PROVIDERS: &[AgentProvider] = &[
@@ -301,7 +301,7 @@ fn event_short_name(event: &HookEvent) -> &'static str {
     match event {
         HookEvent::PreCommit => "lint",
         HookEvent::CommitMsg => "cmsg",
-        HookEvent::PrePush   => "review",
+        HookEvent::PrePush => "review",
     }
 }
 
@@ -314,9 +314,12 @@ fn resolve_skill_name(
     let custom: Option<&str> = skill_names.and_then(|sn| match event {
         HookEvent::PreCommit => sn.pre_commit.as_deref(),
         HookEvent::CommitMsg => sn.commit_msg.as_deref(),
-        HookEvent::PrePush   => sn.pre_push.as_deref(),
+        HookEvent::PrePush => sn.pre_push.as_deref(),
     });
-    custom.map_or_else(|| format!("{}{}", prefix, event_short_name(event)), |n| n.to_string())
+    custom.map_or_else(
+        || format!("{}{}", prefix, event_short_name(event)),
+        |n| n.to_string(),
+    )
 }
 
 /// Get the skill file path for a given agent provider and hook event.
@@ -333,7 +336,11 @@ pub(crate) fn agent_skill_path(
             base.join(".claude/skills").join(dir_name).join("SKILL.md")
         }
         AgentProvider::Codex => {
-            if global { base.join(".codex/AGENTS.md") } else { base.join("AGENTS.md") }
+            if global {
+                base.join(".codex/AGENTS.md")
+            } else {
+                base.join("AGENTS.md")
+            }
         }
         AgentProvider::Gemini => {
             let name = resolve_skill_name(event, skill_names, "linthis-");
@@ -353,17 +360,24 @@ pub(crate) fn agent_skill_path(
         }
         AgentProvider::Codebuddy => {
             let dir_name = resolve_skill_name(event, skill_names, "lt-");
-            base.join(".codebuddy/skills").join(dir_name).join("SKILL.md")
+            base.join(".codebuddy/skills")
+                .join(dir_name)
+                .join("SKILL.md")
         }
         AgentProvider::Openclaw => {
             let dir_name = resolve_skill_name(event, skill_names, "lt-");
-            base.join(".openclaw/skills").join(dir_name).join("SKILL.md")
+            base.join(".openclaw/skills")
+                .join(dir_name)
+                .join("SKILL.md")
         }
     }
 }
 
 /// Get the Stop Hook settings file path for providers that support it.
-pub(crate) fn agent_stop_hook_settings_path(base: &std::path::Path, provider: &AgentProvider) -> Option<PathBuf> {
+pub(crate) fn agent_stop_hook_settings_path(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+) -> Option<PathBuf> {
     match provider {
         AgentProvider::Claude => Some(base.join(".claude/settings.json")),
         AgentProvider::Codebuddy => Some(base.join(".codebuddy/settings.json")),
@@ -389,7 +403,11 @@ fn print_agent_installed_info(
     global: bool,
     skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) {
-    let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
+    let events = [
+        HookEvent::PreCommit,
+        HookEvent::CommitMsg,
+        HookEvent::PrePush,
+    ];
     for event in &events {
         let path = agent_skill_path(base, provider, global, event, skill_names);
         if path.exists() {
@@ -398,7 +416,12 @@ fn print_agent_installed_info(
                 HookEvent::CommitMsg => "commit-msg",
                 HookEvent::PrePush => "pre-push",
             };
-            println!("       {} {} ({})", "File:".dimmed(), path.display(), event_name);
+            println!(
+                "       {} {} ({})",
+                "File:".dimmed(),
+                path.display(),
+                event_name
+            );
         }
     }
     if let Some(settings_path) = agent_stop_hook_settings_path(base, provider) {
@@ -415,7 +438,11 @@ pub(crate) fn agent_is_installed(
     global: bool,
     skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> bool {
-    let events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
+    let events = [
+        HookEvent::PreCommit,
+        HookEvent::CommitMsg,
+        HookEvent::PrePush,
+    ];
     match provider {
         AgentProvider::Codex => {
             let path = agent_skill_path(base, provider, global, &HookEvent::PreCommit, skill_names);
@@ -429,24 +456,42 @@ pub(crate) fn agent_is_installed(
                     })
                     .unwrap_or(false)
         }
-        AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
-            events.iter().any(|e| agent_skill_path(base, provider, global, e, skill_names).exists())
-        }
-        _ => events.iter().any(|e| agent_skill_path(base, provider, global, e, skill_names).exists()),
+        AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => events
+            .iter()
+            .any(|e| agent_skill_path(base, provider, global, e, skill_names).exists()),
+        _ => events
+            .iter()
+            .any(|e| agent_skill_path(base, provider, global, e, skill_names).exists()),
     }
 }
 
 /// Detect which agent providers are likely in use (by checking for their directories).
 fn detect_agent_providers(base: &std::path::Path) -> Vec<AgentProvider> {
     let mut detected = Vec::new();
-    if base.join(".claude").exists() { detected.push(AgentProvider::Claude); }
-    if base.join("AGENTS.md").exists() || base.join(".codex").exists() { detected.push(AgentProvider::Codex); }
-    if base.join(".gemini").exists() { detected.push(AgentProvider::Gemini); }
-    if base.join(".cursor").exists() { detected.push(AgentProvider::Cursor); }
-    if base.join(".droid").exists() { detected.push(AgentProvider::Droid); }
-    if base.join(".augment").exists() { detected.push(AgentProvider::Auggie); }
-    if base.join("CODEBUDDY.md").exists() || base.join(".codebuddy").exists() { detected.push(AgentProvider::Codebuddy); }
-    if base.join(".openclaw").exists() { detected.push(AgentProvider::Openclaw); }
+    if base.join(".claude").exists() {
+        detected.push(AgentProvider::Claude);
+    }
+    if base.join("AGENTS.md").exists() || base.join(".codex").exists() {
+        detected.push(AgentProvider::Codex);
+    }
+    if base.join(".gemini").exists() {
+        detected.push(AgentProvider::Gemini);
+    }
+    if base.join(".cursor").exists() {
+        detected.push(AgentProvider::Cursor);
+    }
+    if base.join(".droid").exists() {
+        detected.push(AgentProvider::Droid);
+    }
+    if base.join(".augment").exists() {
+        detected.push(AgentProvider::Auggie);
+    }
+    if base.join("CODEBUDDY.md").exists() || base.join(".codebuddy").exists() {
+        detected.push(AgentProvider::Codebuddy);
+    }
+    if base.join(".openclaw").exists() {
+        detected.push(AgentProvider::Openclaw);
+    }
     detected
 }
 
@@ -457,24 +502,26 @@ pub fn detect_agent_providers_lightweight() -> Vec<(&'static str, bool)> {
         .iter()
         .map(|p| {
             let name = match p {
-                AgentProvider::Claude    => "Claude Code",
-                AgentProvider::Codex     => "Codex",
-                AgentProvider::Gemini    => "Gemini",
-                AgentProvider::Cursor    => "Cursor",
-                AgentProvider::Droid     => "Droid",
-                AgentProvider::Auggie    => "Auggie",
+                AgentProvider::Claude => "Claude Code",
+                AgentProvider::Codex => "Codex",
+                AgentProvider::Gemini => "Gemini",
+                AgentProvider::Cursor => "Cursor",
+                AgentProvider::Droid => "Droid",
+                AgentProvider::Auggie => "Auggie",
                 AgentProvider::Codebuddy => "CodeBuddy",
-                AgentProvider::Openclaw  => "OpenClaw",
+                AgentProvider::Openclaw => "OpenClaw",
             };
             let detected = match p {
-                AgentProvider::Claude    => root.join(".claude").exists(),
-                AgentProvider::Codex     => root.join("AGENTS.md").exists(),
-                AgentProvider::Gemini    => root.join(".gemini").exists(),
-                AgentProvider::Cursor    => root.join(".cursor").exists(),
-                AgentProvider::Droid     => root.join(".droid").exists(),
-                AgentProvider::Auggie    => root.join(".augment").exists(),
-                AgentProvider::Codebuddy => root.join("CODEBUDDY.md").exists() || root.join(".codebuddy").exists(),
-                AgentProvider::Openclaw  => root.join(".openclaw").exists(),
+                AgentProvider::Claude => root.join(".claude").exists(),
+                AgentProvider::Codex => root.join("AGENTS.md").exists(),
+                AgentProvider::Gemini => root.join(".gemini").exists(),
+                AgentProvider::Cursor => root.join(".cursor").exists(),
+                AgentProvider::Droid => root.join(".droid").exists(),
+                AgentProvider::Auggie => root.join(".augment").exists(),
+                AgentProvider::Codebuddy => {
+                    root.join("CODEBUDDY.md").exists() || root.join(".codebuddy").exists()
+                }
+                AgentProvider::Openclaw => root.join(".openclaw").exists(),
             };
             (name, detected)
         })
@@ -490,13 +537,15 @@ fn install_agent_dedicated_file(path: &std::path::Path, content: &str) -> Result
                 .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
         }
     }
-    fs::write(path, content)
-        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    fs::write(path, content).map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
     Ok(())
 }
 
 /// Recursively copy a directory tree from `src` to `dst`.
-pub(crate) fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+pub(crate) fn copy_dir_recursive(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+) -> Result<(), String> {
     use std::fs;
     if !dst.exists() {
         fs::create_dir_all(dst)
@@ -511,8 +560,14 @@ pub(crate) fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
-            fs::copy(&src_path, &dst_path)
-                .map_err(|e| format!("Failed to copy {} → {}: {}", src_path.display(), dst_path.display(), e))?;
+            fs::copy(&src_path, &dst_path).map_err(|e| {
+                format!(
+                    "Failed to copy {} → {}: {}",
+                    src_path.display(),
+                    dst_path.display(),
+                    e
+                )
+            })?;
         }
     }
     Ok(())
@@ -524,16 +579,19 @@ fn agent_plugin_id(_event: &HookEvent) -> &'static str {
 }
 
 /// Target directory for agent slash commands per provider.
-fn agent_command_dir(base: &std::path::Path, provider: &AgentProvider) -> Option<std::path::PathBuf> {
+fn agent_command_dir(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+) -> Option<std::path::PathBuf> {
     match provider {
-        AgentProvider::Claude    => Some(base.join(".claude/commands/linthis")),
+        AgentProvider::Claude => Some(base.join(".claude/commands/linthis")),
         AgentProvider::Codebuddy => Some(base.join(".codebuddy/commands/linthis")),
-        AgentProvider::Gemini    => Some(base.join(".gemini/commands")),
-        AgentProvider::Cursor    => Some(base.join(".cursor/commands")),
-        AgentProvider::Droid     => Some(base.join(".droid/commands")),
-        AgentProvider::Auggie    => Some(base.join(".augment/commands")),
-        AgentProvider::Codex     => None,
-        AgentProvider::Openclaw  => Some(base.join(".openclaw/commands")),
+        AgentProvider::Gemini => Some(base.join(".gemini/commands")),
+        AgentProvider::Cursor => Some(base.join(".cursor/commands")),
+        AgentProvider::Droid => Some(base.join(".droid/commands")),
+        AgentProvider::Auggie => Some(base.join(".augment/commands")),
+        AgentProvider::Codex => None,
+        AgentProvider::Openclaw => Some(base.join(".openclaw/commands")),
     }
 }
 
@@ -560,9 +618,15 @@ fn install_plugin_skill(
     let skill_path = agent_skill_path(base, provider, false, event, skill_names);
     match provider {
         AgentProvider::Codex => {
-            let content = fs::read_to_string(&skill_src)
-                .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
-            install_agent_append_section(&skill_path, &content, agent_event_section_marker(event), "# Agent Instructions\n")
+            let content = fs::read_to_string(&skill_src).map_err(|e| {
+                format!("Failed to read skill file '{}': {}", skill_src.display(), e)
+            })?;
+            install_agent_append_section(
+                &skill_path,
+                &content,
+                agent_event_section_marker(event),
+                "# Agent Instructions\n",
+            )
         }
         AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
             let target_dir = skill_path.parent().unwrap();
@@ -573,8 +637,9 @@ fn install_plugin_skill(
             Ok(())
         }
         _ => {
-            let content = fs::read_to_string(&skill_src)
-                .map_err(|e| format!("Failed to read skill file '{}': {}", skill_src.display(), e))?;
+            let content = fs::read_to_string(&skill_src).map_err(|e| {
+                format!("Failed to read skill file '{}': {}", skill_src.display(), e)
+            })?;
             install_agent_dedicated_file(&skill_path, &content)
         }
     }
@@ -602,8 +667,13 @@ fn install_plugin_commands(
             for entry in entries.flatten() {
                 if entry.path().is_file() {
                     let cmd_target = cmd_dir.join(entry.file_name());
-                    let content = fs::read_to_string(entry.path())
-                        .map_err(|e| format!("Failed to read command file '{}': {}", entry.path().display(), e))?;
+                    let content = fs::read_to_string(entry.path()).map_err(|e| {
+                        format!(
+                            "Failed to read command file '{}': {}",
+                            entry.path().display(),
+                            e
+                        )
+                    })?;
                     install_agent_dedicated_file(&cmd_target, &content)?;
                 }
             }
@@ -615,14 +685,14 @@ fn install_plugin_commands(
 /// Get the default memory file path for a provider.
 fn agent_memory_path(base: &std::path::Path, provider: &AgentProvider) -> Option<PathBuf> {
     match provider {
-        AgentProvider::Claude    => Some(base.join("CLAUDE.md")),
+        AgentProvider::Claude => Some(base.join("CLAUDE.md")),
         AgentProvider::Codebuddy => Some(base.join("CODEBUDDY.md")),
-        AgentProvider::Gemini    => Some(base.join(".gemini/GEMINI.md")),
-        AgentProvider::Cursor    => Some(base.join(".cursor/CURSOR.md")),
-        AgentProvider::Droid     => Some(base.join(".droid/DROID.md")),
-        AgentProvider::Auggie    => Some(base.join(".augment/AUGMENT.md")),
-        AgentProvider::Codex     => None,
-        AgentProvider::Openclaw  => Some(base.join("AGENTS.md")),
+        AgentProvider::Gemini => Some(base.join(".gemini/GEMINI.md")),
+        AgentProvider::Cursor => Some(base.join(".cursor/CURSOR.md")),
+        AgentProvider::Droid => Some(base.join(".droid/DROID.md")),
+        AgentProvider::Auggie => Some(base.join(".augment/AUGMENT.md")),
+        AgentProvider::Codex => None,
+        AgentProvider::Openclaw => Some(base.join("AGENTS.md")),
     }
 }
 
@@ -670,8 +740,13 @@ fn install_plugin_stop_hook(
         agent_stop_hook_settings_path(base, provider)
     };
     if let Some(settings_path) = settings_path {
-        let override_json = std::fs::read_to_string(&hooks_json_src)
-            .map_err(|e| format!("Failed to read hooks.json '{}': {}", hooks_json_src.display(), e))?;
+        let override_json = std::fs::read_to_string(&hooks_json_src).map_err(|e| {
+            format!(
+                "Failed to read hooks.json '{}': {}",
+                hooks_json_src.display(),
+                e
+            )
+        })?;
         install_agent_stop_hook_from_json(base, &settings_path, &override_json)?;
     }
     Ok(())
@@ -699,10 +774,18 @@ fn resolve_agent_plugin<'a>(
     plugin_id: &str,
     provider: &str,
 ) -> Option<&'a linthis::config::HookSourceEntry> {
-    hook_config.agent.plugins.get(provider)
+    hook_config
+        .agent
+        .plugins
+        .get(provider)
         .and_then(|m| m.get(plugin_id))
-        .or_else(|| hook_config.agent.plugins.get("_default")
-            .and_then(|m| m.get(plugin_id)))
+        .or_else(|| {
+            hook_config
+                .agent
+                .plugins
+                .get("_default")
+                .and_then(|m| m.get(plugin_id))
+        })
 }
 
 /// Tier-1/2 override check for an agent plugin.
@@ -722,7 +805,9 @@ fn resolve_and_install_agent_plugin_override(
 
     // Tier 1: fixed-path plugin directory (project-local only)
     if !global {
-        if let Some(plugin_dir) = resolver::fixed_agent_plugin_dir(&project_root, &provider_name, plugin_id) {
+        if let Some(plugin_dir) =
+            resolver::fixed_agent_plugin_dir(&project_root, &provider_name, plugin_id)
+        {
             install_agent_plugin_from_dir(&plugin_dir, base, provider, event, skill_names, None)?;
             return Ok(true);
         }
@@ -731,9 +816,17 @@ fn resolve_and_install_agent_plugin_override(
     // Tier 2: TOML agent plugin entry with provider fallback
     let config = Config::load_merged(&project_root);
     if let Some(entry) = resolve_agent_plugin(&config.hook, plugin_id, &provider_name) {
-        let resolved = resolver::resolve_to_dir(&entry.source, &project_root, &config.hook.marketplaces)
-            .map_err(|e| format!("Failed to resolve agent plugin '{}': {}", plugin_id, e))?;
-        install_agent_plugin_from_dir(resolved.path(), base, provider, event, skill_names, entry.target.as_ref())?;
+        let resolved =
+            resolver::resolve_to_dir(&entry.source, &project_root, &config.hook.marketplaces)
+                .map_err(|e| format!("Failed to resolve agent plugin '{}': {}", plugin_id, e))?;
+        install_agent_plugin_from_dir(
+            resolved.path(),
+            base,
+            provider,
+            event,
+            skill_names,
+            entry.target.as_ref(),
+        )?;
         return Ok(true);
     }
 
@@ -742,9 +835,15 @@ fn resolve_and_install_agent_plugin_override(
         use linthis::plugin::{PluginCache, PluginConfigManager};
 
         let managers: Vec<_> = if global {
-            [PluginConfigManager::global()].into_iter().filter_map(|r| r.ok()).collect()
+            [PluginConfigManager::global()]
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .collect()
         } else {
-            [PluginConfigManager::project()].into_iter().filter_map(|r| r.ok()).collect()
+            [PluginConfigManager::project()]
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .collect()
         };
 
         if let Ok(cache) = PluginCache::new() {
@@ -757,14 +856,28 @@ fn resolve_and_install_agent_plugin_override(
                             .join(&provider_name)
                             .join(plugin_id);
                         if provider_dir.is_dir() {
-                            install_agent_plugin_from_dir(&provider_dir, base, provider, event, skill_names, None)?;
+                            install_agent_plugin_from_dir(
+                                &provider_dir,
+                                base,
+                                provider,
+                                event,
+                                skill_names,
+                                None,
+                            )?;
                             return Ok(true);
                         }
                         let default_dir = cache_path
                             .join("hooks/agent/plugins/_default")
                             .join(plugin_id);
                         if default_dir.is_dir() {
-                            install_agent_plugin_from_dir(&default_dir, base, provider, event, skill_names, None)?;
+                            install_agent_plugin_from_dir(
+                                &default_dir,
+                                base,
+                                provider,
+                                event,
+                                skill_names,
+                                None,
+                            )?;
                             return Ok(true);
                         }
                     }
@@ -801,16 +914,28 @@ fn openclaw_post_install_skill(skill_dir: &std::path::Path) {
             .output()
         {
             Ok(output) if output.status.success() => {
-                println!("  {} Registered skill via 'openclaw skills install'", "✓".green());
+                println!(
+                    "  {} Registered skill via 'openclaw skills install'",
+                    "✓".green()
+                );
                 println!("  {} Verify with 'openclaw skills list'", "→".dimmed());
                 return;
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                println!("  {} 'openclaw skills install' exited with {}: {}", "Warning".yellow(), output.status, stderr.trim());
+                println!(
+                    "  {} 'openclaw skills install' exited with {}: {}",
+                    "Warning".yellow(),
+                    output.status,
+                    stderr.trim()
+                );
             }
             Err(e) => {
-                println!("  {} Failed to run 'openclaw skills install': {}", "Warning".yellow(), e);
+                println!(
+                    "  {} Failed to run 'openclaw skills install': {}",
+                    "Warning".yellow(),
+                    e
+                );
             }
         }
     }
@@ -818,7 +943,11 @@ fn openclaw_post_install_skill(skill_dir: &std::path::Path) {
     let skill_name = match skill_dir.file_name() {
         Some(name) => name,
         None => {
-            println!("  {} Could not determine skill name from path '{}'", "Warning".yellow(), skill_dir.display());
+            println!(
+                "  {} Could not determine skill name from path '{}'",
+                "Warning".yellow(),
+                skill_dir.display()
+            );
             return;
         }
     };
@@ -827,16 +956,32 @@ fn openclaw_post_install_skill(skill_dir: &std::path::Path) {
         let target = global_skills.join(skill_name);
         match copy_dir_recursive(skill_dir, &target) {
             Ok(()) => {
-                println!("  {} Copied skill to {} (CLI unavailable, direct copy fallback)", "✓".green(), target.display());
-                println!("  {} When openclaw CLI is available, verify with 'openclaw skills list'", "→".dimmed());
+                println!(
+                    "  {} Copied skill to {} (CLI unavailable, direct copy fallback)",
+                    "✓".green(),
+                    target.display()
+                );
+                println!(
+                    "  {} When openclaw CLI is available, verify with 'openclaw skills list'",
+                    "→".dimmed()
+                );
             }
             Err(e) => {
-                println!("  {} Failed to copy skill to {}: {}", "Warning".yellow(), target.display(), e);
+                println!(
+                    "  {} Failed to copy skill to {}: {}",
+                    "Warning".yellow(),
+                    target.display(),
+                    e
+                );
             }
         }
     } else {
         println!("  {} 'openclaw' CLI not found and no known skills directory (~/.openclaw/skills/) detected.", "Notice".cyan());
-        println!("  {} Run 'openclaw skills install {}' manually after installing OpenClaw.", "→".dimmed(), skill_dir.display());
+        println!(
+            "  {} Run 'openclaw skills install {}' manually after installing OpenClaw.",
+            "→".dimmed(),
+            skill_dir.display()
+        );
     }
 }
 
@@ -850,7 +995,10 @@ fn openclaw_post_uninstall_skill(skill_dir: &std::path::Path) {
             .output()
         {
             Ok(output) if output.status.success() => {
-                println!("  {} Unregistered skill via 'openclaw skills uninstall'", "✓".green());
+                println!(
+                    "  {} Unregistered skill via 'openclaw skills uninstall'",
+                    "✓".green()
+                );
                 return;
             }
             _ => {}
@@ -865,9 +1013,18 @@ fn openclaw_post_uninstall_skill(skill_dir: &std::path::Path) {
         let target = global_skills.join(skill_name);
         if target.is_dir() {
             if let Err(e) = std::fs::remove_dir_all(&target) {
-                println!("  {} Failed to remove skill dir {}: {}", "Warning".yellow(), target.display(), e);
+                println!(
+                    "  {} Failed to remove skill dir {}: {}",
+                    "Warning".yellow(),
+                    target.display(),
+                    e
+                );
             } else {
-                println!("  {} Removed skill from {} (direct removal fallback)", "✓".green(), target.display());
+                println!(
+                    "  {} Removed skill from {} (direct removal fallback)",
+                    "✓".green(),
+                    target.display()
+                );
             }
         }
     }
@@ -893,7 +1050,12 @@ pub(crate) fn install_agent_skill(
     match provider {
         AgentProvider::Codex => {
             let section_marker = agent_event_section_marker(event);
-            install_agent_append_section(&skill_path, &content, section_marker, "# Agent Instructions\n")?;
+            install_agent_append_section(
+                &skill_path,
+                &content,
+                section_marker,
+                "# Agent Instructions\n",
+            )?;
         }
         AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
             install_agent_dedicated_file(&skill_path, &content)?;
@@ -969,13 +1131,22 @@ fn agent_event_content_for_provider(
     match provider {
         AgentProvider::Codex => body,
         AgentProvider::Claude | AgentProvider::Codebuddy | AgentProvider::Openclaw => {
-            format!("---\nname: {}\ndescription: {}\n---\n\n# {}\n\n{}\n", name, desc, name, body)
+            format!(
+                "---\nname: {}\ndescription: {}\n---\n\n# {}\n\n{}\n",
+                name, desc, name, body
+            )
         }
         AgentProvider::Gemini | AgentProvider::Droid | AgentProvider::Auggie => {
-            format!("---\nname: {}\ndescription: {}\n---\n\n# {}\n\n{}\n", name, desc, name, body)
+            format!(
+                "---\nname: {}\ndescription: {}\n---\n\n# {}\n\n{}\n",
+                name, desc, name, body
+            )
         }
         AgentProvider::Cursor => {
-            format!("---\ndescription: {}\nalwaysApply: true\n---\n\n# {}\n\n{}\n", desc, name, body)
+            format!(
+                "---\ndescription: {}\nalwaysApply: true\n---\n\n# {}\n\n{}\n",
+                desc, name, body
+            )
         }
     }
 }
@@ -987,7 +1158,7 @@ pub(crate) fn agent_event_skill_metadata(
     let custom_name: Option<&str> = skill_names.and_then(|sn| match event {
         HookEvent::PreCommit => sn.pre_commit.as_deref(),
         HookEvent::CommitMsg => sn.commit_msg.as_deref(),
-        HookEvent::PrePush   => sn.pre_push.as_deref(),
+        HookEvent::PrePush => sn.pre_push.as_deref(),
     });
     match event {
         HookEvent::PreCommit => (
@@ -1009,7 +1180,7 @@ fn agent_event_section_marker(event: &HookEvent) -> &'static str {
     match event {
         HookEvent::PreCommit => "## Linthis Lint Rule",
         HookEvent::CommitMsg => "## Linthis Commit Message Rule",
-        HookEvent::PrePush   => "## Linthis Review Rule",
+        HookEvent::PrePush => "## Linthis Review Rule",
     }
 }
 
@@ -1028,20 +1199,30 @@ fn install_agent_append_section(
     }
     let section = format!("\n{}\n\n{}\n", section_marker, content);
     if path.exists() {
-        let existing = fs::read_to_string(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+        let existing =
+            fs::read_to_string(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
         if existing.contains(section_marker) {
             let start = existing.find(section_marker).unwrap();
             let after = &existing[start + section_marker.len()..];
-            let end = after.find("\n## ")
+            let end = after
+                .find("\n## ")
                 .map(|i| start + section_marker.len() + i)
                 .unwrap_or(existing.len());
-            let updated = format!("{}{}{}", &existing[..start], &section[1..], &existing[end..]);
+            let updated = format!(
+                "{}{}{}",
+                &existing[..start],
+                &section[1..],
+                &existing[end..]
+            );
             fs::write(path, updated).map_err(|e| format!("write {}: {}", path.display(), e))?;
         } else {
-            let mut f = std::fs::OpenOptions::new().append(true).open(path)
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(path)
                 .map_err(|e| format!("open {}: {}", path.display(), e))?;
             use std::io::Write;
-            f.write_all(section.as_bytes()).map_err(|e| format!("write {}: {}", path.display(), e))?;
+            f.write_all(section.as_bytes())
+                .map_err(|e| format!("write {}: {}", path.display(), e))?;
         }
     } else {
         fs::write(path, format!("{}{}", file_header, section))
@@ -1052,17 +1233,22 @@ fn install_agent_append_section(
 
 /// Remove a specific section (by marker) from a file.
 fn remove_agent_section_by_marker(path: &std::path::Path, marker: &str) -> Result<(), String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
     if !content.contains(marker) {
         return Ok(());
     }
     let start = content.find(marker).unwrap();
     let after = &content[start + marker.len()..];
-    let end = after.find("\n## ")
+    let end = after
+        .find("\n## ")
         .map(|i| start + marker.len() + i)
         .unwrap_or(content.len());
-    let trim_start = if start > 0 && content.as_bytes()[start - 1] == b'\n' { start - 1 } else { start };
+    let trim_start = if start > 0 && content.as_bytes()[start - 1] == b'\n' {
+        start - 1
+    } else {
+        start
+    };
     let updated = format!("{}{}", &content[..trim_start], &content[end..]);
     if updated.trim().is_empty() {
         std::fs::remove_file(path).map_err(|e| format!("remove {}: {}", path.display(), e))?;
@@ -1080,7 +1266,11 @@ fn remove_agent_dedicated_file(path: &std::path::Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             let _ = fs::remove_dir(parent);
             if let Some(grandparent) = parent.parent() {
-                if grandparent.file_name().map(|n| n.to_string_lossy().starts_with('.')).unwrap_or(false) {
+                if grandparent
+                    .file_name()
+                    .map(|n| n.to_string_lossy().starts_with('.'))
+                    .unwrap_or(false)
+                {
                     let _ = fs::remove_dir(grandparent);
                 }
             }
@@ -1162,7 +1352,9 @@ fn install_agent_stop_hook(
     settings_path: &std::path::Path,
 ) -> Result<(), String> {
     let override_json_str: Option<String> = None;
-    let override_json = override_json_str.as_deref().unwrap_or_else(|| agent_stop_hook_json_ref());
+    let override_json = override_json_str
+        .as_deref()
+        .unwrap_or_else(|| agent_stop_hook_json_ref());
     install_agent_stop_hook_from_json(git_root, settings_path, override_json)
 }
 
@@ -1198,14 +1390,25 @@ fn warn_legacy_if_present(base: &std::path::Path, provider: &AgentProvider) {
     match provider {
         AgentProvider::Claude => {
             let legacy = base.join("CLAUDE.md");
-            if legacy.exists() && std::fs::read_to_string(&legacy).map(|c| c.contains("## Linthis")).unwrap_or(false) {
-                println!("{}: Legacy linthis section detected in {} — you may remove it manually.", "Notice".cyan(), legacy.display());
+            if legacy.exists()
+                && std::fs::read_to_string(&legacy)
+                    .map(|c| c.contains("## Linthis"))
+                    .unwrap_or(false)
+            {
+                println!(
+                    "{}: Legacy linthis section detected in {} — you may remove it manually.",
+                    "Notice".cyan(),
+                    legacy.display()
+                );
             }
         }
         AgentProvider::Codebuddy => {
             let legacy_md = base.join("CODEBUDDY.md");
             let legacy_skill = base.join(".codebuddy/skills/linthis/SKILL.md");
-            if (legacy_md.exists() && std::fs::read_to_string(&legacy_md).map(|c| c.contains("## Linthis")).unwrap_or(false))
+            if (legacy_md.exists()
+                && std::fs::read_to_string(&legacy_md)
+                    .map(|c| c.contains("## Linthis"))
+                    .unwrap_or(false))
                 || legacy_skill.exists()
             {
                 println!("{}: Legacy linthis files detected (CODEBUDDY.md section / SKILL.md) — you may remove them manually.", "Notice".cyan());
@@ -1219,13 +1422,19 @@ fn uninstall_agent_legacy(base: &std::path::Path, provider: &AgentProvider) {
     match provider {
         AgentProvider::Claude => {
             let legacy = base.join("CLAUDE.md");
-            if legacy.exists() { let _ = remove_agent_section_from_file(&legacy); }
+            if legacy.exists() {
+                let _ = remove_agent_section_from_file(&legacy);
+            }
         }
         AgentProvider::Codebuddy => {
             let legacy_md = base.join("CODEBUDDY.md");
-            if legacy_md.exists() { let _ = remove_agent_section_from_file(&legacy_md); }
+            if legacy_md.exists() {
+                let _ = remove_agent_section_from_file(&legacy_md);
+            }
             let legacy_skill = base.join(".codebuddy/skills/linthis/SKILL.md");
-            if legacy_skill.exists() { let _ = remove_agent_dedicated_file(&legacy_skill); }
+            if legacy_skill.exists() {
+                let _ = remove_agent_dedicated_file(&legacy_skill);
+            }
         }
         _ => {}
     }
@@ -1247,42 +1456,63 @@ pub(crate) fn resolve_agent_base(global: bool) -> Result<PathBuf, ExitCode> {
     }
 }
 
-/// Install agent skills for a list of providers across all events.
-fn install_agent_providers_batch(
-    providers: &[&AgentProvider],
-    base: &std::path::Path,
-    events: &[HookEvent],
+/// Parameters for batch agent provider installation.
+struct AgentInstallBatchParams<'a> {
+    providers: &'a [&'a AgentProvider],
+    base: &'a std::path::Path,
+    events: &'a [HookEvent],
     force: bool,
     global: bool,
-    scope: &str,
-    project_str: &str,
-    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
-) -> bool {
+    scope: &'a str,
+    project_str: &'a str,
+    skill_names: Option<&'a linthis::config::AgentSkillNamesConfig>,
+}
+
+/// Install agent skills for a list of providers across all events.
+fn install_agent_providers_batch(params: &AgentInstallBatchParams<'_>) -> bool {
     let mut any_installed = false;
-    for p in providers {
-        if agent_is_installed(base, p, global, skill_names) && !force {
+    for p in params.providers {
+        if agent_is_installed(params.base, p, params.global, params.skill_names) && !params.force {
             println!("{}: {} already installed", "Info".cyan(), p);
-            print_agent_installed_info(base, p, global, skill_names);
+            print_agent_installed_info(params.base, p, params.global, params.skill_names);
             continue;
         }
-        warn_legacy_if_present(base, p);
+        warn_legacy_if_present(params.base, p);
         let provider_name = format!("{}", p).to_lowercase();
         let mut provider_ok = true;
-        for event in events {
-            match install_agent_skill(base, p, global, event, skill_names) {
+        for event in params.events {
+            match install_agent_skill(params.base, p, params.global, event, params.skill_names) {
                 Ok(_) => {
-                    let path = agent_skill_path(base, p, global, event, skill_names);
-                    println!("{} Installed {} ({}) → {}", "✓".green(), p, event.hook_filename(), path.display());
-                    add_skill_provider_to_hook(scope, project_str, event, &provider_name);
+                    let path =
+                        agent_skill_path(params.base, p, params.global, event, params.skill_names);
+                    println!(
+                        "{} Installed {} ({}) → {}",
+                        "✓".green(),
+                        p,
+                        event.hook_filename(),
+                        path.display()
+                    );
+                    add_skill_provider_to_hook(
+                        params.scope,
+                        params.project_str,
+                        event,
+                        &provider_name,
+                    );
                 }
                 Err(e) => {
-                    eprintln!("{}: Failed to install {} ({}): {}", "Error".red(), p, event.hook_filename(), e);
+                    eprintln!(
+                        "{}: Failed to install {} ({}): {}",
+                        "Error".red(),
+                        p,
+                        event.hook_filename(),
+                        e
+                    );
                     provider_ok = false;
                 }
             }
         }
         if provider_ok {
-            print_extra_installed(base, p);
+            print_extra_installed(params.base, p);
             any_installed = true;
         }
     }
@@ -1298,14 +1528,19 @@ fn build_ordered_provider_list<'a>(
 ) -> Vec<&'a AgentProvider> {
     let mut ordered: Vec<&AgentProvider> = Vec::new();
     for p in ALL_AGENT_PROVIDERS {
-        if detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p))
+        if detected
+            .iter()
+            .any(|d| std::mem::discriminant(d) == std::mem::discriminant(p))
             || agent_is_installed(base, p, global, skill_names)
         {
             ordered.push(p);
         }
     }
     for p in ALL_AGENT_PROVIDERS {
-        if !ordered.iter().any(|o| std::mem::discriminant(*o) == std::mem::discriminant(p)) {
+        if !ordered
+            .iter()
+            .any(|o| std::mem::discriminant(*o) == std::mem::discriminant(p))
+        {
             ordered.push(p);
         }
     }
@@ -1328,7 +1563,9 @@ fn prompt_agent_selection<'a>(
 
     for (i, p) in ordered.iter().enumerate() {
         let is_installed = agent_is_installed(base, p, global, skill_names);
-        let is_detected = detected.iter().any(|d| std::mem::discriminant(d) == std::mem::discriminant(p));
+        let is_detected = detected
+            .iter()
+            .any(|d| std::mem::discriminant(d) == std::mem::discriminant(p));
         let status = match (is_installed, is_detected) {
             (true, _) => format!(" {}", "(installed)".yellow()),
             (false, true) => format!(" {}", "(detected)".cyan()),
@@ -1363,13 +1600,18 @@ fn prompt_agent_selection<'a>(
         return Some(ordered.to_vec());
     }
 
-    let selected: Vec<&AgentProvider> = choice.split(',')
+    let selected: Vec<&AgentProvider> = choice
+        .split(',')
         .filter_map(|s| s.trim().parse::<usize>().ok())
         .filter(|&n| n >= 1 && n <= provider_count)
         .map(|n| ordered[n - 1])
         .collect();
 
-    if selected.is_empty() { None } else { Some(selected) }
+    if selected.is_empty() {
+        None
+    } else {
+        Some(selected)
+    }
 }
 
 pub(crate) fn handle_agent_hook_install(
@@ -1385,15 +1627,26 @@ pub(crate) fn handle_agent_hook_install(
     };
 
     let scope = if global { "global" } else { "local" };
-    let project_str = if global { String::new() } else { base.to_str().unwrap_or("").to_string() };
+    let project_str = if global {
+        String::new()
+    } else {
+        base.to_str().unwrap_or("").to_string()
+    };
 
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hook.agent.skill_names;
+    let skill_names_cfg = linthis::config::Config::load_merged(&project_root)
+        .hook
+        .agent
+        .skill_names;
     let skill_names = Some(&skill_names_cfg);
 
     println!("{}", "🤖 AI Coding Agent Integration".bold());
     if global {
-        println!("  {} Installing user-level skills in {}", "→".dimmed(), base.display());
+        println!(
+            "  {} Installing user-level skills in {}",
+            "→".dimmed(),
+            base.display()
+        );
     }
     println!();
 
@@ -1404,7 +1657,16 @@ pub(crate) fn handle_agent_hook_install(
             return ExitCode::SUCCESS;
         }
         let providers = vec![p];
-        install_agent_providers_batch(&providers, &base, events, force, global, scope, &project_str, skill_names);
+        install_agent_providers_batch(&AgentInstallBatchParams {
+            providers: &providers,
+            base: &base,
+            events,
+            force,
+            global,
+            scope,
+            project_str: &project_str,
+            skill_names,
+        });
         return ExitCode::SUCCESS;
     }
 
@@ -1415,10 +1677,22 @@ pub(crate) fn handle_agent_hook_install(
         } else {
             detected.iter().collect()
         };
-        let any = install_agent_providers_batch(&targets, &base, events, force, global, scope, &project_str, skill_names);
+        let any = install_agent_providers_batch(&AgentInstallBatchParams {
+            providers: &targets,
+            base: &base,
+            events,
+            force,
+            global,
+            scope,
+            project_str: &project_str,
+            skill_names,
+        });
         if any {
             println!();
-            println!("{}", "Agents will auto-check code quality after edits.".bold());
+            println!(
+                "{}",
+                "Agents will auto-check code quality after edits.".bold()
+            );
         }
         return ExitCode::SUCCESS;
     }
@@ -1435,16 +1709,32 @@ pub(crate) fn handle_agent_hook_install(
     };
 
     println!();
-    let any = install_agent_providers_batch(&selected, &base, events, force, global, scope, &project_str, skill_names);
+    let any = install_agent_providers_batch(&AgentInstallBatchParams {
+        providers: &selected,
+        base: &base,
+        events,
+        force,
+        global,
+        scope,
+        project_str: &project_str,
+        skill_names,
+    });
     if any {
         println!();
-        println!("{}", "Agents will auto-check code quality after edits.".bold());
+        println!(
+            "{}",
+            "Agents will auto-check code quality after edits.".bold()
+        );
     }
     ExitCode::SUCCESS
 }
 
 /// Uninstall agent hooks for all installed providers.
-pub(crate) fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[HookEvent]) -> ExitCode {
+pub(crate) fn handle_agent_hook_uninstall(
+    yes: bool,
+    global: bool,
+    events: &[HookEvent],
+) -> ExitCode {
     use std::io::{self, Write};
 
     let base = match resolve_agent_base(global) {
@@ -1453,7 +1743,10 @@ pub(crate) fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[Hoo
     };
 
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let skill_names_cfg = linthis::config::Config::load_merged(&project_root).hook.agent.skill_names;
+    let skill_names_cfg = linthis::config::Config::load_merged(&project_root)
+        .hook
+        .agent
+        .skill_names;
     let skill_names = Some(&skill_names_cfg);
 
     let installed: Vec<&AgentProvider> = ALL_AGENT_PROVIDERS
@@ -1483,41 +1776,83 @@ pub(crate) fn handle_agent_hook_uninstall(yes: bool, global: bool, events: &[Hoo
     }
 
     let scope = if global { "global" } else { "local" };
-    let project_str = if global { String::new() } else { base.to_str().unwrap_or("").to_string() };
+    let project_str = if global {
+        String::new()
+    } else {
+        base.to_str().unwrap_or("").to_string()
+    };
 
     let mut any_removed = false;
     for p in &installed {
         let provider_name = format!("{}", p).to_lowercase();
-        let ok = uninstall_provider_events(&base, p, events, global, skill_names, scope, &project_str, &provider_name);
+        let ok = uninstall_provider_events(&AgentUninstallParams {
+            base: &base,
+            provider: p,
+            events,
+            global,
+            skill_names,
+            scope,
+            project_str: &project_str,
+            provider_name: &provider_name,
+        });
         if ok {
             uninstall_agent_legacy(&base, p);
             any_removed = true;
         }
     }
 
-    if any_removed { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if any_removed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+/// Parameters for uninstalling event skills for a single provider.
+struct AgentUninstallParams<'a> {
+    base: &'a std::path::Path,
+    provider: &'a AgentProvider,
+    events: &'a [HookEvent],
+    global: bool,
+    skill_names: Option<&'a linthis::config::AgentSkillNamesConfig>,
+    scope: &'a str,
+    project_str: &'a str,
+    provider_name: &'a str,
 }
 
 /// Uninstall all event skills for a single provider.
-fn uninstall_provider_events(
-    base: &std::path::Path,
-    provider: &AgentProvider,
-    events: &[HookEvent],
-    global: bool,
-    skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
-    scope: &str,
-    project_str: &str,
-    provider_name: &str,
-) -> bool {
+fn uninstall_provider_events(params: &AgentUninstallParams<'_>) -> bool {
     let mut ok = true;
-    for event in events {
-        match uninstall_agent_skill(base, provider, global, event, skill_names) {
+    for event in params.events {
+        match uninstall_agent_skill(
+            params.base,
+            params.provider,
+            params.global,
+            event,
+            params.skill_names,
+        ) {
             Ok(_) => {
-                println!("{} Uninstalled {} ({}) skill", "✓".green(), provider, event.hook_filename());
-                remove_skill_provider_from_hook(scope, project_str, event, provider_name);
+                println!(
+                    "{} Uninstalled {} ({}) skill",
+                    "✓".green(),
+                    params.provider,
+                    event.hook_filename()
+                );
+                remove_skill_provider_from_hook(
+                    params.scope,
+                    params.project_str,
+                    event,
+                    params.provider_name,
+                );
             }
             Err(e) => {
-                eprintln!("{}: Failed to uninstall {} ({}): {}", "Error".red(), provider, event.hook_filename(), e);
+                eprintln!(
+                    "{}: Failed to uninstall {} ({}): {}",
+                    "Error".red(),
+                    params.provider,
+                    event.hook_filename(),
+                    e
+                );
                 ok = false;
             }
         }

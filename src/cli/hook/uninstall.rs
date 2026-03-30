@@ -14,10 +14,10 @@
 use colored::Colorize;
 use std::process::ExitCode;
 
-use crate::cli::commands::{HookEvent, HookTool};
 use super::agent::handle_agent_hook_uninstall;
 use super::metadata::remove_installed_hook;
 use super::{find_git_root, global_hooks_dir, is_linthis_hook_file};
+use crate::cli::commands::{HookEvent, HookTool};
 
 /// Uninstall a global git hook from ~/.config/git/hooks/<event>.
 ///
@@ -35,7 +35,11 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
     };
 
     let events_to_remove: Vec<HookEvent> = if all {
-        vec![HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg]
+        vec![
+            HookEvent::PreCommit,
+            HookEvent::PrePush,
+            HookEvent::CommitMsg,
+        ]
     } else {
         vec![hook_event.unwrap_or(HookEvent::PreCommit)]
     };
@@ -49,7 +53,11 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
         }
 
         if !yes {
-            print!("Remove global {} hook at {}? [y/N]: ", event.hook_filename().cyan(), hook_path.display());
+            print!(
+                "Remove global {} hook at {}? [y/N]: ",
+                event.hook_filename().cyan(),
+                hook_path.display()
+            );
             io::stdout().flush().ok();
             let mut input = String::new();
             io::stdin().read_line(&mut input).ok();
@@ -61,12 +69,21 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
 
         match fs::remove_file(&hook_path) {
             Ok(_) => {
-                println!("{} Removed global {} hook", "✓".green(), event.hook_filename());
+                println!(
+                    "{} Removed global {} hook",
+                    "✓".green(),
+                    event.hook_filename()
+                );
                 remove_installed_hook("global", "", event);
                 any_removed = true;
             }
             Err(e) => {
-                eprintln!("{}: Failed to remove {}: {}", "Error".red(), hook_path.display(), e);
+                eprintln!(
+                    "{}: Failed to remove {}: {}",
+                    "Error".red(),
+                    hook_path.display(),
+                    e
+                );
             }
         }
     }
@@ -77,9 +94,13 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
     }
 
     // Check if any linthis hooks remain; if not, unset core.hooksPath
-    let remaining = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg]
-        .iter()
-        .any(|e| is_linthis_hook_file(&hooks_dir.join(e.hook_filename())));
+    let remaining = [
+        HookEvent::PreCommit,
+        HookEvent::PrePush,
+        HookEvent::CommitMsg,
+    ]
+    .iter()
+    .any(|e| is_linthis_hook_file(&hooks_dir.join(e.hook_filename())));
 
     if !remaining {
         let _ = std::process::Command::new("git")
@@ -92,7 +113,10 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
 }
 
 /// Remove only linthis lines from a hook file, keeping other content.
-fn remove_linthis_lines_from_hook(hook_path: &std::path::Path, existing_content: &str) -> Result<(), ExitCode> {
+fn remove_linthis_lines_from_hook(
+    hook_path: &std::path::Path,
+    existing_content: &str,
+) -> Result<(), ExitCode> {
     let new_content: String = existing_content
         .lines()
         .filter(|line| !line.contains("linthis") && !line.contains("# linthis-hook"))
@@ -127,7 +151,11 @@ fn hook_has_other_content(content: &str) -> bool {
 }
 
 /// Uninstall a single hook
-pub(crate) fn uninstall_single_hook(git_root: &std::path::Path, hook_event: &HookEvent, yes: bool) -> ExitCode {
+pub(crate) fn uninstall_single_hook(
+    git_root: &std::path::Path,
+    hook_event: &HookEvent,
+    yes: bool,
+) -> ExitCode {
     let hook_path = git_root.join(".git/hooks").join(hook_event.hook_filename());
 
     if !hook_path.exists() {
@@ -172,10 +200,18 @@ fn uninstall_hook_auto(
 ) -> Result<(), ExitCode> {
     if has_other {
         remove_linthis_lines_from_hook(hook_path, existing_content)?;
-        println!("{} Removed linthis from {} hook", "✓".green(), hook_event.hook_filename());
+        println!(
+            "{} Removed linthis from {} hook",
+            "✓".green(),
+            hook_event.hook_filename()
+        );
     } else {
         delete_hook_file(hook_path)?;
-        println!("{} Deleted {} hook", "✓".green(), hook_event.hook_filename());
+        println!(
+            "{} Deleted {} hook",
+            "✓".green(),
+            hook_event.hook_filename()
+        );
     }
     Ok(())
 }
@@ -196,7 +232,10 @@ fn uninstall_hook_interactive(
 
     println!("\nOptions:");
     if has_other {
-        println!("  1. {} - Remove only linthis lines", "Remove linthis".cyan());
+        println!(
+            "  1. {} - Remove only linthis lines",
+            "Remove linthis".cyan()
+        );
         println!("  2. {} - Delete entire hook file", "Delete all".cyan());
     } else {
         println!("  1. {} - Delete hook file", "Delete".cyan());
@@ -213,7 +252,11 @@ fn uninstall_hook_interactive(
         "1" => {
             if has_other {
                 remove_linthis_lines_from_hook(hook_path, existing_content)?;
-                println!("{} Removed linthis from {}", "✓".green(), hook_path.display());
+                println!(
+                    "{} Removed linthis from {}",
+                    "✓".green(),
+                    hook_path.display()
+                );
             } else {
                 delete_hook_file(hook_path)?;
                 println!("{} Deleted {}", "✓".green(), hook_path.display());
@@ -278,10 +321,10 @@ fn uninstall_local_hooks(
             }
         }
     }
-    if include_agent {
-        if handle_agent_hook_uninstall(yes, false, effective_events) == ExitCode::SUCCESS {
-            any_uninstalled = true;
-        }
+    if include_agent
+        && handle_agent_hook_uninstall(yes, false, effective_events) == ExitCode::SUCCESS
+    {
+        any_uninstalled = true;
     }
     if !any_uninstalled {
         println!("{}: No hooks with linthis found", "Info".cyan());
@@ -298,7 +341,11 @@ pub(crate) fn handle_hook_uninstall(
     yes: bool,
     global: bool,
 ) -> ExitCode {
-    const ALL_EVENTS_LIST: [HookEvent; 3] = [HookEvent::PreCommit, HookEvent::PrePush, HookEvent::CommitMsg];
+    const ALL_EVENTS_LIST: [HookEvent; 3] = [
+        HookEvent::PreCommit,
+        HookEvent::PrePush,
+        HookEvent::CommitMsg,
+    ];
 
     let effective_events: Vec<HookEvent> = if all || all_events {
         ALL_EVENTS_LIST.to_vec()
@@ -310,7 +357,13 @@ pub(crate) fn handle_hook_uninstall(
     let include_git = all || all_types || hook_types.iter().any(|t| !matches!(t, HookTool::Agent));
 
     if global {
-        uninstall_global_hooks(&effective_events, include_git, include_agent, all || all_events, yes)
+        uninstall_global_hooks(
+            &effective_events,
+            include_git,
+            include_agent,
+            all || all_events,
+            yes,
+        )
     } else {
         uninstall_local_hooks(&effective_events, include_git, include_agent, yes)
     }

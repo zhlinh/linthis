@@ -55,7 +55,11 @@ pub fn create_backup(files: &[PathBuf], description: &str, quiet: bool) -> Optio
 
     // Create backup directory
     if let Err(e) = fs::create_dir_all(&backup_path) {
-        eprintln!("{}: Failed to create backup directory: {}", "Warning".yellow(), e);
+        eprintln!(
+            "{}: Failed to create backup directory: {}",
+            "Warning".yellow(),
+            e
+        );
         return None;
     }
 
@@ -75,7 +79,12 @@ pub fn create_backup(files: &[PathBuf], description: &str, quiet: bool) -> Optio
         // Create parent directories
         if let Some(parent) = backup_file_path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("{}: Failed to create directory {}: {}", "Warning".yellow(), parent.display(), e);
+                eprintln!(
+                    "{}: Failed to create directory {}: {}",
+                    "Warning".yellow(),
+                    parent.display(),
+                    e
+                );
                 continue;
             }
         }
@@ -90,7 +99,12 @@ pub fn create_backup(files: &[PathBuf], description: &str, quiet: bool) -> Optio
 
         // Copy file
         if let Err(e) = fs::copy(file, &backup_file_path) {
-            eprintln!("{}: Failed to backup {}: {}", "Warning".yellow(), file.display(), e);
+            eprintln!(
+                "{}: Failed to backup {}: {}",
+                "Warning".yellow(),
+                file.display(),
+                e
+            );
             continue;
         }
         backed_up_files.push(rel_path.to_string_lossy().to_string());
@@ -110,16 +124,19 @@ pub fn create_backup(files: &[PathBuf], description: &str, quiet: bool) -> Optio
     };
 
     let manifest_path = backup_path.join("manifest.json");
-    if let Err(e) = fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap_or_default()) {
-        eprintln!("{}: Failed to write backup manifest: {}", "Warning".yellow(), e);
+    if let Err(e) = fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap_or_default(),
+    ) {
+        eprintln!(
+            "{}: Failed to write backup manifest: {}",
+            "Warning".yellow(),
+            e
+        );
     }
 
     if !quiet {
-        println!(
-            "{} Backup created: {}",
-            "✓".green(),
-            backup_path.display()
-        );
+        println!("{} Backup created: {}", "✓".green(), backup_path.display());
         println!(
             "  {} file{} backed up",
             backed_up_files.len(),
@@ -196,17 +213,18 @@ pub fn handle_list_backups(restore_cmd: &str) -> ExitCode {
     println!();
 
     for (idx, backup_path) in backups.iter().enumerate() {
-        let backup_name = backup_path.file_name().unwrap_or_default().to_string_lossy();
+        let backup_name = backup_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
         let manifest_path = backup_path.join("manifest.json");
 
         let (file_count, description) = if manifest_path.exists() {
             match fs::read_to_string(&manifest_path) {
-                Ok(content) => {
-                    match serde_json::from_str::<BackupManifest>(&content) {
-                        Ok(m) => (m.files.len(), m.description),
-                        Err(_) => (0, String::new()),
-                    }
-                }
+                Ok(content) => match serde_json::from_str::<BackupManifest>(&content) {
+                    Ok(m) => (m.files.len(), m.description),
+                    Err(_) => (0, String::new()),
+                },
                 Err(_) => (0, String::new()),
             }
         } else {
@@ -228,7 +246,8 @@ pub fn handle_list_backups(restore_cmd: &str) -> ExitCode {
     }
 
     println!();
-    println!("To restore: {} or {} <backup-name>",
+    println!(
+        "To restore: {} or {} <backup-name>",
         format!("{} --undo", restore_cmd).cyan(),
         format!("{} --undo", restore_cmd).cyan()
     );
@@ -279,22 +298,23 @@ pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
         path
     };
 
-    let backup_name = backup_path.file_name().unwrap_or_default().to_string_lossy();
+    let backup_name = backup_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
     println!("{} Restoring from backup: {}", "→".cyan(), backup_name);
 
     // Read manifest
     let manifest_path = backup_path.join("manifest.json");
     let manifest: BackupManifest = if manifest_path.exists() {
         match fs::read_to_string(&manifest_path) {
-            Ok(content) => {
-                match serde_json::from_str(&content) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        eprintln!("{}: Failed to parse manifest: {}", "Error".red(), e);
-                        return ExitCode::from(1);
-                    }
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("{}: Failed to parse manifest: {}", "Error".red(), e);
+                    return ExitCode::from(1);
                 }
-            }
+            },
             Err(e) => {
                 eprintln!("{}: Failed to read manifest: {}", "Error".red(), e);
                 return ExitCode::from(1);
@@ -323,7 +343,12 @@ pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
         // Create parent directories if needed
         if let Some(parent) = target_file.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("  {} Failed to create directory for {}: {}", "✗".red(), rel_path, e);
+                eprintln!(
+                    "  {} Failed to create directory for {}: {}",
+                    "✗".red(),
+                    rel_path,
+                    e
+                );
                 failed_count += 1;
                 continue;
             }

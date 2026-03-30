@@ -127,7 +127,11 @@ fn handle_review_background(options: ReviewCommandOptions) -> ExitCode {
     match background::spawn_background_review(&args) {
         Ok(_pid) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{}: Failed to start background review: {}", "Error".red(), e);
+            eprintln!(
+                "{}: Failed to start background review: {}",
+                "Error".red(),
+                e
+            );
             ExitCode::from(1)
         }
     }
@@ -145,12 +149,7 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
         }
     };
     let head_ref = &options.head;
-    eprintln!(
-        "{} Reviewing diff {}..{}",
-        "→".cyan(),
-        base_ref,
-        head_ref
-    );
+    eprintln!("{} Reviewing diff {}..{}", "→".cyan(), base_ref, head_ref);
 
     // 2. Collect diff
     let diff_result = match diff::collect_diff(&base_ref, head_ref) {
@@ -162,7 +161,12 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
     };
 
     if diff_result.files.is_empty() {
-        eprintln!("{} No changes found between {} and {}", "✓".green(), base_ref, head_ref);
+        eprintln!(
+            "{} No changes found between {} and {}",
+            "✓".green(),
+            base_ref,
+            head_ref
+        );
         return ExitCode::SUCCESS;
     }
 
@@ -176,7 +180,11 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
     // 3. Resolve AI provider
     let provider_str = resolve_ai_provider(
         options.provider.as_deref(),
-        config.review.provider.as_deref().or(config.ai.provider.as_deref()),
+        config
+            .review
+            .provider
+            .as_deref()
+            .or(config.ai.provider.as_deref()),
     );
     let provider_kind: AiProviderKind = provider_str.parse().unwrap_or_default();
     let ai_config = create_provider_config(&provider_kind);
@@ -211,7 +219,11 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
         _ => report::generate_markdown_report(&review_result),
     };
 
-    let report_ext = if options.output == "json" { "json" } else { "md" };
+    let report_ext = if options.output == "json" {
+        "json"
+    } else {
+        "md"
+    };
     let report_path = match save_report(&report_content, report_ext) {
         Ok(p) => p,
         Err(e) => {
@@ -227,7 +239,10 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
     println!("{}", report_content);
 
     // Print boxed summary
-    println!("{}", linthis::utils::output::format_review_box(&review_result));
+    println!(
+        "{}",
+        linthis::utils::output::format_review_box(&review_result)
+    );
 
     // 6. Handle auto-fix if enabled
     let auto_fix = options.auto_fix || config.review.auto_fix;
@@ -265,10 +280,7 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
                 }
             }
             AutoFixMode::Commit => {
-                match handle_auto_fix_commit(
-                    &mut review_result,
-                    &ai_config,
-                ) {
+                match handle_auto_fix_commit(&mut review_result, &ai_config) {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("{}: Auto-fix commit failed: {}", "Warning".yellow(), e);
@@ -277,10 +289,7 @@ fn handle_review_foreground(options: ReviewCommandOptions) -> ExitCode {
                 (None, Some(ExitCode::from(1)))
             }
             AutoFixMode::Apply => {
-                match handle_auto_fix_apply(
-                    &mut review_result,
-                    &ai_config,
-                ) {
+                match handle_auto_fix_apply(&mut review_result, &ai_config) {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("{}: Auto-fix apply failed: {}", "Warning".yellow(), e);
@@ -344,14 +353,13 @@ fn handle_auto_fix_pr(
     platform::check_tool_available(&platform_config)?;
 
     // Resolve reviewers
-    let changed_files: Vec<String> = review_result.files.iter()
+    let changed_files: Vec<String> = review_result
+        .files
+        .iter()
         .map(|f| f.path.display().to_string())
         .collect();
-    let reviewers = reviewer::resolve_reviewers(
-        &options.reviewers,
-        &config.review.reviewers,
-        &changed_files,
-    );
+    let reviewers =
+        reviewer::resolve_reviewers(&options.reviewers, &config.review.reviewers, &changed_files);
 
     // Generate and apply fixes before creating the branch
     let fixable_count = review_result
@@ -408,10 +416,7 @@ fn handle_auto_fix_pr(
             fix_count, original_branch
         )
     } else {
-        format!(
-            "review: add code review report for {}",
-            original_branch
-        )
+        format!("review: add code review report for {}", original_branch)
     };
     run_git(&["commit", "-m", &commit_msg])?;
 
@@ -429,9 +434,7 @@ fn handle_auto_fix_pr(
     } else {
         format!(
             "review: {} — {} issues ({})",
-            review_result.summary.assessment,
-            review_result.summary.total_issues,
-            original_branch
+            review_result.summary.assessment, review_result.summary.total_issues, original_branch
         )
     };
     let pr_description = report::generate_notification_summary(review_result);
@@ -579,9 +582,7 @@ fn create_provider_config(kind: &AiProviderKind) -> AiProviderConfig {
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
         AiProviderKind::CodeBuddy => std::env::var("CODEBUDDY_API_KEY").ok(),
-        AiProviderKind::OpenAi | AiProviderKind::CodexCli => {
-            std::env::var("OPENAI_API_KEY").ok()
-        }
+        AiProviderKind::OpenAi | AiProviderKind::CodexCli => std::env::var("OPENAI_API_KEY").ok(),
         AiProviderKind::Gemini => std::env::var("GEMINI_API_KEY")
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
             .ok(),

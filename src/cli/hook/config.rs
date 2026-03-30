@@ -13,10 +13,10 @@
 use colored::Colorize;
 use std::process::ExitCode;
 
-use crate::cli::commands::{HookEvent, HookTool};
+use super::metadata::save_installed_hook;
 use super::script::{build_hook_command, build_thin_wrapper_script, hook_action};
 use super::{find_git_root, is_command_available, write_hook_script};
-use super::metadata::save_installed_hook;
+use crate::cli::commands::{HookEvent, HookTool};
 
 /// Format a `HookSource` as a TOML inline-table string, e.g. `{ plugin = "lt", file = "..." }`.
 pub(crate) fn format_hook_source(source: &linthis::config::HookSource) -> String {
@@ -33,12 +33,19 @@ pub(crate) fn format_hook_source(source: &linthis::config::HookSource) -> String
         }
         HookSource::Git { git, git_ref, path } => {
             if let Some(r) = git_ref {
-                format!("{{ git = \"{}\", ref = \"{}\", path = \"{}\" }}", git, r, path)
+                format!(
+                    "{{ git = \"{}\", ref = \"{}\", path = \"{}\" }}",
+                    git, r, path
+                )
             } else {
                 format!("{{ git = \"{}\", path = \"{}\" }}", git, path)
             }
         }
-        HookSource::Marketplace { marketplace, plugin, file } => {
+        HookSource::Marketplace {
+            marketplace,
+            plugin,
+            file,
+        } => {
             format!(
                 "{{ marketplace = \"{}\", plugin = \"{}\", file = \"{}\" }}",
                 marketplace, plugin, file
@@ -110,7 +117,10 @@ pub(crate) fn lookup_hook_config_entry<'a>(
 /// Resolve hook script content from Tier-1 (fixed path) or Tier-2 (TOML config),
 /// returning `Ok(Some(content))` if an override is found, `Ok(None)` to fall through
 /// to the built-in generator, or `Err(ExitCode)` for a hard resolution error.
-pub(crate) fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> Result<Option<String>, ExitCode> {
+pub(crate) fn resolve_hook_override(
+    tool: &HookTool,
+    hook_event: &HookEvent,
+) -> Result<Option<String>, ExitCode> {
     use linthis::config::Config;
     use linthis::hooks::resolver;
 
@@ -122,11 +132,18 @@ pub(crate) fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> 
     let project_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     // Tier 1: fixed-path auto-discovery
-    if let Some(fixed) = resolver::fixed_git_hook_path(&project_root, dir, hook_event.hook_filename()) {
+    if let Some(fixed) =
+        resolver::fixed_git_hook_path(&project_root, dir, hook_event.hook_filename())
+    {
         match std::fs::read_to_string(fixed.as_path()) {
             Ok(content) => return Ok(Some(content)),
             Err(e) => {
-                eprintln!("{}: Failed to read fixed-path override '{}': {}", "Error".red(), fixed.display(), e);
+                eprintln!(
+                    "{}: Failed to read fixed-path override '{}': {}",
+                    "Error".red(),
+                    fixed.display(),
+                    e
+                );
                 return Err(ExitCode::from(2));
             }
         }
@@ -139,7 +156,13 @@ pub(crate) fn resolve_hook_override(tool: &HookTool, hook_event: &HookEvent) -> 
         match resolver::resolve_to_string(&entry.source, &project_root, &config.hook.marketplaces) {
             Ok(content) => return Ok(Some(content)),
             Err(e) => {
-                eprintln!("{}: Failed to resolve hook override for '{}/{}': {}", "Error".red(), dir, event_key, e);
+                eprintln!(
+                    "{}: Failed to resolve hook override for '{}/{}': {}",
+                    "Error".red(),
+                    dir,
+                    event_key,
+                    e
+                );
                 return Err(ExitCode::from(2));
             }
         }
@@ -159,14 +182,29 @@ fn create_prek_config(
     let hook_filename = hook_event.hook_filename();
 
     if config_path.exists() && !force {
-        eprintln!("{}: {} already exists, skipping", "Warning".yellow(), config_path.display());
+        eprintln!(
+            "{}: {} already exists, skipping",
+            "Warning".yellow(),
+            config_path.display()
+        );
         return Ok(());
     }
 
     if let Some(override_content) = resolve_hook_override(tool, hook_event)? {
-        std::fs::write(&config_path, override_content)
-            .map_err(|e| { eprintln!("{}: Failed to write '{}': {}", "Error".red(), config_path.display(), e); ExitCode::from(2) })?;
-        println!("{} Created {} [override]", "✓".green(), config_path.display());
+        std::fs::write(&config_path, override_content).map_err(|e| {
+            eprintln!(
+                "{}: Failed to write '{}': {}",
+                "Error".red(),
+                config_path.display(),
+                e
+            );
+            ExitCode::from(2)
+        })?;
+        println!(
+            "{} Created {} [override]",
+            "✓".green(),
+            config_path.display()
+        );
         return Ok(());
     }
 
@@ -177,11 +215,23 @@ fn create_prek_config(
         hook_filename, hook_event.description(), hook_cmd, stage
     );
 
-    std::fs::write(&config_path, content)
-        .map_err(|e| { eprintln!("{}: Failed to create {}: {}", "Error".red(), config_path.display(), e); ExitCode::from(2) })?;
+    std::fs::write(&config_path, content).map_err(|e| {
+        eprintln!(
+            "{}: Failed to create {}: {}",
+            "Error".red(),
+            config_path.display(),
+            e
+        );
+        ExitCode::from(2)
+    })?;
 
     let tool_name = "prek";
-    println!("{} Created {} ({}/pre-commit compatible)", "✓".green(), config_path.display(), tool_name);
+    println!(
+        "{} Created {} ({}/pre-commit compatible)",
+        "✓".green(),
+        config_path.display(),
+        tool_name
+    );
     print_prek_next_steps(tool, hook_event, hook_filename);
     Ok(())
 }
@@ -196,23 +246,42 @@ fn print_prek_next_steps(tool: &HookTool, hook_event: &HookEvent, hook_filename:
         match install_hooks(tool, hook_event) {
             Ok(_) => {
                 println!("{}", "✓".green());
-                println!("\n{} {} hooks are ready!", "✓".green().bold(), hook_filename);
-                println!("  Hooks will run automatically on {}", format!("git {}", hook_action(hook_event)).cyan());
+                println!(
+                    "\n{} {} hooks are ready!",
+                    "✓".green().bold(),
+                    hook_filename
+                );
+                println!(
+                    "  Hooks will run automatically on {}",
+                    format!("git {}", hook_action(hook_event)).cyan()
+                );
             }
             Err(e) => {
                 println!("{}", "✗".red());
                 eprintln!("{}: {}", "Warning".yellow(), e);
-                println!("\nPlease run manually: {}", format!("{} install --hook-type {}", tool_name, hook_filename).cyan());
+                println!(
+                    "\nPlease run manually: {}",
+                    format!("{} install --hook-type {}", tool_name, hook_filename).cyan()
+                );
             }
         }
     } else {
         println!("\nNext steps:");
         if matches!(tool, HookTool::Prek) {
             println!("  1. Install prek: {}", "pip install prek".cyan());
-            println!("  2. Set up hooks: {}", format!("prek install --hook-type {}", hook_filename).cyan());
+            println!(
+                "  2. Set up hooks: {}",
+                format!("prek install --hook-type {}", hook_filename).cyan()
+            );
         } else {
-            println!("  1. Install pre-commit: {}", "pip install pre-commit".cyan());
-            println!("  2. Set up hooks: {}", format!("pre-commit install --hook-type {}", hook_filename).cyan());
+            println!(
+                "  1. Install pre-commit: {}",
+                "pip install pre-commit".cyan()
+            );
+            println!(
+                "  2. Set up hooks: {}",
+                format!("pre-commit install --hook-type {}", hook_filename).cyan()
+            );
         }
     }
 }
@@ -223,9 +292,8 @@ fn install_hooks(tool: &HookTool, hook_event: &HookEvent) -> Result<(), String> 
 
     let (cmd, tool_name) = match tool {
         HookTool::Prek => ("prek", "prek"),
-        HookTool::Git | HookTool::Agent
-        | HookTool::GitWithAgent | HookTool::PrekWithAgent => {
-            return Ok(()) // handled separately
+        HookTool::Git | HookTool::Agent | HookTool::GitWithAgent | HookTool::PrekWithAgent => {
+            return Ok(()); // handled separately
         }
     };
 
@@ -259,7 +327,11 @@ fn create_git_hook_config(
     let git_root = match find_git_root() {
         Some(root) => root,
         None => {
-            eprintln!("{}: Not in a git repository, cannot create .git/hooks/{}", "Error".red(), hook_filename);
+            eprintln!(
+                "{}: Not in a git repository, cannot create .git/hooks/{}",
+                "Error".red(),
+                hook_filename
+            );
             return Err(ExitCode::from(1));
         }
     };
@@ -268,8 +340,15 @@ fn create_git_hook_config(
     let hook_path = git_hooks_dir.join(hook_filename);
 
     if !git_hooks_dir.exists() {
-        fs::create_dir_all(&git_hooks_dir)
-            .map_err(|e| { eprintln!("{}: Failed to create hooks directory {}: {}", "Error".red(), git_hooks_dir.display(), e); ExitCode::from(2) })?;
+        fs::create_dir_all(&git_hooks_dir).map_err(|e| {
+            eprintln!(
+                "{}: Failed to create hooks directory {}: {}",
+                "Error".red(),
+                git_hooks_dir.display(),
+                e
+            );
+            ExitCode::from(2)
+        })?;
     }
 
     // Tier-1/2 override check
@@ -288,12 +367,18 @@ fn create_git_hook_config(
     write_hook_script(&hook_path, &content)?;
 
     println!("{} Created {} [project]", "✓".green(), hook_path.display());
-    println!("  {} Thin wrapper: hook logic auto-updates with linthis", "→".dimmed());
+    println!(
+        "  {} Thin wrapper: hook logic auto-updates with linthis",
+        "→".dimmed()
+    );
     #[cfg(not(unix))]
     {
         println!("\nNext steps:");
         println!("  Make sure the hook is executable:");
-        println!("    {}", format!("chmod +x .git/hooks/{}", hook_filename).cyan());
+        println!(
+            "    {}",
+            format!("chmod +x .git/hooks/{}", hook_filename).cyan()
+        );
     }
     let project = git_root.to_str().unwrap_or("").to_string();
     save_installed_hook("local", &project, hook_event, &HookTool::Git, None, None);
@@ -308,7 +393,9 @@ fn write_git_hook_override(
 ) -> Result<(), ExitCode> {
     let content = if hook_path.exists() && !force {
         let mut existing = std::fs::read_to_string(hook_path).unwrap_or_default();
-        if !existing.ends_with('\n') { existing.push('\n'); }
+        if !existing.ends_with('\n') {
+            existing.push('\n');
+        }
         existing.push_str("\n# linthis-hook (override)\n");
         existing.push_str(override_content);
         existing
@@ -316,7 +403,11 @@ fn write_git_hook_override(
         override_content.to_string()
     };
     write_hook_script(hook_path, &content)?;
-    println!("{} Created {} [project, override]", "✓".green(), hook_path.display());
+    println!(
+        "{} Created {} [project, override]",
+        "✓".green(),
+        hook_path.display()
+    );
     Ok(())
 }
 
@@ -325,27 +416,57 @@ fn append_linthis_to_existing_hook(
     hook_path: &std::path::Path,
     linthis_hook_line: &str,
 ) -> Result<(), ExitCode> {
-    let existing_content = std::fs::read_to_string(hook_path)
-        .map_err(|e| { eprintln!("{}: Failed to read existing hook file: {}", "Error".red(), e); ExitCode::from(2) })?;
+    let existing_content = std::fs::read_to_string(hook_path).map_err(|e| {
+        eprintln!(
+            "{}: Failed to read existing hook file: {}",
+            "Error".red(),
+            e
+        );
+        ExitCode::from(2)
+    })?;
 
-    if existing_content.contains(linthis_hook_line) || existing_content.contains("linthis hook run") {
-        println!("{}: linthis hook already exists in {}", "Info".cyan(), hook_path.display());
+    if existing_content.contains(linthis_hook_line) || existing_content.contains("linthis hook run")
+    {
+        println!(
+            "{}: linthis hook already exists in {}",
+            "Info".cyan(),
+            hook_path.display()
+        );
         return Ok(());
     }
 
     let mut new_content = existing_content;
-    if !new_content.ends_with('\n') { new_content.push('\n'); }
+    if !new_content.ends_with('\n') {
+        new_content.push('\n');
+    }
     new_content.push_str("\n# linthis-hook\n");
     new_content.push_str(linthis_hook_line);
     new_content.push('\n');
 
-    std::fs::write(hook_path, new_content)
-        .map_err(|e| { eprintln!("{}: Failed to update {}: {}", "Error".red(), hook_path.display(), e); ExitCode::from(2) })?;
-    println!("{} Added linthis to existing {} {} [project]", "✓".green(), hook_path.display(), "(appended)".dimmed());
+    std::fs::write(hook_path, new_content).map_err(|e| {
+        eprintln!(
+            "{}: Failed to update {}: {}",
+            "Error".red(),
+            hook_path.display(),
+            e
+        );
+        ExitCode::from(2)
+    })?;
+    println!(
+        "{} Added linthis to existing {} {} [project]",
+        "✓".green(),
+        hook_path.display(),
+        "(appended)".dimmed()
+    );
     Ok(())
 }
 
-pub(crate) fn create_hook_config(tool: &HookTool, hook_event: &HookEvent, force: bool, args: &Option<String>) -> Result<(), ExitCode> {
+pub(crate) fn create_hook_config(
+    tool: &HookTool,
+    hook_event: &HookEvent,
+    force: bool,
+    args: &Option<String>,
+) -> Result<(), ExitCode> {
     match tool {
         HookTool::Agent | HookTool::GitWithAgent | HookTool::PrekWithAgent => Ok(()),
         HookTool::Prek => create_prek_config(tool, hook_event, force, args),
