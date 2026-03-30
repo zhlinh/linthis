@@ -559,10 +559,10 @@ pub enum RunMode {
 /// Controls how missing tools are auto-installed during linting
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ToolInstallMode {
-    /// Silently install without prompting
-    Auto,
-    /// Prompt user before installing (default); falls back to Disabled in non-TTY
+    /// Silently install without prompting (default)
     #[default]
+    Auto,
+    /// Prompt user before installing; falls back to Disabled in non-TTY
     Prompt,
     /// Never auto-install; show warning only
     Disabled,
@@ -694,6 +694,17 @@ fn get_formatter(lang: Language) -> Option<Box<dyn Formatter>> {
     }
 }
 
+/// Check if a command is available on the system PATH.
+fn is_command_available(cmd: &str) -> bool {
+    std::process::Command::new(cmd)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Get installation instructions for a language's linter (platform-specific)
 fn get_checker_install_hint(lang: Language) -> String {
     match lang {
@@ -747,7 +758,17 @@ fn get_checker_install_hint(lang: Language) -> String {
                 "Install: https://github.com/pinterest/ktlint".to_string()
             }
         }
-        Language::Lua => "Install: luarocks install luacheck".to_string(),
+        Language::Lua => {
+            if is_command_available("luarocks") {
+                "Install: luarocks install luacheck".to_string()
+            } else if cfg!(target_os = "macos") {
+                "Install: brew install luarocks && luarocks install luacheck".to_string()
+            } else if cfg!(target_os = "windows") {
+                "Install: 1) Install Lua from https://www.lua.org/download.html\n         2) Install LuaRocks from https://luarocks.org/\n         3) luarocks install luacheck".to_string()
+            } else {
+                "Install: sudo apt install luarocks && luarocks install luacheck (Ubuntu/Debian)".to_string()
+            }
+        }
         Language::Shell => {
             if cfg!(target_os = "macos") {
                 "Install: brew install shellcheck".to_string()
@@ -758,8 +779,20 @@ fn get_checker_install_hint(lang: Language) -> String {
                 "Install: sudo apt install shellcheck (Ubuntu/Debian)".to_string()
             }
         }
-        Language::Ruby => "Install: gem install rubocop".to_string(),
-        Language::Php => "Install: composer global require squizlabs/php_codesniffer".to_string(),
+        Language::Ruby => {
+            if is_command_available("gem") {
+                "Install: gem install rubocop".to_string()
+            } else {
+                "Install: 1) Install Ruby from https://www.ruby-lang.org/\n         2) gem install rubocop".to_string()
+            }
+        }
+        Language::Php => {
+            if is_command_available("composer") {
+                "Install: composer global require squizlabs/php_codesniffer".to_string()
+            } else {
+                "Install: 1) Install Composer from https://getcomposer.org/\n         2) composer global require squizlabs/php_codesniffer".to_string()
+            }
+        }
         Language::Scala => {
             if cfg!(target_os = "macos") {
                 "Install: brew install scalafix\n         Or: cs install scalafix".to_string()
