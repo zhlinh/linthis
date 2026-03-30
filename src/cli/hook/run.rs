@@ -12,13 +12,12 @@
 
 use colored::Colorize;
 
-use crate::cli::commands::{AgentFixProvider, HookEvent, HookTool};
 use super::config::describe_hook_source;
 use super::script::{
-    build_git_with_agent_hook_script, build_global_hook_script_for_event,
-    build_hook_command, merge_model_into_provider_args,
-    parse_agent_fix_provider_name, parse_provider_with_model,
+    build_git_with_agent_hook_script, build_global_hook_script_for_event, build_hook_command,
+    merge_model_into_provider_args, parse_agent_fix_provider_name, parse_provider_with_model,
 };
+use crate::cli::commands::{AgentFixProvider, HookEvent, HookTool};
 
 /// Environment variable injected by `handle_hook_run` to detect re-entrant hook calls.
 const LINTHIS_HOOK_RUNNING_PREFIX: &str = "LINTHIS_HOOK_RUNNING_";
@@ -56,15 +55,17 @@ pub(crate) fn handle_hook_run(
 ) -> i32 {
     let (provider_name, merged_pa) = if let Some(raw) = raw_provider {
         let (name, model) = parse_provider_with_model(raw);
-        (Some(name), merge_model_into_provider_args(model, raw_provider_args))
+        (
+            Some(name),
+            merge_model_into_provider_args(model, raw_provider_args),
+        )
     } else {
         (None, raw_provider_args.map(|s| s.to_string()))
     };
     let provider: Option<&str> = provider_name;
     let provider_args: Option<&str> = merged_pa.as_deref();
 
-    let already_running = std::env::vars()
-        .any(|(k, _)| k.starts_with(LINTHIS_HOOK_RUNNING_PREFIX));
+    let already_running = std::env::vars().any(|(k, _)| k.starts_with(LINTHIS_HOOK_RUNNING_PREFIX));
 
     let script = match hook_type {
         HookTool::Git => {
@@ -82,7 +83,11 @@ pub(crate) fn handle_hook_run(
             build_git_with_agent_hook_script(&linthis_cmd, &fix_provider, event, provider_args)
         }
         _ => {
-            eprintln!("{}: hook run: unsupported hook type '{}' (supported: git, git-with-agent)", "Error".red(), hook_type.as_str());
+            eprintln!(
+                "{}: hook run: unsupported hook type '{}' (supported: git, git-with-agent)",
+                "Error".red(),
+                hook_type.as_str()
+            );
             return 1;
         }
     };
@@ -106,7 +111,11 @@ pub(crate) fn handle_hook_run(
     match status {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("{}: hook run: failed to execute script: {}", "Error".red(), e);
+            eprintln!(
+                "{}: hook run: failed to execute script: {}",
+                "Error".red(),
+                e
+            );
             1
         }
     }

@@ -18,7 +18,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use super::commands::PluginCommands;
-use linthis::templates::{generate_plugin_manifest_filtered, generate_plugin_readme, get_plugin_template_configs};
+use linthis::templates::{
+    generate_plugin_manifest_filtered, generate_plugin_readme, get_plugin_template_configs,
+};
 
 /// Check if any plugins have available updates
 pub fn check_plugins_for_updates(plugins: &[(String, String, Option<String>)]) -> bool {
@@ -114,7 +116,9 @@ fn merge_plugin_linthis_config(
         source = source.with_ref(r);
     }
     let fetcher = PluginFetcher::new();
-    let cached = fetcher.fetch(&source, &cache, false).map_err(|e| e.to_string())?;
+    let cached = fetcher
+        .fetch(&source, &cache, false)
+        .map_err(|e| e.to_string())?;
 
     let hook_config_path = cached.cache_path.join("linthis-hook.toml");
     let general_config_path = cached.cache_path.join("linthis.toml");
@@ -185,9 +189,8 @@ fn merge_plugin_linthis_config(
             .parse()
             .map_err(|e| format!("Failed to parse plugin linthis.toml: {}", e))?;
 
-        const MERGEABLE_TOP_KEYS: &[&str] = &[
-            "plugin_auto_sync", "self_auto_update", "tool_auto_install",
-        ];
+        const MERGEABLE_TOP_KEYS: &[&str] =
+            &["plugin_auto_sync", "self_auto_update", "tool_auto_install"];
         for key in MERGEABLE_TOP_KEYS {
             if let Some(value) = general_doc.get(key) {
                 if !user_doc.contains_key(key) {
@@ -222,23 +225,32 @@ fn merge_plugin_linthis_config(
 
 /// Handle plugin subcommands
 pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
-    use linthis::plugin::{
-        cache::PluginCache,
-        manifest::PluginManifest,
-    };
+    use linthis::plugin::{cache::PluginCache, manifest::PluginManifest};
 
     match action {
-        PluginCommands::New { name, languages, force } => {
+        PluginCommands::New {
+            name,
+            languages,
+            force,
+        } => {
             // Create a new plugin from template
             let plugin_dir = PathBuf::from(&name);
             if plugin_dir.exists() {
                 if force {
                     if let Err(e) = std::fs::remove_dir_all(&plugin_dir) {
-                        eprintln!("{}: Failed to remove existing directory: {}", "Error".red(), e);
+                        eprintln!(
+                            "{}: Failed to remove existing directory: {}",
+                            "Error".red(),
+                            e
+                        );
                         return ExitCode::from(1);
                     }
                 } else {
-                    eprintln!("{}: Directory '{}' already exists (use --force to overwrite)", "Error".red(), name);
+                    eprintln!(
+                        "{}: Directory '{}' already exists (use --force to overwrite)",
+                        "Error".red(),
+                        name
+                    );
                     return ExitCode::from(1);
                 }
             }
@@ -266,7 +278,8 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             // Filter languages if specified
             let selected_langs: Vec<_> = if let Some(ref filter) = languages {
                 let filter_lower: Vec<_> = filter.iter().map(|s| s.to_lowercase()).collect();
-                all_langs.iter()
+                all_langs
+                    .iter()
                     .filter(|(lang, _)| filter_lower.contains(&lang.to_string()))
                     .collect()
             } else {
@@ -275,7 +288,14 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
 
             if selected_langs.is_empty() {
                 eprintln!("{}: No valid languages specified", "Error".red());
-                eprintln!("Available languages: {}", all_langs.iter().map(|(l, _)| *l).collect::<Vec<_>>().join(", "));
+                eprintln!(
+                    "Available languages: {}",
+                    all_langs
+                        .iter()
+                        .map(|(l, _)| *l)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 return ExitCode::from(1);
             }
 
@@ -288,7 +308,12 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             // Create language directories
             for (lang, _) in &selected_langs {
                 if let Err(e) = std::fs::create_dir_all(plugin_dir.join(lang)) {
-                    eprintln!("{}: Failed to create {} directory: {}", "Error".red(), lang, e);
+                    eprintln!(
+                        "{}: Failed to create {} directory: {}",
+                        "Error".red(),
+                        lang,
+                        e
+                    );
                     return ExitCode::from(1);
                 }
             }
@@ -304,7 +329,12 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                 if should_include {
                     let file_path = plugin_dir.join(path);
                     if let Err(e) = std::fs::write(&file_path, content) {
-                        eprintln!("{}: Failed to write {}: {}", "Error".red(), file_path.display(), e);
+                        eprintln!(
+                            "{}: Failed to write {}: {}",
+                            "Error".red(),
+                            file_path.display(),
+                            e
+                        );
                         return ExitCode::from(1);
                     }
                 }
@@ -326,7 +356,12 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             let gitignore_content = "# Editor files\n*.swp\n*.swo\n*~\n.idea/\n.vscode/\n\n# OS files\n.DS_Store\nThumbs.db\n";
             let _ = std::fs::write(plugin_dir.join(".gitignore"), gitignore_content);
 
-            println!("{} Created plugin '{}' with {} language(s)", "✓".green(), name, selected_langs.len());
+            println!(
+                "{} Created plugin '{}' with {} language(s)",
+                "✓".green(),
+                name,
+                selected_langs.len()
+            );
             println!();
             println!("Created files:");
             println!("  {} linthis-plugin.toml  - Plugin manifest", "•".cyan());
@@ -341,8 +376,14 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             println!("  3. Edit linthis-plugin.toml with your details");
             println!("  4. Push to a Git repository:");
             println!();
-            println!("     cd {} && git init && git add . && git commit -m \"Initial commit\"", name);
-            println!("     git remote add origin git@github.com:your-org/{}.git", name);
+            println!(
+                "     cd {} && git init && git add . && git commit -m \"Initial commit\"",
+                name
+            );
+            println!(
+                "     git remote add origin git@github.com:your-org/{}.git",
+                name
+            );
             println!("     git push -u origin main");
             println!();
             println!("  5. Use the plugin:");
@@ -386,7 +427,10 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                                     plugin.url
                                 );
                                 println!("    Path: {}", plugin.cache_path.display());
-                                println!("    Cached: {}", plugin.cached_at.format("%Y-%m-%d %H:%M"));
+                                println!(
+                                    "    Cached: {}",
+                                    plugin.cached_at.format("%Y-%m-%d %H:%M")
+                                );
                                 println!(
                                     "    Updated: {}",
                                     plugin.last_updated.format("%Y-%m-%d %H:%M")
@@ -439,17 +483,16 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                     if plugins.is_empty() {
                         println!("No {} plugins configured.", config_type);
                         if !global {
-                            println!("  Use {} to view global plugins.", "linthis plugin list -g".cyan());
+                            println!(
+                                "  Use {} to view global plugins.",
+                                "linthis plugin list -g".cyan()
+                            );
                         }
                         println!("\nConfig: {}", manager.config_path().display());
                         return ExitCode::SUCCESS;
                     }
 
-                    println!(
-                        "{} ({}):",
-                        "Configured plugins".bold(),
-                        config_type
-                    );
+                    println!("{} ({}):", "Configured plugins".bold(), config_type);
                     for (name, url, git_ref) in &plugins {
                         if verbose {
                             if let Some(r) = git_ref {
@@ -501,7 +544,10 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             ExitCode::SUCCESS
         }
 
-        PluginCommands::Sync { global, plugin: alias } => {
+        PluginCommands::Sync {
+            global,
+            plugin: alias,
+        } => {
             use linthis::plugin::{fetcher::PluginFetcher, PluginConfigManager, PluginSource};
 
             let manager = if global {
@@ -637,13 +683,12 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                             _ => false,
                         };
 
-                        let hash_info = new_hash
-                            .map(|h| &h[..7.min(h.len())])
-                            .unwrap_or("unknown");
+                        let hash_info = new_hash.map(|h| &h[..7.min(h.len())]).unwrap_or("unknown");
 
                         if was_updated {
                             if old_hash.is_some() {
-                                let old_short = old_hash.as_ref()
+                                let old_short = old_hash
+                                    .as_ref()
                                     .map(|h| &h[..7.min(h.len())])
                                     .unwrap_or("unknown");
                                 println!("{} {} -> {}", "✓".green(), old_short, hash_info);
@@ -674,11 +719,7 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                         updated_count
                     );
                 } else {
-                    println!(
-                        "{} All {} plugin(s) up to date",
-                        "✓".green(),
-                        success_count
-                    );
+                    println!("{} All {} plugin(s) up to date", "✓".green(), success_count);
                 }
             } else {
                 println!(
@@ -778,7 +819,9 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
 
                     // Try to merge linthis-config.toml from the plugin package.
                     // Fetch the plugin first so we can read its bundled config.
-                    if let Err(e) = merge_plugin_linthis_config(&alias, &url, git_ref.as_deref(), global) {
+                    if let Err(e) =
+                        merge_plugin_linthis_config(&alias, &url, git_ref.as_deref(), global)
+                    {
                         eprintln!("{}: {}", "Warning".yellow(), e);
                         // Non-fatal: warn but still report success
                     }
@@ -861,7 +904,11 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             }
         }
 
-        PluginCommands::Apply { alias, global, language } => {
+        PluginCommands::Apply {
+            alias,
+            global,
+            language,
+        } => {
             use linthis::plugin::{loader::PluginLoader, PluginConfigManager, PluginSource};
 
             let manager = if global {
@@ -895,19 +942,30 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
 
             // Filter by alias if specified
             let plugins: Vec<_> = if let Some(ref alias_filter) = alias {
-                plugins.into_iter().filter(|(name, _, _)| name == alias_filter).collect()
+                plugins
+                    .into_iter()
+                    .filter(|(name, _, _)| name == alias_filter)
+                    .collect()
             } else {
                 plugins
             };
 
             if plugins.is_empty() {
                 if let Some(ref a) = alias {
-                    eprintln!("{}: Plugin '{}' not found in {} config", "Error".red(), a, config_type);
+                    eprintln!(
+                        "{}: Plugin '{}' not found in {} config",
+                        "Error".red(),
+                        a,
+                        config_type
+                    );
                 } else {
                     println!("No plugins configured in {} config.", config_type);
                 }
                 if !global {
-                    eprintln!("  Use {} to apply global plugins.", "linthis plugin apply -g".cyan());
+                    eprintln!(
+                        "  Use {} to apply global plugins.",
+                        "linthis plugin apply -g".cyan()
+                    );
                 }
                 return ExitCode::from(1);
             }
@@ -935,7 +993,10 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                     Ok(configs) => {
                         // Filter by language if specified
                         let configs: Vec<_> = if let Some(ref langs) = language {
-                            configs.into_iter().filter(|c| langs.contains(&c.language)).collect()
+                            configs
+                                .into_iter()
+                                .filter(|c| langs.contains(&c.language))
+                                .collect()
                         } else {
                             configs
                         };
@@ -982,7 +1043,12 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
                         }
                     }
                     Err(e) => {
-                        eprintln!("{}: Failed to load plugin '{}': {}", "Warning".yellow(), name, e);
+                        eprintln!(
+                            "{}: Failed to load plugin '{}': {}",
+                            "Warning".yellow(),
+                            name,
+                            e
+                        );
                     }
                 }
             }
@@ -990,7 +1056,10 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             println!();
             if applied_count > 0 {
                 println!("{} Applied {} config file(s)", "✓".green(), applied_count);
-                println!("\n{}: Add these to .gitignore if you don't want to commit them", "Tip".cyan());
+                println!(
+                    "\n{}: Add these to .gitignore if you don't want to commit them",
+                    "Tip".cyan()
+                );
             } else {
                 println!("{} No new configs applied (all already exist)", "ℹ".blue());
             }

@@ -15,9 +15,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use linthis::tui::{self, App, EventHandler};
+use linthis::utils::types::RunResult;
 use linthis::watch::{Debouncer, FileWatcher, WatchConfig};
 use linthis::{run, RunMode, RunOptions, Severity};
-use linthis::utils::types::RunResult;
 
 /// Run watch mode
 pub fn run_watch(config: WatchConfig) -> Result<(), String> {
@@ -101,8 +101,7 @@ fn run_simple_watch(watcher: FileWatcher, config: WatchConfig) -> Result<(), Str
                     // Send notification if enabled
                     #[cfg(feature = "notifications")]
                     if config.notify {
-                        let watch_result =
-                            linthis::watch::WatchResult::from_run_result(&result);
+                        let watch_result = linthis::watch::WatchResult::from_run_result(&result);
                         linthis::watch::notify_issues(&watch_result);
                     }
                 }
@@ -164,9 +163,7 @@ fn run_tui_watch(
             app.set_status("Running...");
 
             // Redraw to show checking status
-            terminal
-                .draw(|frame| tui::draw(frame, &app))
-                .ok();
+            terminal.draw(|frame| tui::draw(frame, &app)).ok();
 
             // Run lint
             match run_lint(&config) {
@@ -177,8 +174,7 @@ fn run_tui_watch(
                     // Send notification if enabled
                     #[cfg(feature = "notifications")]
                     if config.notify {
-                        let watch_result =
-                            linthis::watch::WatchResult::from_run_result(&result);
+                        let watch_result = linthis::watch::WatchResult::from_run_result(&result);
                         linthis::watch::notify_issues(&watch_result);
                     }
                 }
@@ -208,7 +204,8 @@ fn run_tui_watch(
     }
 
     // Restore terminal
-    tui::restore_terminal(&mut terminal).map_err(|e| format!("Failed to restore terminal: {}", e))?;
+    tui::restore_terminal(&mut terminal)
+        .map_err(|e| format!("Failed to restore terminal: {}", e))?;
 
     println!("Watch mode stopped.");
     Ok(())

@@ -124,7 +124,7 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
             fail_on,
             sast_config,
             verbose,
-        } => Some(handle_security_command(
+        } => Some(handle_security_command(cli::SecurityCommandParams {
             path,
             scan_type,
             severity,
@@ -136,7 +136,7 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
             fail_on,
             sast_config,
             verbose,
-        )),
+        })),
         Commands::License {
             path,
             policy,
@@ -146,7 +146,7 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
             sbom,
             fail_on_violation,
             verbose,
-        } => Some(handle_license_command(
+        } => Some(handle_license_command(cli::LicenseCommandParams {
             path,
             policy,
             policy_file,
@@ -155,7 +155,7 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
             sbom,
             fail_on_violation,
             verbose,
-        )),
+        })),
         Commands::Complexity {
             path,
             staged,

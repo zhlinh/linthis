@@ -151,7 +151,9 @@ pub fn collect_paths(options: &PathCollectionOptions) -> PathCollectionResult {
         match linthis::utils::get_staged_files() {
             Ok(files) => {
                 if files.is_empty() {
-                    return PathCollectionResult::Empty("No staged files to check".yellow().to_string());
+                    return PathCollectionResult::Empty(
+                        "No staged files to check".yellow().to_string(),
+                    );
                 }
                 let filtered = filter_files_with_exclusions(
                     files,
@@ -161,11 +163,16 @@ pub fn collect_paths(options: &PathCollectionOptions) -> PathCollectionResult {
                 );
                 if filtered.is_empty() {
                     return PathCollectionResult::Empty(
-                        "No staged files to check after exclusions".yellow().to_string(),
+                        "No staged files to check after exclusions"
+                            .yellow()
+                            .to_string(),
                     );
                 }
                 if options.verbose {
-                    eprintln!("Checking {} staged file(s) after exclusions", filtered.len());
+                    eprintln!(
+                        "Checking {} staged file(s) after exclusions",
+                        filtered.len()
+                    );
                 }
                 PathCollectionResult::Success(filtered, exclude_patterns)
             }
@@ -179,7 +186,9 @@ pub fn collect_paths(options: &PathCollectionOptions) -> PathCollectionResult {
             Ok(files) => {
                 if files.is_empty() {
                     return PathCollectionResult::Empty(
-                        format!("No files changed since '{}'", base_ref).yellow().to_string(),
+                        format!("No files changed since '{}'", base_ref)
+                            .yellow()
+                            .to_string(),
                     );
                 }
                 let filtered = filter_files_with_exclusions(
@@ -225,7 +234,9 @@ pub fn collect_paths(options: &PathCollectionOptions) -> PathCollectionResult {
                 );
                 if filtered.is_empty() {
                     return PathCollectionResult::Empty(
-                        "No uncommitted files to check after exclusions".yellow().to_string(),
+                        "No uncommitted files to check after exclusions"
+                            .yellow()
+                            .to_string(),
                     );
                 }
                 if options.verbose {

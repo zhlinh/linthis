@@ -13,8 +13,8 @@
 use super::commands::ReportCommands;
 use colored::Colorize;
 use linthis::reports::{
-    analyze_trends, get_last_result, load_result_from_file, ConsistencyAnalysis,
-    HtmlReportOptions, ReportStatistics,
+    analyze_trends, get_last_result, load_result_from_file, ConsistencyAnalysis, HtmlReportOptions,
+    ReportStatistics,
 };
 use linthis::utils::get_project_root;
 use linthis::utils::output::{format_issue_human, format_summary_human};
@@ -237,10 +237,18 @@ fn handle_show_report(
     }
 
     // Separate errors and warnings for numbered output
-    for (idx, issue) in display_issues.iter().filter(|i| i.severity == Severity::Error).enumerate() {
+    for (idx, issue) in display_issues
+        .iter()
+        .filter(|i| i.severity == Severity::Error)
+        .enumerate()
+    {
         print_numbered_issue(issue, idx, "E", compact, true);
     }
-    for (idx, issue) in display_issues.iter().filter(|i| i.severity == Severity::Warning).enumerate() {
+    for (idx, issue) in display_issues
+        .iter()
+        .filter(|i| i.severity == Severity::Warning)
+        .enumerate()
+    {
         print_numbered_issue(issue, idx, "W", compact, false);
     }
 
@@ -300,7 +308,11 @@ fn handle_html_report(
             let reports_dir = project_root.join(".linthis").join("reports");
             if !reports_dir.exists() {
                 if let Err(e) = fs::create_dir_all(&reports_dir) {
-                    eprintln!("{}: Failed to create reports directory: {}", "Error".red(), e);
+                    eprintln!(
+                        "{}: Failed to create reports directory: {}",
+                        "Error".red(),
+                        e
+                    );
                     return ExitCode::from(1);
                 }
             }

@@ -13,13 +13,11 @@
 use colored::Colorize;
 use std::path::PathBuf;
 
-use crate::cli::commands::{AgentProvider, HookEvent, HookTool};
-use super::agent::{
-    agent_skill_path, agent_stop_hook_settings_path, install_agent_skill,
-};
-use super::metadata::{InstalledHook, load_installed_hooks, save_installed_hook};
+use super::agent::{agent_skill_path, agent_stop_hook_settings_path, install_agent_skill};
+use super::metadata::{load_installed_hooks, save_installed_hook, InstalledHook};
 use super::script::build_thin_wrapper_script;
 use super::{dirs, find_git_root, global_hooks_dir, write_hook_script};
+use crate::cli::commands::{AgentProvider, HookEvent, HookTool};
 
 /// Detect hook type from thin wrapper content.
 fn detect_hook_type_from_thin_wrapper(content: &str) -> HookTool {
@@ -77,8 +75,21 @@ fn record_thin_wrapper_metadata(
         .map(|s| s.trim_end_matches('"').to_string());
     let hook_type = detect_hook_type_from_thin_wrapper(content);
     let scope = if global { "global" } else { "local" };
-    save_installed_hook(scope, project, event, &hook_type, provider_opt.as_deref(), None);
-    println!("  {} recorded thin wrapper {} {} ({})", "✓".green(), name, hook_type.as_str(), scope);
+    save_installed_hook(
+        scope,
+        project,
+        event,
+        &hook_type,
+        provider_opt.as_deref(),
+        None,
+    );
+    println!(
+        "  {} recorded thin wrapper {} {} ({})",
+        "✓".green(),
+        name,
+        hook_type.as_str(),
+        scope
+    );
 }
 
 /// Migrate an old-format linthis hook to a thin wrapper.
@@ -90,7 +101,11 @@ fn migrate_old_hook(
     global: bool,
     project: &str,
 ) -> bool {
-    let hook_type = if old_hook_has_agent(content) { HookTool::GitWithAgent } else { HookTool::Git };
+    let hook_type = if old_hook_has_agent(content) {
+        HookTool::GitWithAgent
+    } else {
+        HookTool::Git
+    };
     let provider_opt = detect_provider_from_old_hook(content);
     let thin = build_thin_wrapper_script(event, &hook_type, provider_opt, global, None);
 
@@ -111,7 +126,13 @@ fn migrate_old_hook(
 
     let scope = if global { "global" } else { "local" };
     save_installed_hook(scope, project, event, &hook_type, provider_opt, None);
-    println!("  {} migrated {} → thin wrapper {} ({})", "✓".green(), name, hook_type.as_str(), scope);
+    println!(
+        "  {} migrated {} → thin wrapper {} ({})",
+        "✓".green(),
+        name,
+        hook_type.as_str(),
+        scope
+    );
     eprintln!(
         "  {} Hook type inferred from old script content (heuristic). \
          If incorrect, re-install with the right type:\n  \
@@ -125,7 +146,11 @@ fn migrate_old_hook(
 
 /// Scan `hook_dir` for old-format linthis hook scripts, migrate each to a thin
 /// wrapper, save metadata, and return the number of hooks migrated.
-pub(crate) fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, global: bool, project: &str) -> usize {
+pub(crate) fn detect_and_migrate_existing_hooks(
+    hook_dir: &std::path::Path,
+    global: bool,
+    project: &str,
+) -> usize {
     let event_map: &[(&str, HookEvent)] = &[
         ("pre-commit", HookEvent::PreCommit),
         ("pre-push", HookEvent::PrePush),
@@ -180,7 +205,7 @@ pub(crate) fn detect_and_migrate_existing_hooks(hook_dir: &std::path::Path, glob
 fn parse_hook_event(s: &str) -> Option<HookEvent> {
     match s {
         "pre-commit" => Some(HookEvent::PreCommit),
-        "pre-push"   => Some(HookEvent::PrePush),
+        "pre-push" => Some(HookEvent::PrePush),
         "commit-msg" => Some(HookEvent::CommitMsg),
         _ => None,
     }
@@ -189,10 +214,10 @@ fn parse_hook_event(s: &str) -> Option<HookEvent> {
 /// Parse hook type string back to HookTool enum.
 fn parse_hook_tool(s: &str) -> Option<HookTool> {
     match s {
-        "git"             => Some(HookTool::Git),
-        "git-with-agent"  => Some(HookTool::GitWithAgent),
-        "agent"           => Some(HookTool::Agent),
-        "prek"            => Some(HookTool::Prek),
+        "git" => Some(HookTool::Git),
+        "git-with-agent" => Some(HookTool::GitWithAgent),
+        "agent" => Some(HookTool::Agent),
+        "prek" => Some(HookTool::Prek),
         "prek-with-agent" => Some(HookTool::PrekWithAgent),
         _ => None,
     }
@@ -201,20 +226,22 @@ fn parse_hook_tool(s: &str) -> Option<HookTool> {
 /// Parse a provider name string to AgentProvider.
 fn parse_sync_agent_provider(name: &str) -> Option<AgentProvider> {
     match name.to_lowercase().as_str() {
-        "claude"    => Some(AgentProvider::Claude),
-        "codex"     => Some(AgentProvider::Codex),
-        "gemini"    => Some(AgentProvider::Gemini),
-        "cursor"    => Some(AgentProvider::Cursor),
-        "droid"     => Some(AgentProvider::Droid),
+        "claude" => Some(AgentProvider::Claude),
+        "codex" => Some(AgentProvider::Codex),
+        "gemini" => Some(AgentProvider::Gemini),
+        "cursor" => Some(AgentProvider::Cursor),
+        "droid" => Some(AgentProvider::Droid),
         "auggie" | "aug" | "augment" => Some(AgentProvider::Auggie),
         "codebuddy" => Some(AgentProvider::Codebuddy),
-        "openclaw"  => Some(AgentProvider::Openclaw),
+        "openclaw" => Some(AgentProvider::Openclaw),
         _ => None,
     }
 }
 
 /// Group filtered hooks by hook_type for structured output.
-fn group_hooks_by_type<'a>(filtered: &'a [&'a InstalledHook]) -> Vec<(&'a str, Vec<&'a &'a InstalledHook>)> {
+fn group_hooks_by_type<'a>(
+    filtered: &'a [&'a InstalledHook],
+) -> Vec<(&'a str, Vec<&'a &'a InstalledHook>)> {
     let type_order = ["agent", "git-with-agent", "prek-with-agent", "git", "prek"];
     let mut grouped: Vec<(&str, Vec<&&InstalledHook>)> = Vec::new();
     for ht in &type_order {
@@ -227,7 +254,10 @@ fn group_hooks_by_type<'a>(filtered: &'a [&'a InstalledHook]) -> Vec<(&'a str, V
         if !type_order.contains(&hook.hook_type.as_str()) {
             let existing = grouped.iter().any(|(ht, _)| *ht == hook.hook_type.as_str());
             if !existing {
-                let group: Vec<&&InstalledHook> = filtered.iter().filter(|h| h.hook_type == hook.hook_type).collect();
+                let group: Vec<&&InstalledHook> = filtered
+                    .iter()
+                    .filter(|h| h.hook_type == hook.hook_type)
+                    .collect();
                 grouped.push((hook.hook_type.as_str(), group));
             }
         }
@@ -261,7 +291,11 @@ fn sync_thin_wrapper(
     };
 
     let hook_file = hook_dir.join(event.hook_filename());
-    let pa_opt: Option<&str> = if hook.provider_args.is_empty() { None } else { Some(&hook.provider_args) };
+    let pa_opt: Option<&str> = if hook.provider_args.is_empty() {
+        None
+    } else {
+        Some(&hook.provider_args)
+    };
     let thin_script = build_thin_wrapper_script(event, hook_type, provider_opt, global, pa_opt);
     if let Some(parent) = hook_file.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -283,9 +317,15 @@ fn sync_agent_skills(
     project_root: &std::path::Path,
     skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> u32 {
-    let base = if global { dirs::home_dir().unwrap_or_default() } else { project_root.to_path_buf() };
+    let base = if global {
+        dirs::home_dir().unwrap_or_default()
+    } else {
+        project_root.to_path_buf()
+    };
 
-    let mut skill_targets: Vec<AgentProvider> = hook.skill_providers.iter()
+    let mut skill_targets: Vec<AgentProvider> = hook
+        .skill_providers
+        .iter()
         .filter_map(|name| parse_sync_agent_provider(name))
         .collect();
 
@@ -303,16 +343,31 @@ fn sync_agent_skills(
             errors += 1;
             continue;
         }
-        println!("     {} {} skill → {}", "↳".dimmed(), provider, skill_path.display());
+        println!(
+            "     {} {} skill → {}",
+            "↳".dimmed(),
+            provider,
+            skill_path.display()
+        );
         if let Some(cmd_dir) = agent_command_dir(&base, provider) {
             if cmd_dir.exists() {
-                println!("     {} {} command → {}", "↳".dimmed(), provider, cmd_dir.display());
+                println!(
+                    "     {} {} command → {}",
+                    "↳".dimmed(),
+                    provider,
+                    cmd_dir.display()
+                );
             }
         }
         if matches!(event, HookEvent::PreCommit) {
             if let Some(settings_path) = agent_stop_hook_settings_path(&base, provider) {
                 if settings_path.exists() {
-                    println!("     {} {} stop hook → {}", "↳".dimmed(), provider, settings_path.display());
+                    println!(
+                        "     {} {} stop hook → {}",
+                        "↳".dimmed(),
+                        provider,
+                        settings_path.display()
+                    );
                 }
             }
         }
@@ -321,16 +376,19 @@ fn sync_agent_skills(
 }
 
 /// Target directory for agent slash commands per provider (sync-local copy).
-fn agent_command_dir(base: &std::path::Path, provider: &AgentProvider) -> Option<std::path::PathBuf> {
+fn agent_command_dir(
+    base: &std::path::Path,
+    provider: &AgentProvider,
+) -> Option<std::path::PathBuf> {
     match provider {
-        AgentProvider::Claude    => Some(base.join(".claude/commands/linthis")),
+        AgentProvider::Claude => Some(base.join(".claude/commands/linthis")),
         AgentProvider::Codebuddy => Some(base.join(".codebuddy/commands/linthis")),
-        AgentProvider::Gemini    => Some(base.join(".gemini/commands")),
-        AgentProvider::Cursor    => Some(base.join(".cursor/commands")),
-        AgentProvider::Droid     => Some(base.join(".droid/commands")),
-        AgentProvider::Auggie    => Some(base.join(".augment/commands")),
-        AgentProvider::Codex     => None,
-        AgentProvider::Openclaw  => Some(base.join(".openclaw/commands")),
+        AgentProvider::Gemini => Some(base.join(".gemini/commands")),
+        AgentProvider::Cursor => Some(base.join(".cursor/commands")),
+        AgentProvider::Droid => Some(base.join(".droid/commands")),
+        AgentProvider::Auggie => Some(base.join(".augment/commands")),
+        AgentProvider::Codex => None,
+        AgentProvider::Openclaw => Some(base.join(".openclaw/commands")),
     }
 }
 
@@ -342,10 +400,18 @@ fn sync_disk_scan_pass(
     skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) {
     let all_scan_providers = [
-        AgentProvider::Claude, AgentProvider::Codebuddy, AgentProvider::Gemini,
-        AgentProvider::Cursor, AgentProvider::Droid, AgentProvider::Auggie,
+        AgentProvider::Claude,
+        AgentProvider::Codebuddy,
+        AgentProvider::Gemini,
+        AgentProvider::Cursor,
+        AgentProvider::Droid,
+        AgentProvider::Auggie,
     ];
-    let all_scan_events = [HookEvent::PreCommit, HookEvent::CommitMsg, HookEvent::PrePush];
+    let all_scan_events = [
+        HookEvent::PreCommit,
+        HookEvent::CommitMsg,
+        HookEvent::PrePush,
+    ];
     for scan_event in &all_scan_events {
         for scan_provider in &all_scan_providers {
             let skill_path = agent_skill_path(base, scan_provider, global, scan_event, skill_names);
@@ -355,14 +421,27 @@ fn sync_disk_scan_pass(
             let provider_name_lower = format!("{}", scan_provider).to_lowercase();
             let already_registered = filtered.iter().any(|h| {
                 h.event == scan_event.as_str()
-                    && matches!(h.hook_type.as_str(), "git-with-agent" | "agent" | "prek-with-agent")
-                    && h.skill_providers.iter().any(|sp| sp.to_lowercase() == provider_name_lower)
+                    && matches!(
+                        h.hook_type.as_str(),
+                        "git-with-agent" | "agent" | "prek-with-agent"
+                    )
+                    && h.skill_providers
+                        .iter()
+                        .any(|sp| sp.to_lowercase() == provider_name_lower)
             });
             if already_registered {
                 continue;
             }
-            if let Err(e) = install_agent_skill(base, scan_provider, global, scan_event, skill_names) {
-                eprintln!("  {} skill refresh error ({:?}/{}): {}", "⚠".yellow(), scan_provider, scan_event.as_str(), e);
+            if let Err(e) =
+                install_agent_skill(base, scan_provider, global, scan_event, skill_names)
+            {
+                eprintln!(
+                    "  {} skill refresh error ({:?}/{}): {}",
+                    "⚠".yellow(),
+                    scan_provider,
+                    scan_event.as_str(),
+                    e
+                );
             }
         }
     }
@@ -374,7 +453,10 @@ fn handle_sync_no_metadata(global: bool, project_root: &std::path::Path) -> i32 
         match global_hooks_dir() {
             Some(d) => d,
             None => {
-                eprintln!("{}: Could not determine global hooks directory", "Error".red());
+                eprintln!(
+                    "{}: Could not determine global hooks directory",
+                    "Error".red()
+                );
                 return 1;
             }
         }
@@ -383,18 +465,32 @@ fn handle_sync_no_metadata(global: bool, project_root: &std::path::Path) -> i32 
     };
 
     let detected = detect_and_migrate_existing_hooks(
-        &hook_dir, global,
-        if global { "" } else { project_root.to_str().unwrap_or("") },
+        &hook_dir,
+        global,
+        if global {
+            ""
+        } else {
+            project_root.to_str().unwrap_or("")
+        },
     );
 
     if detected == 0 {
         if global {
             println!("No global linthis hooks found to sync.");
-            println!("  Run {} to install global hooks", "linthis hook install -g".cyan());
+            println!(
+                "  Run {} to install global hooks",
+                "linthis hook install -g".cyan()
+            );
         } else {
             println!("No local linthis hooks found for this project.");
-            println!("  Run {} to install and record hooks", "linthis hook install".cyan());
-            println!("  Use {} to sync global hooks.", "linthis hook sync -g".cyan());
+            println!(
+                "  Run {} to install and record hooks",
+                "linthis hook install".cyan()
+            );
+            println!(
+                "  Use {} to sync global hooks.",
+                "linthis hook sync -g".cyan()
+            );
         }
     }
     0
@@ -413,14 +509,28 @@ fn sync_single_hook(
 
     let event = match parse_hook_event(&hook.event) {
         Some(e) => e,
-        None => { eprintln!("  {} Unknown event '{}', skipping", "✗".red(), hook.event); return 1; }
+        None => {
+            eprintln!("  {} Unknown event '{}', skipping", "✗".red(), hook.event);
+            return 1;
+        }
     };
     let hook_type = match parse_hook_tool(&hook.hook_type) {
         Some(t) => t,
-        None => { eprintln!("  {} Unknown hook type '{}', skipping", "✗".red(), hook.hook_type); return 1; }
+        None => {
+            eprintln!(
+                "  {} Unknown hook type '{}', skipping",
+                "✗".red(),
+                hook.hook_type
+            );
+            return 1;
+        }
     };
     let prov_str: &str = &hook.provider;
-    let provider_opt: Option<&str> = if prov_str.is_empty() { None } else { Some(prov_str) };
+    let provider_opt: Option<&str> = if prov_str.is_empty() {
+        None
+    } else {
+        Some(prov_str)
+    };
 
     if sync_thin_wrapper(hook, &event, &hook_type, provider_opt, global, project_root).is_err() {
         return 1;
@@ -429,15 +539,31 @@ fn sync_single_hook(
     *hook_index += 1;
     let mut details = vec![target_scope.to_string()];
     if let Some(fp) = provider_opt {
-        if !fp.is_empty() { details.push(format!("fix: {}", fp)); }
+        if !fp.is_empty() {
+            details.push(format!("fix: {}", fp));
+        }
     }
     if !hook.skill_providers.is_empty() {
         details.push(format!("skills: {}", hook.skill_providers.join(",")));
     }
-    println!("  {}. {} synced {} {} ({})", hook_index, "✓".green(), hook.event, hook.hook_type, details.join(", "));
+    println!(
+        "  {}. {} synced {} {} ({})",
+        hook_index,
+        "✓".green(),
+        hook.event,
+        hook.hook_type,
+        details.join(", ")
+    );
 
     if matches!(hook_type, HookTool::Agent) {
-        errors += sync_agent_skills(hook, &event, provider_opt, global, project_root, skill_names);
+        errors += sync_agent_skills(
+            hook,
+            &event,
+            provider_opt,
+            global,
+            project_root,
+            skill_names,
+        );
     }
 
     errors
@@ -461,12 +587,19 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
     };
 
     let sync_project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let skill_names_cfg = linthis::config::Config::load_merged(&sync_project_root).hook.agent.skill_names;
+    let skill_names_cfg = linthis::config::Config::load_merged(&sync_project_root)
+        .hook
+        .agent
+        .skill_names;
     let skill_names = Some(&skill_names_cfg);
 
-    let filtered: Vec<&InstalledHook> = hooks_file.hooks.iter()
+    let filtered: Vec<&InstalledHook> = hooks_file
+        .hooks
+        .iter()
         .filter(|h| h.scope == target_scope)
-        .filter(|h| global || h.project.is_empty() || h.project == project_root.to_str().unwrap_or(""))
+        .filter(|h| {
+            global || h.project.is_empty() || h.project == project_root.to_str().unwrap_or("")
+        })
         .collect();
 
     if filtered.is_empty() {
@@ -483,14 +616,31 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
         println!();
         let gt: &str = group_type;
         let gh_len = group_hooks.len();
-        println!("{} Type: {} ({} hook{})", "→".cyan(), gt.cyan(), gh_len, if gh_len == 1 { "" } else { "s" });
+        println!(
+            "{} Type: {} ({} hook{})",
+            "→".cyan(),
+            gt.cyan(),
+            gh_len,
+            if gh_len == 1 { "" } else { "s" }
+        );
 
         for hook in group_hooks {
-            errors += sync_single_hook(hook, &mut hook_index, target_scope, global, &project_root, skill_names);
+            errors += sync_single_hook(
+                hook,
+                &mut hook_index,
+                target_scope,
+                global,
+                &project_root,
+                skill_names,
+            );
         }
     }
 
-    let base_for_scan = if global { dirs::home_dir().unwrap_or_default() } else { project_root.clone() };
+    let base_for_scan = if global {
+        dirs::home_dir().unwrap_or_default()
+    } else {
+        project_root.clone()
+    };
     sync_disk_scan_pass(&base_for_scan, global, &filtered, skill_names);
 
     if errors > 0 {
@@ -506,6 +656,10 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
 pub fn handle_hook_sync_after_plugin_sync(global: bool) {
     let code = handle_hook_sync(global, true);
     if code != 0 {
-        eprintln!("{}: Agent hook sync encountered errors (exit {})", "Warning".yellow(), code);
+        eprintln!(
+            "{}: Agent hook sync encountered errors (exit {})",
+            "Warning".yellow(),
+            code
+        );
     }
 }

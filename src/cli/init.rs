@@ -189,11 +189,7 @@ fn handle_config_migrate(
 }
 
 /// Handle init subcommand
-pub fn handle_init_command(
-    global: bool,
-    with_hook: bool,
-    force: bool
-) -> ExitCode {
+pub fn handle_init_command(global: bool, with_hook: bool, force: bool) -> ExitCode {
     use linthis::config::Config;
 
     let config_path = if global {
@@ -254,21 +250,22 @@ pub fn handle_init_command(
                 "Warning".yellow()
             );
             eprintln!("  Global hook template feature has been removed");
-            eprintln!("  Use {} in each project instead",
+            eprintln!(
+                "  Use {} in each project instead",
                 "linthis hook install".cyan()
             );
         } else {
             // Install hook for project
             println!();
             let exit_code = handle_hook_command(HookCommands::Install {
-                hook_types: vec![],        // Use default hook type (Git)
+                hook_types: vec![],                      // Use default hook type (Git)
                 hook_events: vec![HookEvent::PreCommit], // Default to pre-commit hook
-                force,                     // Use force flag from init
-                yes: true,                 // Non-interactive mode
-                global: false,             // Project-level install
-                provider: None,            // No provider specified
-                args: None,               // Use default args (-c -f)
-                provider_args: None,       // No extra agent CLI args
+                force,                                   // Use force flag from init
+                yes: true,                               // Non-interactive mode
+                global: false,                           // Project-level install
+                provider: None,                          // No provider specified
+                args: None,                              // Use default args (-c -f)
+                provider_args: None,                     // No extra agent CLI args
             });
             if exit_code != ExitCode::SUCCESS {
                 return exit_code;
@@ -284,7 +281,11 @@ fn home_dir() -> Option<std::path::PathBuf> {
     std::env::var("HOME")
         .ok()
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var("USERPROFILE").ok().map(std::path::PathBuf::from))
+        .or_else(|| {
+            std::env::var("USERPROFILE")
+                .ok()
+                .map(std::path::PathBuf::from)
+        })
 }
 
 /// Initialize default config files for all linters/formatters
@@ -323,7 +324,10 @@ pub fn init_linter_configs() -> ExitCode {
     // Ensure .linthis/ is in .gitignore (working directory for review results, caches, etc.)
     let gitignore_path = Path::new(".gitignore");
     let existing_gitignore = fs::read_to_string(gitignore_path).unwrap_or_default();
-    if !existing_gitignore.lines().any(|line| line.trim() == ".linthis/" || line.trim() == ".linthis") {
+    if !existing_gitignore
+        .lines()
+        .any(|line| line.trim() == ".linthis/" || line.trim() == ".linthis")
+    {
         let mut content = existing_gitignore;
         if !content.is_empty() && !content.ends_with('\n') {
             content.push('\n');

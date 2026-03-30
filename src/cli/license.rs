@@ -19,17 +19,30 @@ use linthis::license::{
     format_license_report, LicensePolicy, LicenseReportFormat, LicenseScanner, ScanOptions,
 };
 
+/// Parameters for the license subcommand.
+pub struct LicenseCommandParams {
+    pub path: PathBuf,
+    pub policy: String,
+    pub policy_file: Option<PathBuf>,
+    pub include_dev: bool,
+    pub format: String,
+    pub sbom: bool,
+    pub fail_on_violation: bool,
+    pub verbose: bool,
+}
+
 /// Handle the license subcommand
-pub fn handle_license_command(
-    path: PathBuf,
-    policy: String,
-    policy_file: Option<PathBuf>,
-    include_dev: bool,
-    format: String,
-    sbom: bool,
-    fail_on_violation: bool,
-    verbose: bool,
-) -> ExitCode {
+pub fn handle_license_command(params: LicenseCommandParams) -> ExitCode {
+    let LicenseCommandParams {
+        path,
+        policy,
+        policy_file,
+        include_dev,
+        format,
+        sbom,
+        fail_on_violation,
+        verbose,
+    } = params;
     let scanner = LicenseScanner::new();
 
     // Detect languages
@@ -93,20 +106,15 @@ pub fn handle_license_command(
             // Generate SBOM if requested
             if sbom && format != "spdx" {
                 println!("\n{}", "📋 SBOM (SPDX format):".bold());
-                let sbom_output = format_license_report(
-                    &result,
-                    &violations,
-                    LicenseReportFormat::Spdx,
-                );
+                let sbom_output =
+                    format_license_report(&result, &violations, LicenseReportFormat::Spdx);
                 println!("{}", sbom_output);
             }
 
             // Check for violations
             let error_violations: Vec<_> = violations
                 .iter()
-                .filter(|v| {
-                    v.violation_type != linthis::license::policy::ViolationType::Warning
-                })
+                .filter(|v| v.violation_type != linthis::license::policy::ViolationType::Warning)
                 .collect();
 
             if fail_on_violation && !error_violations.is_empty() {

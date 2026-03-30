@@ -116,7 +116,10 @@ pub fn handle_doctor_command(all: bool, output_format: &str) -> ExitCode {
     // Output based on format
     match output_format {
         "json" => {
-            println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&result).unwrap_or_default()
+            );
         }
         _ => {
             print_human_output(&result, &languages);
@@ -170,13 +173,25 @@ fn check_tool(lang: Language, is_checker: bool) -> ToolStatus {
 fn get_tool_info(lang: Language, is_checker: bool) -> (String, String, &'static str) {
     match (lang, is_checker) {
         // Checkers
-        (Language::Rust, true) => ("clippy".to_string(), "cargo".to_string(), "clippy --version"),
+        (Language::Rust, true) => (
+            "clippy".to_string(),
+            "cargo".to_string(),
+            "clippy --version",
+        ),
         (Language::Python, true) => ("ruff".to_string(), "ruff".to_string(), "--version"),
-        (Language::Go, true) => ("golangci-lint".to_string(), "golangci-lint".to_string(), "--version"),
+        (Language::Go, true) => (
+            "golangci-lint".to_string(),
+            "golangci-lint".to_string(),
+            "--version",
+        ),
         (Language::TypeScript, true) | (Language::JavaScript, true) => {
             ("eslint".to_string(), "eslint".to_string(), "--version")
         }
-        (Language::Java, true) => ("checkstyle".to_string(), "checkstyle".to_string(), "--version"),
+        (Language::Java, true) => (
+            "checkstyle".to_string(),
+            "checkstyle".to_string(),
+            "--version",
+        ),
         (Language::Cpp, true) | (Language::ObjectiveC, true) => {
             ("cpplint".to_string(), "cpplint".to_string(), "--version")
         }
@@ -184,11 +199,19 @@ fn get_tool_info(lang: Language, is_checker: bool) -> (String, String, &'static 
         (Language::Swift, true) => ("swiftlint".to_string(), "swiftlint".to_string(), "version"),
         (Language::Kotlin, true) => ("ktlint".to_string(), "ktlint".to_string(), "--version"),
         (Language::Lua, true) => ("luacheck".to_string(), "luacheck".to_string(), "--version"),
-        (Language::Shell, true) => ("shellcheck".to_string(), "shellcheck".to_string(), "--version"),
+        (Language::Shell, true) => (
+            "shellcheck".to_string(),
+            "shellcheck".to_string(),
+            "--version",
+        ),
         (Language::Ruby, true) => ("rubocop".to_string(), "rubocop".to_string(), "--version"),
         (Language::Php, true) => ("phpcs".to_string(), "phpcs".to_string(), "--version"),
         (Language::Scala, true) => ("scalafix".to_string(), "scalafix".to_string(), "--version"),
-        (Language::CSharp, true) => ("dotnet-format".to_string(), "dotnet".to_string(), "format --version"),
+        (Language::CSharp, true) => (
+            "dotnet-format".to_string(),
+            "dotnet".to_string(),
+            "format --version",
+        ),
 
         // Formatters
         (Language::Rust, false) => ("rustfmt".to_string(), "rustfmt".to_string(), "--version"),
@@ -197,19 +220,37 @@ fn get_tool_info(lang: Language, is_checker: bool) -> (String, String, &'static 
         (Language::TypeScript, false) | (Language::JavaScript, false) => {
             ("prettier".to_string(), "prettier".to_string(), "--version")
         }
-        (Language::Java, false) => ("google-java-format".to_string(), "google-java-format".to_string(), "--version"),
-        (Language::Cpp, false) | (Language::ObjectiveC, false) => {
-            ("clang-format".to_string(), "clang-format".to_string(), "--version")
-        }
+        (Language::Java, false) => (
+            "google-java-format".to_string(),
+            "google-java-format".to_string(),
+            "--version",
+        ),
+        (Language::Cpp, false) | (Language::ObjectiveC, false) => (
+            "clang-format".to_string(),
+            "clang-format".to_string(),
+            "--version",
+        ),
         (Language::Dart, false) => ("dart-format".to_string(), "dart".to_string(), "--version"),
-        (Language::Swift, false) => ("swift-format".to_string(), "swift-format".to_string(), "--version"),
+        (Language::Swift, false) => (
+            "swift-format".to_string(),
+            "swift-format".to_string(),
+            "--version",
+        ),
         (Language::Kotlin, false) => ("ktlint".to_string(), "ktlint".to_string(), "--version"),
         (Language::Lua, false) => ("stylua".to_string(), "stylua".to_string(), "--version"),
         (Language::Shell, false) => ("shfmt".to_string(), "shfmt".to_string(), "--version"),
         (Language::Ruby, false) => ("rubocop".to_string(), "rubocop".to_string(), "--version"),
-        (Language::Php, false) => ("php-cs-fixer".to_string(), "php-cs-fixer".to_string(), "--version"),
+        (Language::Php, false) => (
+            "php-cs-fixer".to_string(),
+            "php-cs-fixer".to_string(),
+            "--version",
+        ),
         (Language::Scala, false) => ("scalafmt".to_string(), "scalafmt".to_string(), "--version"),
-        (Language::CSharp, false) => ("dotnet-format".to_string(), "dotnet".to_string(), "format --version"),
+        (Language::CSharp, false) => (
+            "dotnet-format".to_string(),
+            "dotnet".to_string(),
+            "format --version",
+        ),
     }
 }
 
@@ -286,9 +327,7 @@ fn get_install_hint(lang: Language, is_checker: bool) -> String {
                 "https://checkstyle.sourceforge.io/".to_string()
             }
         }
-        (Language::Cpp, true) | (Language::ObjectiveC, true) => {
-            "pip install cpplint".to_string()
-        }
+        (Language::Cpp, true) | (Language::ObjectiveC, true) => "pip install cpplint".to_string(),
         (Language::Dart, true) => "https://dart.dev/get-dart".to_string(),
         (Language::Swift, true) => {
             if cfg!(target_os = "macos") {
@@ -574,11 +613,7 @@ fn print_human_output(result: &DoctorResult, languages: &[Language]) {
             .count();
 
         if missing_tools > 0 {
-            println!(
-                "{} {} tool(s) not available",
-                "⚠".yellow(),
-                missing_tools
-            );
+            println!("{} {} tool(s) not available", "⚠".yellow(), missing_tools);
         }
         if invalid_configs > 0 {
             println!(

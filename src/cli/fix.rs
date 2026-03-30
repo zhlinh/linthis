@@ -18,10 +18,12 @@
 
 use colored::Colorize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use crate::cli::backup::{create_backup, collect_files_from_issues, handle_list_backups, handle_undo};
+use crate::cli::backup::{
+    collect_files_from_issues, create_backup, handle_list_backups, handle_undo,
+};
 use crate::cli::helpers::{find_latest_result_file, resolve_ai_provider};
 use crate::cli::recheck::{
     print_recheck_footer, print_recheck_header, print_recheck_summary, recheck_modified_files,
@@ -132,7 +134,11 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
         println!(
             "{} Running {} first...",
             "→".cyan(),
-            if options.format_only { "format" } else { "check" }
+            if options.format_only {
+                "format"
+            } else {
+                "check"
+            }
         );
     }
 
@@ -181,10 +187,8 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
 
             // Enter fix mode
             let (modified_files, fixed_count) = if options.ai {
-                let provider = resolve_ai_provider(
-                    options.provider.as_deref(),
-                    config.ai.provider.as_deref(),
-                );
+                let provider =
+                    resolve_ai_provider(options.provider.as_deref(), config.ai.provider.as_deref());
                 let ai_config = AiFixConfig::with_provider(&provider)
                     .with_model(options.model.clone())
                     .with_accept_all(options.accept_all)
@@ -202,8 +206,12 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
             // Recheck modified files
             if !modified_files.is_empty() {
                 print_recheck_header();
-                let recheck_result =
-                    recheck_modified_files(&modified_files, &result.issues, options.quiet, options.verbose);
+                let recheck_result = recheck_modified_files(
+                    &modified_files,
+                    &result.issues,
+                    options.quiet,
+                    options.verbose,
+                );
                 print_recheck_summary(&recheck_result, fixed_count);
                 print_recheck_footer();
             }
@@ -261,21 +269,13 @@ fn print_issue_type_summary(issues: &[LintIssue]) {
     let lint_count = issues
         .iter()
         .filter(|i| {
-            !i.source
-                .as_deref()
-                .unwrap_or("")
-                .starts_with("security/")
+            !i.source.as_deref().unwrap_or("").starts_with("security/")
                 && i.source.as_deref() != Some("linthis-complexity")
         })
         .count();
     let sec_count = issues
         .iter()
-        .filter(|i| {
-            i.source
-                .as_deref()
-                .unwrap_or("")
-                .starts_with("security/")
-        })
+        .filter(|i| i.source.as_deref().unwrap_or("").starts_with("security/"))
         .count();
     let cx_count = issues
         .iter()
@@ -314,10 +314,8 @@ fn run_fix_and_recheck(
     }
 
     let (modified_files, fixed_count) = if options.ai {
-        let provider = resolve_ai_provider(
-            options.provider.as_deref(),
-            config.ai.provider.as_deref(),
-        );
+        let provider =
+            resolve_ai_provider(options.provider.as_deref(), config.ai.provider.as_deref());
         let ai_config = AiFixConfig::with_provider(&provider)
             .with_model(options.model.clone())
             .with_accept_all(options.accept_all)
@@ -395,11 +393,12 @@ fn handle_fix_from_result(options: &FixCommandOptions, config: &Config) -> ExitC
 
 /// Run AI fix in a loop until no issues remain or max iterations reached
 /// Build an `AiFixConfig` from the command options and resolved provider.
-fn build_ai_fix_config(options: &FixCommandOptions, config: &Config, accept_all: bool) -> AiFixConfig {
-    let provider = resolve_ai_provider(
-        options.provider.as_deref(),
-        config.ai.provider.as_deref(),
-    );
+fn build_ai_fix_config(
+    options: &FixCommandOptions,
+    config: &Config,
+    accept_all: bool,
+) -> AiFixConfig {
+    let provider = resolve_ai_provider(options.provider.as_deref(), config.ai.provider.as_deref());
     AiFixConfig::with_provider(&provider)
         .with_model(options.model.clone())
         .with_accept_all(accept_all)
@@ -475,7 +474,11 @@ fn print_ai_fix_summary(
         println!(
             "  {} remaining issue{}",
             current_result.issues.len().to_string().yellow(),
-            if current_result.issues.len() == 1 { "" } else { "s" }
+            if current_result.issues.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
         );
         println!(
             "\n  Run {} to see remaining issues",
@@ -521,7 +524,7 @@ enum IterationOutcome {
     /// All issues have been resolved.
     AllFixed,
     /// Some issues remain; continue with the updated result.
-    Continue(linthis::utils::types::RunResult),
+    Continue(Box<linthis::utils::types::RunResult>),
     /// No further progress can be made; stop the loop.
     Stop,
 }
@@ -575,7 +578,7 @@ fn run_single_ai_iteration(
                     if result.issues.len() == 1 { "" } else { "s" }
                 );
             }
-            (applied, IterationOutcome::Continue(result))
+            (applied, IterationOutcome::Continue(Box::new(result)))
         }
         None => (applied, IterationOutcome::Stop),
     }
@@ -617,14 +620,19 @@ fn run_ai_fix_loop(
                 return ExitCode::SUCCESS;
             }
             IterationOutcome::Continue(result) => {
-                current_result = result;
+                current_result = *result;
             }
             IterationOutcome::Stop => break,
         }
     }
 
     if !options.quiet {
-        print_ai_fix_summary(&current_result, iteration, total_fixed, start_time.elapsed());
+        print_ai_fix_summary(
+            &current_result,
+            iteration,
+            total_fixed,
+            start_time.elapsed(),
+        );
     }
 
     if current_result.issues.is_empty() {
@@ -672,9 +680,7 @@ fn resolve_api_key(provider_kind: &AiProviderKind) -> Option<String> {
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
         AiProviderKind::CodeBuddy => std::env::var("CODEBUDDY_API_KEY").ok(),
-        AiProviderKind::OpenAi | AiProviderKind::CodexCli => {
-            std::env::var("OPENAI_API_KEY").ok()
-        }
+        AiProviderKind::OpenAi | AiProviderKind::CodexCli => std::env::var("OPENAI_API_KEY").ok(),
         AiProviderKind::Gemini => std::env::var("GEMINI_API_KEY")
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
             .ok(),
@@ -744,7 +750,7 @@ fn print_provider_unavailable_hint(provider_kind: &AiProviderKind) {
 /// Try to auto-apply the first suggestion from a successful result.
 fn try_auto_apply(
     result: &linthis::ai::SuggestionResult,
-    file_path: &PathBuf,
+    file_path: &Path,
     line_number: u32,
     message: &str,
     rule_id: &str,
@@ -756,7 +762,7 @@ fn try_auto_apply(
 
     let suggestion = result.suggestions.first()?;
     let issue = LintIssue {
-        file_path: file_path.clone(),
+        file_path: file_path.to_path_buf(),
         line: line_number as usize,
         column: None,
         severity: linthis::utils::types::Severity::Error,
@@ -832,7 +838,14 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
     format_single_result(&result, &options.output, options.with_context);
 
     if result.is_success() {
-        if let Some(code) = try_auto_apply(&result, file_path, line_number, message, rule_id, options.accept_all) {
+        if let Some(code) = try_auto_apply(
+            &result,
+            file_path,
+            line_number,
+            message,
+            rule_id,
+            options.accept_all,
+        ) {
             return code;
         }
         ExitCode::SUCCESS
@@ -842,11 +855,7 @@ fn handle_single_file_ai_fix(options: &FixCommandOptions, config: &Config) -> Ex
 }
 
 /// Format a single suggestion result
-fn format_single_result(
-    result: &linthis::ai::SuggestionResult,
-    format: &str,
-    with_context: bool,
-) {
+fn format_single_result(result: &linthis::ai::SuggestionResult, format: &str, with_context: bool) {
     match format {
         "json" => {
             let json = serde_json::to_string_pretty(result).unwrap_or_default();
@@ -898,7 +907,11 @@ fn format_single_result(
                 println!("  {}", "No suggestions generated.".yellow());
             } else {
                 for (idx, suggestion) in result.suggestions.iter().enumerate() {
-                    println!("  {} {}:", format!("[{}]", idx + 1).cyan(), "Suggestion".bold());
+                    println!(
+                        "  {} {}:",
+                        format!("[{}]", idx + 1).cyan(),
+                        "Suggestion".bold()
+                    );
                     println!("  ```{}", suggestion.language);
                     for line in suggestion.code.lines() {
                         println!("    {}", line.green());

@@ -93,8 +93,7 @@ pub fn find_latest_result_file() -> Option<PathBuf> {
         .filter_map(|e| e.ok())
         .filter(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            name.starts_with("result-")
-                && (name.ends_with(".json") || name.ends_with(".txt"))
+            name.starts_with("result-") && (name.ends_with(".json") || name.ends_with(".txt"))
         })
         .collect();
 
@@ -175,10 +174,7 @@ pub fn print_fix_hint(issues: &[LintIssue]) {
             "Tip:".yellow().bold(),
             clang_tidy_count,
         );
-        eprintln!(
-            "       {}",
-            "LINTHIS_SKIP_CLANG_TIDY=1 linthis".yellow()
-        );
+        eprintln!("       {}", "LINTHIS_SKIP_CLANG_TIDY=1 linthis".yellow());
     }
 
     eprintln!();
@@ -186,7 +182,10 @@ pub fn print_fix_hint(issues: &[LintIssue]) {
         "  {} To review and fix issues interactively:",
         "Tip:".cyan().bold()
     );
-    eprintln!("       {}      - load last result and fix", "linthis fix".cyan());
+    eprintln!(
+        "       {}      - load last result and fix",
+        "linthis fix".cyan()
+    );
     eprintln!(
         "       {} - AI-powered fix suggestions ({} to choose agent)",
         "linthis fix --ai".cyan(),
@@ -214,10 +213,7 @@ pub fn select_ai_provider_interactive() -> Option<String> {
     eprintln!("{}", "Select AI provider:".cyan().bold());
     eprintln!();
     for (i, (kind, available)) in ordered.iter().enumerate() {
-        let (_, name, desc) = ALL_AI_PROVIDERS
-            .iter()
-            .find(|(k, _, _)| k == kind)
-            .unwrap();
+        let (_, name, desc) = ALL_AI_PROVIDERS.iter().find(|(k, _, _)| k == kind).unwrap();
         if *available {
             eprintln!(
                 "  {} {}. {} - {}{}",
@@ -256,10 +252,7 @@ pub fn select_ai_provider_interactive() -> Option<String> {
 
     if num >= 1 && num <= ordered.len() {
         let (kind, _) = ordered[num - 1];
-        let (_, name, _) = ALL_AI_PROVIDERS
-            .iter()
-            .find(|(k, _, _)| k == kind)
-            .unwrap();
+        let (_, name, _) = ALL_AI_PROVIDERS.iter().find(|(k, _, _)| k == kind).unwrap();
         Some(name.to_string())
     } else {
         None

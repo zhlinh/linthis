@@ -20,7 +20,11 @@ fn read_commit_msg(msg_or_file: &str) -> Result<(String, bool), ExitCode> {
         match std::fs::read_to_string(path) {
             Ok(content) => Ok((content, true)),
             Err(e) => {
-                eprintln!("{}: Failed to read commit message file: {}", "Error".red(), e);
+                eprintln!(
+                    "{}: Failed to read commit message file: {}",
+                    "Error".red(),
+                    e
+                );
                 Err(ExitCode::from(1))
             }
         }
@@ -41,7 +45,11 @@ fn validate_commit_msg(
     let regex = match Regex::new(&config.cmsg.commit_msg_pattern) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{}: Invalid commit message pattern in config: {}", "Error".red(), e);
+            eprintln!(
+                "{}: Invalid commit message pattern in config: {}",
+                "Error".red(),
+                e
+            );
             return Err(ExitCode::from(2));
         }
     };
@@ -53,7 +61,11 @@ fn validate_commit_msg(
     }
 
     if config.cmsg.require_ticket {
-        let ticket_pattern = config.cmsg.ticket_pattern.as_deref().unwrap_or(r"\[\w+-\d+\]");
+        let ticket_pattern = config
+            .cmsg
+            .ticket_pattern
+            .as_deref()
+            .unwrap_or(r"\[\w+-\d+\]");
         let ticket_regex = match Regex::new(ticket_pattern) {
             Ok(r) => r,
             Err(e) => {
@@ -91,7 +103,11 @@ fn print_ticket_error(first_line: &str, ticket_pattern: &str) {
     eprintln!("{}", "╰────────────────────────────────────────╯".red());
 }
 
-pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Option<&str>) -> ExitCode {
+pub fn handle_commit_msg_check(
+    msg_or_file: &str,
+    auto_fix: bool,
+    provider: Option<&str>,
+) -> ExitCode {
     use linthis::config::Config;
 
     let project_root = linthis::utils::get_project_root();
@@ -123,20 +139,33 @@ pub fn handle_commit_msg_check(msg_or_file: &str, auto_fix: bool, provider: Opti
 
     if auto_fix {
         let path = std::path::Path::new(msg_or_file);
-        return handle_cmsg_auto_fix(&commit_msg, &errors, is_file, path, provider, config.ai.provider.as_deref());
+        return handle_cmsg_auto_fix(
+            &commit_msg,
+            &errors,
+            is_file,
+            path,
+            provider,
+            config.ai.provider.as_deref(),
+        );
     }
 
     if errors.iter().any(|e| e.contains("Conventional Commits")) {
         print_commit_msg_error(first_line);
     } else {
-        let ticket_pattern = config.cmsg.ticket_pattern.as_deref().unwrap_or(r"\[\w+-\d+\]");
+        let ticket_pattern = config
+            .cmsg
+            .ticket_pattern
+            .as_deref()
+            .unwrap_or(r"\[\w+-\d+\]");
         print_ticket_error(first_line, ticket_pattern);
     }
     ExitCode::from(1)
 }
 
 /// Resolve an AiProviderConfig from its kind.
-fn ai_provider_config_from_kind(kind: &linthis::ai::AiProviderKind) -> linthis::ai::AiProviderConfig {
+fn ai_provider_config_from_kind(
+    kind: &linthis::ai::AiProviderKind,
+) -> linthis::ai::AiProviderConfig {
     use linthis::ai::{AiProviderConfig, AiProviderKind};
     match kind {
         AiProviderKind::Claude => AiProviderConfig::claude(),
@@ -179,7 +208,11 @@ pub(crate) fn handle_cmsg_auto_fix(
 
     let provider = AiProvider::new(ai_provider_config_from_kind(&kind));
 
-    eprintln!("{} Rewriting commit message with AI (provider: {})...", "→".cyan(), provider_name.cyan());
+    eprintln!(
+        "{} Rewriting commit message with AI (provider: {})...",
+        "→".cyan(),
+        provider_name.cyan()
+    );
 
     let first_line = original_msg.lines().next().unwrap_or("").trim();
     let rest_of_msg: String = original_msg.lines().skip(1).collect::<Vec<_>>().join("\n");
@@ -225,7 +258,10 @@ pub(crate) fn handle_cmsg_auto_fix(
 
 /// Print commit message validation error
 fn print_commit_msg_error(first_line: &str) {
-    eprintln!("{}", linthis::utils::output::format_cmsg_result(false, first_line));
+    eprintln!(
+        "{}",
+        linthis::utils::output::format_cmsg_result(false, first_line)
+    );
     let paths = linthis::utils::output::format_hook_paths_footer_pub(Some("commit-msg"));
     if !paths.is_empty() {
         eprintln!("{}", paths);
