@@ -211,20 +211,16 @@ impl LanguageSecurityScanner for JavaSecurityScanner {
     }
 
     fn fix(&self, _path: &Path, vulnerabilities: &[Vulnerability]) -> Result<FixResult, String> {
-        let mut result = FixResult::default();
-
-        result.needs_review = true;
-        result
-            .messages
-            .push("Java dependency fixes require manual version updates".to_string());
-        result
-            .messages
-            .push("Update versions in pom.xml or build.gradle".to_string());
-
-        for vuln in vulnerabilities {
-            result.unfixed.push(vuln.advisory.id.clone());
-        }
-
+        let unfixed: Vec<String> = vulnerabilities.iter().map(|v| v.advisory.id.clone()).collect();
+        let result = FixResult {
+            needs_review: true,
+            messages: vec![
+                "Java dependency fixes require manual version updates".to_string(),
+                "Update versions in pom.xml or build.gradle".to_string(),
+            ],
+            unfixed,
+            ..FixResult::default()
+        };
         Ok(result)
     }
 }
