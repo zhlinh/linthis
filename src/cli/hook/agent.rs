@@ -74,23 +74,75 @@ If no code files were modified in this session, approve immediately.
 | Specific files | `linthis -i <f1> -i <f2>` | Check & format listed files — one `-i` per file |
 | Check only | append `-c` | Lint only, no formatting (e.g. `linthis -s -c`) |
 
+## Build/Test Commands Reference
+
+Auto-detect the project language and use the corresponding commands:
+
+| Language | Build check | Test command |
+|----------|------------|-------------|
+| Rust | `cargo check` | `cargo test` |
+| Go | `go build ./...` | `go test ./...` |
+| TypeScript | `npx tsc --noEmit` | `npm test` |
+| Python | `python -m py_compile <file>` | `pytest` |
+| C/C++ | `make` / `cmake --build build` | `make test` / `ctest` |
+| Java/Kotlin | `mvn compile` / `gradle build` | `mvn test` / `gradle test` |
+
+> Detect by checking for `Cargo.toml`, `go.mod`, `package.json`, `pyproject.toml`, `Makefile`/`CMakeLists.txt`, `pom.xml`/`build.gradle` in the project root.
+
 ## Steps
 
-1. Identify modified code files in this session (files written or edited via Write/Edit tools, or via Bash)
-2. Run lint + format on those files:
+1. **Identify** modified code files in this session (files written or edited via Write/Edit tools, or via Bash)
+2. **Snapshot before fixing**: save current state so we can generate a diff later
+   ```bash
+   git diff -- <modified files> > /tmp/lt-lint-before.diff
+   ```
+3. **Run lint + format** on those files:
    - `linthis -m` to cover all modified files at once, or
    - `linthis -i <file1> -i <file2>` to target specific files
    - **Note**: linthis may auto-format files (whitespace, trailing newlines, etc.) in addition to reporting lint errors
-3. Read the lint output carefully — each issue includes file path, line number, and rule name
-4. If issues are found, fix them by editing the code directly
+4. **Read the lint output** carefully — each issue includes file path, line number, and rule name
+5. If issues are found, **group them by file** and assess dependencies:
+   - **Independent files** (no cross-file dependencies): fix in parallel — use concurrent tool calls, one per file
+   - **Dependent files** (shared type renames, API signature changes): fix sequentially in dependency order
    - Do **NOT** use `linthis --fix` or `linthis fix` — fixing manually ensures you understand the issue and don't introduce regressions from blind automated transforms
-5. Re-run linthis to confirm all issues are resolved
-6. **Re-stage**: if any files were already staged before step 2, linting/formatting may have changed them on disk. You must re-stage those files so the index matches the working tree:
+6. **Re-run linthis** to confirm all issues are resolved
+7. **Build/test verification** — after all lint issues are fixed, run build and tests to ensure fixes don't break anything:
+   ```bash
+   # Example for Rust:
+   cargo check && cargo test
+   # Example for Go:
+   go build ./... && go test ./...
+   ```
+   - If build or tests **fail**: revert the problematic change, re-analyze the error, and fix again. Repeat until both linthis and build/tests pass
+   - If the project has no build step (e.g. pure Python scripts), skip the build but still run tests if available
+8. **Generate diff report** — show what was changed:
+   ```bash
+   git diff -- <modified files>
+   ```
+   Display a **Changes Summary** listing each file, what was changed, and why:
+   ```
+   ## Changes Summary
+   - src/foo.rs:42 — fixed unused variable `x` (lint: unused_variables)
+   - src/bar.rs:15 — added doc comment for exported function (lint: missing_docs)
+   - src/baz.rs:80 — reduced function complexity by extracting helper (complexity: threshold 20)
+
+   ## Diff
+   <full git diff output>
+   ```
+9. **Re-stage**: if any files were already staged before step 3, linting/formatting may have changed them on disk. You must re-stage those files so the index matches the working tree:
    ```
    git add <formatted or fixed files>
    ```
-7. Final check: run `linthis -s -c` (check-only on staged files) to verify the staging area is clean
-8. Only approve the commit once lint passes with zero errors
+10. **Final check**: run `linthis -s -c` (check-only on staged files) to verify the staging area is clean
+11. Only approve the commit once **all lint checks pass** AND **build/tests pass**
+
+## Key Rules
+
+- **One `-i` per file**: `linthis -i src/foo.go -i src/bar.go` (not glob patterns)
+- **Fix manually**: Read the error, understand the root cause, then edit
+- **Build must pass**: Never approve a commit if the build or tests are broken after fixing
+- **Always re-stage**: After any fix or format, `git add` the changed files
+- **Always show diff**: After all fixes, display the changes summary and diff so the user can review what was modified
 
 ## Example
 
@@ -103,7 +155,7 @@ src/handler.go:23:4: error return value not checked (errcheck)
 2 issues found
 ```
 
-Fix line 15 by adding a doc comment, and line 23 by handling the error return value. Then re-run to confirm zero errors. If files were staged, re-stage: `git add src/handler.go`."#
+Fix line 15 by adding a doc comment, and line 23 by handling the error return value. Then re-run to confirm zero errors. Run build/test to verify. If files were staged, re-stage: `git add src/handler.go`."#
         .to_string()
 }
 
@@ -264,9 +316,43 @@ Create `.linthis/review/result/` directory if it doesn't exist.
 
 ### Step 5 — Gate the push
 
-- **Critical issues** → output `❌ Push blocked — fix Critical issues first`; do not proceed
+- **Critical issues** → output `❌ Push blocked — fix Critical issues first`; **auto-fix directly**, then verify build/tests pass (see Build Verification below), then re-run review until pass
 - **Important issues only** → output `⚠️ Push with caution`; ask user to confirm
 - **Minor or none** → output `✅ Review passed`; proceed
+
+### Build Verification (after auto-fix)
+
+After auto-fixing Critical issues, you **must** verify the fix doesn't break the build:
+
+1. **Save a snapshot** before fixing: `git diff > /tmp/lt-review-before.diff`
+2. **Auto-fix** the Critical issues
+3. **Run build/test** to verify:
+
+   | Language | Build check | Test command |
+   |----------|------------|-------------|
+   | Rust | `cargo check` | `cargo test` |
+   | Go | `go build ./...` | `go test ./...` |
+   | TypeScript | `npx tsc --noEmit` | `npm test` |
+   | Python | `python -m py_compile <file>` | `pytest` |
+   | C/C++ | `make` / `cmake --build build` | `make test` / `ctest` |
+   | Java/Kotlin | `mvn compile` / `gradle build` | `mvn test` / `gradle test` |
+
+   > Detect project type by checking for `Cargo.toml`, `go.mod`, `package.json`, `pyproject.toml`, `Makefile`/`CMakeLists.txt`, `pom.xml`/`build.gradle` in the project root.
+
+4. If build/tests **fail**: revert the fix, re-analyze the error, and try a different approach. Repeat until both the fix and build/tests pass
+5. **Generate diff report** — show what was changed:
+   ```bash
+   git diff -- <modified files>
+   ```
+   Display a **Changes Summary**:
+   ```
+   ## Changes Summary
+   - src/foo.rs:42 — fixed SQL injection by switching to parameterized query
+   - src/bar.go:80 — added error handling for unchecked return value
+
+   ## Diff
+   <full git diff output>
+   ```
 
 ## Review Principles
 
