@@ -291,15 +291,26 @@ fn platform_hint(macos: &str, windows: Option<&str>, linux: &str) -> String {
     }
 }
 
+/// Generate a Python tool install command, preferring uv > pipx > pip (without "Install: " prefix).
+fn python_tool_install_cmd(tool: &str) -> String {
+    if linthis::is_command_available("uv") {
+        format!("uv tool install {}", tool)
+    } else if linthis::is_command_available("pipx") {
+        format!("pipx install {}", tool)
+    } else {
+        format!("pip install {}", tool)
+    }
+}
+
 /// Get installation hint for a checker tool
 fn get_checker_install_hint(lang: Language) -> String {
     match lang {
         Language::Rust => "rustup component add clippy".to_string(),
-        Language::Python => "pip install ruff".to_string(),
+        Language::Python => python_tool_install_cmd("ruff"),
         Language::Go => platform_hint("brew install golangci-lint", None, "go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"),
         Language::TypeScript | Language::JavaScript => "npm install -g eslint".to_string(),
         Language::Java => platform_hint("brew install checkstyle", None, "https://checkstyle.sourceforge.io/"),
-        Language::Cpp | Language::ObjectiveC => "pip install cpplint".to_string(),
+        Language::Cpp | Language::ObjectiveC => python_tool_install_cmd("cpplint"),
         Language::Dart => "https://dart.dev/get-dart".to_string(),
         Language::Swift => platform_hint("brew install swiftlint", None, "https://github.com/realm/SwiftLint"),
         Language::Kotlin => platform_hint("brew install ktlint", None, "https://github.com/pinterest/ktlint"),
@@ -316,7 +327,7 @@ fn get_checker_install_hint(lang: Language) -> String {
 fn get_formatter_install_hint(lang: Language) -> String {
     match lang {
         Language::Rust => "rustup component add rustfmt".to_string(),
-        Language::Python => "pip install ruff".to_string(),
+        Language::Python => python_tool_install_cmd("ruff"),
         Language::Go => "Included with Go installation".to_string(),
         Language::TypeScript | Language::JavaScript => "npm install -g prettier".to_string(),
         Language::Java => platform_hint("brew install google-java-format", None, "https://github.com/google/google-java-format/releases"),

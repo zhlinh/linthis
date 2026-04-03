@@ -192,7 +192,7 @@ impl SastScanner for FlawfinderScanner {
     }
 
     fn install_hint(&self) -> String {
-        "Install: pip install flawfinder".to_string()
+        crate::python_tool_install_hint("flawfinder")
     }
 }
 
