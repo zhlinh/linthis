@@ -111,111 +111,109 @@ impl CpplintFixer {
 
     /// Try to auto-install cpplint using pip
     fn try_install_cpplint() -> bool {
-        // Acquire lock to ensure only one thread installs
         let _lock = INSTALL_LOCK.lock().unwrap();
 
-        // Double-check state after acquiring lock
         let state = CPPLINT_INSTALL_STATE.load(Ordering::SeqCst);
         if state != 0 {
-            return state == 2; // Return true if already installed
+            return state == 2;
         }
 
-        // Set installing state
         CPPLINT_INSTALL_STATE.store(1, Ordering::SeqCst);
-
         eprintln!("\n📦 cpplint not found, attempting to install...");
 
-        // Try uv > pipx > pip > pip3 (prefer isolated global installs)
-        let install_commands: Vec<(&str, Vec<&str>)> = if Command::new("uv")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
+        let install_commands = Self::detect_install_commands();
+
+        for (cmd_name, args) in &install_commands {
+            if Self::try_run_installer(cmd_name, args) {
+                CPPLINT_INSTALL_STATE.store(2, Ordering::SeqCst);
+                return true;
+            }
+        }
+
+        let hint = crate::python_tool_install_hint("cpplint");
+        eprintln!("   ❌ Auto-installation failed. Please install manually:");
+        eprintln!("      {}\n", hint);
+
+        CPPLINT_INSTALL_STATE.store(3, Ordering::SeqCst);
+        false
+    }
+
+    /// Detect available Python tool installer: uv > pipx > pip/pip3.
+    fn detect_install_commands() -> Vec<(&'static str, Vec<&'static str>)> {
+        let has = |cmd: &str| {
+            Command::new(cmd)
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        };
+        if has("uv") {
             vec![("uv", vec!["tool", "install", "cpplint"])]
-        } else if Command::new("pipx")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
+        } else if has("pipx") {
             vec![("pipx", vec!["install", "cpplint"])]
         } else {
             vec![
                 ("pip", vec!["install", "cpplint", "--upgrade"]),
                 ("pip3", vec!["install", "cpplint", "--upgrade"]),
             ]
+        }
+    }
+
+    /// Try to run an installer command. Returns true if cpplint is available after.
+    fn try_run_installer(cmd_name: &str, args: &[&str]) -> bool {
+        if !Command::new(cmd_name)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            return false;
+        }
+
+        eprintln!("   Using {} to install cpplint...", cmd_name);
+
+        let mut child = match Command::new(cmd_name)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(e) => {
+                eprintln!("   ❌ Failed to start {}: {}", cmd_name, e);
+                return false;
+            }
         };
 
-        for (cmd_name, args) in &install_commands {
-            if !Command::new(cmd_name)
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
-            eprintln!("   Using {} to install cpplint...", cmd_name);
-
-            // Run install with progress output
-            let mut child = match Command::new(cmd_name)
-                .args(args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-            {
-                Ok(child) => child,
-                Err(e) => {
-                    eprintln!("   ❌ Failed to start pip: {}", e);
-                    continue;
-                }
-            };
-
-            // Read and display output
-            if let Some(stderr) = child.stderr.take() {
-                let reader = BufReader::new(stderr);
-                for line in reader.lines().map_while(Result::ok) {
-                    // Filter and display relevant progress information
-                    if line.contains("Collecting")
-                        || line.contains("Downloading")
-                        || line.contains("Installing")
-                        || line.contains("Successfully")
-                    {
-                        eprintln!("   {}", line);
-                    }
-                }
-            }
-
-            // Wait for installation to complete
-            match child.wait() {
-                Ok(status) if status.success() => {
-                    // Verify installation
-                    if Self::has_cpplint() {
-                        eprintln!("   ✓ cpplint installed successfully!\n");
-                        CPPLINT_INSTALL_STATE.store(2, Ordering::SeqCst);
-                        return true;
-                    } else {
-                        eprintln!("   ⚠️  Installation completed but cpplint not found in PATH");
-                        eprintln!("   You may need to restart your terminal or add Python's bin directory to PATH\n");
-                    }
-                }
-                Ok(status) => {
-                    eprintln!("   ❌ Installation failed with exit code: {}", status);
-                }
-                Err(e) => {
-                    eprintln!("   ❌ Failed to wait for installer: {}", e);
+        if let Some(stderr) = child.stderr.take() {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                if line.contains("Collecting")
+                    || line.contains("Downloading")
+                    || line.contains("Installing")
+                    || line.contains("Successfully")
+                {
+                    eprintln!("   {}", line);
                 }
             }
         }
 
-        // Installation failed
-        let hint = crate::python_tool_install_hint("cpplint");
-        eprintln!("   ❌ Auto-installation failed. Please install manually:");
-        eprintln!("      {}\n", hint);
-
-        CPPLINT_INSTALL_STATE.store(3, Ordering::SeqCst);
+        match child.wait() {
+            Ok(status) if status.success() => {
+                if Self::has_cpplint() {
+                    eprintln!("   ✓ cpplint installed successfully!\n");
+                    return true;
+                }
+                eprintln!("   ⚠️  Installation completed but cpplint not found in PATH");
+                eprintln!("   You may need to restart your terminal or add Python's bin directory to PATH\n");
+            }
+            Ok(status) => {
+                eprintln!("   ❌ Installation failed with exit code: {}", status);
+            }
+            Err(e) => {
+                eprintln!("   ❌ Failed to wait for {}: {}", cmd_name, e);
+            }
+        }
         false
     }
 
@@ -483,12 +481,6 @@ impl CpplintFixer {
     fn fix_header_guard_from_error(&self, lines: &mut Vec<String>, error: &CpplintError) -> bool {
         let debug = std::env::var("LINTHIS_DEBUG").is_ok();
 
-        // Extract suggested guard name from message
-        // Message formats:
-        // 1. "#ifndef header guard has wrong style, please use: GUARD_NAME_"
-        // 2. "#endif line should be "#endif  // GUARD_NAME_""
-        // 3. "No #ifndef header guard found, suggested CPP variable is: GUARD_NAME_"
-
         if debug {
             eprintln!(
                 "[cpplint-fixer] fix_header_guard_from_error: line={}, msg={}",
@@ -496,32 +488,7 @@ impl CpplintFixer {
             );
         }
 
-        let suggested_guard = if error.message.contains("please use:") {
-            // Extract from "#ifndef header guard has wrong style, please use: GUARD_NAME_"
-            error
-                .message
-                .split("please use:")
-                .nth(1)
-                .map(|s| s.trim().to_string())
-        } else if error.message.contains("#endif line should be") {
-            // Extract from "#endif line should be "#endif  // GUARD_NAME_""
-            Regex::new(r#"#endif\s+//\s+(\w+)"#)
-                .ok()
-                .and_then(|re| re.captures(&error.message))
-                .and_then(|caps| caps.get(1))
-                .map(|m| m.as_str().to_string())
-        } else if error.message.contains("suggested CPP variable is:") {
-            // Extract from "No #ifndef header guard found, suggested CPP variable is: GUARD_NAME_"
-            error
-                .message
-                .split("suggested CPP variable is:")
-                .nth(1)
-                .map(|s| s.trim().to_string())
-        } else {
-            None
-        };
-
-        let suggested_guard = match suggested_guard {
+        let suggested_guard = match Self::extract_guard_name(&error.message) {
             Some(g) => g,
             None => return false,
         };
@@ -555,6 +522,26 @@ impl CpplintFixer {
         }
 
         false
+    }
+
+    /// Extract the suggested guard name from a cpplint error message.
+    fn extract_guard_name(message: &str) -> Option<String> {
+        if message.contains("please use:") {
+            message.split("please use:").nth(1).map(|s| s.trim().to_string())
+        } else if message.contains("#endif line should be") {
+            Regex::new(r#"#endif\s+//\s+(\w+)"#)
+                .ok()
+                .and_then(|re| re.captures(message))
+                .and_then(|caps| caps.get(1))
+                .map(|m| m.as_str().to_string())
+        } else if message.contains("suggested CPP variable is:") {
+            message
+                .split("suggested CPP variable is:")
+                .nth(1)
+                .map(|s| s.trim().to_string())
+        } else {
+            None
+        }
     }
 
     /// Insert header guard when none exists
@@ -879,51 +866,39 @@ impl CpplintFixer {
             return false;
         }
 
-        let line = &lines[line_idx];
+        // (pattern, replacement_macro) pairs
+        let replacements = [
+            (r"ASSERT_TRUE\s*\(\s*(.+?)\s*==\s*(.+?)\s*\)", "ASSERT_EQ"),
+            (r"ASSERT_TRUE\s*\(\s*(.+?)\s*!=\s*(.+?)\s*\)", "ASSERT_NE"),
+            (r"ASSERT_FALSE\s*\(\s*(.+?)\s*==\s*(.+?)\s*\)", "ASSERT_NE"),
+        ];
 
-        // ASSERT_TRUE(a == b) -> ASSERT_EQ(a, b)
-        let eq_re = Regex::new(r"ASSERT_TRUE\s*\(\s*(.+?)\s*==\s*(.+?)\s*\)").ok();
-        if let Some(re) = eq_re {
-            if let Some(caps) = re.captures(line) {
-                let lhs = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
-                let rhs = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("");
-                if !lhs.is_empty() && !rhs.is_empty() {
-                    let replacement = format!("ASSERT_EQ({}, {})", lhs, rhs);
-                    lines[line_idx] = re.replace(line, replacement.as_str()).to_string();
-                    return true;
-                }
-            }
-        }
-
-        // ASSERT_TRUE(a != b) -> ASSERT_NE(a, b)
-        let ne_re = Regex::new(r"ASSERT_TRUE\s*\(\s*(.+?)\s*!=\s*(.+?)\s*\)").ok();
-        if let Some(re) = ne_re {
-            if let Some(caps) = re.captures(line) {
-                let lhs = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
-                let rhs = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("");
-                if !lhs.is_empty() && !rhs.is_empty() {
-                    let replacement = format!("ASSERT_NE({}, {})", lhs, rhs);
-                    lines[line_idx] = re.replace(line, replacement.as_str()).to_string();
-                    return true;
-                }
-            }
-        }
-
-        // ASSERT_FALSE(a == b) -> ASSERT_NE(a, b)
-        let false_eq_re = Regex::new(r"ASSERT_FALSE\s*\(\s*(.+?)\s*==\s*(.+?)\s*\)").ok();
-        if let Some(re) = false_eq_re {
-            if let Some(caps) = re.captures(line) {
-                let lhs = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
-                let rhs = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("");
-                if !lhs.is_empty() && !rhs.is_empty() {
-                    let replacement = format!("ASSERT_NE({}, {})", lhs, rhs);
-                    lines[line_idx] = re.replace(line, replacement.as_str()).to_string();
-                    return true;
-                }
+        for (pattern, macro_name) in &replacements {
+            if Self::try_replace_assert(&mut lines[line_idx], pattern, macro_name) {
+                return true;
             }
         }
 
         false
+    }
+
+    /// Try to apply a single assert replacement. Returns true if replaced.
+    fn try_replace_assert(line: &mut String, pattern: &str, macro_name: &str) -> bool {
+        let re = match Regex::new(pattern) {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+        let Some(caps) = re.captures(line) else {
+            return false;
+        };
+        let lhs = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+        let rhs = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+        if lhs.is_empty() || rhs.is_empty() {
+            return false;
+        }
+        let replacement = format!("{}({}, {})", macro_name, lhs, rhs);
+        *line = re.replace(line.as_str(), replacement.as_str()).to_string();
+        true
     }
 
     /// Fix empty semicolon: replace lone `;` with `{}`
