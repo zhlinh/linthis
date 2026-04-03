@@ -84,57 +84,10 @@ pub fn perform_self_update(
     }
 }
 
-/// Perform auto-sync check and optionally sync plugins
-/// Returns true if sync was performed, false otherwise
-pub fn perform_auto_sync(auto_sync_config: Option<&linthis::plugin::AutoSyncConfig>) -> bool {
-    use linthis::plugin::{AutoSyncConfig, AutoSyncManager, PluginConfigManager};
+/// Collect all plugins from both project and global configs.
+fn collect_all_plugins() -> Vec<(String, String, Option<String>)> {
+    use linthis::plugin::PluginConfigManager;
 
-    // Use default config if none provided
-    let default_config = AutoSyncConfig::default();
-    let config = auto_sync_config.unwrap_or(&default_config);
-
-    // Validate config
-    if let Err(e) = config.validate() {
-        eprintln!(
-            "{}: Invalid plugin_auto_sync config: {}",
-            "Warning".yellow(),
-            e
-        );
-        return false;
-    }
-
-    // Skip if disabled
-    if config.is_disabled() {
-        return false;
-    }
-
-    // Create auto-sync manager
-    let manager = match AutoSyncManager::new() {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!(
-                "{}: Failed to create auto-sync manager: {}",
-                "Warning".yellow(),
-                e
-            );
-            return false;
-        }
-    };
-
-    // Check if sync is needed
-    let should_sync = match manager.should_sync(config) {
-        Ok(should) => should,
-        Err(e) => {
-            eprintln!("{}: Failed to check sync status: {}", "Warning".yellow(), e);
-            return false;
-        }
-    };
-
-    if !should_sync {
-        return false;
-    }
-
-    // Collect all plugins from both project and global configs
     let mut all_plugins = Vec::new();
 
     if let Ok(project_manager) = PluginConfigManager::project() {
@@ -149,46 +102,16 @@ pub fn perform_auto_sync(auto_sync_config: Option<&linthis::plugin::AutoSyncConf
         }
     }
 
-    // If no plugins configured, just update timestamp and return
-    if all_plugins.is_empty() {
-        let _ = manager.update_last_sync_time();
-        return false;
-    }
+    all_plugins
+}
 
-    // Check if any plugins have updates
-    let has_updates = check_plugins_for_updates(&all_plugins);
+/// Sync plugins from both project and global configs.
+/// Returns true if any sync succeeded.
+fn sync_all_plugin_configs() -> bool {
+    use linthis::plugin::PluginConfigManager;
 
-    // If no updates available, silently update timestamp and return
-    if !has_updates {
-        let _ = manager.update_last_sync_time();
-        return false;
-    }
-
-    // Updates are available!
-    // If prompt mode, ask user
-    if config.should_prompt() {
-        match manager.prompt_user() {
-            Ok(true) => {
-                // User confirmed, proceed
-            }
-            Ok(false) => {
-                // User declined
-                println!("Skipped plugin sync.");
-                // Update timestamp to avoid prompting again immediately
-                let _ = manager.update_last_sync_time();
-                return false;
-            }
-            Err(e) => {
-                eprintln!("{}: Failed to prompt user: {}", "Warning".yellow(), e);
-                return false;
-            }
-        }
-    }
-
-    // Perform sync for both project and global configs
     let mut synced = false;
 
-    // Try project config first
     if let Ok(project_manager) = PluginConfigManager::project() {
         if let Ok(plugins) = project_manager.list_plugins() {
             if !plugins.is_empty() {
@@ -200,7 +123,6 @@ pub fn perform_auto_sync(auto_sync_config: Option<&linthis::plugin::AutoSyncConf
         }
     }
 
-    // Try global config
     if let Ok(global_manager) = PluginConfigManager::global() {
         if let Ok(plugins) = global_manager.list_plugins() {
             if !plugins.is_empty() {
@@ -212,7 +134,94 @@ pub fn perform_auto_sync(auto_sync_config: Option<&linthis::plugin::AutoSyncConf
         }
     }
 
-    // Update last sync timestamp
+    synced
+}
+
+/// Prompt the user for sync confirmation if required by config.
+/// Returns false if user declined or prompt failed.
+fn confirm_sync_prompt(
+    config: &linthis::plugin::AutoSyncConfig,
+    manager: &linthis::plugin::AutoSyncManager,
+) -> bool {
+    if !config.should_prompt() {
+        return true;
+    }
+    match manager.prompt_user() {
+        Ok(true) => true,
+        Ok(false) => {
+            println!("Skipped plugin sync.");
+            let _ = manager.update_last_sync_time();
+            false
+        }
+        Err(e) => {
+            eprintln!("{}: Failed to prompt user: {}", "Warning".yellow(), e);
+            false
+        }
+    }
+}
+
+/// Perform auto-sync check and optionally sync plugins
+/// Returns true if sync was performed, false otherwise
+pub fn perform_auto_sync(auto_sync_config: Option<&linthis::plugin::AutoSyncConfig>) -> bool {
+    use linthis::plugin::{AutoSyncConfig, AutoSyncManager};
+
+    let default_config = AutoSyncConfig::default();
+    let config = auto_sync_config.unwrap_or(&default_config);
+
+    if let Err(e) = config.validate() {
+        eprintln!(
+            "{}: Invalid plugin_auto_sync config: {}",
+            "Warning".yellow(),
+            e
+        );
+        return false;
+    }
+
+    if config.is_disabled() {
+        return false;
+    }
+
+    let manager = match AutoSyncManager::new() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!(
+                "{}: Failed to create auto-sync manager: {}",
+                "Warning".yellow(),
+                e
+            );
+            return false;
+        }
+    };
+
+    let should_sync = match manager.should_sync(config) {
+        Ok(should) => should,
+        Err(e) => {
+            eprintln!("{}: Failed to check sync status: {}", "Warning".yellow(), e);
+            return false;
+        }
+    };
+
+    if !should_sync {
+        return false;
+    }
+
+    let all_plugins = collect_all_plugins();
+    if all_plugins.is_empty() {
+        let _ = manager.update_last_sync_time();
+        return false;
+    }
+
+    if !check_plugins_for_updates(&all_plugins) {
+        let _ = manager.update_last_sync_time();
+        return false;
+    }
+
+    if !confirm_sync_prompt(config, &manager) {
+        return false;
+    }
+
+    let synced = sync_all_plugin_configs();
+
     if synced {
         if let Err(e) = manager.update_last_sync_time() {
             eprintln!(

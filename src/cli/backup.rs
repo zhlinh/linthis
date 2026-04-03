@@ -255,20 +255,14 @@ pub fn handle_list_backups(restore_cmd: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Restore files from a backup
-pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
-    let backup_dir = get_backup_dir();
-
-    if !backup_dir.exists() {
-        eprintln!("{}: No backups found.", "Error".red());
-        eprintln!("  Run a fix or format command first to create a backup.");
-        return ExitCode::from(1);
-    }
-
-    // Find the backup to restore
-    let backup_path = if source == "last" {
-        // Find the most recent backup
-        let mut backups: Vec<_> = match fs::read_dir(&backup_dir) {
+/// Resolve the backup path from a source identifier ("last" or a backup name).
+fn resolve_backup_path(
+    backup_dir: &std::path::Path,
+    source: &str,
+    list_cmd: &str,
+) -> Result<PathBuf, ExitCode> {
+    if source == "last" {
+        let mut backups: Vec<_> = match fs::read_dir(backup_dir) {
             Ok(entries) => entries
                 .filter_map(|e| e.ok())
                 .filter(|e| e.path().is_dir())
@@ -276,60 +270,54 @@ pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
                 .collect(),
             Err(e) => {
                 eprintln!("{}: Failed to read backup directory: {}", "Error".red(), e);
-                return ExitCode::from(1);
+                return Err(ExitCode::from(1));
             }
         };
 
         if backups.is_empty() {
             eprintln!("{}: No backups found.", "Error".red());
-            return ExitCode::from(1);
+            return Err(ExitCode::from(1));
         }
 
         backups.sort();
-        backups.pop().unwrap() // Get the most recent
+        Ok(backups.pop().unwrap())
     } else {
-        // Use specified backup name
         let path = backup_dir.join(source);
         if !path.exists() {
             eprintln!("{}: Backup not found: {}", "Error".red(), source);
             eprintln!("  Run {} to see available backups.", list_cmd.cyan());
-            return ExitCode::from(1);
+            return Err(ExitCode::from(1));
         }
-        path
-    };
+        Ok(path)
+    }
+}
 
-    let backup_name = backup_path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-    println!("{} Restoring from backup: {}", "→".cyan(), backup_name);
-
-    // Read manifest
+/// Read and parse a backup manifest from the given backup path.
+fn read_backup_manifest(backup_path: &std::path::Path) -> Result<BackupManifest, ExitCode> {
     let manifest_path = backup_path.join("manifest.json");
-    let manifest: BackupManifest = if manifest_path.exists() {
-        match fs::read_to_string(&manifest_path) {
-            Ok(content) => match serde_json::from_str(&content) {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("{}: Failed to parse manifest: {}", "Error".red(), e);
-                    return ExitCode::from(1);
-                }
-            },
-            Err(e) => {
-                eprintln!("{}: Failed to read manifest: {}", "Error".red(), e);
-                return ExitCode::from(1);
-            }
-        }
-    } else {
+    if !manifest_path.exists() {
         eprintln!("{}: Backup manifest not found.", "Error".red());
-        return ExitCode::from(1);
-    };
+        return Err(ExitCode::from(1));
+    }
+    let content = fs::read_to_string(&manifest_path).map_err(|e| {
+        eprintln!("{}: Failed to read manifest: {}", "Error".red(), e);
+        ExitCode::from(1)
+    })?;
+    serde_json::from_str(&content).map_err(|e| {
+        eprintln!("{}: Failed to parse manifest: {}", "Error".red(), e);
+        ExitCode::from(1)
+    })
+}
 
-    let project_root = linthis::utils::get_project_root();
+/// Restore individual files from backup, returning (restored_count, failed_count).
+fn restore_backup_files(
+    manifest: &BackupManifest,
+    backup_path: &std::path::Path,
+    project_root: &std::path::Path,
+) -> (usize, usize) {
     let mut restored_count = 0;
     let mut failed_count = 0;
 
-    // Restore each file
     for rel_path in &manifest.files {
         let backup_file = backup_path.join(rel_path);
         let target_file = project_root.join(rel_path);
@@ -340,7 +328,6 @@ pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
             continue;
         }
 
-        // Create parent directories if needed
         if let Some(parent) = target_file.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
                 eprintln!(
@@ -354,7 +341,6 @@ pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
             }
         }
 
-        // Copy file back
         match fs::copy(&backup_file, &target_file) {
             Ok(_) => {
                 println!("  {} Restored: {}", "✓".green(), rel_path);
@@ -366,6 +352,39 @@ pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
             }
         }
     }
+
+    (restored_count, failed_count)
+}
+
+/// Restore files from a backup
+pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
+    let backup_dir = get_backup_dir();
+
+    if !backup_dir.exists() {
+        eprintln!("{}: No backups found.", "Error".red());
+        eprintln!("  Run a fix or format command first to create a backup.");
+        return ExitCode::from(1);
+    }
+
+    let backup_path = match resolve_backup_path(&backup_dir, source, list_cmd) {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+
+    let backup_name = backup_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    println!("{} Restoring from backup: {}", "→".cyan(), backup_name);
+
+    let manifest = match read_backup_manifest(&backup_path) {
+        Ok(m) => m,
+        Err(code) => return code,
+    };
+
+    let project_root = linthis::utils::get_project_root();
+    let (restored_count, failed_count) =
+        restore_backup_files(&manifest, &backup_path, &project_root);
 
     println!();
     if failed_count == 0 {
