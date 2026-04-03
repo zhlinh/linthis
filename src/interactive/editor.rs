@@ -69,12 +69,33 @@ pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> Editor
         }
     };
     let editor = get_editor();
+
+    // Build the editor command with appropriate arguments
+    let mut cmd = build_editor_command(&editor, file, line, column);
+
+    // Spawn the editor and wait for result
+    let spawn_result = cmd.spawn();
+
+    match spawn_result {
+        Ok(child) => wait_for_editor(child, &editor, file, &original_content),
+        Err(e) => EditorResult {
+            success: false,
+            changes: vec![],
+            error: Some(format!("Failed to launch editor '{}': {}", editor, e)),
+        },
+    }
+}
+
+/// Build a Command with the correct arguments for the detected editor.
+fn build_editor_command(
+    editor: &str,
+    file: &Path,
+    line: usize,
+    column: Option<usize>,
+) -> Command {
     let editor_lower = editor.to_lowercase();
+    let mut cmd = Command::new(editor);
 
-    // Determine editor type and build command
-    let mut cmd = Command::new(&editor);
-
-    // Get the base name of the editor for matching
     let editor_name = Path::new(&editor_lower)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -87,20 +108,12 @@ pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> Editor
             cmd.arg("--goto")
                 .arg(format!("{}:{}:{}", file.display(), line, col));
         }
-        // Vim family
-        "vim" | "nvim" | "vi" | "gvim" | "mvim" => {
+        // Vim family / Emacs / Nano / Kakoune: +line file
+        "vim" | "nvim" | "vi" | "gvim" | "mvim" | "emacs" | "emacsclient" | "nano" | "kak" => {
             cmd.arg(format!("+{}", line)).arg(file);
         }
-        // Emacs
-        "emacs" | "emacsclient" => {
-            cmd.arg(format!("+{}", line)).arg(file);
-        }
-        // Nano
-        "nano" => {
-            cmd.arg(format!("+{}", line)).arg(file);
-        }
-        // Sublime Text
-        "sublime" | "subl" | "sublime_text" => {
+        // Sublime Text / Atom / Helix: file:line:col
+        "sublime" | "subl" | "sublime_text" | "atom" | "hx" | "helix" => {
             let col = column.unwrap_or(1);
             cmd.arg(format!("{}:{}:{}", file.display(), line, col));
         }
@@ -108,21 +121,7 @@ pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> Editor
         "notepad++" => {
             cmd.arg(format!("-n{}", line)).arg(file);
         }
-        // Atom (deprecated but still used)
-        "atom" => {
-            let col = column.unwrap_or(1);
-            cmd.arg(format!("{}:{}:{}", file.display(), line, col));
-        }
-        // Helix
-        "hx" | "helix" => {
-            let col = column.unwrap_or(1);
-            cmd.arg(format!("{}:{}:{}", file.display(), line, col));
-        }
-        // Kakoune
-        "kak" => {
-            cmd.arg(format!("+{}", line)).arg(file);
-        }
-        // JetBrains IDEs (idea, goland, pycharm, etc.) via command line
+        // JetBrains IDEs
         name if name.contains("idea") || name.contains("goland") || name.contains("pycharm") => {
             let col = column.unwrap_or(1);
             cmd.arg("--line")
@@ -137,58 +136,53 @@ pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> Editor
         }
     }
 
-    // Spawn the editor
-    let spawn_result = cmd.spawn();
+    cmd
+}
 
-    match spawn_result {
-        Ok(mut child) => {
-            // Wait for the editor to close
-            match child.wait() {
-                Ok(status) => {
-                    if !status.success() {
-                        return EditorResult {
-                            success: false,
-                            changes: vec![],
-                            error: Some(format!(
-                                "Editor '{}' exited with status: {}",
-                                editor,
-                                status.code().unwrap_or(-1)
-                            )),
-                        };
-                    }
-
-                    // Read file content after editing
-                    let new_content = match fs::read_to_string(file) {
-                        Ok(content) => content,
-                        Err(e) => {
-                            return EditorResult {
-                                success: false,
-                                changes: vec![],
-                                error: Some(format!("Failed to read file after editing: {}", e)),
-                            }
-                        }
-                    };
-
-                    // Detect changes
-                    let changes = detect_changes(&original_content, &new_content);
-
-                    EditorResult {
-                        success: true,
-                        changes,
-                        error: None,
-                    }
-                }
-                Err(e) => EditorResult {
+/// Wait for the editor child process and detect file changes.
+fn wait_for_editor(
+    mut child: std::process::Child,
+    editor: &str,
+    file: &Path,
+    original_content: &str,
+) -> EditorResult {
+    match child.wait() {
+        Ok(status) => {
+            if !status.success() {
+                return EditorResult {
                     success: false,
                     changes: vec![],
-                    error: Some(format!("Failed to wait for editor '{}': {}", editor, e)),
-                },
+                    error: Some(format!(
+                        "Editor '{}' exited with status: {}",
+                        editor,
+                        status.code().unwrap_or(-1)
+                    )),
+                };
+            }
+
+            let new_content = match fs::read_to_string(file) {
+                Ok(content) => content,
+                Err(e) => {
+                    return EditorResult {
+                        success: false,
+                        changes: vec![],
+                        error: Some(format!("Failed to read file after editing: {}", e)),
+                    }
+                }
+            };
+
+            let changes = detect_changes(original_content, &new_content);
+
+            EditorResult {
+                success: true,
+                changes,
+                error: None,
             }
         }
         Err(e) => EditorResult {
             success: false,
             changes: vec![],
-            error: Some(format!("Failed to launch editor '{}': {}", editor, e)),
+            error: Some(format!("Failed to wait for editor '{}': {}", editor, e)),
         },
     }
 }

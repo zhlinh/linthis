@@ -192,64 +192,18 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
 
         match action {
             InteractiveAction::Edit => {
-                result.edited += 1;
                 processed[idx] = true;
-
-                let editor_result = open_in_editor(&issue.file_path, issue.line, issue.column);
-
-                if editor_result.success {
-                    println!();
-                    if editor_result.changes.is_empty() {
-                        println!("  {}", "No changes made".dimmed());
-                    } else {
-                        print_editor_changes(&editor_result.changes, &issue.file_path);
-                        // Track this file for rechecking
-                        result.modified_files.insert(issue.file_path.clone());
-                    }
-                } else if let Some(ref error) = editor_result.error {
-                    eprintln!("{}: {}", "Failed to open editor".red(), error);
-                }
+                handle_edit_action(issue, &mut result);
                 idx += 1;
             }
             InteractiveAction::Ignore => {
                 processed[idx] = true;
-                match add_nolint_comment(issue) {
-                    NolintResult::Success(diffs) => {
-                        result.ignored += 1;
-                        println!("{} Added NOLINT comment", "✓".green());
-                        println!();
-                        print_diff(&diffs, &issue.file_path);
-                        // Track this file for rechecking
-                        result.modified_files.insert(issue.file_path.clone());
-                    }
-                    NolintResult::AlreadyIgnored => {
-                        println!("{}", "Already has NOLINT comment".yellow());
-                        result.skipped += 1;
-                    }
-                    NolintResult::Error(e) => {
-                        eprintln!("{}: {}", "Failed to add NOLINT".red(), e);
-                        result.skipped += 1;
-                    }
-                }
+                handle_ignore_action(issue, &mut result);
                 idx += 1;
             }
             InteractiveAction::AiFix => {
                 processed[idx] = true;
-                let ai_config = AiFixConfig::default();
-                match run_ai_fix_single(issue, &ai_config) {
-                    Ok((applied, modified_files)) => {
-                        if applied {
-                            result.edited += 1;
-                            result.modified_files.extend(modified_files);
-                        } else {
-                            result.skipped += 1;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("{}: {}", "AI fix error".red(), e);
-                        result.skipped += 1;
-                    }
-                }
+                handle_ai_fix_action(issue, &mut result);
                 idx += 1;
             }
             InteractiveAction::Skip => {
@@ -260,7 +214,6 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
             InteractiveAction::Previous => {
                 if idx > 0 {
                     idx -= 1;
-                    // Adjust counters if we're revisiting a processed issue
                     if processed[idx] {
                         println!("{}", "  (Revisiting previously processed issue)".dimmed());
                     }
@@ -270,7 +223,7 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
             }
             InteractiveAction::GoTo(target) => {
                 if target > 0 && target <= total {
-                    idx = target - 1; // Convert to 0-based index
+                    idx = target - 1;
                     if processed[idx] {
                         println!("{}", "  (Jumping to previously processed issue)".dimmed());
                     }
@@ -285,7 +238,6 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
             }
             InteractiveAction::Quit => {
                 result.quit_early = true;
-                // Count unprocessed issues as skipped
                 for &was_processed in &processed[idx..] {
                     if !was_processed {
                         result.skipped += 1;
@@ -296,7 +248,71 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
         }
     }
 
-    // Show summary
+    print_review_summary(&result);
+    result
+}
+
+/// Handle the Edit action for a single issue
+fn handle_edit_action(issue: &LintIssue, result: &mut InteractiveResult) {
+    result.edited += 1;
+
+    let editor_result = open_in_editor(&issue.file_path, issue.line, issue.column);
+
+    if editor_result.success {
+        println!();
+        if editor_result.changes.is_empty() {
+            println!("  {}", "No changes made".dimmed());
+        } else {
+            print_editor_changes(&editor_result.changes, &issue.file_path);
+            result.modified_files.insert(issue.file_path.clone());
+        }
+    } else if let Some(ref error) = editor_result.error {
+        eprintln!("{}: {}", "Failed to open editor".red(), error);
+    }
+}
+
+/// Handle the Ignore (NOLINT) action for a single issue
+fn handle_ignore_action(issue: &LintIssue, result: &mut InteractiveResult) {
+    match add_nolint_comment(issue) {
+        NolintResult::Success(diffs) => {
+            result.ignored += 1;
+            println!("{} Added NOLINT comment", "✓".green());
+            println!();
+            print_diff(&diffs, &issue.file_path);
+            result.modified_files.insert(issue.file_path.clone());
+        }
+        NolintResult::AlreadyIgnored => {
+            println!("{}", "Already has NOLINT comment".yellow());
+            result.skipped += 1;
+        }
+        NolintResult::Error(e) => {
+            eprintln!("{}: {}", "Failed to add NOLINT".red(), e);
+            result.skipped += 1;
+        }
+    }
+}
+
+/// Handle the AI Fix action for a single issue
+fn handle_ai_fix_action(issue: &LintIssue, result: &mut InteractiveResult) {
+    let ai_config = AiFixConfig::default();
+    match run_ai_fix_single(issue, &ai_config) {
+        Ok((applied, modified_files)) => {
+            if applied {
+                result.edited += 1;
+                result.modified_files.extend(modified_files);
+            } else {
+                result.skipped += 1;
+            }
+        }
+        Err(e) => {
+            eprintln!("{}: {}", "AI fix error".red(), e);
+            result.skipped += 1;
+        }
+    }
+}
+
+/// Print the interactive review summary
+fn print_review_summary(result: &InteractiveResult) {
     println!();
     println!("{}", "═".repeat(60).dimmed());
     println!("  {}", "Interactive Review Summary".bold());
@@ -309,23 +325,42 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
     }
     println!("{}", "═".repeat(60).dimmed());
     println!();
-
-    result
 }
 
 /// Show menu for a single issue
 fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> InteractiveAction {
+    display_issue_header(issue, current, total);
+    display_issue_actions(issue, current, total);
+
+    let choice = read_line().trim().to_lowercase();
+
+    match choice.as_str() {
+        "e" | "edit" => InteractiveAction::Edit,
+        "i" | "ignore" => InteractiveAction::Ignore,
+        "a" | "ai" | "aifix" | "ai-fix" => InteractiveAction::AiFix,
+        "s" | "skip" | "" => InteractiveAction::Skip,
+        "p" | "prev" | "previous" => InteractiveAction::Previous,
+        "q" | "quit" => InteractiveAction::Quit,
+        input if input.starts_with("g") => parse_goto_input(input)
+            .unwrap_or_else(|| show_issue_menu(issue, current, total)),
+        _ => {
+            println!("{}", "Invalid choice. Use: e/i/s/p/g/q".yellow());
+            show_issue_menu(issue, current, total)
+        }
+    }
+}
+
+/// Display the issue header with severity, location, code context, and message.
+fn display_issue_header(issue: &LintIssue, current: usize, total: usize) {
     println!();
     println!("{}", "─".repeat(60).dimmed());
 
-    // Issue header with severity badge
     let severity_badge = match issue.severity {
         Severity::Error => format!("[E{}]", current).red().bold(),
         Severity::Warning => format!("[W{}]", current).yellow().bold(),
         Severity::Info => format!("[I{}]", current).blue(),
     };
 
-    // Language and source tags
     let lang_tag = issue
         .language
         .map(|l| format!("[{}]", format!("{:?}", l).to_lowercase()))
@@ -339,14 +374,12 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
         .unwrap_or_default()
         .dimmed();
 
-    // File location
     let location = if let Some(col) = issue.column {
         format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
     } else {
         format!("{}:{}", issue.file_path.display(), issue.line)
     };
 
-    // Progress indicator
     let progress = format!("({}/{})", current, total).dimmed();
 
     println!(
@@ -358,24 +391,22 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
         progress
     );
 
-    // Code context
     print_code_context(issue);
 
-    // Message and code
     if let Some(ref code) = issue.code {
         println!("  {} ({})", issue.message, code.cyan());
     } else {
         println!("  {}", issue.message);
     }
 
-    // Suggestion if available
     if let Some(ref suggestion) = issue.suggestion {
         println!("  {} {}", "-->".green(), suggestion);
     }
+}
 
+/// Display the action menu options for an issue.
+fn display_issue_actions(issue: &LintIssue, current: usize, total: usize) {
     println!();
-
-    // Action menu with progress indicator
     println!("  {}", format!("Issue {}/{}", current, total).bold().cyan());
     println!();
     let nolint_desc = describe_nolint_action(issue);
@@ -398,43 +429,28 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
     println!();
     print!("  > ");
     io::stdout().flush().ok();
+}
 
-    let choice = read_line().trim().to_lowercase();
-
-    match choice.as_str() {
-        "e" | "edit" => InteractiveAction::Edit,
-        "i" | "ignore" => InteractiveAction::Ignore,
-        "a" | "ai" | "aifix" | "ai-fix" => InteractiveAction::AiFix,
-        "s" | "skip" | "" => InteractiveAction::Skip, // Enter defaults to skip
-        "p" | "prev" | "previous" => InteractiveAction::Previous,
-        "q" | "quit" => InteractiveAction::Quit,
-        input if input.starts_with("g") => {
-            // Handle "g N" or just "g" (will prompt for number)
-            let parts: Vec<&str> = input.split_whitespace().collect();
-            if parts.len() >= 2 {
-                if let Ok(num) = parts[1].parse::<usize>() {
-                    InteractiveAction::GoTo(num)
-                } else {
-                    println!("{}", "Invalid issue number".yellow());
-                    show_issue_menu(issue, current, total)
-                }
-            } else {
-                // Prompt for issue number
-                print!("  {} ", "Go to issue #:".cyan());
-                io::stdout().flush().ok();
-                let num_input = read_line().trim().to_string();
-                if let Ok(num) = num_input.parse::<usize>() {
-                    InteractiveAction::GoTo(num)
-                } else {
-                    println!("{}", "Invalid issue number".yellow());
-                    show_issue_menu(issue, current, total)
-                }
-            }
+/// Parse a "goto" input like "g 5" or prompt for a number if just "g".
+/// Returns `Some(GoTo(n))` on success, `None` if parsing fails.
+fn parse_goto_input(input: &str) -> Option<InteractiveAction> {
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.len() >= 2 {
+        if let Ok(num) = parts[1].parse::<usize>() {
+            return Some(InteractiveAction::GoTo(num));
         }
-        _ => {
-            println!("{}", "Invalid choice. Use: e/i/s/p/g/q".yellow());
-            show_issue_menu(issue, current, total)
-        }
+        println!("{}", "Invalid issue number".yellow());
+        return None;
+    }
+    // Prompt for issue number
+    print!("  {} ", "Go to issue #:".cyan());
+    io::stdout().flush().ok();
+    let num_input = read_line().trim().to_string();
+    if let Ok(num) = num_input.parse::<usize>() {
+        Some(InteractiveAction::GoTo(num))
+    } else {
+        println!("{}", "Invalid issue number".yellow());
+        None
     }
 }
 

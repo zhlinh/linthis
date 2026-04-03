@@ -126,7 +126,35 @@ pub struct AiFixResult {
 
 /// Create an AI suggester from config
 pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
-    let mut provider_config = match &config.provider {
+    let mut provider_config = build_provider_config(&config.provider);
+
+    // Override model if specified
+    if let Some(ref model) = config.model {
+        provider_config.model = model.clone();
+    }
+
+    // Set API key and endpoint from environment
+    provider_config.api_key = resolve_api_key(&config.provider);
+    resolve_endpoint(&config.provider, &mut provider_config);
+
+    let provider = AiProvider::new(provider_config);
+    let suggester = AiSuggester::with_provider(provider);
+
+    if !suggester.is_available() {
+        let hint = get_provider_hint(&config.provider)?;
+        return Err(format!(
+            "AI provider {} is not available. {}",
+            suggester.provider_name(),
+            hint
+        ));
+    }
+
+    Ok(suggester)
+}
+
+/// Build the base provider config for a given provider kind.
+fn build_provider_config(kind: &AiProviderKind) -> AiProviderConfig {
+    match kind {
         AiProviderKind::Claude => AiProviderConfig::claude(),
         AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
         AiProviderKind::CodeBuddy => AiProviderConfig::codebuddy(),
@@ -141,15 +169,12 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
             ..AiProviderConfig::default()
         },
         AiProviderKind::Mock => AiProviderConfig::mock(),
-    };
-
-    // Override model if specified
-    if let Some(ref model) = config.model {
-        provider_config.model = model.clone();
     }
+}
 
-    // Set API key from environment
-    provider_config.api_key = match &config.provider {
+/// Resolve the API key from environment variables for the given provider.
+fn resolve_api_key(kind: &AiProviderKind) -> Option<String> {
+    match kind {
         AiProviderKind::Claude => std::env::var("ANTHROPIC_AUTH_TOKEN")
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .ok(),
@@ -159,57 +184,49 @@ pub fn create_suggester(config: &AiFixConfig) -> Result<AiSuggester, String> {
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
             .ok(),
         _ => None,
+    }
+}
+
+/// Resolve the endpoint URL from environment variables for the given provider.
+fn resolve_endpoint(kind: &AiProviderKind, config: &mut AiProviderConfig) {
+    let env_var = match kind {
+        AiProviderKind::Claude => Some("ANTHROPIC_BASE_URL"),
+        AiProviderKind::CodeBuddy => Some("CODEBUDDY_BASE_URL"),
+        _ => None,
     };
+    if let Some(var_name) = env_var {
+        if let Ok(base_url) = std::env::var(var_name) {
+            config.endpoint = Some(base_url);
+        }
+    }
+}
 
-    // Set endpoint from environment
-    match &config.provider {
+/// Get the availability hint message for a provider, or return Err for custom providers.
+fn get_provider_hint(kind: &AiProviderKind) -> Result<&str, String> {
+    match kind {
         AiProviderKind::Claude => {
-            if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
-                provider_config.endpoint = Some(base_url);
-            }
+            Ok("Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable")
         }
-        AiProviderKind::CodeBuddy => {
-            if let Ok(base_url) = std::env::var("CODEBUDDY_BASE_URL") {
-                provider_config.endpoint = Some(base_url);
-            }
+        AiProviderKind::ClaudeCli => Ok("Install Claude CLI (claude command must be available)"),
+        AiProviderKind::CodeBuddy => Ok("Set CODEBUDDY_API_KEY environment variable"),
+        AiProviderKind::CodeBuddyCli => {
+            Ok("Install CodeBuddy CLI (codebuddy command must be available)")
         }
-        _ => {}
+        AiProviderKind::OpenAi => Ok("Set OPENAI_API_KEY environment variable"),
+        AiProviderKind::CodexCli => Ok("Install Codex CLI (npm install -g @openai/codex)"),
+        AiProviderKind::Gemini => {
+            Ok("Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable")
+        }
+        AiProviderKind::GeminiCli => {
+            Ok("Install Gemini CLI (npm install -g @google/gemini-cli)")
+        }
+        AiProviderKind::Local => Ok("Set LINTHIS_AI_ENDPOINT environment variable"),
+        AiProviderKind::Custom(name) => Err(format!(
+            "Custom AI provider '{}' is not available. Check your config and ensure required tools/keys are set.",
+            name
+        )),
+        AiProviderKind::Mock => Ok("Mock provider should always be available"),
     }
-
-    let provider = AiProvider::new(provider_config);
-    let suggester = AiSuggester::with_provider(provider);
-
-    if !suggester.is_available() {
-        let hint = match &config.provider {
-            AiProviderKind::Claude => {
-                "Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY environment variable"
-            }
-            AiProviderKind::ClaudeCli => "Install Claude CLI (claude command must be available)",
-            AiProviderKind::CodeBuddy => "Set CODEBUDDY_API_KEY environment variable",
-            AiProviderKind::CodeBuddyCli => {
-                "Install CodeBuddy CLI (codebuddy command must be available)"
-            }
-            AiProviderKind::OpenAi => "Set OPENAI_API_KEY environment variable",
-            AiProviderKind::CodexCli => "Install Codex CLI (npm install -g @openai/codex)",
-            AiProviderKind::Gemini => "Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable",
-            AiProviderKind::GeminiCli => "Install Gemini CLI (npm install -g @google/gemini-cli)",
-            AiProviderKind::Local => "Set LINTHIS_AI_ENDPOINT environment variable",
-            AiProviderKind::Custom(name) => {
-                return Err(format!(
-                    "Custom AI provider '{}' is not available. Check your config and ensure required tools/keys are set.",
-                    name
-                ));
-            }
-            AiProviderKind::Mock => "Mock provider should always be available",
-        };
-        return Err(format!(
-            "AI provider {} is not available. {}",
-            suggester.provider_name(),
-            hint
-        ));
-    }
-
-    Ok(suggester)
 }
 
 /// Check if provider is a CLI provider that supports direct file editing
@@ -264,16 +281,10 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
     println!();
 
     // Create provider for CLI operations
-    let provider_config = match &config.provider {
-        AiProviderKind::ClaudeCli => AiProviderConfig::claude_cli(),
-        AiProviderKind::CodeBuddyCli => AiProviderConfig::codebuddy_cli(),
-        AiProviderKind::CodexCli => AiProviderConfig::codex_cli(),
-        AiProviderKind::GeminiCli => AiProviderConfig::gemini_cli(),
-        AiProviderKind::Custom(name) => AiProviderConfig {
-            kind: AiProviderKind::Custom(name.clone()),
-            ..AiProviderConfig::default()
-        },
-        _ => return fix_result,
+    let provider_config = build_cli_provider_config(&config.provider);
+    let provider_config = match provider_config {
+        Some(c) => c,
+        None => return fix_result,
     };
 
     let file_list: Vec<_> = file_groups.into_iter().collect();
@@ -285,6 +296,7 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
 
     // Sequential mode: interactive or single-threaded
     let provider = AiProvider::new(provider_config);
+    let cli_name = get_cli_name(&config.provider);
 
     for (file_idx, (file_path, file_issues)) in file_list.iter().enumerate() {
         println!(
@@ -304,7 +316,6 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
             }
         };
 
-        // Prepare issues for CLI
         let issues_data: Vec<(usize, String, String)> = file_issues
             .iter()
             .map(|i| {
@@ -318,139 +329,195 @@ pub fn run_cli_file_fix(issues: &[LintIssue], config: &AiFixConfig) -> AiFixResu
 
         println!("    {} issues to fix", issues_data.len());
 
-        // Start spinner with elapsed time in a background thread
-        let cli_name: String = match &config.provider {
-            AiProviderKind::ClaudeCli => "Claude".into(),
-            AiProviderKind::CodeBuddyCli => "CodeBuddy".into(),
-            AiProviderKind::CodexCli => "Codex".into(),
-            AiProviderKind::GeminiCli => "Gemini".into(),
-            AiProviderKind::Custom(name) => name.clone(),
-            _ => "CLI".into(),
-        };
-        let spinner_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let spinner_running_clone = Arc::clone(&spinner_running);
-
-        let spinner_handle = std::thread::spawn(move || {
-            let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-            let start_time = std::time::Instant::now();
-            let mut idx = 0;
-            let mut first_print = true;
-
-            while spinner_running_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                let elapsed = start_time.elapsed();
-                let secs = elapsed.as_secs();
-                let time_str = if secs >= 60 {
-                    format!("{}m {}s", secs / 60, secs % 60)
-                } else {
-                    format!("{}s", secs)
-                };
-
-                if first_print {
-                    // First time: print spinner line and empty line below
-                    println!(
-                        "    {} Running {} CLI... ({})",
-                        spinner_chars[idx].to_string().cyan(),
-                        cli_name,
-                        time_str.dimmed()
-                    );
-                    println!(); // Empty line for cursor
-                    first_print = false;
-                } else {
-                    // Update: move up 2 lines, print, then move back down
-                    print!(
-                        "\x1B[2A\r    {} Running {} CLI... ({})\x1B[K\n\n",
-                        spinner_chars[idx].to_string().cyan(),
-                        cli_name,
-                        time_str.dimmed()
-                    );
-                }
-                io::stdout().flush().ok();
-
-                idx = (idx + 1) % spinner_chars.len();
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
+        // Run CLI with spinner
+        let diff_result = run_with_spinner(&cli_name, || {
+            provider.fix_file_with_cli(file_path, &issues_data)
         });
 
-        // Let CLI fix the file
-        let diff_result = provider.fix_file_with_cli(file_path, &issues_data);
-
-        // Stop spinner and clear both lines (spinner line and empty line)
-        spinner_running.store(false, std::sync::atomic::Ordering::Relaxed);
-        let _ = spinner_handle.join();
-        // Move up 2 lines and clear them
-        print!("\x1B[2A\x1B[K\n\x1B[K\x1B[A");
-        io::stdout().flush().ok();
-
-        match diff_result {
-            Ok(diff) => {
-                if diff.is_empty() {
-                    println!("    {} No changes made", "⚠".yellow());
-                    fix_result.skipped += file_issues.len();
-                    continue;
-                }
-
-                // Show diff
-                println!();
-                println!("    {}", "Changes:".bold());
-                for line in diff.lines() {
-                    if line.starts_with('+') && !line.starts_with("+++") {
-                        println!("    {}", line.green());
-                    } else if line.starts_with('-') && !line.starts_with("---") {
-                        println!("    {}", line.red());
-                    } else if line.starts_with("@@") {
-                        println!("    {}", line.cyan());
-                    } else {
-                        println!("    {}", line.dimmed());
-                    }
-                }
-                println!();
-
-                if config.accept_all {
-                    // Auto-accept
-                    println!("    {} Changes applied", "✓".green());
-                    fix_result.applied += file_issues.len();
-                    fix_result.modified_files.insert(file_path.clone());
-                } else {
-                    // Ask for confirmation
-                    print!("    Apply changes? [Y/n/r(estore)]: ");
-                    io::stdout().flush().ok();
-                    let input = read_line().trim().to_lowercase();
-
-                    match input.as_str() {
-                        "n" | "no" => {
-                            // Restore original
-                            let _ = fs::write(file_path, &original_content);
-                            println!("    {} Changes discarded", "⚠".yellow());
-                            fix_result.skipped += file_issues.len();
-                        }
-                        "r" | "restore" => {
-                            let _ = fs::write(file_path, &original_content);
-                            println!("    {} File restored", "↺".cyan());
-                            fix_result.skipped += file_issues.len();
-                        }
-                        _ => {
-                            println!("    {} Changes applied", "✓".green());
-                            fix_result.applied += file_issues.len();
-                            fix_result.modified_files.insert(file_path.clone());
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("    {} CLI error: {}", "✗".red(), e);
-                // Restore original on error
-                let _ = fs::write(file_path, &original_content);
-                fix_result.errors += file_issues.len();
-            }
-        }
+        // Process the result
+        process_cli_diff_result(
+            diff_result,
+            file_path,
+            &original_content,
+            file_issues.len(),
+            config.accept_all,
+            &mut fix_result,
+        );
 
         println!();
     }
 
-    // Print summary
     print_cli_fix_summary(&fix_result, total_files);
 
     fix_result
+}
+
+/// Build a CLI provider config, returning None if the provider is not a CLI provider.
+fn build_cli_provider_config(kind: &AiProviderKind) -> Option<AiProviderConfig> {
+    match kind {
+        AiProviderKind::ClaudeCli => Some(AiProviderConfig::claude_cli()),
+        AiProviderKind::CodeBuddyCli => Some(AiProviderConfig::codebuddy_cli()),
+        AiProviderKind::CodexCli => Some(AiProviderConfig::codex_cli()),
+        AiProviderKind::GeminiCli => Some(AiProviderConfig::gemini_cli()),
+        AiProviderKind::Custom(name) => Some(AiProviderConfig {
+            kind: AiProviderKind::Custom(name.clone()),
+            ..AiProviderConfig::default()
+        }),
+        _ => None,
+    }
+}
+
+/// Get the display name for a CLI provider.
+fn get_cli_name(kind: &AiProviderKind) -> String {
+    match kind {
+        AiProviderKind::ClaudeCli => "Claude".into(),
+        AiProviderKind::CodeBuddyCli => "CodeBuddy".into(),
+        AiProviderKind::CodexCli => "Codex".into(),
+        AiProviderKind::GeminiCli => "Gemini".into(),
+        AiProviderKind::Custom(name) => name.clone(),
+        _ => "CLI".into(),
+    }
+}
+
+/// Run a closure while displaying a CLI spinner. Returns the closure's result.
+fn run_with_spinner<F, T>(cli_name: &str, f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    let spinner_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let spinner_running_clone = Arc::clone(&spinner_running);
+    let cli_name_owned = cli_name.to_string();
+
+    let spinner_handle = std::thread::spawn(move || {
+        let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let start_time = std::time::Instant::now();
+        let mut idx = 0;
+        let mut first_print = true;
+
+        while spinner_running_clone.load(std::sync::atomic::Ordering::Relaxed) {
+            let elapsed = start_time.elapsed();
+            let secs = elapsed.as_secs();
+            let time_str = if secs >= 60 {
+                format!("{}m {}s", secs / 60, secs % 60)
+            } else {
+                format!("{}s", secs)
+            };
+
+            if first_print {
+                println!(
+                    "    {} Running {} CLI... ({})",
+                    spinner_chars[idx].to_string().cyan(),
+                    cli_name_owned,
+                    time_str.dimmed()
+                );
+                println!();
+                first_print = false;
+            } else {
+                print!(
+                    "\x1B[2A\r    {} Running {} CLI... ({})\x1B[K\n\n",
+                    spinner_chars[idx].to_string().cyan(),
+                    cli_name_owned,
+                    time_str.dimmed()
+                );
+            }
+            io::stdout().flush().ok();
+
+            idx = (idx + 1) % spinner_chars.len();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+
+    let result = f();
+
+    spinner_running.store(false, std::sync::atomic::Ordering::Relaxed);
+    let _ = spinner_handle.join();
+    print!("\x1B[2A\x1B[K\n\x1B[K\x1B[A");
+    io::stdout().flush().ok();
+
+    result
+}
+
+/// Print a unified diff with colored output.
+fn print_colored_diff(diff: &str) {
+    println!();
+    println!("    {}", "Changes:".bold());
+    for line in diff.lines() {
+        if line.starts_with('+') && !line.starts_with("+++") {
+            println!("    {}", line.green());
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            println!("    {}", line.red());
+        } else if line.starts_with("@@") {
+            println!("    {}", line.cyan());
+        } else {
+            println!("    {}", line.dimmed());
+        }
+    }
+    println!();
+}
+
+/// Process the result of a CLI diff operation: show diff, confirm, or restore.
+fn process_cli_diff_result(
+    diff_result: Result<String, String>,
+    file_path: &PathBuf,
+    original_content: &str,
+    issue_count: usize,
+    accept_all: bool,
+    fix_result: &mut AiFixResult,
+) {
+    match diff_result {
+        Ok(diff) => {
+            if diff.is_empty() {
+                println!("    {} No changes made", "⚠".yellow());
+                fix_result.skipped += issue_count;
+                return;
+            }
+
+            print_colored_diff(&diff);
+
+            if accept_all {
+                println!("    {} Changes applied", "✓".green());
+                fix_result.applied += issue_count;
+                fix_result.modified_files.insert(file_path.clone());
+            } else {
+                confirm_or_restore(file_path, original_content, issue_count, fix_result);
+            }
+        }
+        Err(e) => {
+            eprintln!("    {} CLI error: {}", "✗".red(), e);
+            let _ = fs::write(file_path, original_content);
+            fix_result.errors += issue_count;
+        }
+    }
+}
+
+/// Prompt user to accept, discard, or restore changes.
+fn confirm_or_restore(
+    file_path: &PathBuf,
+    original_content: &str,
+    issue_count: usize,
+    fix_result: &mut AiFixResult,
+) {
+    print!("    Apply changes? [Y/n/r(estore)]: ");
+    io::stdout().flush().ok();
+    let input = read_line().trim().to_lowercase();
+
+    match input.as_str() {
+        "n" | "no" => {
+            let _ = fs::write(file_path, original_content);
+            println!("    {} Changes discarded", "⚠".yellow());
+            fix_result.skipped += issue_count;
+        }
+        "r" | "restore" => {
+            let _ = fs::write(file_path, original_content);
+            println!("    {} File restored", "↺".cyan());
+            fix_result.skipped += issue_count;
+        }
+        _ => {
+            println!("    {} Changes applied", "✓".green());
+            fix_result.applied += issue_count;
+            fix_result.modified_files.insert(file_path.clone());
+        }
+    }
 }
 
 /// Result of a batch fix (multiple files in one CLI call)
@@ -633,8 +700,21 @@ fn run_cli_file_fix_parallel(
         .into_inner()
         .unwrap();
 
+    collect_batch_results(&results, total_files, &mut fix_result);
+
+    print_cli_fix_summary(&fix_result, total_files);
+
+    fix_result
+}
+
+/// Collect and display results from parallel batch processing.
+fn collect_batch_results(
+    results: &[BatchResult],
+    total_files: usize,
+    fix_result: &mut AiFixResult,
+) {
     let mut file_idx = 0;
-    for batch_result in &results {
+    for batch_result in results {
         if let Some(ref error) = batch_result.error {
             for (file_path, issue_count) in &batch_result.files {
                 file_idx += 1;
@@ -648,17 +728,7 @@ fn run_cli_file_fix_parallel(
                 println!("  [{}/{}] {}", file_idx, total_files, file_path.display());
 
                 if let Some(diff) = batch_result.diffs.get(file_path) {
-                    for line in diff.lines() {
-                        if line.starts_with('+') && !line.starts_with("+++") {
-                            println!("    {}", line.green());
-                        } else if line.starts_with('-') && !line.starts_with("---") {
-                            println!("    {}", line.red());
-                        } else if line.starts_with("@@") {
-                            println!("    {}", line.cyan());
-                        } else {
-                            println!("    {}", line.dimmed());
-                        }
-                    }
+                    print_colored_diff(diff);
                     println!("    {} Changes applied", "✓".green());
                     fix_result.applied += issue_count;
                     fix_result.modified_files.insert(file_path.clone());
@@ -670,11 +740,6 @@ fn run_cli_file_fix_parallel(
             }
         }
     }
-
-    // Print summary
-    print_cli_fix_summary(&fix_result, total_files);
-
-    fix_result
 }
 
 /// Print CLI fix summary
@@ -825,30 +890,42 @@ pub fn show_ai_suggestions(
     if config.accept_all {
         if let Some(suggestion) = result.suggestions.first() {
             println!("  {} Applying first suggestion...", "→".cyan());
-            // Capture original content before applying
-            let original_content = fs::read_to_string(&issue.file_path).ok();
-            let original_lines: Vec<&str> = original_content
-                .as_ref()
-                .map(|c| c.lines().collect())
-                .unwrap_or_default();
-            let start_line = issue.line;
-            let end_line = suggestion.end_line.max(issue.line);
-
-            if apply_suggestion(issue, suggestion) {
-                println!("  {} Applied successfully!", "✓".green());
-                println!();
-                print_suggestion_diff(&original_lines, suggestion, start_line, end_line);
-                return (true, false);
-            } else {
-                println!("  {} Failed to apply.", "✗".red());
-                return (false, false);
-            }
+            return (try_apply_suggestion(issue, suggestion), false);
         }
     }
 
-    // Interactive mode - ask user what to do
-    // Show numbered options for each suggestion
-    for i in 1..=result.suggestions.len() {
+    // Interactive mode
+    prompt_suggestion_choice(issue, &result.suggestions)
+}
+
+/// Try to apply a suggestion and print the result. Returns true if successful.
+fn try_apply_suggestion(issue: &LintIssue, suggestion: &FixSuggestion) -> bool {
+    let original_content = fs::read_to_string(&issue.file_path).ok();
+    let original_lines: Vec<&str> = original_content
+        .as_ref()
+        .map(|c| c.lines().collect())
+        .unwrap_or_default();
+    let start_line = issue.line;
+    let end_line = suggestion.end_line.max(issue.line);
+
+    if apply_suggestion(issue, suggestion) {
+        println!("  {} Applied successfully!", "✓".green());
+        println!();
+        print_suggestion_diff(&original_lines, suggestion, start_line, end_line);
+        true
+    } else {
+        println!("  {} Failed to apply.", "✗".red());
+        false
+    }
+}
+
+/// Prompt the user to choose which suggestion to apply.
+/// Returns (applied, quit).
+fn prompt_suggestion_choice(
+    issue: &LintIssue,
+    suggestions: &[FixSuggestion],
+) -> (bool, bool) {
+    for i in 1..=suggestions.len() {
         if i == 1 {
             println!(
                 "  [{}] Apply suggestion #{} {}",
@@ -867,40 +944,19 @@ pub fn show_ai_suggestions(
     io::stdout().flush().ok();
 
     let input = read_line().trim().to_lowercase();
+    let input = if input.is_empty() { "1" } else { &input };
 
-    // Empty input (Enter) applies suggestion #1 by default
-    let input = if input.is_empty() {
-        "1".to_string()
-    } else {
-        input
-    };
-
-    match input.as_str() {
+    match input {
         "s" | "skip" => (false, false),
         "q" | "quit" => (false, true),
         _ => {
-            // Try to parse as number
             if let Ok(num) = input.parse::<usize>() {
-                if num >= 1 && num <= result.suggestions.len() {
-                    let suggestion = &result.suggestions[num - 1];
-                    // Capture original content before applying
-                    let original_content = fs::read_to_string(&issue.file_path).ok();
-                    let original_lines: Vec<&str> = original_content
-                        .as_ref()
-                        .map(|c| c.lines().collect())
-                        .unwrap_or_default();
-                    let start_line = issue.line;
-                    let end_line = suggestion.end_line.max(issue.line);
-
-                    if apply_suggestion(issue, suggestion) {
-                        println!("  {} Applied suggestion #{}!", "✓".green(), num);
-                        println!();
-                        print_suggestion_diff(&original_lines, suggestion, start_line, end_line);
-                        return (true, false);
-                    } else {
+                if num >= 1 && num <= suggestions.len() {
+                    let applied = try_apply_suggestion(issue, &suggestions[num - 1]);
+                    if !applied {
                         println!("  {} Failed to apply suggestion.", "✗".red());
-                        return (false, false);
                     }
+                    return (applied, false);
                 }
             }
             println!("  {} Invalid choice, skipping.", "Invalid:".yellow());

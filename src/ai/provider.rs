@@ -557,6 +557,47 @@ pub struct AiProvider {
     config: AiProviderConfig,
 }
 
+/// Resolve API key from environment variables based on provider kind
+fn resolve_api_key(kind: &AiProviderKind) -> Option<String> {
+    match kind {
+        AiProviderKind::Claude => env::var("ANTHROPIC_AUTH_TOKEN")
+            .or_else(|_| env::var("ANTHROPIC_API_KEY"))
+            .ok(),
+        AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").ok(),
+        AiProviderKind::OpenAi | AiProviderKind::CodexCli => env::var("OPENAI_API_KEY").ok(),
+        AiProviderKind::Gemini => env::var("GEMINI_API_KEY")
+            .or_else(|_| env::var("GOOGLE_API_KEY"))
+            .ok(),
+        _ => None,
+    }
+}
+
+/// Get default model name for a given provider kind
+fn default_model_for_provider(kind: &AiProviderKind) -> String {
+    match kind {
+        AiProviderKind::Claude => "claude-sonnet-4-20250514".to_string(),
+        AiProviderKind::ClaudeCli => "claude-cli".to_string(),
+        AiProviderKind::CodeBuddy => "deepseek-v3.1".to_string(),
+        AiProviderKind::CodeBuddyCli => "codebuddy-cli".to_string(),
+        AiProviderKind::OpenAi => "gpt-4o".to_string(),
+        AiProviderKind::CodexCli => "codex-cli".to_string(),
+        AiProviderKind::Gemini => "gemini-2.5-flash".to_string(),
+        AiProviderKind::GeminiCli => "gemini-cli".to_string(),
+        AiProviderKind::Local => "codellama:7b".to_string(),
+        AiProviderKind::Custom(name) => name.clone(),
+        AiProviderKind::Mock => "mock".to_string(),
+    }
+}
+
+/// Resolve API endpoint from environment variables based on provider kind
+fn resolve_endpoint(kind: &AiProviderKind) -> Option<String> {
+    match kind {
+        AiProviderKind::Claude => env::var("ANTHROPIC_BASE_URL").ok(),
+        AiProviderKind::CodeBuddy => env::var("CODEBUDDY_BASE_URL").ok(),
+        _ => env::var("LINTHIS_AI_ENDPOINT").ok(),
+    }
+}
+
 impl AiProvider {
     /// Create a new AI provider with configuration
     pub fn new(config: AiProviderConfig) -> Self {
@@ -578,39 +619,10 @@ impl AiProvider {
             .and_then(|s| s.parse().ok())
             .unwrap_or(AiProviderKind::Claude);
 
-        // Get API key based on provider type
-        let api_key = match kind {
-            AiProviderKind::Claude => env::var("ANTHROPIC_AUTH_TOKEN")
-                .or_else(|_| env::var("ANTHROPIC_API_KEY"))
-                .ok(),
-            AiProviderKind::CodeBuddy => env::var("CODEBUDDY_API_KEY").ok(),
-            AiProviderKind::OpenAi | AiProviderKind::CodexCli => env::var("OPENAI_API_KEY").ok(),
-            AiProviderKind::Gemini => env::var("GEMINI_API_KEY")
-                .or_else(|_| env::var("GOOGLE_API_KEY"))
-                .ok(),
-            _ => None,
-        };
-
-        let model = env::var("LINTHIS_AI_MODEL").unwrap_or_else(|_| match &kind {
-            AiProviderKind::Claude => "claude-sonnet-4-20250514".to_string(),
-            AiProviderKind::ClaudeCli => "claude-cli".to_string(),
-            AiProviderKind::CodeBuddy => "deepseek-v3.1".to_string(),
-            AiProviderKind::CodeBuddyCli => "codebuddy-cli".to_string(),
-            AiProviderKind::OpenAi => "gpt-4o".to_string(),
-            AiProviderKind::CodexCli => "codex-cli".to_string(),
-            AiProviderKind::Gemini => "gemini-2.5-flash".to_string(),
-            AiProviderKind::GeminiCli => "gemini-cli".to_string(),
-            AiProviderKind::Local => "codellama:7b".to_string(),
-            AiProviderKind::Custom(name) => name.clone(),
-            AiProviderKind::Mock => "mock".to_string(),
-        });
-
-        // Get endpoint based on provider type
-        let endpoint = match kind {
-            AiProviderKind::Claude => env::var("ANTHROPIC_BASE_URL").ok(),
-            AiProviderKind::CodeBuddy => env::var("CODEBUDDY_BASE_URL").ok(),
-            _ => env::var("LINTHIS_AI_ENDPOINT").ok(),
-        };
+        let api_key = resolve_api_key(&kind);
+        let model = env::var("LINTHIS_AI_MODEL")
+            .unwrap_or_else(|_| default_model_for_provider(&kind));
+        let endpoint = resolve_endpoint(&kind);
 
         Self {
             config: AiProviderConfig {
@@ -1412,192 +1424,241 @@ If unsure about impact, use Grep extensively to find all references first."#,
         })?;
 
         if cp.is_cli {
-            // CLI custom provider: spawn command with prompt_args + prompt
-            use std::process::{Command, Stdio};
-
-            let cmd_name = cp.command.as_deref().unwrap_or("echo");
-            let mut cmd = Command::new(cmd_name);
-
-            for arg in &cp.prompt_args {
-                cmd.arg(arg);
-            }
-
-            // Add system prompt if supported and provided
-            if let (Some(ref sys_arg), Some(sys)) = (&cp.system_prompt_arg, system_prompt) {
-                if !sys_arg.is_empty() {
-                    cmd.arg(sys_arg).arg(sys);
-                }
-            }
-
-            cmd.arg(prompt);
-            cmd.stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-
-            let child = cmd
-                .spawn()
-                .map_err(|e| format!("Failed to spawn '{}': {}", cmd_name, e))?;
-            let output = child
-                .wait_with_output()
-                .map_err(|e| format!("Failed to wait for '{}': {}", cmd_name, e))?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("{} error: {}", cmd_name, stderr));
-            }
-
-            let response = String::from_utf8_lossy(&output.stdout).to_string();
-            if response.trim().is_empty() {
-                return Err(format!("Empty response from {}", cmd_name));
-            }
-            Ok(response)
+            self.complete_custom_cli(&cp, prompt, system_prompt)
         } else {
-            // API custom provider: dispatch based on api_style
-            let api_key = cp
-                .api_key_env
-                .as_ref()
-                .and_then(|env_name| env::var(env_name).ok())
-                .or_else(|| self.config.api_key.clone())
-                .ok_or_else(|| format!("API key not set for custom provider '{}'", cp.name))?;
+            self.complete_custom_api(&cp, prompt, system_prompt)
+        }
+    }
 
-            let client = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
-                .build()
-                .map_err(|e| e.to_string())?;
+    fn complete_custom_cli(
+        &self,
+        cp: &CustomProviderResolved,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
+        use std::process::{Command, Stdio};
 
-            match cp.api_style.as_deref() {
-                Some("openai") => {
-                    let endpoint = cp
-                        .endpoint
-                        .as_deref()
-                        .unwrap_or("https://api.openai.com/v1/chat/completions");
-                    let model = cp.model.as_deref().unwrap_or("gpt-4");
+        let cmd_name = cp.command.as_deref().unwrap_or("echo");
+        let mut cmd = Command::new(cmd_name);
 
-                    let mut messages = Vec::new();
-                    if let Some(sys) = system_prompt {
-                        messages.push(serde_json::json!({"role": "system", "content": sys}));
-                    }
-                    messages.push(serde_json::json!({"role": "user", "content": prompt}));
+        for arg in &cp.prompt_args {
+            cmd.arg(arg);
+        }
 
-                    let body = serde_json::json!({
-                        "model": model,
-                        "max_tokens": self.config.max_tokens,
-                        "temperature": self.config.temperature,
-                        "messages": messages
-                    });
-
-                    let response = client
-                        .post(endpoint)
-                        .header("Authorization", format!("Bearer {}", api_key))
-                        .header("content-type", "application/json")
-                        .json(&body)
-                        .send()
-                        .map_err(|e| format!("Request failed: {}", e))?;
-
-                    if !response.status().is_success() {
-                        let status = response.status();
-                        let text = response.text().unwrap_or_default();
-                        return Err(format!("API error ({}): {}", status, text));
-                    }
-
-                    let result: serde_json::Value = response
-                        .json()
-                        .map_err(|e| format!("Failed to parse response: {}", e))?;
-                    result["choices"][0]["message"]["content"]
-                        .as_str()
-                        .map(|s| s.to_string())
-                        .ok_or_else(|| "No content in response".to_string())
-                }
-                Some("anthropic") => {
-                    let endpoint = cp
-                        .endpoint
-                        .as_deref()
-                        .unwrap_or("https://api.anthropic.com/v1/messages");
-                    let model = cp.model.as_deref().unwrap_or("claude-sonnet-4-20250514");
-
-                    let mut body = serde_json::json!({
-                        "model": model,
-                        "max_tokens": self.config.max_tokens,
-                        "messages": [{"role": "user", "content": prompt}]
-                    });
-                    if let Some(sys) = system_prompt {
-                        body["system"] = serde_json::json!(sys);
-                    }
-
-                    let response = client
-                        .post(endpoint)
-                        .header("x-api-key", &api_key)
-                        .header("anthropic-version", "2023-06-01")
-                        .header("content-type", "application/json")
-                        .json(&body)
-                        .send()
-                        .map_err(|e| format!("Request failed: {}", e))?;
-
-                    if !response.status().is_success() {
-                        let status = response.status();
-                        let text = response.text().unwrap_or_default();
-                        return Err(format!("API error ({}): {}", status, text));
-                    }
-
-                    let result: serde_json::Value = response
-                        .json()
-                        .map_err(|e| format!("Failed to parse response: {}", e))?;
-                    result["content"][0]["text"]
-                        .as_str()
-                        .map(|s| s.to_string())
-                        .ok_or_else(|| "No content in response".to_string())
-                }
-                Some("gemini") => {
-                    let model = cp.model.as_deref().unwrap_or("gemini-2.0-flash");
-                    let endpoint = cp.endpoint.clone()
-                        .unwrap_or_else(|| format!(
-                            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-                            model
-                        ));
-                    let url = format!("{}?key={}", endpoint, api_key);
-
-                    let mut body = serde_json::json!({
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {
-                            "maxOutputTokens": self.config.max_tokens,
-                            "temperature": self.config.temperature
-                        }
-                    });
-                    if let Some(sys) = system_prompt {
-                        body["systemInstruction"] = serde_json::json!({"parts": [{"text": sys}]});
-                    }
-
-                    let response = client
-                        .post(&url)
-                        .header("content-type", "application/json")
-                        .json(&body)
-                        .send()
-                        .map_err(|e| format!("Request failed: {}", e))?;
-
-                    if !response.status().is_success() {
-                        let status = response.status();
-                        let text = response.text().unwrap_or_default();
-                        return Err(format!("API error ({}): {}", status, text));
-                    }
-
-                    let result: serde_json::Value = response
-                        .json()
-                        .map_err(|e| format!("Failed to parse response: {}", e))?;
-                    result["candidates"][0]["content"]["parts"][0]["text"]
-                        .as_str()
-                        .map(|s| s.to_string())
-                        .ok_or_else(|| "No content in response".to_string())
-                }
-                Some(other) => Err(format!(
-                    "Unknown api_style '{}' for custom provider '{}'",
-                    other, cp.name
-                )),
-                None => Err(format!(
-                    "Custom API provider '{}' requires 'api_style'",
-                    cp.name
-                )),
+        if let (Some(ref sys_arg), Some(sys)) = (&cp.system_prompt_arg, system_prompt) {
+            if !sys_arg.is_empty() {
+                cmd.arg(sys_arg).arg(sys);
             }
         }
+
+        cmd.arg(prompt);
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn '{}': {}", cmd_name, e))?;
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to wait for '{}': {}", cmd_name, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("{} error: {}", cmd_name, stderr));
+        }
+
+        let response = String::from_utf8_lossy(&output.stdout).to_string();
+        if response.trim().is_empty() {
+            return Err(format!("Empty response from {}", cmd_name));
+        }
+        Ok(response)
+    }
+
+    fn complete_custom_api(
+        &self,
+        cp: &CustomProviderResolved,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
+        let api_key = cp
+            .api_key_env
+            .as_ref()
+            .and_then(|env_name| env::var(env_name).ok())
+            .or_else(|| self.config.api_key.clone())
+            .ok_or_else(|| format!("API key not set for custom provider '{}'", cp.name))?;
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        match cp.api_style.as_deref() {
+            Some("openai") => {
+                self.complete_custom_openai_style(cp, &client, &api_key, prompt, system_prompt)
+            }
+            Some("anthropic") => {
+                self.complete_custom_anthropic_style(cp, &client, &api_key, prompt, system_prompt)
+            }
+            Some("gemini") => {
+                self.complete_custom_gemini_style(cp, &client, &api_key, prompt, system_prompt)
+            }
+            Some(other) => Err(format!(
+                "Unknown api_style '{}' for custom provider '{}'",
+                other, cp.name
+            )),
+            None => Err(format!(
+                "Custom API provider '{}' requires 'api_style'",
+                cp.name
+            )),
+        }
+    }
+
+    fn complete_custom_openai_style(
+        &self,
+        cp: &CustomProviderResolved,
+        client: &reqwest::blocking::Client,
+        api_key: &str,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
+        let endpoint = cp
+            .endpoint
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1/chat/completions");
+        let model = cp.model.as_deref().unwrap_or("gpt-4");
+
+        let mut messages = Vec::new();
+        if let Some(sys) = system_prompt {
+            messages.push(serde_json::json!({"role": "system", "content": sys}));
+        }
+        messages.push(serde_json::json!({"role": "user", "content": prompt}));
+
+        let body = serde_json::json!({
+            "model": model,
+            "max_tokens": self.config.max_tokens,
+            "temperature": self.config.temperature,
+            "messages": messages
+        });
+
+        let response = client
+            .post(endpoint)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().unwrap_or_default();
+            return Err(format!("API error ({}): {}", status, text));
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        result["choices"][0]["message"]["content"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No content in response".to_string())
+    }
+
+    fn complete_custom_anthropic_style(
+        &self,
+        cp: &CustomProviderResolved,
+        client: &reqwest::blocking::Client,
+        api_key: &str,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
+        let endpoint = cp
+            .endpoint
+            .as_deref()
+            .unwrap_or("https://api.anthropic.com/v1/messages");
+        let model = cp.model.as_deref().unwrap_or("claude-sonnet-4-20250514");
+
+        let mut body = serde_json::json!({
+            "model": model,
+            "max_tokens": self.config.max_tokens,
+            "messages": [{"role": "user", "content": prompt}]
+        });
+        if let Some(sys) = system_prompt {
+            body["system"] = serde_json::json!(sys);
+        }
+
+        let response = client
+            .post(endpoint)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().unwrap_or_default();
+            return Err(format!("API error ({}): {}", status, text));
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        result["content"][0]["text"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No content in response".to_string())
+    }
+
+    fn complete_custom_gemini_style(
+        &self,
+        cp: &CustomProviderResolved,
+        client: &reqwest::blocking::Client,
+        api_key: &str,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
+        let model = cp.model.as_deref().unwrap_or("gemini-2.0-flash");
+        let endpoint = cp.endpoint.clone().unwrap_or_else(|| {
+            format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+                model
+            )
+        });
+        let url = format!("{}?key={}", endpoint, api_key);
+
+        let mut body = serde_json::json!({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "maxOutputTokens": self.config.max_tokens,
+                "temperature": self.config.temperature
+            }
+        });
+        if let Some(sys) = system_prompt {
+            body["systemInstruction"] = serde_json::json!({"parts": [{"text": sys}]});
+        }
+
+        let response = client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().unwrap_or_default();
+            return Err(format!("API error ({}): {}", status, text));
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        result["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No content in response".to_string())
     }
 
     fn complete_mock(&self, prompt: &str, _system_prompt: Option<&str>) -> Result<String, String> {
