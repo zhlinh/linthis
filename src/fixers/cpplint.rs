@@ -125,9 +125,30 @@ impl CpplintFixer {
 
         eprintln!("\n📦 cpplint not found, attempting to install...");
 
-        // Try pip first (more compatible on macOS), then pip3
-        for pip_cmd in &["pip", "pip3"] {
-            if !Command::new(pip_cmd)
+        // Try uv > pipx > pip > pip3 (prefer isolated global installs)
+        let install_commands: Vec<(&str, Vec<&str>)> = if Command::new("uv")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            vec![("uv", vec!["tool", "install", "cpplint"])]
+        } else if Command::new("pipx")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            vec![("pipx", vec!["install", "cpplint"])]
+        } else {
+            vec![
+                ("pip", vec!["install", "cpplint", "--upgrade"]),
+                ("pip3", vec!["install", "cpplint", "--upgrade"]),
+            ]
+        };
+
+        for (cmd_name, args) in &install_commands {
+            if !Command::new(cmd_name)
                 .arg("--version")
                 .output()
                 .map(|o| o.status.success())
@@ -136,11 +157,11 @@ impl CpplintFixer {
                 continue;
             }
 
-            eprintln!("   Using {} to install cpplint...", pip_cmd);
+            eprintln!("   Using {} to install cpplint...", cmd_name);
 
-            // Run pip install with progress output
-            let mut child = match Command::new(pip_cmd)
-                .args(["install", "cpplint", "--upgrade"])
+            // Run install with progress output
+            let mut child = match Command::new(cmd_name)
+                .args(args)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -184,16 +205,15 @@ impl CpplintFixer {
                     eprintln!("   ❌ Installation failed with exit code: {}", status);
                 }
                 Err(e) => {
-                    eprintln!("   ❌ Failed to wait for pip: {}", e);
+                    eprintln!("   ❌ Failed to wait for installer: {}", e);
                 }
             }
         }
 
         // Installation failed
+        let hint = crate::python_tool_install_hint("cpplint");
         eprintln!("   ❌ Auto-installation failed. Please install manually:");
-        eprintln!("      pip install cpplint");
-        eprintln!("   Or if pip doesn't work:");
-        eprintln!("      pip3 install cpplint\n");
+        eprintln!("      {}\n", hint);
 
         CPPLINT_INSTALL_STATE.store(3, Ordering::SeqCst);
         false

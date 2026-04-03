@@ -212,7 +212,8 @@ impl SastScanner for OpenGrepScanner {
     }
 
     fn install_hint(&self) -> String {
-        "Install: pip install opengrep (or pip install semgrep)".to_string()
+        let hint = crate::python_tool_install_hint("opengrep");
+        format!("{} (or semgrep)", hint)
     }
 }
 

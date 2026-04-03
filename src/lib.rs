@@ -722,7 +722,7 @@ fn get_formatter(lang: Language) -> Option<Box<dyn Formatter>> {
 }
 
 /// Check if a command is available on the system PATH.
-fn is_command_available(cmd: &str) -> bool {
+pub fn is_command_available(cmd: &str) -> bool {
     std::process::Command::new(cmd)
         .arg("--version")
         .stdout(std::process::Stdio::null())
@@ -752,11 +752,38 @@ fn platform_hint_macos_or(macos: &str, other: &str) -> String {
     }
 }
 
+/// Generate a Python tool install hint, preferring uv > pipx > pip.
+/// Falls back to platform-specific uv install instructions if none are available.
+pub fn python_tool_install_hint(tool: &str) -> String {
+    if is_command_available("uv") {
+        format!("Install: uv tool install {}", tool)
+    } else if is_command_available("pipx") {
+        format!("Install: pipx install {}", tool)
+    } else if is_command_available("pip") || is_command_available("pip3") {
+        format!("Install: pip install {}", tool)
+    } else {
+        platform_hint(
+            &format!(
+                "Install: brew install uv && uv tool install {}",
+                tool
+            ),
+            &format!(
+                "Install: powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\" && uv tool install {}",
+                tool
+            ),
+            &format!(
+                "Install: curl -LsSf https://astral.sh/uv/install.sh | sh && uv tool install {}",
+                tool
+            ),
+        )
+    }
+}
+
 /// Get installation instructions for a language's linter (platform-specific)
 fn get_checker_install_hint(lang: Language) -> String {
     match lang {
         Language::Rust => "Install: rustup component add clippy".to_string(),
-        Language::Python => "Install: pip install ruff".to_string(),
+        Language::Python => python_tool_install_hint("ruff"),
         Language::Go => platform_hint(
             "Install: brew install golangci-lint\n         Or: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest",
             "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: choco install golangci-lint",
@@ -768,11 +795,14 @@ fn get_checker_install_hint(lang: Language) -> String {
             "Install: choco install checkstyle\n         Or download from: https://checkstyle.org/",
             "Install: sudo apt install checkstyle (Ubuntu/Debian)\n         Or download from: https://checkstyle.org/",
         ),
-        Language::Cpp | Language::ObjectiveC => platform_hint(
-            "Install: brew install llvm (for clang-tidy)\n         Or: pip install cpplint",
-            "Install: choco install llvm (for clang-tidy)\n         Or: pip install cpplint",
-            "Install: sudo apt install clang-tidy (Ubuntu/Debian)\n         Or: pip install cpplint",
-        ),
+        Language::Cpp | Language::ObjectiveC => {
+            let cpplint_hint = python_tool_install_hint("cpplint");
+            platform_hint(
+                &format!("Install: brew install llvm (for clang-tidy)\n         Or: {}", cpplint_hint),
+                &format!("Install: choco install llvm (for clang-tidy)\n         Or: {}", cpplint_hint),
+                &format!("Install: sudo apt install clang-tidy (Ubuntu/Debian)\n         Or: {}", cpplint_hint),
+            )
+        }
         Language::Dart => "Install: Dart SDK (includes dart analyze)\n         https://dart.dev/get-dart".to_string(),
         Language::Swift => platform_hint_macos_or(
             "Install: brew install swiftlint",
@@ -833,7 +863,7 @@ fn get_checker_install_hint_php() -> String {
 fn get_formatter_install_hint(lang: Language) -> String {
     match lang {
         Language::Rust => "Install: rustup component add rustfmt".to_string(),
-        Language::Python => "Install: pip install ruff".to_string(),
+        Language::Python => python_tool_install_hint("ruff"),
         Language::Go => "Install: Go formatter (gofmt) is included with Go".to_string(),
         Language::TypeScript | Language::JavaScript => "Install: npm install -g prettier".to_string(),
         Language::Java => platform_hint(

@@ -160,7 +160,7 @@ impl SastScanner for BanditScanner {
     }
 
     fn install_hint(&self) -> String {
-        "Install: pip install bandit".to_string()
+        crate::python_tool_install_hint("bandit")
     }
 }
 
