@@ -24,7 +24,7 @@ use std::time::{Duration, SystemTime};
 const CACHE_VERSION: u32 = 1;
 
 /// Default cache max age in days
-const DEFAULT_CACHE_MAX_AGE_DAYS: u32 = 7;
+const DEFAULT_CACHE_MAX_AGE_DAYS: u32 = 30;
 
 /// Cache directory name
 const CACHE_DIR: &str = ".linthis";
@@ -191,11 +191,14 @@ impl LintCache {
         Ok(())
     }
 
-    /// Remove stale entries older than max_age_days
+    /// Remove stale entries older than max_age_days.
+    /// If max_age_days is Some(0), no pruning is performed (unlimited retention).
     pub fn prune(&mut self, max_age_days: Option<u32>) {
-        let max_age = Duration::from_secs(
-            max_age_days.unwrap_or(DEFAULT_CACHE_MAX_AGE_DAYS) as u64 * 24 * 60 * 60,
-        );
+        let days = max_age_days.unwrap_or(DEFAULT_CACHE_MAX_AGE_DAYS);
+        if days == 0 {
+            return; // unlimited — don't prune
+        }
+        let max_age = Duration::from_secs(days as u64 * 24 * 60 * 60);
         let now = SystemTime::now();
 
         for checker_entries in self.entries.values_mut() {
