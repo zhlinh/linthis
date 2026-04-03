@@ -207,24 +207,7 @@ impl CppFormatter {
             let name = path.file_name().and_then(|n| n.to_str())?;
             let name_lower = name.to_lowercase();
 
-            let is_build_dir = name_lower.starts_with("cmake")
-                || name_lower.starts_with("build")
-                || name_lower.starts_with("out")
-                || name_lower.ends_with("-build")
-                || name_lower.ends_with("_build")
-                || (depth > 0
-                    && (name_lower.contains("android")
-                        || name_lower.contains("ios")
-                        || name_lower.contains("linux")
-                        || name_lower.contains("windows")
-                        || name_lower.contains("arm")
-                        || name_lower.contains("x86")
-                        || name_lower.contains("static")
-                        || name_lower.contains("shared")
-                        || name_lower.contains("debug")
-                        || name_lower.contains("release")));
-
-            if is_build_dir {
+            if is_build_directory(&name_lower, depth) {
                 if path.join("compile_commands.json").exists() {
                     return Some(path);
                 }
@@ -285,6 +268,98 @@ impl CppFormatter {
         // clang-tidy returns non-zero if there are unfixable issues, but fix still works
         Ok(output.status.success() || !output.stdout.is_empty())
     }
+
+    /// Run pre-format fixers (cpplint fixer and clang-tidy --fix)
+    fn run_pre_format_fixers(&self, path: &Path, language: &str) {
+        // Run cpplint fixer (fixes header guards, TODOs, copyright)
+        if self.use_cpplint_fix {
+            if let Ok(mut fixer) = self.cpplint_fixer.lock() {
+                fixer.set_is_objc(language == "oc");
+                let _ = fixer.fix_file(path);
+            }
+        }
+
+        // Run clang-tidy --fix (skip for OC files)
+        if self.use_clang_tidy_fix && language != "oc" {
+            let _ = self.run_clang_tidy_fix(path);
+        }
+    }
+
+    /// Run clang-format on a file, returning an error FormatResult if it fails
+    fn run_clang_format(
+        &self,
+        path: &Path,
+        language: &str,
+    ) -> Result<Option<FormatResult>> {
+        let mut cmd = Command::new("clang-format");
+        cmd.arg("-i");
+
+        if let Some(config_path) = Self::find_clang_format_config(path, language) {
+            cmd.arg(format!("-style=file:{}", config_path.display()));
+        } else {
+            cmd.arg("-style=Google");
+        }
+
+        cmd.arg(path);
+        let output = cmd.output().map_err(|e| {
+            crate::LintisError::formatter("clang-format", path, format!("Failed to run: {}", e))
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Ok(Some(FormatResult::error(
+                path.to_path_buf(),
+                format!("clang-format failed: {}", stderr),
+            )));
+        }
+
+        Ok(None)
+    }
+
+    /// Run post-format source fixers (comment spacing, TODOs, etc.)
+    fn run_post_format_fixers(path: &Path, language: &str) -> Result<()> {
+        SourceFixer::fix_comment_spacing(path)?;
+        SourceFixer::fix_todo_comments(path)?;
+        SourceFixer::fix_lone_semicolon(path)?;
+
+        let max_line_length = if language == "oc" { 150 } else { 120 };
+        SourceFixer::fix_long_comments(path, max_line_length)?;
+
+        if language == "oc" {
+            SourceFixer::fix_pragma_separators(path)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Check if a directory name matches build-related patterns
+fn is_build_directory(name_lower: &str, depth: usize) -> bool {
+    if name_lower.starts_with("cmake")
+        || name_lower.starts_with("build")
+        || name_lower.starts_with("out")
+        || name_lower.ends_with("-build")
+        || name_lower.ends_with("_build")
+    {
+        return true;
+    }
+
+    if depth > 0 {
+        return is_platform_subdirectory(name_lower);
+    }
+
+    false
+}
+
+/// Check if a directory name matches platform/architecture patterns
+fn is_platform_subdirectory(name_lower: &str) -> bool {
+    const PLATFORM_KEYWORDS: &[&str] = &[
+        "android", "ios", "linux", "windows", "arm", "x86", "static", "shared", "debug",
+        "release",
+    ];
+    PLATFORM_KEYWORDS
+        .iter()
+        .any(|kw| name_lower.contains(kw))
 }
 
 impl Default for CppFormatter {
@@ -323,65 +398,17 @@ impl Formatter for CppFormatter {
             )
         })?;
 
-        // Step 1: Run cpplint fixer (fixes header guards, TODOs, copyright)
-        // For OC files, we still run the fixer but it will skip unsafe categories
-        // (like readability/casting which misinterprets OC method signatures)
-        if self.use_cpplint_fix {
-            if let Ok(mut fixer) = self.cpplint_fixer.lock() {
-                fixer.set_is_objc(language == "oc");
-                let _ = fixer.fix_file(path); // Ignore errors, continue with other fixes
-            }
+        // Run pre-format fixers (cpplint, clang-tidy)
+        self.run_pre_format_fixers(path, language);
+
+        // Run clang-format (-i modifies in place)
+        let format_result = self.run_clang_format(path, language)?;
+        if let Some(err_result) = format_result {
+            return Ok(err_result);
         }
 
-        // Step 2: Run clang-tidy --fix (fixes code issues like C-style casts)
-        // Skip for Objective-C files as clang-tidy doesn't handle OC properly
-        if self.use_clang_tidy_fix && language != "oc" {
-            let _ = self.run_clang_tidy_fix(path); // Ignore errors, clang-format will still run
-        }
-
-        // Step 3: Run clang-format (-i modifies in place)
-        let mut cmd = Command::new("clang-format");
-        cmd.arg("-i");
-
-        // Use language-specific config if found, otherwise fall back to Google style
-        if let Some(config_path) = Self::find_clang_format_config(path, language) {
-            cmd.arg(format!("-style=file:{}", config_path.display()));
-        } else {
-            cmd.arg("-style=Google");
-        }
-
-        cmd.arg(path);
-        let output = cmd.output().map_err(|e| {
-            crate::LintisError::formatter("clang-format", path, format!("Failed to run: {}", e))
-        })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Ok(FormatResult::error(
-                path.to_path_buf(),
-                format!("clang-format failed: {}", stderr),
-            ));
-        }
-
-        // Step 4: Fix comment spacing (clang-format doesn't fix non-ASCII comments like Chinese)
-        // This fixes "//comment" -> "// comment" for all characters
-        SourceFixer::fix_comment_spacing(path)?;
-
-        // Step 5: Fix TODO comments (add username from git blame)
-        SourceFixer::fix_todo_comments(path)?;
-
-        // Step 6: Fix lone semicolons (remove lines with only semicolon)
-        SourceFixer::fix_lone_semicolon(path)?;
-
-        // Step 7: Fix long comment lines (break at appropriate points)
-        // OC uses 150 char limit, C++ uses 120
-        let max_line_length = if language == "oc" { 150 } else { 120 };
-        SourceFixer::fix_long_comments(path, max_line_length)?;
-
-        // Step 8: Fix pragma separators (OC only) - convert "-- -- --" to "#pragma mark -"
-        if language == "oc" {
-            SourceFixer::fix_pragma_separators(path)?;
-        }
+        // Run post-format source fixers
+        Self::run_post_format_fixers(path, language)?;
 
         // Read new content and compare
         let new_content = fs::read_to_string(path).map_err(|e| {
