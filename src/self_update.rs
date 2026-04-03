@@ -31,9 +31,9 @@ pub struct SelfUpdateConfig {
     #[serde(default = "default_mode")]
     pub mode: String,
 
-    /// Check for updates every N days
+    /// Check for updates every N days (supports decimals, e.g. 0.5 = 12 hours; 0 = 12 hours)
     #[serde(default = "default_interval_days")]
-    pub interval_days: u64,
+    pub interval_days: f64,
 }
 
 fn default_enabled() -> bool {
@@ -44,8 +44,8 @@ fn default_mode() -> String {
     "prompt".to_string()
 }
 
-fn default_interval_days() -> u64 {
-    7
+fn default_interval_days() -> f64 {
+    7.0
 }
 
 impl Default for SelfUpdateConfig {
@@ -78,8 +78,8 @@ impl SelfUpdateConfig {
             ));
         }
 
-        if self.interval_days == 0 {
-            return Err("interval_days must be greater than 0".to_string());
+        if self.interval_days < 0.0 {
+            return Err("interval_days must be >= 0 (0 means every 12 hours)".to_string());
         }
 
         Ok(())
@@ -117,15 +117,18 @@ impl SelfUpdateManager {
     }
 
     /// Check if it's time to check for updates
-    pub fn should_check(&self, interval_days: u64) -> bool {
+    pub fn should_check(&self, interval_days: f64) -> bool {
         match self.get_last_check_time() {
             Some(last_check) => {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-                let days_since_check = (now - last_check) / 86400; // 86400 seconds in a day
-                days_since_check >= interval_days
+                let elapsed_secs = now.saturating_sub(last_check);
+                // 0 means every 12 hours (minimum 0.5 days)
+                let effective_days = if interval_days <= 0.0 { 0.5 } else { interval_days };
+                let interval_secs = (effective_days * 86400.0) as u64;
+                elapsed_secs >= interval_secs
             }
             None => true, // Never checked before
         }
@@ -265,7 +268,7 @@ mod tests {
         let config = SelfUpdateConfig::default();
         assert!(config.enabled);
         assert_eq!(config.mode, "prompt");
-        assert_eq!(config.interval_days, 7);
+        assert!((config.interval_days - 7.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -303,8 +306,13 @@ mod tests {
         assert!(bad_config.validate().is_err());
 
         let mut bad_config2 = config.clone();
-        bad_config2.interval_days = 0;
+        bad_config2.interval_days = -1.0;
         assert!(bad_config2.validate().is_err());
+
+        // interval_days = 0 is valid (means 12 hours)
+        let mut zero_config = config.clone();
+        zero_config.interval_days = 0.0;
+        assert!(zero_config.validate().is_ok());
     }
 
     #[test]
@@ -334,7 +342,7 @@ mod tests {
         let _ = fs::remove_file(&manager.timestamp_file);
 
         // If never checked, should always return true
-        assert!(manager.should_check(7));
+        assert!(manager.should_check(7.0));
     }
 
     #[test]

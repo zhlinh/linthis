@@ -35,9 +35,9 @@ pub struct AutoSyncConfig {
     #[serde(default = "default_mode")]
     pub mode: String,
 
-    /// Sync interval in days
+    /// Sync interval in days (supports decimals, e.g. 0.5 = 12 hours; 0 = 12 hours)
     #[serde(default = "default_interval_days")]
-    pub interval_days: u64,
+    pub interval_days: f64,
 }
 
 fn default_enabled() -> bool {
@@ -48,8 +48,8 @@ fn default_mode() -> String {
     "prompt".to_string()
 }
 
-fn default_interval_days() -> u64 {
-    7
+fn default_interval_days() -> f64 {
+    7.0
 }
 
 impl Default for AutoSyncConfig {
@@ -73,9 +73,9 @@ impl AutoSyncConfig {
                 ),
             });
         }
-        if self.interval_days == 0 {
+        if self.interval_days < 0.0 {
             return Err(PluginError::ValidationError {
-                message: "auto_sync.interval_days must be greater than 0".to_string(),
+                message: "auto_sync.interval_days must be >= 0 (0 means every 12 hours)".to_string(),
             });
         }
         Ok(())
@@ -178,7 +178,9 @@ impl AutoSyncManager {
         };
 
         let now = Self::current_time()?;
-        let interval_seconds = config.interval_days * 24 * 60 * 60;
+        // 0 means every 12 hours (minimum 0.5 days)
+        let effective_days = if config.interval_days <= 0.0 { 0.5 } else { config.interval_days };
+        let interval_seconds = (effective_days * 86400.0) as u64;
         let elapsed = now.saturating_sub(last_sync);
 
         Ok(elapsed >= interval_seconds)
@@ -245,7 +247,7 @@ mod tests {
         let config = AutoSyncConfig::default();
         assert!(config.enabled);
         assert_eq!(config.mode, "prompt");
-        assert_eq!(config.interval_days, 7);
+        assert!((config.interval_days - 7.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -259,7 +261,11 @@ mod tests {
         config.mode = "auto".to_string();
         assert!(config.validate().is_ok());
 
-        config.interval_days = 0;
+        // interval_days = 0 is valid (means 12 hours)
+        config.interval_days = 0.0;
+        assert!(config.validate().is_ok());
+
+        config.interval_days = -1.0;
         assert!(config.validate().is_err());
     }
 
@@ -338,7 +344,7 @@ mod tests {
         let config = AutoSyncConfig {
             enabled: true,
             mode: "auto".to_string(),
-            interval_days: 7,
+            interval_days: 7.0,
         };
 
         // Update timestamp to now
