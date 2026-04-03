@@ -426,3 +426,117 @@ pub fn get_gitignore_patterns(project_root: &Path) -> Vec<String> {
 
     patterns
 }
+
+/// Check if any of the given file contents already contain a `.linthis` ignore entry.
+fn has_linthis_ignore(content: &str) -> bool {
+    content
+        .lines()
+        .any(|line| line.trim() == ".linthis/" || line.trim() == ".linthis")
+}
+
+/// Ensure `.linthis/` is ignored by git in the project.
+///
+/// Checks project `.gitignore`, global gitignore (`core.excludesFile` or
+/// `~/.gitignore_global`), and `.git/info/exclude`. If `.linthis/` is already
+/// covered by any of them, does nothing. Otherwise appends to the project's
+/// `.gitignore` (creating it if needed) and prints a message.
+pub fn ensure_gitignore_has_linthis(project_root: &Path) {
+    // 1. Check project .gitignore
+    let gitignore_path = project_root.join(".gitignore");
+    let existing = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
+    if has_linthis_ignore(&existing) {
+        return;
+    }
+
+    // 2. Check global gitignore (core.excludesFile or ~/.gitignore_global)
+    let global_path = std::process::Command::new("git")
+        .args(["config", "--global", "core.excludesFile"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(o.stdout)
+            } else {
+                None
+            }
+        })
+        .map(|b| String::from_utf8_lossy(&b).trim().to_string());
+    let global_gitignore = global_path
+        .map(|p| {
+            // Expand ~ to home directory
+            if p.starts_with('~') {
+                if let Ok(home) = std::env::var("HOME") {
+                    return std::path::PathBuf::from(p.replacen('~', &home, 1));
+                }
+            }
+            std::path::PathBuf::from(p)
+        })
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| std::path::PathBuf::from(h).join(".gitignore_global"))
+        });
+    if let Some(ref path) = global_gitignore {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if has_linthis_ignore(&content) {
+                return;
+            }
+        }
+    }
+
+    // 3. Check .git/info/exclude
+    let exclude_path = project_root.join(".git").join("info").join("exclude");
+    if let Ok(content) = std::fs::read_to_string(&exclude_path) {
+        if has_linthis_ignore(&content) {
+            return;
+        }
+    }
+
+    // Not ignored anywhere — prefer adding to global gitignore (less project impact)
+    let target_path = if let Some(ref gp) = global_gitignore {
+        // Ensure the global excludesFile is configured if using default ~/.gitignore_global
+        if std::fs::read_to_string(gp).is_err() {
+            // File doesn't exist yet — create it and set core.excludesFile if needed
+            let _ = std::process::Command::new("git")
+                .args([
+                    "config",
+                    "--global",
+                    "core.excludesFile",
+                    &gp.to_string_lossy(),
+                ])
+                .output();
+        }
+        gp.clone()
+    } else {
+        // No HOME — fall back to project .gitignore
+        gitignore_path.clone()
+    };
+
+    let target_existing = std::fs::read_to_string(&target_path).unwrap_or_default();
+    let mut content = target_existing;
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str("\n# Linthis working directory\n.linthis/\n");
+
+    match std::fs::write(&target_path, &content) {
+        Ok(_) => {
+            if target_path == gitignore_path {
+                eprintln!("[linthis] Added .linthis/ to .gitignore");
+            } else {
+                eprintln!(
+                    "[linthis] Added .linthis/ to global gitignore ({})",
+                    target_path.display()
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "[linthis] Warning: failed to update {}: {}",
+                target_path.display(),
+                e
+            );
+            eprintln!("[linthis] Please add '.linthis/' to your gitignore manually");
+        }
+    }
+}
