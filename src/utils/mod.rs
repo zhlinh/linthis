@@ -625,37 +625,78 @@ fn ensure_jetbrains_exclude(project_root: &Path) {
     }
 }
 
-/// Add `.linthis` to VS Code search.exclude in `.vscode/settings.json`.
+/// Add `.linthis` to VS Code search.exclude.
+/// Prefers global user settings; falls back to project `.vscode/settings.json`.
 fn ensure_vscode_exclude(project_root: &Path) {
-    let vscode_dir = project_root.join(".vscode");
-    if !vscode_dir.is_dir() {
-        return;
-    }
-
-    let settings_path = vscode_dir.join("settings.json");
-    let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
-
-    // Already excluded
-    if content.contains("\".linthis\"") || content.contains("\".linthis/\"") {
-        return;
-    }
-
-    if content.is_empty() || content.trim().is_empty() {
-        // Create new settings file
-        let new_content = "{\n  \"search.exclude\": {\n    \".linthis\": true\n  }\n}\n";
-        if std::fs::write(&settings_path, new_content).is_ok() {
-            eprintln!("[linthis] Added .linthis/ to .vscode/settings.json search.exclude");
+    // 1. Check if already excluded in global user settings
+    if let Some(global_path) = vscode_user_settings_path() {
+        if let Ok(content) = std::fs::read_to_string(&global_path) {
+            if content.contains("\".linthis\"") || content.contains("\".linthis/\"") {
+                return;
+            }
         }
-        return;
     }
 
-    // Parse existing JSON
+    // 2. Check project .vscode/settings.json
+    let project_settings = project_root.join(".vscode").join("settings.json");
+    if let Ok(content) = std::fs::read_to_string(&project_settings) {
+        if content.contains("\".linthis\"") || content.contains("\".linthis/\"") {
+            return;
+        }
+    }
+
+    // 3. Not excluded anywhere — prefer global user settings
+    if let Some(global_path) = vscode_user_settings_path() {
+        if add_linthis_to_vscode_settings(&global_path) {
+            eprintln!(
+                "[linthis] Added .linthis/ to VS Code global search.exclude ({})",
+                global_path.display()
+            );
+            return;
+        }
+    }
+
+    // 4. Fall back to project .vscode/settings.json (only if .vscode/ exists)
+    if project_root.join(".vscode").is_dir()
+        && add_linthis_to_vscode_settings(&project_settings)
+    {
+        eprintln!("[linthis] Added .linthis/ to .vscode/settings.json search.exclude");
+    }
+}
+
+/// Get the VS Code global user settings.json path.
+fn vscode_user_settings_path() -> Option<std::path::PathBuf> {
+    if cfg!(target_os = "macos") {
+        std::env::var("HOME")
+            .ok()
+            .map(|h| Path::new(&h).join("Library/Application Support/Code/User/settings.json"))
+    } else if cfg!(target_os = "windows") {
+        std::env::var("APPDATA")
+            .ok()
+            .map(|a| Path::new(&a).join("Code/User/settings.json"))
+    } else {
+        std::env::var("HOME")
+            .ok()
+            .map(|h| Path::new(&h).join(".config/Code/User/settings.json"))
+    }
+    .filter(|p| p.parent().is_some_and(|d| d.is_dir()))
+}
+
+/// Add `.linthis` to search.exclude in a VS Code settings.json file.
+/// Returns true on success.
+fn add_linthis_to_vscode_settings(settings_path: &Path) -> bool {
+    let content = std::fs::read_to_string(settings_path).unwrap_or_default();
+
+    if content.trim().is_empty() {
+        let new_content = "{\n  \"search.exclude\": {\n    \".linthis\": true\n  }\n}\n";
+        return std::fs::write(settings_path, new_content).is_ok();
+    }
+
     let mut json: serde_json::Value = match serde_json::from_str(&content) {
         Ok(v) => v,
-        Err(_) => return,
+        Err(_) => return false,
     };
 
-    // Add to search.exclude
     let search_exclude = json
         .as_object_mut()
         .and_then(|obj| {
@@ -669,13 +710,10 @@ fn ensure_vscode_exclude(project_root: &Path) {
     if let Some(exclude) = search_exclude {
         exclude.insert(".linthis".to_string(), serde_json::json!(true));
     } else {
-        return;
+        return false;
     }
 
-    if let Ok(formatted) = serde_json::to_string_pretty(&json) {
-        let output = format!("{}\n", formatted);
-        if std::fs::write(&settings_path, &output).is_ok() {
-            eprintln!("[linthis] Added .linthis/ to .vscode/settings.json search.exclude");
-        }
-    }
+    serde_json::to_string_pretty(&json)
+        .map(|formatted| std::fs::write(settings_path, format!("{}\n", formatted)).is_ok())
+        .unwrap_or(false)
 }
