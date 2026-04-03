@@ -63,8 +63,13 @@ fn handle_review_status() -> ExitCode {
 
 fn handle_review_clean() -> ExitCode {
     let config = Config::load_merged(&std::env::current_dir().unwrap_or_default());
-    let retention = config.review.retention_days;
-    match background::clean_artifacts(retention) {
+    // Prefer retention.reviews (count-based); fall back to review.retention_days (days-based)
+    let result = if config.retention.reviews > 0 {
+        background::clean_artifacts_by_count(config.retention.reviews)
+    } else {
+        background::clean_artifacts(config.review.retention_days)
+    };
+    match result {
         Ok(count) => {
             println!("Cleaned {} review artifact(s)", count);
             ExitCode::SUCCESS

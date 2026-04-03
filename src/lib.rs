@@ -1453,14 +1453,19 @@ fn handle_install_failures(failed: &[FailedTool], file_count: usize, quiet: bool
 }
 
 /// Load the lint cache if caching is enabled.
-fn load_cache(no_cache: bool, mode: &RunMode, verbose: bool) -> Option<Mutex<LintCache>> {
+fn load_cache(
+    no_cache: bool,
+    mode: &RunMode,
+    verbose: bool,
+    cache_max_age_days: Option<u32>,
+) -> Option<Mutex<LintCache>> {
     if no_cache || *mode == RunMode::FormatOnly {
         return None;
     }
     let project_root = utils::get_project_root();
     match LintCache::load(&project_root) {
         Ok(mut c) => {
-            c.prune(None);
+            c.prune(cache_max_age_days);
             c.reset_stats();
             Some(Mutex::new(c))
         }
@@ -1875,9 +1880,13 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     }
 
     let project_root = utils::get_project_root();
-    let cache = load_cache(options.no_cache, &options.mode, options.verbose);
-
     let config = Config::load_merged(&project_root);
+    let cache = load_cache(
+        options.no_cache,
+        &options.mode,
+        options.verbose,
+        Some(config.retention.cache_days),
+    );
     let rule_filter = RuleFilter::from_config(&config.rules);
     let custom_checker = if config.rules.has_custom_rules() {
         match CustomRulesChecker::new(&config.rules.custom) {

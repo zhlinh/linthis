@@ -168,6 +168,10 @@ pub struct Config {
     #[serde(default)]
     pub review: ReviewConfig,
 
+    /// Retention settings for results, backups, reviews, and cache
+    #[serde(default)]
+    pub retention: RetentionConfig,
+
     /// Checks configuration: which checks to run and per-check settings.
     ///
     /// ```toml
@@ -643,6 +647,57 @@ fn default_review_enabled() -> bool {
 
 fn default_retention_days() -> u32 {
     30
+}
+
+/// Unified retention configuration for .linthis/ artifacts.
+///
+/// ```toml
+/// [retention]
+/// results = 10      # max result files (0 = unlimited)
+/// backups = 5       # max backup directories (0 = unlimited)
+/// reviews = 10      # max review files (0 = unlimited)
+/// cache_days = 30   # max age in days for lint cache entries
+/// ```
+///
+/// Values > 0 always keep at least 1 (the most recent).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetentionConfig {
+    /// Maximum number of result files to keep (0 = unlimited)
+    #[serde(default = "default_retention_results")]
+    pub results: usize,
+    /// Maximum number of backup directories to keep (0 = unlimited)
+    #[serde(default = "default_retention_backups")]
+    pub backups: usize,
+    /// Maximum number of review files to keep (0 = unlimited)
+    #[serde(default = "default_retention_reviews")]
+    pub reviews: usize,
+    /// Maximum age in days for lint cache entries
+    #[serde(default = "default_retention_cache_days")]
+    pub cache_days: u32,
+}
+
+fn default_retention_results() -> usize {
+    10
+}
+fn default_retention_backups() -> usize {
+    5
+}
+fn default_retention_reviews() -> usize {
+    10
+}
+fn default_retention_cache_days() -> u32 {
+    30
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            results: default_retention_results(),
+            backups: default_retention_backups(),
+            reviews: default_retention_reviews(),
+            cache_days: default_retention_cache_days(),
+        }
+    }
 }
 
 /// Platform-specific PR/MR command configuration

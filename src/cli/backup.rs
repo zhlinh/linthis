@@ -23,8 +23,8 @@ use std::process::ExitCode;
 
 use linthis::utils::types::LintIssue;
 
-/// Maximum number of backups to keep
-const MAX_BACKUPS: usize = 5;
+/// Default maximum number of backups to keep (used when config is unavailable)
+const DEFAULT_MAX_BACKUPS: usize = 5;
 
 /// Backup manifest containing metadata about backed up files
 #[derive(Debug, Serialize, Deserialize)]
@@ -150,8 +150,15 @@ pub fn create_backup(files: &[PathBuf], description: &str, quiet: bool) -> Optio
     Some(timestamp)
 }
 
-/// Clean up old backups, keeping only the most recent MAX_BACKUPS
-pub fn cleanup_old_backups() {
+/// Clean up old backups, keeping only the most recent `max_backups`.
+/// If `max_backups` is 0, no cleanup is performed (unlimited).
+/// Always keeps at least 1 backup.
+pub fn cleanup_old_backups_with_limit(max_backups: usize) {
+    if max_backups == 0 {
+        return; // unlimited
+    }
+    let keep = max_backups.max(1); // always keep at least 1
+
     let backup_dir = get_backup_dir();
     if !backup_dir.exists() {
         return;
@@ -170,12 +177,21 @@ pub fn cleanup_old_backups() {
     backups.sort();
 
     // Remove oldest backups if we have too many
-    while backups.len() > MAX_BACKUPS {
+    while backups.len() > keep {
         if let Some(oldest) = backups.first() {
             let _ = fs::remove_dir_all(oldest);
             backups.remove(0);
         }
     }
+}
+
+/// Clean up old backups using config or default limit.
+pub fn cleanup_old_backups() {
+    let project_root = linthis::utils::get_project_root();
+    let max = linthis::config::Config::load_project_config(&project_root)
+        .map(|c| c.retention.backups)
+        .unwrap_or(DEFAULT_MAX_BACKUPS);
+    cleanup_old_backups_with_limit(max);
 }
 
 /// List available backups

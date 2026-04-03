@@ -176,7 +176,7 @@ fn is_process_running(pid: u32) -> bool {
     }
 }
 
-/// Clean up review artifacts older than retention_days.
+/// Clean up review artifacts older than retention_days (legacy, kept for backward compat).
 pub fn clean_artifacts(retention_days: u32) -> Result<usize, String> {
     let dir = review_dir()?;
     let cutoff = SystemTime::now()
@@ -197,6 +197,39 @@ pub fn clean_artifacts(retention_days: u32) -> Result<usize, String> {
                     removed += 1;
                 }
             }
+        }
+    }
+
+    Ok(removed)
+}
+
+/// Clean up review artifacts by count, keeping the most recent `max_reviews`.
+/// If `max_reviews` is 0, no cleanup (unlimited). Always keeps at least 1.
+pub fn clean_artifacts_by_count(max_reviews: usize) -> Result<usize, String> {
+    if max_reviews == 0 {
+        return Ok(0);
+    }
+    let keep = max_reviews.max(1);
+
+    let dir = review_dir()?;
+    let entries = fs::read_dir(&dir).map_err(|e| format!("Failed to read review dir: {}", e))?;
+
+    let mut files: Vec<_> = entries
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .collect();
+
+    // Sort by modified time, newest first
+    files.sort_by(|a, b| {
+        let a_time = a.metadata().and_then(|m| m.modified()).ok();
+        let b_time = b.metadata().and_then(|m| m.modified()).ok();
+        b_time.cmp(&a_time)
+    });
+
+    let mut removed = 0;
+    for entry in files.iter().skip(keep) {
+        if fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
         }
     }
 

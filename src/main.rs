@@ -1025,8 +1025,18 @@ fn save_results(result: &linthis::utils::types::RunResult, output: &str, cli: &C
         }
     }
 
-    if !cli.no_save_result && cli.output_file.is_none() && cli.keep_results > 0 {
-        cleanup_old_results(cli.keep_results, cli.verbose);
+    if !cli.no_save_result && cli.output_file.is_none() {
+        // CLI --keep-results overrides config; config overrides default (10)
+        let keep = if cli.keep_results != 10 {
+            cli.keep_results // explicitly set via CLI
+        } else {
+            linthis::config::Config::load_project_config(&project_root)
+                .map(|c| c.retention.results)
+                .unwrap_or(10)
+        };
+        if keep > 0 {
+            cleanup_old_results(keep.max(1), cli.verbose);
+        }
     }
 }
 
