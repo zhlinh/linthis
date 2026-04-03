@@ -319,9 +319,23 @@ pub(crate) fn shell_agent_availability_check(provider: &AgentFixProvider) -> Str
 /// Note: CommitMsg uses agent_fix_headless_cmd_commit_msg() instead (needs $1 expansion).
 pub(crate) fn agent_fix_prompt_for_event(_hook_event: &HookEvent) -> String {
     "Staged files have linthis lint errors. \
-     Run 'linthis -s' to inspect them. \
-     Fix all issues by editing the files directly (do NOT use linthis --fix). \
-     Verify with 'linthis -s' until it passes cleanly."
+     Follow these steps: \
+     (1) Run 'git diff --cached -- <files>' and save the output as the before-snapshot. \
+     (2) Run 'linthis -s' to inspect issues. \
+     (3) Group the issues by file. For files with independent errors (no cross-file dependencies), \
+     fix them in parallel using concurrent tool calls — each tool call fixes one file. \
+     For files with cross-file dependencies (e.g. shared type renames, API signature changes), \
+     fix them sequentially in dependency order. \
+     Fix by editing the code directly (do NOT use linthis --fix). \
+     (4) Verify with 'linthis -s' until it passes cleanly. \
+     (5) Run the project build/test to ensure fixes don't break anything \
+     (detect project type: cargo check && cargo test for Rust, \
+     go build ./... && go test ./... for Go, \
+     npx tsc --noEmit for TypeScript, python -m py_compile for Python). \
+     If build/tests fail, revert the problematic fix and try again. \
+     (6) Run 'git diff --cached' and display a Changes Summary showing \
+     each modified file, what was changed, and why (e.g. which lint rule). \
+     Then show the full diff output."
         .to_string()
 }
 
@@ -474,7 +488,15 @@ pub(crate) fn prepush_review_prompt() -> &'static str {
      Important (missing error handling, performance), and Minor issues. \
      (3) Write the review to .linthis/review/result/review-$(date +%Y%m%d-%H%M%S).md \
      (create the directory if needed). \
-     (4) If Critical issues found: print '❌ Push blocked — fix Critical issues first' and exit 1. \
+     (4) If Critical issues found: save a snapshot with 'git diff', auto-fix the issues, \
+     then run build/test to verify fixes don't break anything \
+     (detect project type: cargo check && cargo test for Rust, \
+     go build ./... && go test ./... for Go, \
+     npx tsc --noEmit for TypeScript, python -m py_compile for Python). \
+     If build/tests fail, revert and retry with a different approach. \
+     After fixing, display a Changes Summary showing each file, what changed, and why, \
+     plus the full git diff. Then re-run the review. \
+     Print '❌ Push blocked — fix Critical issues first' and exit 1 if issues remain. \
      If Important issues only: print '⚠️ Push with caution'. \
      If Minor or none: print '✅ Review passed'. \
      Exit 0 unless Critical issues were found."
