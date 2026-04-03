@@ -403,112 +403,8 @@ impl CpplintFixer {
 
         // Process errors
         for error in &errors {
-            match error.category.as_str() {
-                "build/header_guard" => {
-                    // Skip header guard fixes for OC files - OC uses #import which handles include guards
-                    if self.is_objc {
-                        if debug {
-                            eprintln!("[cpplint-fixer] Skipping build/header_guard for OC file");
-                        }
-                    } else if self.config.header_guard_mode == HeaderGuardMode::FixName {
-                        if self.fix_header_guard_from_error(&mut lines, error) {
-                            if debug {
-                                eprintln!(
-                                    "[cpplint-fixer] Fixed header_guard at line {}",
-                                    error.line
-                                );
-                            }
-                            modified = true;
-                        }
-                    } else if self.config.header_guard_mode == HeaderGuardMode::PragmaOnce
-                        && self.convert_to_pragma_once(&mut lines)
-                    {
-                        modified = true;
-                    }
-                }
-                "readability/todo" => {
-                    if self.fix_todo_from_error(&mut lines, error) {
-                        if debug {
-                            eprintln!("[cpplint-fixer] Fixed todo at line {}", error.line);
-                        }
-                        modified = true;
-                    }
-                }
-                "legal/copyright" => {
-                    if self.fix_copyright_from_error(&mut lines) {
-                        modified = true;
-                    }
-                }
-                "readability/casting" => {
-                    // Skip C-style cast fixes for OC files - OC method signatures
-                    // like `+ (UIImage *)method` are misinterpreted as C-style casts
-                    if self.is_objc {
-                        if debug {
-                            eprintln!("[cpplint-fixer] Skipping readability/casting for OC file");
-                        }
-                    } else if self.fix_c_style_cast(&mut lines, error) {
-                        modified = true;
-                    }
-                }
-                "readability/check" => {
-                    if self.fix_assert_check(&mut lines, error) {
-                        modified = true;
-                    }
-                }
-                "whitespace/comments" => {
-                    if self.fix_comment_spacing(&mut lines, error) {
-                        if debug {
-                            eprintln!(
-                                "[cpplint-fixer] Fixed comment spacing at line {}",
-                                error.line
-                            );
-                        }
-                        modified = true;
-                    }
-                }
-                "whitespace/semicolon" => {
-                    if self.fix_empty_semicolon(&mut lines, error) {
-                        if debug {
-                            eprintln!(
-                                "[cpplint-fixer] Fixed empty semicolon at line {}",
-                                error.line
-                            );
-                        }
-                        modified = true;
-                    }
-                }
-                "whitespace/comma" => {
-                    if self.fix_comma_spacing(&mut lines, error) {
-                        if debug {
-                            eprintln!("[cpplint-fixer] Fixed comma spacing at line {}", error.line);
-                        }
-                        modified = true;
-                    }
-                }
-                "whitespace/operators" => {
-                    // Skip for OC files - @property (getter=xxx) syntax is valid OC
-                    if self.is_objc {
-                        if debug {
-                            eprintln!("[cpplint-fixer] Skipping whitespace/operators for OC file");
-                        }
-                    } else if self.fix_operator_spacing(&mut lines, error) {
-                        if debug {
-                            eprintln!(
-                                "[cpplint-fixer] Fixed operator spacing at line {}",
-                                error.line
-                            );
-                        }
-                        modified = true;
-                    }
-                }
-                _ => {
-                    if debug {
-                        eprintln!(
-                            "[cpplint-fixer] Skipping unsupported category: {}",
-                            error.category
-                        );
-                    }
-                }
+            if self.fix_single_error(&mut lines, error, debug) {
+                modified = true;
             }
         }
 
@@ -524,6 +420,63 @@ impl CpplintFixer {
         }
 
         Ok(modified)
+    }
+
+    /// Fix a single cpplint error by category. Returns true if a fix was applied.
+    fn fix_single_error(
+        &mut self,
+        lines: &mut Vec<String>,
+        error: &CpplintError,
+        debug: bool,
+    ) -> bool {
+        // Skip OC-incompatible categories early
+        let skip_for_objc = matches!(
+            error.category.as_str(),
+            "build/header_guard" | "readability/casting" | "whitespace/operators"
+        );
+        if self.is_objc && skip_for_objc {
+            if debug {
+                eprintln!("[cpplint-fixer] Skipping {} for OC file", error.category);
+            }
+            return false;
+        }
+
+        let fixed = match error.category.as_str() {
+            "build/header_guard" if self.config.header_guard_mode == HeaderGuardMode::FixName => {
+                self.fix_header_guard_from_error(lines, error)
+            }
+            "build/header_guard"
+                if self.config.header_guard_mode == HeaderGuardMode::PragmaOnce =>
+            {
+                self.convert_to_pragma_once(lines)
+            }
+            "build/header_guard" => false,
+            "readability/todo" => self.fix_todo_from_error(lines, error),
+            "legal/copyright" => self.fix_copyright_from_error(lines),
+            "readability/casting" => self.fix_c_style_cast(lines, error),
+            "readability/check" => self.fix_assert_check(lines, error),
+            "whitespace/comments" => self.fix_comment_spacing(lines, error),
+            "whitespace/semicolon" => self.fix_empty_semicolon(lines, error),
+            "whitespace/comma" => self.fix_comma_spacing(lines, error),
+            "whitespace/operators" => self.fix_operator_spacing(lines, error),
+            _ => {
+                if debug {
+                    eprintln!(
+                        "[cpplint-fixer] Skipping unsupported category: {}",
+                        error.category
+                    );
+                }
+                return false;
+            }
+        };
+
+        if fixed && debug {
+            eprintln!(
+                "[cpplint-fixer] Fixed {} at line {}",
+                error.category, error.line
+            );
+        }
+        fixed
     }
 
     /// Fix header guard based on cpplint error message
