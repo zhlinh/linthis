@@ -68,25 +68,11 @@ pub fn handle_license_command(params: LicenseCommandParams) -> ExitCode {
     };
 
     // Load policy
-    let license_policy = if let Some(ref policy_path) = policy_file {
-        match std::fs::read_to_string(policy_path) {
-            Ok(content) => match LicensePolicy::from_toml(&content) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("{}: {}", "Failed to load policy file".red(), e);
-                    return ExitCode::from(1);
-                }
-            },
-            Err(e) => {
-                eprintln!("{}: {}", "Failed to read policy file".red(), e);
-                return ExitCode::from(1);
-            }
-        }
-    } else {
-        match policy.as_str() {
-            "strict" => LicensePolicy::strict(),
-            "permissive" => LicensePolicy::permissive(),
-            _ => LicensePolicy::default(),
+    let license_policy = match load_license_policy(&policy, &policy_file) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", e);
+            return ExitCode::from(1);
         }
     };
 
@@ -132,5 +118,24 @@ pub fn handle_license_command(params: LicenseCommandParams) -> ExitCode {
             eprintln!("{}: {}", "License scan failed".red().bold(), e);
             ExitCode::from(1)
         }
+    }
+}
+
+/// Load license policy from file or preset name.
+fn load_license_policy(
+    policy: &str,
+    policy_file: &Option<PathBuf>,
+) -> Result<LicensePolicy, String> {
+    if let Some(ref policy_path) = policy_file {
+        let content = std::fs::read_to_string(policy_path)
+            .map_err(|e| format!("{}: {}", "Failed to read policy file".red(), e))?;
+        LicensePolicy::from_toml(&content)
+            .map_err(|e| format!("{}: {}", "Failed to load policy file".red(), e))
+    } else {
+        Ok(match policy {
+            "strict" => LicensePolicy::strict(),
+            "permissive" => LicensePolicy::permissive(),
+            _ => LicensePolicy::default(),
+        })
     }
 }

@@ -1828,6 +1828,56 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         RunMode::FormatOnly => RunModeKind::FormatOnly,
     };
 
+    // Scan and discover files
+    let files = scan_files(options);
+
+    let file_langs: Vec<_> = files
+        .iter()
+        .filter_map(|f| Language::from_path(f).map(|l| (f, l)))
+        .collect();
+    result.total_files = file_langs.len();
+
+    // Pre-flight: auto-install missing tools
+    if !file_langs.is_empty() {
+        run_pre_flight_install(&file_langs, options, files.len());
+    }
+
+    // Load config and cache
+    let project_root = utils::get_project_root();
+    let config = Config::load_merged(&project_root);
+    let cache = load_cache(
+        options.no_cache,
+        &options.mode,
+        options.verbose,
+        Some(config.retention.cache_days),
+    );
+    let rule_filter = RuleFilter::from_config(&config.rules);
+    let custom_checker = load_custom_checker(&config, options.verbose);
+
+    // Dispatch to mode-specific handler
+    match options.mode {
+        RunMode::Both => run_both_mode(&file_langs, options, &cache, &project_root, &mut result),
+        RunMode::CheckOnly => run_check_only_mode(&file_langs, options, &cache, &project_root, &mut result),
+        RunMode::FormatOnly => run_format_only_mode(&file_langs, options, &mut result),
+    }
+
+    // Run custom rules and apply filters
+    run_custom_rules(&custom_checker, &file_langs, options, &mut result);
+    apply_rule_filter(&rule_filter, &mut result, options.verbose);
+
+    // Finalize
+    result.count_files_with_issues();
+    result.calculate_exit_code();
+    result.duration_ms = start.elapsed().as_millis() as u64;
+    result.unavailable_tools = collect_unavailable_tools();
+
+    finalize_cache(cache, &project_root, options.quiet, options.verbose);
+
+    Ok(result)
+}
+
+/// Scan file system for files to process, printing status messages.
+fn scan_files(options: &RunOptions) -> Vec<std::path::PathBuf> {
     if !options.quiet && !options.plugins.is_empty() {
         eprintln!("📦 Plugins: {}", options.plugins.join(", "));
     }
@@ -1862,76 +1912,57 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         eprintln!("Found {} files to process", files.len());
     }
 
-    let file_langs: Vec<_> = files
-        .iter()
-        .filter_map(|f| Language::from_path(f).map(|l| (f, l)))
-        .collect();
-    result.total_files = file_langs.len();
+    files
+}
 
-    // Pre-flight: auto-install missing tools
-    if !file_langs.is_empty() {
-        let (installed, failed) = pre_flight_install(
-            &file_langs, &options.mode, &options.tool_install_mode, options.quiet,
-        );
-        if (!installed.is_empty() || !failed.is_empty()) && !options.quiet {
-            print_found_files_status(files.len());
-        }
-        handle_install_failures(&failed, files.len(), options.quiet);
-    }
-
-    let project_root = utils::get_project_root();
-    let config = Config::load_merged(&project_root);
-    let cache = load_cache(
-        options.no_cache,
+/// Run pre-flight tool installation checks.
+fn run_pre_flight_install(
+    file_langs: &[(&std::path::PathBuf, Language)],
+    options: &RunOptions,
+    file_count: usize,
+) {
+    let (installed, failed) = pre_flight_install(
+        file_langs,
         &options.mode,
-        options.verbose,
-        Some(config.retention.cache_days),
+        &options.tool_install_mode,
+        options.quiet,
     );
-    let rule_filter = RuleFilter::from_config(&config.rules);
-    let custom_checker = if config.rules.has_custom_rules() {
-        match CustomRulesChecker::new(&config.rules.custom) {
-            Ok(checker) => {
-                if options.verbose {
-                    eprintln!("Loaded {} custom rules", checker.rule_count());
-                }
-                Some(checker)
+    if (!installed.is_empty() || !failed.is_empty()) && !options.quiet {
+        print_found_files_status(file_count);
+    }
+    handle_install_failures(&failed, file_count, options.quiet);
+}
+
+/// Load custom rules checker from config.
+fn load_custom_checker(config: &Config, verbose: bool) -> Option<CustomRulesChecker> {
+    if !config.rules.has_custom_rules() {
+        return None;
+    }
+    match CustomRulesChecker::new(&config.rules.custom) {
+        Ok(checker) => {
+            if verbose {
+                eprintln!("Loaded {} custom rules", checker.rule_count());
             }
-            Err(e) => {
-                eprintln!("\x1b[33mWarning\x1b[0m: Failed to load custom rules: {}", e);
-                None
-            }
+            Some(checker)
         }
-    } else {
-        None
-    };
-
-    // Dispatch to mode-specific handler
-    match options.mode {
-        RunMode::Both => run_both_mode(&file_langs, options, &cache, &project_root, &mut result),
-        RunMode::CheckOnly => run_check_only_mode(&file_langs, options, &cache, &project_root, &mut result),
-        RunMode::FormatOnly => run_format_only_mode(&file_langs, options, &mut result),
+        Err(e) => {
+            eprintln!("\x1b[33mWarning\x1b[0m: Failed to load custom rules: {}", e);
+            None
+        }
     }
+}
 
-    // Run custom rules
-    run_custom_rules(&custom_checker, &file_langs, options, &mut result);
-
-    // Apply rule filter
+/// Apply rule filter to issues and log if verbose.
+fn apply_rule_filter(rule_filter: &RuleFilter, result: &mut RunResult, verbose: bool) {
     let original_count = result.issues.len();
-    result.issues = rule_filter.filter_issues(result.issues);
+    result.issues = rule_filter.filter_issues(std::mem::take(&mut result.issues));
     let filtered_count = original_count - result.issues.len();
-    if options.verbose && filtered_count > 0 {
-        eprintln!("Filtered out {} issues based on rules configuration", filtered_count);
+    if verbose && filtered_count > 0 {
+        eprintln!(
+            "Filtered out {} issues based on rules configuration",
+            filtered_count
+        );
     }
-
-    // Finalize
-    result.count_files_with_issues();
-    result.calculate_exit_code();
-    result.duration_ms = start.elapsed().as_millis() as u64;
-    result.unavailable_tools = collect_unavailable_tools();
-
-    finalize_cache(cache, &project_root, options.quiet, options.verbose);
-
-    Ok(result)
 }
 
 // Re-export commonly used types

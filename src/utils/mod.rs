@@ -427,6 +427,38 @@ pub fn get_gitignore_patterns(project_root: &Path) -> Vec<String> {
     patterns
 }
 
+/// Check if a file contains a `.linthis` ignore entry.
+fn file_has_linthis_ignore(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|c| has_linthis_ignore(&c))
+        .unwrap_or(false)
+}
+
+/// Resolve the global gitignore path from git config or default ~/.gitignore_global.
+fn resolve_global_gitignore_path() -> Option<std::path::PathBuf> {
+    let global_path = std::process::Command::new("git")
+        .args(["config", "--global", "core.excludesFile"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    global_path
+        .map(|p| {
+            if p.starts_with('~') {
+                if let Ok(home) = std::env::var("HOME") {
+                    return std::path::PathBuf::from(p.replacen('~', &home, 1));
+                }
+            }
+            std::path::PathBuf::from(p)
+        })
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| std::path::PathBuf::from(h).join(".gitignore_global"))
+        })
+}
+
 /// Check if any of the given file contents already contain a `.linthis` ignore entry.
 fn has_linthis_ignore(content: &str) -> bool {
     content
@@ -443,53 +475,20 @@ fn has_linthis_ignore(content: &str) -> bool {
 pub fn ensure_gitignore_has_linthis(project_root: &Path) {
     // 1. Check project .gitignore
     let gitignore_path = project_root.join(".gitignore");
-    let existing = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
-    if has_linthis_ignore(&existing) {
+    if file_has_linthis_ignore(&gitignore_path) {
         return;
     }
 
-    // 2. Check global gitignore (core.excludesFile or ~/.gitignore_global)
-    let global_path = std::process::Command::new("git")
-        .args(["config", "--global", "core.excludesFile"])
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(o.stdout)
-            } else {
-                None
-            }
-        })
-        .map(|b| String::from_utf8_lossy(&b).trim().to_string());
-    let global_gitignore = global_path
-        .map(|p| {
-            // Expand ~ to home directory
-            if p.starts_with('~') {
-                if let Ok(home) = std::env::var("HOME") {
-                    return std::path::PathBuf::from(p.replacen('~', &home, 1));
-                }
-            }
-            std::path::PathBuf::from(p)
-        })
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| std::path::PathBuf::from(h).join(".gitignore_global"))
-        });
-    if let Some(ref path) = global_gitignore {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if has_linthis_ignore(&content) {
-                return;
-            }
-        }
+    // 2. Check global gitignore
+    let global_gitignore = resolve_global_gitignore_path();
+    if global_gitignore.as_ref().is_some_and(|p| file_has_linthis_ignore(p)) {
+        return;
     }
 
     // 3. Check .git/info/exclude
     let exclude_path = project_root.join(".git").join("info").join("exclude");
-    if let Ok(content) = std::fs::read_to_string(&exclude_path) {
-        if has_linthis_ignore(&content) {
-            return;
-        }
+    if file_has_linthis_ignore(&exclude_path) {
+        return;
     }
 
     // Not ignored anywhere — prefer adding to global gitignore (less project impact)
