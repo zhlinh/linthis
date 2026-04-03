@@ -31,7 +31,7 @@ pub struct SelfUpdateConfig {
     #[serde(default = "default_mode")]
     pub mode: String,
 
-    /// Check for updates every N days (supports decimals, e.g. 0.5 = 12 hours; 0 = 12 hours)
+    /// Check for updates every N days (supports decimals, e.g. 0.5 = 12 hours; 0 = disabled)
     #[serde(default = "default_interval_days")]
     pub interval_days: f64,
 }
@@ -79,7 +79,7 @@ impl SelfUpdateConfig {
         }
 
         if self.interval_days < 0.0 {
-            return Err("interval_days must be >= 0 (0 means every 12 hours)".to_string());
+            return Err("interval_days must be >= 0 (0 means disabled)".to_string());
         }
 
         Ok(())
@@ -116,8 +116,12 @@ impl SelfUpdateManager {
             .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
     }
 
-    /// Check if it's time to check for updates
+    /// Check if it's time to check for updates.
+    /// Returns false if interval_days is 0 (disabled).
     pub fn should_check(&self, interval_days: f64) -> bool {
+        if interval_days <= 0.0 {
+            return false; // 0 = disabled
+        }
         match self.get_last_check_time() {
             Some(last_check) => {
                 let now = SystemTime::now()
@@ -125,9 +129,7 @@ impl SelfUpdateManager {
                     .unwrap()
                     .as_secs();
                 let elapsed_secs = now.saturating_sub(last_check);
-                // 0 means every 12 hours (minimum 0.5 days)
-                let effective_days = if interval_days <= 0.0 { 0.5 } else { interval_days };
-                let interval_secs = (effective_days * 86400.0) as u64;
+                let interval_secs = (interval_days * 86400.0) as u64;
                 elapsed_secs >= interval_secs
             }
             None => true, // Never checked before
