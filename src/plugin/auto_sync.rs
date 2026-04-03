@@ -35,7 +35,7 @@ pub struct AutoSyncConfig {
     #[serde(default = "default_mode")]
     pub mode: String,
 
-    /// Sync interval in days (supports decimals, e.g. 0.5 = 12 hours; 0 = 12 hours)
+    /// Sync interval in days (supports decimals, e.g. 0.5 = 12 hours; 0 = disabled)
     #[serde(default = "default_interval_days")]
     pub interval_days: f64,
 }
@@ -75,7 +75,7 @@ impl AutoSyncConfig {
         }
         if self.interval_days < 0.0 {
             return Err(PluginError::ValidationError {
-                message: "auto_sync.interval_days must be >= 0 (0 means every 12 hours)".to_string(),
+                message: "auto_sync.interval_days must be >= 0 (0 means disabled)".to_string(),
             });
         }
         Ok(())
@@ -177,10 +177,12 @@ impl AutoSyncManager {
             }
         };
 
+        if config.interval_days <= 0.0 {
+            return Ok(false); // 0 = disabled
+        }
+
         let now = Self::current_time()?;
-        // 0 means every 12 hours (minimum 0.5 days)
-        let effective_days = if config.interval_days <= 0.0 { 0.5 } else { config.interval_days };
-        let interval_seconds = (effective_days * 86400.0) as u64;
+        let interval_seconds = (config.interval_days * 86400.0) as u64;
         let elapsed = now.saturating_sub(last_sync);
 
         Ok(elapsed >= interval_seconds)
