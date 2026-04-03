@@ -1409,6 +1409,38 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     // ═══════════════════════════════════════════════════════════
     // Phase 2: Interactive review (no waiting)
     // ═══════════════════════════════════════════════════════════
+    let fix_result = run_interactive_review(
+        issues,
+        &cached_suggestions,
+        config,
+        errors,
+        successful,
+    );
+
+    print_fix_summary(&fix_result);
+    fix_result
+}
+
+/// Action to take after reviewing a suggestion
+enum ReviewAction {
+    Next,
+    Previous,
+    GoTo(usize),
+    Ignore,
+    AcceptAll,
+    Quit,
+}
+
+/// Run the interactive review phase: iterate through issues, show suggestions, handle user input.
+fn run_interactive_review(
+    issues: &[LintIssue],
+    cached_suggestions: &[CachedSuggestion],
+    config: &AiFixConfig,
+    errors: usize,
+    successful: usize,
+) -> AiFixResult {
+    let total = issues.len();
+
     println!("{}", "─".repeat(60).dimmed());
     println!(
         "  {} Review suggestions (no more waiting)",
@@ -1432,69 +1464,8 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
         let issue = &issues[idx];
         let cached = &cached_suggestions[idx];
 
-        // Show issue header (same format as non-AI mode)
-        println!();
-        println!("{}", "─".repeat(60).dimmed());
+        print_issue_header(issue, idx, total, config.verbose);
 
-        // Severity badge
-        let current = idx + 1;
-        let severity_badge = match issue.severity {
-            Severity::Error => format!("[E{}]", current).red().bold(),
-            Severity::Warning => format!("[W{}]", current).yellow().bold(),
-            Severity::Info => format!("[I{}]", current).blue(),
-        };
-
-        // Language and source tags
-        let lang_tag = issue
-            .language
-            .map(|l| format!("[{}]", format!("{:?}", l).to_lowercase()))
-            .unwrap_or_default()
-            .dimmed();
-
-        let source_tag = issue
-            .source
-            .as_ref()
-            .map(|s| format!("[{}]", s))
-            .unwrap_or_default()
-            .dimmed();
-
-        // File location
-        let location = if let Some(col) = issue.column {
-            format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
-        } else {
-            format!("{}:{}", issue.file_path.display(), issue.line)
-        };
-
-        // Progress indicator
-        let progress = format!("({}/{})", current, total).dimmed();
-
-        println!(
-            "  {} {}{} {} {}",
-            severity_badge,
-            lang_tag,
-            source_tag,
-            location.white().bold(),
-            progress
-        );
-
-        // Code context
-        print_code_context(issue);
-
-        // Message and code
-        if let Some(ref code) = issue.code {
-            println!("  {} ({})", issue.message, code.cyan());
-        } else {
-            println!("  {}", issue.message);
-        }
-
-        // Verbose mode: show additional info
-        if config.verbose {
-            if let Some(ref suggestion) = issue.suggestion {
-                println!("  {} {}", "-->".green(), suggestion);
-            }
-        }
-
-        // Show cached suggestions
         let (applied, action) = show_cached_suggestions(issue, &cached.result, idx, total);
 
         if applied {
@@ -1553,114 +1524,18 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
                 idx += 1;
             }
             ReviewAction::AcceptAll => {
-                println!();
-                println!(
-                    "  {} Applying all remaining suggestions...",
-                    "→".cyan().bold()
+                apply_remaining_from(
+                    idx,
+                    applied,
+                    issues,
+                    cached_suggestions,
+                    &mut processed,
+                    &mut fix_result,
                 );
-                println!();
-
-                // Apply current issue first (if not already applied)
-                if !applied && !processed[idx] {
-                    let current_cached = &cached_suggestions[idx];
-                    if let Some(suggestion) = current_cached.result.suggestions.first() {
-                        let current_issue = &issues[idx];
-                        let original_content = fs::read_to_string(&current_issue.file_path).ok();
-                        let original_lines: Vec<&str> = original_content
-                            .as_ref()
-                            .map(|c| c.lines().collect())
-                            .unwrap_or_default();
-                        let start_line = current_issue.line;
-                        let end_line = suggestion.end_line.max(current_issue.line);
-
-                        if apply_suggestion(current_issue, suggestion) {
-                            println!(
-                                "  {} Applied issue #{} ({}:{})",
-                                "✓".green(),
-                                idx + 1,
-                                current_issue.file_path.display(),
-                                current_issue.line
-                            );
-                            print_suggestion_diff(
-                                &original_lines,
-                                suggestion,
-                                start_line,
-                                end_line,
-                            );
-                            fix_result.applied += 1;
-                            fix_result
-                                .modified_files
-                                .insert(current_issue.file_path.clone());
-                        } else {
-                            println!("  {} Failed to apply issue #{}", "✗".red(), idx + 1);
-                            fix_result.skipped += 1;
-                        }
-                    }
-                }
-                processed[idx] = true;
-
-                // Apply remaining issues
-                for remaining_idx in (idx + 1)..total {
-                    if processed[remaining_idx] {
-                        continue;
-                    }
-
-                    let remaining_cached = &cached_suggestions[remaining_idx];
-                    let remaining_issue = &issues[remaining_idx];
-
-                    if remaining_cached.result.error.is_some()
-                        || remaining_cached.result.suggestions.is_empty()
-                    {
-                        fix_result.skipped += 1;
-                        processed[remaining_idx] = true;
-                        continue;
-                    }
-
-                    if let Some(suggestion) = remaining_cached.result.suggestions.first() {
-                        let original_content = fs::read_to_string(&remaining_issue.file_path).ok();
-                        let original_lines: Vec<&str> = original_content
-                            .as_ref()
-                            .map(|c| c.lines().collect())
-                            .unwrap_or_default();
-                        let start_line = remaining_issue.line;
-                        let end_line = suggestion.end_line.max(remaining_issue.line);
-
-                        if apply_suggestion(remaining_issue, suggestion) {
-                            println!(
-                                "  {} Applied issue #{} ({}:{})",
-                                "✓".green(),
-                                remaining_idx + 1,
-                                remaining_issue.file_path.display(),
-                                remaining_issue.line
-                            );
-                            print_suggestion_diff(
-                                &original_lines,
-                                suggestion,
-                                start_line,
-                                end_line,
-                            );
-                            fix_result.applied += 1;
-                            fix_result
-                                .modified_files
-                                .insert(remaining_issue.file_path.clone());
-                        } else {
-                            println!(
-                                "  {} Failed to apply issue #{}",
-                                "✗".red(),
-                                remaining_idx + 1
-                            );
-                            fix_result.skipped += 1;
-                        }
-                    }
-                    processed[remaining_idx] = true;
-                }
-
-                // All done, exit the loop
                 break;
             }
             ReviewAction::Quit => {
                 fix_result.quit_early = true;
-                // Count unprocessed as skipped
                 for (i, &was_processed) in processed.iter().enumerate() {
                     if !was_processed && i >= idx {
                         fix_result.skipped += 1;
@@ -1671,7 +1546,141 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
         }
     }
 
-    // Print summary
+    fix_result
+}
+
+/// Print the issue header with severity badge, location, code context, and message.
+fn print_issue_header(issue: &LintIssue, idx: usize, total: usize, verbose: bool) {
+    println!();
+    println!("{}", "─".repeat(60).dimmed());
+
+    let current = idx + 1;
+    let severity_badge = match issue.severity {
+        Severity::Error => format!("[E{}]", current).red().bold(),
+        Severity::Warning => format!("[W{}]", current).yellow().bold(),
+        Severity::Info => format!("[I{}]", current).blue(),
+    };
+
+    let lang_tag = issue
+        .language
+        .map(|l| format!("[{}]", format!("{:?}", l).to_lowercase()))
+        .unwrap_or_default()
+        .dimmed();
+
+    let source_tag = issue
+        .source
+        .as_ref()
+        .map(|s| format!("[{}]", s))
+        .unwrap_or_default()
+        .dimmed();
+
+    let location = if let Some(col) = issue.column {
+        format!("{}:{}:{}", issue.file_path.display(), issue.line, col)
+    } else {
+        format!("{}:{}", issue.file_path.display(), issue.line)
+    };
+
+    let progress = format!("({}/{})", current, total).dimmed();
+
+    println!(
+        "  {} {}{} {} {}",
+        severity_badge, lang_tag, source_tag, location.white().bold(), progress
+    );
+
+    print_code_context(issue);
+
+    if let Some(ref code) = issue.code {
+        println!("  {} ({})", issue.message, code.cyan());
+    } else {
+        println!("  {}", issue.message);
+    }
+
+    if verbose {
+        if let Some(ref suggestion) = issue.suggestion {
+            println!("  {} {}", "-->".green(), suggestion);
+        }
+    }
+}
+
+/// Apply all remaining suggestions starting from `start_idx`.
+fn apply_remaining_from(
+    start_idx: usize,
+    current_applied: bool,
+    issues: &[LintIssue],
+    cached_suggestions: &[CachedSuggestion],
+    processed: &mut [bool],
+    fix_result: &mut AiFixResult,
+) {
+    println!();
+    println!(
+        "  {} Applying all remaining suggestions...",
+        "→".cyan().bold()
+    );
+    println!();
+
+    let total = issues.len();
+
+    // Apply current issue first (if not already applied)
+    if !current_applied && !processed[start_idx] {
+        apply_single_suggestion(start_idx, issues, cached_suggestions, fix_result);
+    }
+    processed[start_idx] = true;
+
+    // Apply remaining issues
+    for remaining_idx in (start_idx + 1)..total {
+        if processed[remaining_idx] {
+            continue;
+        }
+        let remaining_cached = &cached_suggestions[remaining_idx];
+        if remaining_cached.result.error.is_some() || remaining_cached.result.suggestions.is_empty()
+        {
+            fix_result.skipped += 1;
+            processed[remaining_idx] = true;
+            continue;
+        }
+        apply_single_suggestion(remaining_idx, issues, cached_suggestions, fix_result);
+        processed[remaining_idx] = true;
+    }
+}
+
+/// Apply a single suggestion at the given index and update fix_result.
+fn apply_single_suggestion(
+    idx: usize,
+    issues: &[LintIssue],
+    cached_suggestions: &[CachedSuggestion],
+    fix_result: &mut AiFixResult,
+) {
+    let cached = &cached_suggestions[idx];
+    let issue = &issues[idx];
+    if let Some(suggestion) = cached.result.suggestions.first() {
+        let original_content = fs::read_to_string(&issue.file_path).ok();
+        let original_lines: Vec<&str> = original_content
+            .as_ref()
+            .map(|c| c.lines().collect())
+            .unwrap_or_default();
+        let start_line = issue.line;
+        let end_line = suggestion.end_line.max(issue.line);
+
+        if apply_suggestion(issue, suggestion) {
+            println!(
+                "  {} Applied issue #{} ({}:{})",
+                "✓".green(),
+                idx + 1,
+                issue.file_path.display(),
+                issue.line
+            );
+            print_suggestion_diff(&original_lines, suggestion, start_line, end_line);
+            fix_result.applied += 1;
+            fix_result.modified_files.insert(issue.file_path.clone());
+        } else {
+            println!("  {} Failed to apply issue #{}", "✗".red(), idx + 1);
+            fix_result.skipped += 1;
+        }
+    }
+}
+
+/// Print the AI fix summary box.
+fn print_fix_summary(fix_result: &AiFixResult) {
     println!();
     println!("{}", "═".repeat(60).dimmed());
     println!("  {}", "AI Fix Summary".bold());
@@ -1688,18 +1697,6 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     }
     println!("{}", "═".repeat(60).dimmed());
     println!();
-
-    fix_result
-}
-
-/// Action to take after reviewing a suggestion
-enum ReviewAction {
-    Next,
-    Previous,
-    GoTo(usize),
-    Ignore,
-    AcceptAll,
-    Quit,
 }
 
 /// Show cached suggestions and handle user interaction
@@ -1739,44 +1736,53 @@ fn show_cached_suggestions(
 
     // Show each suggestion as diff
     for (idx, suggestion) in result.suggestions.iter().enumerate() {
-        println!(
-            "  {} {}",
-            format!("[{}]", idx + 1).cyan().bold(),
-            "Suggestion:".bold()
-        );
-
-        // Show suggestion as diff preview
+        print_single_suggestion(idx, suggestion);
         print_suggestion_preview(issue, suggestion);
-
-        // Show explanation if available
-        if let Some(ref explanation) = suggestion.explanation {
-            println!("  {} {}", "Explanation:".dimmed(), explanation);
-        }
-
-        // Show confidence if available
-        if let Some(confidence) = suggestion.confidence {
-            let confidence_str = format!("{:.0}%", confidence * 100.0);
-            let colored = if confidence >= 0.8 {
-                confidence_str.green()
-            } else if confidence >= 0.5 {
-                confidence_str.yellow()
-            } else {
-                confidence_str.red()
-            };
-            println!("  {} {}", "Confidence:".dimmed(), colored);
-        }
-
-        println!();
     }
 
-    // Show options
+    // Show options and get user input
+    print_review_menu(issue, current, total, result.suggestions.len());
+    handle_review_input(issue, result)
+}
+
+/// Print a single suggestion with preview, explanation, and confidence.
+fn print_single_suggestion(idx: usize, suggestion: &FixSuggestion) {
+    println!(
+        "  {} {}",
+        format!("[{}]", idx + 1).cyan().bold(),
+        "Suggestion:".bold()
+    );
+
+    // Note: print_suggestion_preview needs issue context, called by caller if needed
+
+    if let Some(ref explanation) = suggestion.explanation {
+        println!("  {} {}", "Explanation:".dimmed(), explanation);
+    }
+
+    if let Some(confidence) = suggestion.confidence {
+        let confidence_str = format!("{:.0}%", confidence * 100.0);
+        let colored = if confidence >= 0.8 {
+            confidence_str.green()
+        } else if confidence >= 0.5 {
+            confidence_str.yellow()
+        } else {
+            confidence_str.red()
+        };
+        println!("  {} {}", "Confidence:".dimmed(), colored);
+    }
+
+    println!();
+}
+
+/// Print the review options menu.
+fn print_review_menu(issue: &LintIssue, current: usize, total: usize, suggestion_count: usize) {
     let nolint_desc = describe_nolint_action(issue);
     println!(
         "  {}",
         format!("Issue {}/{}", current + 1, total).bold().cyan()
     );
     println!();
-    for i in 1..=result.suggestions.len() {
+    for i in 1..=suggestion_count {
         if i == 1 {
             println!(
                 "    [{}] Apply suggestion #{} {}",
@@ -1806,10 +1812,14 @@ fn show_cached_suggestions(
     println!();
     print!("  > ");
     io::stdout().flush().ok();
+}
 
+/// Handle user input for the review menu and return (applied, action).
+fn handle_review_input(
+    issue: &LintIssue,
+    result: &SuggestionResult,
+) -> (bool, ReviewAction) {
     let input = read_line().trim().to_lowercase();
-
-    // Empty input (Enter) applies suggestion #1 by default
     let input = if input.is_empty() { "1" } else { &input };
 
     match input {
@@ -1818,14 +1828,13 @@ fn show_cached_suggestions(
         "s" | "skip" => (false, ReviewAction::Next),
         "p" | "prev" | "previous" => (false, ReviewAction::Previous),
         "q" | "quit" => (false, ReviewAction::Quit),
-        input if input.starts_with("g") => {
+        input if input.starts_with('g') => {
             let parts: Vec<&str> = input.split_whitespace().collect();
             if parts.len() >= 2 {
                 if let Ok(num) = parts[1].parse::<usize>() {
                     return (false, ReviewAction::GoTo(num));
                 }
             }
-            // Prompt for number
             print!("  {} ", "Go to issue #:".cyan());
             io::stdout().flush().ok();
             let num_input = read_line().trim().to_string();
@@ -1836,36 +1845,40 @@ fn show_cached_suggestions(
                 (false, ReviewAction::Next)
             }
         }
-        _ => {
-            // Try to parse as number for applying suggestion
-            if let Ok(num) = input.parse::<usize>() {
-                if num >= 1 && num <= result.suggestions.len() {
-                    let suggestion = &result.suggestions[num - 1];
-                    // Capture original content before applying
-                    let original_content = fs::read_to_string(&issue.file_path).ok();
-                    let original_lines: Vec<&str> = original_content
-                        .as_ref()
-                        .map(|c| c.lines().collect())
-                        .unwrap_or_default();
-                    let start_line = issue.line;
-                    let end_line = suggestion.end_line.max(issue.line);
+        _ => try_apply_numbered_suggestion(issue, result, input),
+    }
+}
 
-                    if apply_suggestion(issue, suggestion) {
-                        println!("  {} Applied suggestion #{}!", "✓".green(), num);
-                        println!();
-                        // Show diff after applying
-                        print_suggestion_diff(&original_lines, suggestion, start_line, end_line);
-                        return (true, ReviewAction::Next);
-                    } else {
-                        println!("  {} Failed to apply suggestion.", "✗".red());
-                        return (false, ReviewAction::Next);
-                    }
-                }
+/// Try to parse input as a suggestion number and apply it.
+fn try_apply_numbered_suggestion(
+    issue: &LintIssue,
+    result: &SuggestionResult,
+    input: &str,
+) -> (bool, ReviewAction) {
+    if let Ok(num) = input.parse::<usize>() {
+        if num >= 1 && num <= result.suggestions.len() {
+            let suggestion = &result.suggestions[num - 1];
+            let original_content = fs::read_to_string(&issue.file_path).ok();
+            let original_lines: Vec<&str> = original_content
+                .as_ref()
+                .map(|c| c.lines().collect())
+                .unwrap_or_default();
+            let start_line = issue.line;
+            let end_line = suggestion.end_line.max(issue.line);
+
+            if apply_suggestion(issue, suggestion) {
+                println!("  {} Applied suggestion #{}!", "✓".green(), num);
+                println!();
+                print_suggestion_diff(&original_lines, suggestion, start_line, end_line);
+                return (true, ReviewAction::Next);
+            } else {
+                println!("  {} Failed to apply suggestion.", "✗".red());
+                return (false, ReviewAction::Next);
             }
-            println!("  {} Invalid choice, skipping.", "Invalid:".yellow());
-            (false, ReviewAction::Next)
         }
     }
+    println!("  {} Invalid choice, skipping.", "Invalid:".yellow());
+    (false, ReviewAction::Next)
 }
 
 /// Prompt for navigation only (when no suggestions available)
