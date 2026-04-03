@@ -539,4 +539,143 @@ pub fn ensure_gitignore_has_linthis(project_root: &Path) {
             eprintln!("[linthis] Please add '.linthis/' to your gitignore manually");
         }
     }
+
+    // Also exclude from IDE search indexes
+    ensure_ide_exclude_linthis(project_root);
+}
+
+/// Exclude `.linthis/` from IDE search indexes.
+/// Only modifies IDE config if the IDE directory already exists.
+fn ensure_ide_exclude_linthis(project_root: &Path) {
+    ensure_jetbrains_exclude(project_root);
+    ensure_vscode_exclude(project_root);
+}
+
+/// Add `.linthis` as excluded folder in JetBrains `.iml` files.
+fn ensure_jetbrains_exclude(project_root: &Path) {
+    let idea_dir = project_root.join(".idea");
+    if !idea_dir.is_dir() {
+        return;
+    }
+
+    // Find .iml files in .idea/
+    let entries = match std::fs::read_dir(&idea_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let exclude_url = "file://$MODULE_DIR$/.linthis";
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "iml") {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Already excluded
+        if content.contains(exclude_url) {
+            continue;
+        }
+
+        // Insert <excludeFolder> inside <content url="file://$MODULE_DIR$">
+        let marker = "<content url=\"file://$MODULE_DIR$\"";
+        if let Some(pos) = content.find(marker) {
+            // Find the closing > or /> of the content tag
+            let after_marker = &content[pos..];
+            if let Some(close_pos) = after_marker.find("/>") {
+                // Self-closing <content ... /> — expand it
+                let insert_at = pos + close_pos;
+                let new_content = format!(
+                    "{}>\n      <excludeFolder url=\"{}\" />\n    </content{}",
+                    &content[..insert_at],
+                    exclude_url,
+                    &content[insert_at + 2..] // skip "/>"
+                );
+                if std::fs::write(&path, &new_content).is_ok() {
+                    eprintln!(
+                        "[linthis] Added .linthis/ exclude to {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    );
+                }
+            } else if let Some(close_pos) = after_marker.find('>') {
+                // <content ...> with children — insert before </content>
+                let content_start = pos + close_pos + 1;
+                let remaining = &content[content_start..];
+                if let Some(end_pos) = remaining.find("</content>") {
+                    let insert_at = content_start + end_pos;
+                    let new_content = format!(
+                        "{}      <excludeFolder url=\"{}\" />\n    {}",
+                        &content[..insert_at],
+                        exclude_url,
+                        &content[insert_at..]
+                    );
+                    if std::fs::write(&path, &new_content).is_ok() {
+                        eprintln!(
+                            "[linthis] Added .linthis/ exclude to {}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Add `.linthis` to VS Code search.exclude in `.vscode/settings.json`.
+fn ensure_vscode_exclude(project_root: &Path) {
+    let vscode_dir = project_root.join(".vscode");
+    if !vscode_dir.is_dir() {
+        return;
+    }
+
+    let settings_path = vscode_dir.join("settings.json");
+    let content = std::fs::read_to_string(&settings_path).unwrap_or_default();
+
+    // Already excluded
+    if content.contains("\".linthis\"") || content.contains("\".linthis/\"") {
+        return;
+    }
+
+    if content.is_empty() || content.trim().is_empty() {
+        // Create new settings file
+        let new_content = "{\n  \"search.exclude\": {\n    \".linthis\": true\n  }\n}\n";
+        if std::fs::write(&settings_path, new_content).is_ok() {
+            eprintln!("[linthis] Added .linthis/ to .vscode/settings.json search.exclude");
+        }
+        return;
+    }
+
+    // Parse existing JSON
+    let mut json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    // Add to search.exclude
+    let search_exclude = json
+        .as_object_mut()
+        .and_then(|obj| {
+            if !obj.contains_key("search.exclude") {
+                obj.insert("search.exclude".to_string(), serde_json::json!({}));
+            }
+            obj.get_mut("search.exclude")
+        })
+        .and_then(|v| v.as_object_mut());
+
+    if let Some(exclude) = search_exclude {
+        exclude.insert(".linthis".to_string(), serde_json::json!(true));
+    } else {
+        return;
+    }
+
+    if let Ok(formatted) = serde_json::to_string_pretty(&json) {
+        let output = format!("{}\n", formatted);
+        if std::fs::write(&settings_path, &output).is_ok() {
+            eprintln!("[linthis] Added .linthis/ to .vscode/settings.json search.exclude");
+        }
+    }
 }
