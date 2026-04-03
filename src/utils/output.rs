@@ -1009,9 +1009,18 @@ fn filter_issues_by_exit_code(issues: &[LintIssue], exit_code: i32) -> Vec<&Lint
 
 /// Append summary line (e.g. "2 errors, 1 warning in 3 files") to output.
 fn append_issue_summary(output: &mut String, issues: &[&LintIssue], ctx: &HookBoxContext) {
-    let error_count = issues.iter().filter(|i| i.severity == Severity::Error).count();
-    let warning_count = issues.iter().filter(|i| i.severity == Severity::Warning).count();
-    let info_count = issues.iter().filter(|i| i.severity == Severity::Info).count();
+    let error_count = issues
+        .iter()
+        .filter(|i| i.severity == Severity::Error)
+        .count();
+    let warning_count = issues
+        .iter()
+        .filter(|i| i.severity == Severity::Warning)
+        .count();
+    let info_count = issues
+        .iter()
+        .filter(|i| i.severity == Severity::Info)
+        .count();
     let files_with_issues = {
         let mut files = std::collections::HashSet::new();
         for i in issues {
@@ -1022,10 +1031,18 @@ fn append_issue_summary(output: &mut String, issues: &[&LintIssue], ctx: &HookBo
 
     let mut parts = Vec::new();
     if error_count > 0 {
-        parts.push(format!("{} error{}", error_count, if error_count == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{} error{}",
+            error_count,
+            if error_count == 1 { "" } else { "s" }
+        ));
     }
     if warning_count > 0 {
-        parts.push(format!("{} warning{}", warning_count, if warning_count == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{} warning{}",
+            warning_count,
+            if warning_count == 1 { "" } else { "s" }
+        ));
     }
     if info_count > 0 {
         parts.push(format!("{} info", info_count));

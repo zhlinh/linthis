@@ -990,6 +990,8 @@ fn save_results(result: &linthis::utils::types::RunResult, output: &str, cli: &C
             );
             return;
         }
+        // Ensure .linthis/ is in .gitignore so it doesn't pollute the user's repo
+        linthis::utils::ensure_gitignore_has_linthis(&project_root);
         let timestamp = Local::now().format("%Y%m%d-%H%M%S");
         result_dir.join(format!("result-{}.json", timestamp))
     };

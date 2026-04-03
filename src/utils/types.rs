@@ -290,9 +290,21 @@ impl RunResult {
             return;
         }
 
-        let error_count = self.issues.iter().filter(|i| i.severity == Severity::Error).count();
-        let warning_count = self.issues.iter().filter(|i| i.severity == Severity::Warning).count();
-        let info_count = self.issues.iter().filter(|i| i.severity == Severity::Info).count();
+        let error_count = self
+            .issues
+            .iter()
+            .filter(|i| i.severity == Severity::Error)
+            .count();
+        let warning_count = self
+            .issues
+            .iter()
+            .filter(|i| i.severity == Severity::Warning)
+            .count();
+        let info_count = self
+            .issues
+            .iter()
+            .filter(|i| i.severity == Severity::Info)
+            .count();
 
         self.exit_code = fail_on.exit_code(error_count, warning_count, info_count);
     }

@@ -351,27 +351,7 @@ pub fn init_linter_configs() -> ExitCode {
     }
 
     // Ensure .linthis/ is in .gitignore (working directory for review results, caches, etc.)
-    let gitignore_path = Path::new(".gitignore");
-    let existing_gitignore = fs::read_to_string(gitignore_path).unwrap_or_default();
-    if !existing_gitignore
-        .lines()
-        .any(|line| line.trim() == ".linthis/" || line.trim() == ".linthis")
-    {
-        let mut content = existing_gitignore;
-        if !content.is_empty() && !content.ends_with('\n') {
-            content.push('\n');
-        }
-        content.push_str("\n# Linthis working directory\n.linthis/\n");
-        match fs::write(gitignore_path, &content) {
-            Ok(_) => {
-                println!("  {} Added .linthis/ to .gitignore", "✓".green());
-            }
-            Err(e) => {
-                eprintln!("  {} Failed to update .gitignore: {}", "✗".red(), e);
-                eprintln!("  Please add '.linthis/' to .gitignore manually");
-            }
-        }
-    }
+    linthis::utils::ensure_gitignore_has_linthis(Path::new("."));
 
     println!();
     println!(
