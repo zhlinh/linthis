@@ -320,26 +320,39 @@ pub enum Language {
 
 impl Language {
     pub fn from_extension(ext: &str) -> Option<Self> {
-        match ext.to_lowercase().as_str() {
-            // Note: .h files need special handling via from_path() for smart detection
+        let lower = ext.to_lowercase();
+        Self::from_extension_compiled(&lower)
+            .or_else(|| Self::from_extension_scripting(&lower))
+    }
+
+    /// Match compiled language extensions.
+    fn from_extension_compiled(ext: &str) -> Option<Self> {
+        match ext {
             "c" | "cc" | "cpp" | "cxx" | "hpp" | "hxx" => Some(Language::Cpp),
             "h" => None, // Handle .h files specially in from_path()
             "m" | "mm" => Some(Language::ObjectiveC),
             "java" => Some(Language::Java),
-            "py" | "pyw" => Some(Language::Python),
             "rs" => Some(Language::Rust),
             "go" => Some(Language::Go),
-            "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
-            "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             "dart" => Some(Language::Dart),
             "swift" => Some(Language::Swift),
             "kt" | "kts" => Some(Language::Kotlin),
+            "scala" | "sc" => Some(Language::Scala),
+            "cs" | "csx" => Some(Language::CSharp),
+            _ => None,
+        }
+    }
+
+    /// Match scripting/interpreted language extensions.
+    fn from_extension_scripting(ext: &str) -> Option<Self> {
+        match ext {
+            "py" | "pyw" => Some(Language::Python),
+            "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
+            "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             "lua" => Some(Language::Lua),
             "sh" | "bash" | "zsh" | "ksh" => Some(Language::Shell),
             "rb" | "rake" | "gemspec" => Some(Language::Ruby),
             "php" | "phtml" => Some(Language::Php),
-            "scala" | "sc" => Some(Language::Scala),
-            "cs" | "csx" => Some(Language::CSharp),
             _ => None,
         }
     }
@@ -357,95 +370,109 @@ impl Language {
 
     /// Smart detection for .h header files to determine if it's C++/C or Objective-C
     fn detect_header_language(path: &Path) -> Self {
-        // 1. Check for corresponding .m/.mm file (same name) -> Objective-C
-        // 2. Check for corresponding .cpp/.cc/.cxx file (same name) -> C++
-        if let Some(parent) = path.parent() {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                // Check for Objective-C implementation files
-                for ext in &["m", "mm"] {
-                    let impl_path = parent.join(format!("{}.{}", stem, ext));
-                    if impl_path.exists() {
-                        return Language::ObjectiveC;
-                    }
-                }
-                // Check for C++ implementation files
-                for ext in &["cpp", "cc", "cxx", "c"] {
-                    let impl_path = parent.join(format!("{}.{}", stem, ext));
-                    if impl_path.exists() {
-                        return Language::Cpp;
-                    }
-                }
-            }
+        // 1. Check for corresponding implementation files
+        if let Some(lang) = Self::detect_by_sibling_impl(path) {
+            return lang;
         }
 
-        // 3. Check file content for language-specific patterns
-        if let Ok(content) = std::fs::read_to_string(path) {
-            // Objective-C patterns (comprehensive list matching formatter)
-            let objc_patterns = [
-                "#import",
-                "@import", // OC module import: @import UIKit;
-                "@interface",
-                "@implementation",
-                "@protocol",
-                "@property",
-                "@synthesize",
-                "@dynamic",
-                "@selector",
-                "@class",
-                "@end",
-                "NS_ASSUME_NONNULL_BEGIN",
-                "NS_ENUM",
-                "NS_OPTIONS",
-                "nullable",
-                "nonnull",
-                "+ (",  // OC class method
-                "- (",  // OC instance method
-                " @\"", // OC string literal: @"string"
-                " @[",  // OC array literal: @[@"a", @"b"]
-            ];
-            for pattern in objc_patterns {
-                if content.contains(pattern) {
-                    return Language::ObjectiveC;
-                }
-            }
-
-            // Check for Foundation types: NS followed by uppercase letter
-            // (e.g., NSString, NSArray, NSDictionary, NSURL, NSError)
-            if Self::contains_ns_type(&content) {
-                return Language::ObjectiveC;
-            }
-
-            // C++ patterns
-            let cpp_patterns = ["namespace ", "template<", "template <"];
-            for pattern in cpp_patterns {
-                if content.contains(pattern) {
-                    return Language::Cpp;
-                }
-            }
+        // 2. Check file content for language-specific patterns
+        if let Some(lang) = Self::detect_by_content(path) {
+            return lang;
         }
 
-        // 4. Check directory for other files to infer language
-        if let Some(parent) = path.parent() {
-            if let Ok(entries) = std::fs::read_dir(parent) {
-                let mut has_objc = false;
-                let mut has_cpp = false;
-                for entry in entries.filter_map(|e| e.ok()) {
-                    if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
-                        match ext {
-                            "m" | "mm" => has_objc = true,
-                            "cpp" | "cc" | "cxx" => has_cpp = true,
-                            _ => {}
-                        }
-                    }
-                }
-                if has_objc && !has_cpp {
-                    return Language::ObjectiveC;
-                }
-            }
+        // 3. Check directory for other files to infer language
+        if let Some(lang) = Self::detect_by_directory_context(path) {
+            return lang;
         }
 
-        // 5. Default to C++
+        // 4. Default to C++
         Language::Cpp
+    }
+
+    /// Check for sibling .m/.mm (Objective-C) or .cpp/.cc/.cxx/.c (C++) files.
+    fn detect_by_sibling_impl(path: &Path) -> Option<Self> {
+        let parent = path.parent()?;
+        let stem = path.file_stem().and_then(|s| s.to_str())?;
+
+        for ext in &["m", "mm"] {
+            if parent.join(format!("{}.{}", stem, ext)).exists() {
+                return Some(Language::ObjectiveC);
+            }
+        }
+        for ext in &["cpp", "cc", "cxx", "c"] {
+            if parent.join(format!("{}.{}", stem, ext)).exists() {
+                return Some(Language::Cpp);
+            }
+        }
+        None
+    }
+
+    /// Detect language from file content patterns.
+    fn detect_by_content(path: &Path) -> Option<Self> {
+        let content = std::fs::read_to_string(path).ok()?;
+
+        if Self::content_has_objc_patterns(&content) {
+            return Some(Language::ObjectiveC);
+        }
+        if Self::contains_ns_type(&content) {
+            return Some(Language::ObjectiveC);
+        }
+
+        let cpp_patterns = ["namespace ", "template<", "template <"];
+        for pattern in cpp_patterns {
+            if content.contains(pattern) {
+                return Some(Language::Cpp);
+            }
+        }
+        None
+    }
+
+    /// Check if content contains Objective-C specific patterns.
+    fn content_has_objc_patterns(content: &str) -> bool {
+        const OBJC_PATTERNS: &[&str] = &[
+            "#import",
+            "@import",
+            "@interface",
+            "@implementation",
+            "@protocol",
+            "@property",
+            "@synthesize",
+            "@dynamic",
+            "@selector",
+            "@class",
+            "@end",
+            "NS_ASSUME_NONNULL_BEGIN",
+            "NS_ENUM",
+            "NS_OPTIONS",
+            "nullable",
+            "nonnull",
+            "+ (",
+            "- (",
+            " @\"",
+            " @[",
+        ];
+        OBJC_PATTERNS.iter().any(|p| content.contains(p))
+    }
+
+    /// Check directory siblings for language context clues.
+    fn detect_by_directory_context(path: &Path) -> Option<Self> {
+        let parent = path.parent()?;
+        let entries = std::fs::read_dir(parent).ok()?;
+        let mut has_objc = false;
+        let mut has_cpp = false;
+        for entry in entries.filter_map(|e| e.ok()) {
+            if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
+                match ext {
+                    "m" | "mm" => has_objc = true,
+                    "cpp" | "cc" | "cxx" => has_cpp = true,
+                    _ => {}
+                }
+            }
+        }
+        if has_objc && !has_cpp {
+            return Some(Language::ObjectiveC);
+        }
+        None
     }
 
     /// Check if content contains Foundation types (NS followed by uppercase letter).
@@ -705,103 +732,100 @@ fn is_command_available(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Platform-aware install hint: returns (macos, windows, linux) variants.
+fn platform_hint(macos: &str, windows: &str, linux: &str) -> String {
+    if cfg!(target_os = "macos") {
+        macos.to_string()
+    } else if cfg!(target_os = "windows") {
+        windows.to_string()
+    } else {
+        linux.to_string()
+    }
+}
+
+/// Platform-aware install hint with only macos vs other.
+fn platform_hint_macos_or(macos: &str, other: &str) -> String {
+    if cfg!(target_os = "macos") {
+        macos.to_string()
+    } else {
+        other.to_string()
+    }
+}
+
 /// Get installation instructions for a language's linter (platform-specific)
 fn get_checker_install_hint(lang: Language) -> String {
     match lang {
         Language::Rust => "Install: rustup component add clippy".to_string(),
         Language::Python => "Install: pip install ruff".to_string(),
-        Language::Go => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install golangci-lint\n         Or: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest".to_string()
-            } else if cfg!(target_os = "windows") {
-                "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: choco install golangci-lint".to_string()
-            } else {
-                "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: sudo apt install golangci-lint (Ubuntu/Debian)".to_string()
-            }
-        }
+        Language::Go => platform_hint(
+            "Install: brew install golangci-lint\n         Or: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest",
+            "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: choco install golangci-lint",
+            "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: sudo apt install golangci-lint (Ubuntu/Debian)",
+        ),
         Language::TypeScript | Language::JavaScript => "Install: npm install -g eslint".to_string(),
-        Language::Java => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install checkstyle".to_string()
-            } else if cfg!(target_os = "windows") {
-                "Install: choco install checkstyle\n         Or download from: https://checkstyle.org/".to_string()
-            } else {
-                "Install: sudo apt install checkstyle (Ubuntu/Debian)\n         Or download from: https://checkstyle.org/".to_string()
-            }
-        }
-        Language::Cpp | Language::ObjectiveC => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install llvm (for clang-tidy)\n         Or: pip install cpplint"
-                    .to_string()
-            } else if cfg!(target_os = "windows") {
-                "Install: choco install llvm (for clang-tidy)\n         Or: pip install cpplint"
-                    .to_string()
-            } else {
-                "Install: sudo apt install clang-tidy (Ubuntu/Debian)\n         Or: pip install cpplint".to_string()
-            }
-        }
-        Language::Dart => {
-            "Install: Dart SDK (includes dart analyze)\n         https://dart.dev/get-dart"
-                .to_string()
-        }
-        Language::Swift => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install swiftlint".to_string()
-            } else {
-                "Install: https://github.com/realm/SwiftLint".to_string()
-            }
-        }
-        Language::Kotlin => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install ktlint".to_string()
-            } else {
-                "Install: https://github.com/pinterest/ktlint".to_string()
-            }
-        }
-        Language::Lua => {
-            if is_command_available("luarocks") {
-                "Install: luarocks install luacheck".to_string()
-            } else if cfg!(target_os = "macos") {
-                "Install: brew install luarocks && luarocks install luacheck".to_string()
-            } else if cfg!(target_os = "windows") {
-                "Install: 1) Install Lua from https://www.lua.org/download.html\n         2) Install LuaRocks from https://luarocks.org/\n         3) luarocks install luacheck".to_string()
-            } else {
-                "Install: sudo apt install luarocks && luarocks install luacheck (Ubuntu/Debian)".to_string()
-            }
-        }
-        Language::Shell => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install shellcheck".to_string()
-            } else if cfg!(target_os = "windows") {
-                "Install: choco install shellcheck\n         Or: scoop install shellcheck"
-                    .to_string()
-            } else {
-                "Install: sudo apt install shellcheck (Ubuntu/Debian)".to_string()
-            }
-        }
-        Language::Ruby => {
-            if is_command_available("gem") {
-                "Install: gem install rubocop".to_string()
-            } else {
-                "Install: 1) Install Ruby from https://www.ruby-lang.org/\n         2) gem install rubocop".to_string()
-            }
-        }
-        Language::Php => {
-            if is_command_available("composer") {
-                "Install: composer global require squizlabs/php_codesniffer".to_string()
-            } else {
-                "Install: 1) Install Composer from https://getcomposer.org/\n         2) composer global require squizlabs/php_codesniffer".to_string()
-            }
-        }
-        Language::Scala => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install scalafix\n         Or: cs install scalafix".to_string()
-            } else {
-                "Install: cs install scalafix\n         https://scalacenter.github.io/scalafix/"
-                    .to_string()
-            }
-        }
+        Language::Java => platform_hint(
+            "Install: brew install checkstyle",
+            "Install: choco install checkstyle\n         Or download from: https://checkstyle.org/",
+            "Install: sudo apt install checkstyle (Ubuntu/Debian)\n         Or download from: https://checkstyle.org/",
+        ),
+        Language::Cpp | Language::ObjectiveC => platform_hint(
+            "Install: brew install llvm (for clang-tidy)\n         Or: pip install cpplint",
+            "Install: choco install llvm (for clang-tidy)\n         Or: pip install cpplint",
+            "Install: sudo apt install clang-tidy (Ubuntu/Debian)\n         Or: pip install cpplint",
+        ),
+        Language::Dart => "Install: Dart SDK (includes dart analyze)\n         https://dart.dev/get-dart".to_string(),
+        Language::Swift => platform_hint_macos_or(
+            "Install: brew install swiftlint",
+            "Install: https://github.com/realm/SwiftLint",
+        ),
+        Language::Kotlin => platform_hint_macos_or(
+            "Install: brew install ktlint",
+            "Install: https://github.com/pinterest/ktlint",
+        ),
+        Language::Lua => get_checker_install_hint_lua(),
+        Language::Shell => platform_hint(
+            "Install: brew install shellcheck",
+            "Install: choco install shellcheck\n         Or: scoop install shellcheck",
+            "Install: sudo apt install shellcheck (Ubuntu/Debian)",
+        ),
+        Language::Ruby => get_checker_install_hint_ruby(),
+        Language::Php => get_checker_install_hint_php(),
+        Language::Scala => platform_hint_macos_or(
+            "Install: brew install scalafix\n         Or: cs install scalafix",
+            "Install: cs install scalafix\n         https://scalacenter.github.io/scalafix/",
+        ),
         Language::CSharp => "Install: dotnet tool install -g dotnet-format".to_string(),
+    }
+}
+
+/// Lua checker install hint with luarocks detection.
+fn get_checker_install_hint_lua() -> String {
+    if is_command_available("luarocks") {
+        "Install: luarocks install luacheck".to_string()
+    } else {
+        platform_hint(
+            "Install: brew install luarocks && luarocks install luacheck",
+            "Install: 1) Install Lua from https://www.lua.org/download.html\n         2) Install LuaRocks from https://luarocks.org/\n         3) luarocks install luacheck",
+            "Install: sudo apt install luarocks && luarocks install luacheck (Ubuntu/Debian)",
+        )
+    }
+}
+
+/// Ruby checker install hint with gem detection.
+fn get_checker_install_hint_ruby() -> String {
+    if is_command_available("gem") {
+        "Install: gem install rubocop".to_string()
+    } else {
+        "Install: 1) Install Ruby from https://www.ruby-lang.org/\n         2) gem install rubocop".to_string()
+    }
+}
+
+/// PHP checker install hint with composer detection.
+fn get_checker_install_hint_php() -> String {
+    if is_command_available("composer") {
+        "Install: composer global require squizlabs/php_codesniffer".to_string()
+    } else {
+        "Install: 1) Install Composer from https://getcomposer.org/\n         2) composer global require squizlabs/php_codesniffer".to_string()
     }
 }
 
@@ -811,65 +835,38 @@ fn get_formatter_install_hint(lang: Language) -> String {
         Language::Rust => "Install: rustup component add rustfmt".to_string(),
         Language::Python => "Install: pip install ruff".to_string(),
         Language::Go => "Install: Go formatter (gofmt) is included with Go".to_string(),
-        Language::TypeScript | Language::JavaScript => {
-            "Install: npm install -g prettier".to_string()
-        }
-        Language::Java => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install google-java-format".to_string()
-            } else if cfg!(target_os = "windows") {
-                "Install: Download from https://github.com/google/google-java-format/releases"
-                    .to_string()
-            } else {
-                "Install: Download from https://github.com/google/google-java-format/releases\n         Or use your package manager".to_string()
-            }
-        }
-        Language::Cpp | Language::ObjectiveC => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install clang-format\n         Or: brew install llvm".to_string()
-            } else if cfg!(target_os = "windows") {
-                "Install: choco install llvm (includes clang-format)".to_string()
-            } else {
-                "Install: sudo apt install clang-format (Ubuntu/Debian)".to_string()
-            }
-        }
-        Language::Dart => {
-            "Install: Dart SDK (includes dart format)\n         https://dart.dev/get-dart"
-                .to_string()
-        }
-        Language::Swift => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install swift-format".to_string()
-            } else {
-                "Install: https://github.com/apple/swift-format".to_string()
-            }
-        }
-        Language::Kotlin => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install ktlint".to_string()
-            } else {
-                "Install: https://github.com/pinterest/ktlint".to_string()
-            }
-        }
+        Language::TypeScript | Language::JavaScript => "Install: npm install -g prettier".to_string(),
+        Language::Java => platform_hint(
+            "Install: brew install google-java-format",
+            "Install: Download from https://github.com/google/google-java-format/releases",
+            "Install: Download from https://github.com/google/google-java-format/releases\n         Or use your package manager",
+        ),
+        Language::Cpp | Language::ObjectiveC => platform_hint(
+            "Install: brew install clang-format\n         Or: brew install llvm",
+            "Install: choco install llvm (includes clang-format)",
+            "Install: sudo apt install clang-format (Ubuntu/Debian)",
+        ),
+        Language::Dart => "Install: Dart SDK (includes dart format)\n         https://dart.dev/get-dart".to_string(),
+        Language::Swift => platform_hint_macos_or(
+            "Install: brew install swift-format",
+            "Install: https://github.com/apple/swift-format",
+        ),
+        Language::Kotlin => platform_hint_macos_or(
+            "Install: brew install ktlint",
+            "Install: https://github.com/pinterest/ktlint",
+        ),
         Language::Lua => "Install: cargo install stylua".to_string(),
-        Language::Shell => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install shfmt".to_string()
-            } else if cfg!(target_os = "windows") {
-                "Install: choco install shfmt\n         Or: scoop install shfmt".to_string()
-            } else {
-                "Install: sudo apt install shfmt (Ubuntu/Debian)\n         Or: go install mvdan.cc/sh/v3/cmd/shfmt@latest".to_string()
-            }
-        }
+        Language::Shell => platform_hint(
+            "Install: brew install shfmt",
+            "Install: choco install shfmt\n         Or: scoop install shfmt",
+            "Install: sudo apt install shfmt (Ubuntu/Debian)\n         Or: go install mvdan.cc/sh/v3/cmd/shfmt@latest",
+        ),
         Language::Ruby => "Install: gem install rubocop".to_string(),
         Language::Php => "Install: composer global require friendsofphp/php-cs-fixer".to_string(),
-        Language::Scala => {
-            if cfg!(target_os = "macos") {
-                "Install: brew install scalafmt\n         Or: cs install scalafmt".to_string()
-            } else {
-                "Install: cs install scalafmt\n         https://scalameta.org/scalafmt/".to_string()
-            }
-        }
+        Language::Scala => platform_hint_macos_or(
+            "Install: brew install scalafmt\n         Or: cs install scalafmt",
+            "Install: cs install scalafmt\n         https://scalameta.org/scalafmt/",
+        ),
         Language::CSharp => "Install: dotnet tool install -g dotnet-format".to_string(),
     }
 }
@@ -878,189 +875,146 @@ fn get_formatter_install_hint(lang: Language) -> String {
 /// Returns a list of candidate commands to try in order (first that succeeds wins).
 /// Each command is split into [program, arg1, arg2, ...].
 fn get_auto_install_commands(lang: Language, is_checker: bool) -> Vec<Vec<String>> {
+    if is_checker {
+        get_checker_install_commands(lang)
+    } else {
+        get_formatter_install_commands(lang)
+    }
+}
+
+/// Get auto-install commands for a checker tool.
+fn get_checker_install_commands(lang: Language) -> Vec<Vec<String>> {
     macro_rules! cmd {
         ($($s:expr),+) => { vec![$($s.to_string()),+] }
     }
 
-    // Resolve the best pip command: uv pip --system > pip3 > pip
-    fn pip_install_cmd(package: &str) -> Vec<Vec<String>> {
-        let p = package.to_string();
-        vec![
-            // Prefer uv if available
-            vec!["uv".into(), "pip".into(), "install".into(), "--system".into(), p.clone()],
-            vec!["pip3".into(), "install".into(), p.clone()],
-            vec!["pip".into(), "install".into(), p],
-        ]
-    }
-
-    match (lang, is_checker) {
-        // Rust
-        (Language::Rust, true) => vec![cmd!["rustup", "component", "add", "clippy"]],
-        (Language::Rust, false) => vec![cmd!["rustup", "component", "add", "rustfmt"]],
-
-        // Python (ruff handles both check + format)
-        (Language::Python, _) => pip_install_cmd("ruff"),
-
-        // Go
-        (Language::Go, true) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "golangci-lint"]]
-            } else {
-                vec![cmd![
-                    "go",
-                    "install",
-                    "github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
-                ]]
-            }
-        }
-        (Language::Go, false) => vec![], // gofmt ships with Go
-
-        // TypeScript / JavaScript
-        (Language::TypeScript | Language::JavaScript, true) => {
-            vec![cmd!["npm", "install", "-g", "eslint"]]
-        }
-        (Language::TypeScript | Language::JavaScript, false) => {
-            vec![cmd!["npm", "install", "-g", "prettier"]]
-        }
-
-        // Java
-        (Language::Java, true) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "checkstyle"]]
-            } else if cfg!(target_os = "windows") {
-                vec![cmd!["choco", "install", "checkstyle"]]
-            } else {
-                vec![cmd!["sudo", "apt-get", "install", "-y", "checkstyle"]]
-            }
-        }
-        (Language::Java, false) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "google-java-format"]]
-            } else {
-                vec![]
-            }
-        }
-
-        // C / C++ / Objective-C
-        (Language::Cpp | Language::ObjectiveC, true) => {
-            let mut cmds = if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "llvm"]]
-            } else if cfg!(target_os = "windows") {
-                vec![cmd!["choco", "install", "llvm"]]
-            } else {
-                vec![cmd!["sudo", "apt-get", "install", "-y", "clang-tidy"]]
-            };
+    match lang {
+        Language::Rust => vec![cmd!["rustup", "component", "add", "clippy"]],
+        Language::Python => pip_install_cmd("ruff"),
+        Language::Go => get_auto_install_go_checker(),
+        Language::TypeScript | Language::JavaScript => vec![cmd!["npm", "install", "-g", "eslint"]],
+        Language::Java => platform_install_cmd("checkstyle", "checkstyle", "checkstyle"),
+        Language::Cpp | Language::ObjectiveC => {
+            let mut cmds = platform_install_cmd("llvm", "llvm", "clang-tidy");
             cmds.extend(pip_install_cmd("cpplint"));
             cmds
         }
-        (Language::Cpp | Language::ObjectiveC, false) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "clang-format"]]
-            } else if cfg!(target_os = "windows") {
-                vec![cmd!["choco", "install", "llvm"]]
-            } else {
-                vec![cmd!["sudo", "apt-get", "install", "-y", "clang-format"]]
-            }
+        Language::Dart => vec![],
+        Language::Swift => macos_only_brew("swiftlint"),
+        Language::Kotlin => get_auto_install_kotlin(),
+        Language::Lua => vec![cmd!["luarocks", "install", "luacheck"]],
+        Language::Shell => platform_install_cmd("shellcheck", "shellcheck", "shellcheck"),
+        Language::Ruby => vec![cmd!["gem", "install", "rubocop"]],
+        Language::Php => vec![cmd!["composer", "global", "require", "squizlabs/php_codesniffer"]],
+        Language::Scala => {
+            if cfg!(target_os = "macos") { vec![cmd!["brew", "install", "scalafix"]] }
+            else { vec![cmd!["cs", "install", "scalafix"]] }
         }
+        Language::CSharp => vec![cmd!["dotnet", "tool", "install", "-g", "dotnet-format"]],
+    }
+}
 
-        // Dart
-        (Language::Dart, _) => vec![], // requires full Dart SDK, cannot auto-install
+/// Get auto-install commands for a formatter tool.
+fn get_formatter_install_commands(lang: Language) -> Vec<Vec<String>> {
+    macro_rules! cmd {
+        ($($s:expr),+) => { vec![$($s.to_string()),+] }
+    }
 
-        // Swift
-        (Language::Swift, true) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "swiftlint"]]
-            } else {
-                vec![]
-            }
+    match lang {
+        Language::Rust => vec![cmd!["rustup", "component", "add", "rustfmt"]],
+        Language::Python => pip_install_cmd("ruff"),
+        Language::Go => vec![],
+        Language::TypeScript | Language::JavaScript => vec![cmd!["npm", "install", "-g", "prettier"]],
+        Language::Java => get_auto_install_java_formatter(),
+        Language::Cpp | Language::ObjectiveC => platform_install_cmd("clang-format", "llvm", "clang-format"),
+        Language::Dart => vec![],
+        Language::Swift => macos_only_brew("swift-format"),
+        Language::Kotlin => get_auto_install_kotlin(),
+        Language::Lua => vec![cmd!["cargo", "install", "stylua"]],
+        Language::Shell => get_auto_install_shfmt(),
+        Language::Ruby => vec![cmd!["gem", "install", "rubocop"]],
+        Language::Php => vec![cmd!["composer", "global", "require", "friendsofphp/php-cs-fixer"]],
+        Language::Scala => {
+            if cfg!(target_os = "macos") { vec![cmd!["brew", "install", "scalafmt"]] }
+            else { vec![cmd!["cs", "install", "scalafmt"]] }
         }
-        (Language::Swift, false) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "swift-format"]]
-            } else {
-                vec![]
-            }
-        }
+        Language::CSharp => vec![cmd!["dotnet", "tool", "install", "-g", "dotnet-format"]],
+    }
+}
 
-        // Kotlin
-        (Language::Kotlin, _) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "ktlint"]]
-            } else if cfg!(target_os = "windows") {
-                vec![cmd!["choco", "install", "ktlint"]]
-            } else {
-                vec![]
-            }
-        }
+/// Resolve the best pip command: uv pip --system > pip3 > pip
+fn pip_install_cmd(package: &str) -> Vec<Vec<String>> {
+    let p = package.to_string();
+    vec![
+        vec!["uv".into(), "pip".into(), "install".into(), "--system".into(), p.clone()],
+        vec!["pip3".into(), "install".into(), p.clone()],
+        vec!["pip".into(), "install".into(), p],
+    ]
+}
 
-        // Lua
-        (Language::Lua, true) => vec![cmd!["luarocks", "install", "luacheck"]],
-        (Language::Lua, false) => vec![cmd!["cargo", "install", "stylua"]],
+/// Platform-aware package manager install command.
+fn platform_install_cmd(brew_pkg: &str, choco_pkg: &str, apt_pkg: &str) -> Vec<Vec<String>> {
+    if cfg!(target_os = "macos") {
+        vec![vec!["brew".into(), "install".into(), brew_pkg.into()]]
+    } else if cfg!(target_os = "windows") {
+        vec![vec!["choco".into(), "install".into(), choco_pkg.into()]]
+    } else {
+        vec![vec!["sudo".into(), "apt-get".into(), "install".into(), "-y".into(), apt_pkg.into()]]
+    }
+}
 
-        // Shell
-        (Language::Shell, true) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "shellcheck"]]
-            } else if cfg!(target_os = "windows") {
-                vec![cmd!["choco", "install", "shellcheck"]]
-            } else {
-                vec![cmd!["sudo", "apt-get", "install", "-y", "shellcheck"]]
-            }
-        }
-        (Language::Shell, false) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "shfmt"]]
-            } else if cfg!(target_os = "windows") {
-                vec![cmd!["choco", "install", "shfmt"]]
-            } else {
-                vec![
-                    cmd!["sudo", "apt-get", "install", "-y", "shfmt"],
-                    cmd!["go", "install", "mvdan.cc/sh/v3/cmd/shfmt@latest"],
-                ]
-            }
-        }
+/// Go checker auto-install commands.
+fn get_auto_install_go_checker() -> Vec<Vec<String>> {
+    if cfg!(target_os = "macos") {
+        vec![vec!["brew".into(), "install".into(), "golangci-lint".into()]]
+    } else {
+        vec![vec![
+            "go".into(), "install".into(),
+            "github.com/golangci/golangci-lint/cmd/golangci-lint@latest".into(),
+        ]]
+    }
+}
 
-        // Ruby
-        (Language::Ruby, _) => vec![cmd!["gem", "install", "rubocop"]],
+/// Java formatter auto-install commands.
+fn get_auto_install_java_formatter() -> Vec<Vec<String>> {
+    if cfg!(target_os = "macos") {
+        vec![vec!["brew".into(), "install".into(), "google-java-format".into()]]
+    } else {
+        vec![]
+    }
+}
 
-        // PHP
-        (Language::Php, true) => {
-            vec![cmd![
-                "composer",
-                "global",
-                "require",
-                "squizlabs/php_codesniffer"
-            ]]
-        }
-        (Language::Php, false) => {
-            vec![cmd![
-                "composer",
-                "global",
-                "require",
-                "friendsofphp/php-cs-fixer"
-            ]]
-        }
+/// Kotlin auto-install commands.
+fn get_auto_install_kotlin() -> Vec<Vec<String>> {
+    if cfg!(target_os = "macos") {
+        vec![vec!["brew".into(), "install".into(), "ktlint".into()]]
+    } else if cfg!(target_os = "windows") {
+        vec![vec!["choco".into(), "install".into(), "ktlint".into()]]
+    } else {
+        vec![]
+    }
+}
 
-        // Scala
-        (Language::Scala, true) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "scalafix"]]
-            } else {
-                vec![cmd!["cs", "install", "scalafix"]]
-            }
-        }
-        (Language::Scala, false) => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "scalafmt"]]
-            } else {
-                vec![cmd!["cs", "install", "scalafmt"]]
-            }
-        }
+/// shfmt auto-install commands.
+fn get_auto_install_shfmt() -> Vec<Vec<String>> {
+    if cfg!(target_os = "macos") {
+        vec![vec!["brew".into(), "install".into(), "shfmt".into()]]
+    } else if cfg!(target_os = "windows") {
+        vec![vec!["choco".into(), "install".into(), "shfmt".into()]]
+    } else {
+        vec![
+            vec!["sudo".into(), "apt-get".into(), "install".into(), "-y".into(), "shfmt".into()],
+            vec!["go".into(), "install".into(), "mvdan.cc/sh/v3/cmd/shfmt@latest".into()],
+        ]
+    }
+}
 
-        // C#
-        (Language::CSharp, _) => {
-            vec![cmd!["dotnet", "tool", "install", "-g", "dotnet-format"]]
-        }
+/// Return brew install command on macOS, empty otherwise.
+fn macos_only_brew(package: &str) -> Vec<Vec<String>> {
+    if cfg!(target_os = "macos") {
+        vec![vec!["brew".into(), "install".into(), package.into()]]
+    } else {
+        vec![]
     }
 }
 
@@ -1091,6 +1045,51 @@ fn try_install_tool(command: &[String]) -> std::result::Result<(), String> {
 type InstalledTool = (Language, bool);
 type FailedTool = (Language, bool, String);
 
+/// Check if a tool is already available on the system.
+fn is_tool_available(lang: Language, is_checker: bool) -> bool {
+    if is_checker {
+        get_checker(lang).map(|c| c.is_available()).unwrap_or(true)
+    } else {
+        get_formatter(lang)
+            .map(|f| f.is_available())
+            .unwrap_or(true)
+    }
+}
+
+/// Prompt the user to install a missing tool. Returns true if user approves.
+fn prompt_tool_install(lang: Language, tool_name: &str) -> bool {
+    use std::io::Write;
+    eprint!("\r\x1b[K");
+    eprint!(
+        "\x1b[33m?\x1b[0m Missing {} tool \x1b[1m{}\x1b[0m — install now? [y/N] ",
+        lang.name(),
+        tool_name
+    );
+    let _ = std::io::stderr().flush();
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).is_ok()
+        && input.trim().eq_ignore_ascii_case("y")
+}
+
+/// Attempt to install a tool using candidate commands. Returns Ok on success, Err with last error.
+fn attempt_install(commands: &[Vec<String>]) -> std::result::Result<(), String> {
+    let mut last_err = String::new();
+    for cmd in commands {
+        match try_install_tool(cmd) {
+            Ok(()) => return Ok(()),
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
+}
+
+/// Check if install mode should skip installation for this context.
+fn should_skip_install(install_mode: &ToolInstallMode) -> bool {
+    matches!(install_mode, ToolInstallMode::Disabled)
+        || (matches!(install_mode, ToolInstallMode::Prompt)
+            && !std::io::IsTerminal::is_terminal(&std::io::stdin()))
+}
+
 /// Pre-flight: auto-install missing tools for detected languages.
 /// Returns (installed_tools, failed_tools).
 fn pre_flight_install(
@@ -1101,73 +1100,37 @@ fn pre_flight_install(
 ) -> (Vec<InstalledTool>, Vec<FailedTool>) {
     use std::collections::HashSet;
 
+    if should_skip_install(install_mode) {
+        return (Vec::new(), Vec::new());
+    }
+
     let mut seen: HashSet<(Language, bool)> = HashSet::new();
     let mut installed: Vec<InstalledTool> = Vec::new();
     let mut failed: Vec<FailedTool> = Vec::new();
 
+    let check_checker = matches!(run_mode, RunMode::Both | RunMode::CheckOnly);
+    let check_formatter = matches!(run_mode, RunMode::Both | RunMode::FormatOnly);
+
     for (_, lang) in file_langs {
         let lang = *lang;
-
-        // Determine which tools to check based on run mode
-        let check_checker = matches!(run_mode, RunMode::Both | RunMode::CheckOnly);
-        let check_formatter = matches!(run_mode, RunMode::Both | RunMode::FormatOnly);
-
         for is_checker in [true, false] {
-            if is_checker && !check_checker {
+            if (is_checker && !check_checker) || (!is_checker && !check_formatter) {
                 continue;
             }
-            if !is_checker && !check_formatter {
-                continue;
-            }
-            if !seen.insert((lang, is_checker)) {
-                continue;
-            }
-
-            // Check if tool is already available
-            let available = if is_checker {
-                get_checker(lang).map(|c| c.is_available()).unwrap_or(true)
-            } else {
-                get_formatter(lang)
-                    .map(|f| f.is_available())
-                    .unwrap_or(true)
-            };
-
-            if available {
+            if !seen.insert((lang, is_checker)) || is_tool_available(lang, is_checker) {
                 continue;
             }
 
             let tool_name = get_tool_name(lang, is_checker);
-
-            // Resolve effective mode: Disabled skips, Prompt in non-TTY also skips
-            let effective_mode = match install_mode {
-                ToolInstallMode::Disabled => continue,
-                ToolInstallMode::Prompt if !std::io::IsTerminal::is_terminal(&std::io::stdin()) => {
-                    continue
-                }
-                other => other,
-            };
-
             let commands = get_auto_install_commands(lang, is_checker);
             if commands.is_empty() {
                 continue;
             }
 
-            // Prompt mode: ask before installing
-            if matches!(effective_mode, ToolInstallMode::Prompt) {
-                use std::io::Write;
-                eprint!("\r\x1b[K");
-                eprint!(
-                    "\x1b[33m?\x1b[0m Missing {} tool \x1b[1m{}\x1b[0m — install now? [y/N] ",
-                    lang.name(),
-                    tool_name
-                );
-                let _ = std::io::stderr().flush();
-                let mut input = String::new();
-                if std::io::stdin().read_line(&mut input).is_err()
-                    || !input.trim().eq_ignore_ascii_case("y")
-                {
-                    continue;
-                }
+            if matches!(install_mode, ToolInstallMode::Prompt)
+                && !prompt_tool_install(lang, &tool_name)
+            {
+                continue;
             }
 
             if !quiet {
@@ -1180,28 +1143,16 @@ fn pre_flight_install(
                 );
             }
 
-            let mut install_ok = false;
-            let mut last_err = String::new();
-
-            for cmd in &commands {
-                match try_install_tool(cmd) {
-                    Ok(()) => {
-                        install_ok = true;
-                        break;
+            match attempt_install(&commands) {
+                Ok(()) => {
+                    if !quiet {
+                        eprintln!("\x1b[32mInstalled\x1b[0m:  {}", tool_name);
                     }
-                    Err(e) => {
-                        last_err = e.to_string();
-                    }
+                    installed.push((lang, is_checker));
                 }
-            }
-
-            if install_ok {
-                if !quiet {
-                    eprintln!("\x1b[32mInstalled\x1b[0m:  {}", tool_name);
+                Err(last_err) => {
+                    failed.push((lang, is_checker, last_err));
                 }
-                installed.push((lang, is_checker));
-            } else {
-                failed.push((lang, is_checker, last_err));
             }
         }
     }
@@ -1246,35 +1197,54 @@ fn warn_missing_tool(tool_type: &str, lang: Language, is_checker: bool) {
     }
 }
 
+/// Get the name of the checker tool for a language.
+fn get_checker_tool_name(lang: Language) -> &'static str {
+    match lang {
+        Language::Rust => "clippy",
+        Language::Python => "ruff",
+        Language::Go => "golangci-lint",
+        Language::TypeScript | Language::JavaScript => "eslint",
+        Language::Java => "checkstyle",
+        Language::Cpp | Language::ObjectiveC => "cpplint",
+        Language::Dart => "dart-analyze",
+        Language::Swift => "swiftlint",
+        Language::Kotlin => "ktlint",
+        Language::Lua => "luacheck",
+        Language::Shell => "shellcheck",
+        Language::Ruby => "rubocop",
+        Language::Php => "phpcs",
+        Language::Scala => "scalafix",
+        Language::CSharp => "dotnet-format",
+    }
+}
+
+/// Get the name of the formatter tool for a language.
+fn get_formatter_tool_name(lang: Language) -> &'static str {
+    match lang {
+        Language::Rust => "rustfmt",
+        Language::Python => "ruff",
+        Language::Go => "gofmt",
+        Language::TypeScript | Language::JavaScript => "prettier",
+        Language::Java => "google-java-format",
+        Language::Cpp | Language::ObjectiveC => "clang-format",
+        Language::Dart => "dart-format",
+        Language::Swift => "swift-format",
+        Language::Kotlin => "ktlint",
+        Language::Lua => "stylua",
+        Language::Shell => "shfmt",
+        Language::Ruby => "rubocop",
+        Language::Php => "php-cs-fixer",
+        Language::Scala => "scalafmt",
+        Language::CSharp => "dotnet-format",
+    }
+}
+
 /// Get the name of the tool for a language
 fn get_tool_name(lang: Language, is_checker: bool) -> String {
-    match (lang, is_checker) {
-        (Language::Rust, true) => "clippy".to_string(),
-        (Language::Rust, false) => "rustfmt".to_string(),
-        (Language::Python, true) | (Language::Python, false) => "ruff".to_string(),
-        (Language::Go, true) => "golangci-lint".to_string(),
-        (Language::Go, false) => "gofmt".to_string(),
-        (Language::TypeScript, true) | (Language::JavaScript, true) => "eslint".to_string(),
-        (Language::TypeScript, false) | (Language::JavaScript, false) => "prettier".to_string(),
-        (Language::Java, true) => "checkstyle".to_string(),
-        (Language::Java, false) => "google-java-format".to_string(),
-        (Language::Cpp, true) | (Language::ObjectiveC, true) => "cpplint".to_string(),
-        (Language::Cpp, false) | (Language::ObjectiveC, false) => "clang-format".to_string(),
-        (Language::Dart, true) => "dart-analyze".to_string(),
-        (Language::Dart, false) => "dart-format".to_string(),
-        (Language::Swift, true) => "swiftlint".to_string(),
-        (Language::Swift, false) => "swift-format".to_string(),
-        (Language::Kotlin, true) | (Language::Kotlin, false) => "ktlint".to_string(),
-        (Language::Lua, true) => "luacheck".to_string(),
-        (Language::Lua, false) => "stylua".to_string(),
-        (Language::Shell, true) => "shellcheck".to_string(),
-        (Language::Shell, false) => "shfmt".to_string(),
-        (Language::Ruby, true) | (Language::Ruby, false) => "rubocop".to_string(),
-        (Language::Php, true) => "phpcs".to_string(),
-        (Language::Php, false) => "php-cs-fixer".to_string(),
-        (Language::Scala, true) => "scalafix".to_string(),
-        (Language::Scala, false) => "scalafmt".to_string(),
-        (Language::CSharp, true) | (Language::CSharp, false) => "dotnet-format".to_string(),
+    if is_checker {
+        get_checker_tool_name(lang).to_string()
+    } else {
+        get_formatter_tool_name(lang).to_string()
     }
 }
 
@@ -1397,6 +1367,419 @@ fn print_progress(msg: &str, quiet: bool) {
     }
 }
 
+/// Normalize a path to absolute for reliable comparison.
+fn normalize_path(p: &Path) -> PathBuf {
+    if let Ok(canonical) = p.canonicalize() {
+        return canonical;
+    }
+    if p.is_absolute() {
+        return p.to_path_buf();
+    }
+    if let Ok(current_dir) = std::env::current_dir() {
+        let joined = current_dir.join(p);
+        joined.canonicalize().unwrap_or(joined)
+    } else {
+        let s = p.to_string_lossy();
+        let s = s.strip_prefix("./").unwrap_or(&s);
+        PathBuf::from(s)
+    }
+}
+
+/// Print the "Found N files" scanning status line.
+fn print_found_files_status(file_count: usize) {
+    use std::io::Write;
+    eprint!(
+        "\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...",
+        SPINNER_CHARS[1],
+        file_count
+    );
+    let _ = std::io::stderr().flush();
+}
+
+/// Handle pre-flight install results: print warnings for failures and record them.
+fn handle_install_failures(failed: &[FailedTool], file_count: usize, quiet: bool) {
+    if failed.is_empty() || quiet {
+        return;
+    }
+    eprint!("\r\x1b[K");
+    for (lang, is_checker, err) in failed {
+        let tool_name = get_tool_name(*lang, *is_checker);
+        let hint = if *is_checker {
+            get_checker_install_hint(*lang)
+        } else {
+            get_formatter_install_hint(*lang)
+        };
+        let tool_key = format!("{}-{}", tool_name, lang.name());
+        {
+            let mut set = AUTO_INSTALL_FAILED.lock().unwrap();
+            set.get_or_insert_with(HashSet::new).insert(tool_key);
+        }
+        eprintln!(
+            "\x1b[33mWarning\x1b[0m: Auto-install failed for {} — {}\n  Manual install: {}",
+            tool_name, err, hint
+        );
+    }
+    print_found_files_status(file_count);
+}
+
+/// Load the lint cache if caching is enabled.
+fn load_cache(no_cache: bool, mode: &RunMode, verbose: bool) -> Option<Mutex<LintCache>> {
+    if no_cache || *mode == RunMode::FormatOnly {
+        return None;
+    }
+    let project_root = utils::get_project_root();
+    match LintCache::load(&project_root) {
+        Ok(mut c) => {
+            c.prune(None);
+            c.reset_stats();
+            Some(Mutex::new(c))
+        }
+        Err(e) => {
+            if verbose {
+                eprintln!("Cache load failed: {}, starting fresh", e);
+            }
+            Some(Mutex::new(LintCache::new()))
+        }
+    }
+}
+
+/// Check a single file with cache support. Returns issues found.
+fn check_file_with_cache(
+    file: &Path,
+    lang: Language,
+    verbose: bool,
+    config_resolver: Option<&ConfigResolver>,
+    cache: &Option<Mutex<LintCache>>,
+    project_root: &Path,
+) -> Vec<utils::types::LintIssue> {
+    if let Some(ref cache_mutex) = cache {
+        let mut cache_guard = cache_mutex.lock().unwrap();
+        if let Some(cached_issues) = cache_guard.check_file(lang.name(), file, project_root) {
+            return cached_issues;
+        }
+    }
+
+    let issues = run_checker_on_file(file, lang, verbose, config_resolver);
+
+    if let Some(ref cache_mutex) = cache {
+        let mut cache_guard = cache_mutex.lock().unwrap();
+        let _ = cache_guard.update_file(lang.name(), file, project_root, &issues);
+    }
+
+    issues
+}
+
+/// Format a single file. Returns the format result if available.
+fn format_single_file(
+    file: &Path,
+    lang: Language,
+    verbose: bool,
+) -> Option<FormatResult> {
+    let formatter = get_formatter(lang)?;
+    if !formatter.is_available() {
+        warn_missing_tool("formatter", lang, false);
+        return None;
+    }
+    match formatter.format(file) {
+        Ok(fr) => Some(fr),
+        Err(e) => {
+            if verbose {
+                eprintln!("Format error for {}: {}", file.display(), e);
+            }
+            None
+        }
+    }
+}
+
+/// Run the "Both" mode: lint -> format -> re-lint.
+fn run_both_mode(
+    file_langs: &[(&PathBuf, Language)],
+    options: &RunOptions,
+    cache: &Option<Mutex<LintCache>>,
+    project_root: &Path,
+    result: &mut RunResult,
+) {
+    let total_files = file_langs.len();
+
+    // Step 1: First lint pass
+    if options.verbose {
+        eprintln!("Step 1: Checking for issues...");
+    }
+    PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+    let step1_start = Instant::now();
+
+    let check_results: Vec<(PathBuf, Vec<_>)> = file_langs
+        .par_iter()
+        .map(|(file, lang)| {
+            let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+            if !options.quiet && !options.verbose {
+                let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
+                print_progress_with_time(
+                    &format!("[1/3] Checking {}/{} ({}%)...", count + 1, total_files, percentage),
+                    false,
+                    step1_start,
+                    count,
+                );
+            }
+            let issues = check_file_with_cache(file, *lang, options.verbose, options.config_resolver.as_deref(), cache, project_root);
+            ((*file).clone(), issues)
+        })
+        .collect();
+
+    let mut issues_before = Vec::new();
+    let mut files_with_issues: HashSet<PathBuf> = HashSet::new();
+    for (file, file_issues) in check_results {
+        if !file_issues.is_empty() {
+            files_with_issues.insert(file);
+        }
+        issues_before.extend(file_issues);
+    }
+    result.issues_before_format = issues_before.len();
+
+    // Step 2: Format files with issues
+    run_both_format_step(file_langs, &files_with_issues, options, result);
+
+    // Step 3: Re-check formatted files
+    let formatted_files = result
+        .format_results
+        .iter()
+        .filter(|fr| fr.changed)
+        .map(|fr| fr.file_path.clone())
+        .collect::<HashSet<PathBuf>>();
+
+    run_both_recheck_step(file_langs, &formatted_files, options, result);
+
+    // Keep original issues for files that weren't formatted
+    for (file, _) in file_langs {
+        if files_with_issues.contains(*file) && !formatted_files.contains(*file) {
+            let normalized_file = normalize_path(file);
+            for issue in &issues_before {
+                let normalized_issue_path = normalize_path(&issue.file_path);
+                if normalized_issue_path == normalized_file {
+                    result.add_issue(issue.clone());
+                }
+            }
+        }
+    }
+
+    print_progress("", options.quiet || options.verbose);
+
+    if !formatted_files.is_empty() && result.issues_before_format > result.issues.len() {
+        result.issues_fixed = result.issues_before_format - result.issues.len();
+    }
+}
+
+/// Step 2 of Both mode: format files with issues.
+fn run_both_format_step(
+    file_langs: &[(&PathBuf, Language)],
+    files_with_issues: &HashSet<PathBuf>,
+    options: &RunOptions,
+    result: &mut RunResult,
+) {
+    if options.verbose {
+        eprintln!("Step 2: Formatting {} files with issues...", files_with_issues.len());
+    }
+    let files_to_format: Vec<_> = file_langs
+        .iter()
+        .filter(|(f, _)| files_with_issues.contains(*f))
+        .collect();
+    let format_total = files_to_format.len();
+    PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+    let step2_start = Instant::now();
+
+    let format_results: Vec<(PathBuf, Option<FormatResult>)> = files_to_format
+        .par_iter()
+        .map(|(file, lang)| {
+            let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+            if !options.quiet && !options.verbose {
+                let percentage = ((count + 1) as f64 / format_total as f64 * 100.0) as usize;
+                print_progress_with_time(
+                    &format!("[2/3] Formatting {}/{} ({}%)...", count + 1, format_total, percentage),
+                    false,
+                    step2_start,
+                    count,
+                );
+            }
+            let fr = format_single_file(file, *lang, options.verbose);
+            ((*file).clone(), fr)
+        })
+        .collect();
+
+    for (_file, format_result) in format_results {
+        if let Some(fr) = format_result {
+            result.add_format_result(fr);
+        }
+    }
+}
+
+/// Step 3 of Both mode: re-check formatted files.
+fn run_both_recheck_step(
+    file_langs: &[(&PathBuf, Language)],
+    formatted_files: &HashSet<PathBuf>,
+    options: &RunOptions,
+    result: &mut RunResult,
+) {
+    if options.verbose {
+        eprintln!("Step 3: Rechecking {} formatted files...", formatted_files.len());
+    }
+    let recheck_total = formatted_files.len();
+    PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+    let step3_start = Instant::now();
+
+    let recheck_issues: Vec<_> = file_langs
+        .par_iter()
+        .flat_map(|(file, lang)| {
+            if !formatted_files.contains(*file) {
+                return vec![];
+            }
+            let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+            if !options.quiet && !options.verbose {
+                let percentage = ((count + 1) as f64 / recheck_total as f64 * 100.0) as usize;
+                print_progress_with_time(
+                    &format!("[3/3] Rechecking {}/{} ({}%)...", count + 1, recheck_total, percentage),
+                    false,
+                    step3_start,
+                    count,
+                );
+            }
+            run_checker_on_file(file, *lang, options.verbose, options.config_resolver.as_deref())
+        })
+        .collect();
+
+    for issue in recheck_issues {
+        result.add_issue(issue);
+    }
+}
+
+/// Run CheckOnly mode with parallel processing and cache support.
+fn run_check_only_mode(
+    file_langs: &[(&PathBuf, Language)],
+    options: &RunOptions,
+    cache: &Option<Mutex<LintCache>>,
+    project_root: &Path,
+    result: &mut RunResult,
+) {
+    let total_files = file_langs.len();
+    PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+    let check_start = Instant::now();
+
+    let all_issues: Vec<_> = file_langs
+        .par_iter()
+        .flat_map(|(file, lang)| {
+            let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+            if !options.quiet && !options.verbose {
+                let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
+                print_progress_with_time(
+                    &format!("Checking {}/{} ({}%)...", count + 1, total_files, percentage),
+                    false,
+                    check_start,
+                    count,
+                );
+            }
+            if options.verbose {
+                eprintln!("Processing: {} ({})", file.display(), lang.name());
+            }
+            check_file_with_cache(file, *lang, options.verbose, options.config_resolver.as_deref(), cache, project_root)
+        })
+        .collect();
+
+    for issue in all_issues {
+        result.add_issue(issue);
+    }
+    print_progress("", options.quiet || options.verbose);
+}
+
+/// Run FormatOnly mode with parallel processing.
+fn run_format_only_mode(
+    file_langs: &[(&PathBuf, Language)],
+    options: &RunOptions,
+    result: &mut RunResult,
+) {
+    let total_files = file_langs.len();
+    PROGRESS_COUNTER.store(0, Ordering::Relaxed);
+    let format_start = Instant::now();
+
+    let format_results: Vec<Option<FormatResult>> = file_langs
+        .par_iter()
+        .map(|(file, lang)| {
+            let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
+            if !options.quiet && !options.verbose {
+                let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
+                print_progress_with_time(
+                    &format!("Formatting {}/{} ({}%)...", count + 1, total_files, percentage),
+                    false,
+                    format_start,
+                    count,
+                );
+            }
+            if options.verbose {
+                eprintln!("Processing: {} ({})", file.display(), lang.name());
+            }
+            format_single_file(file, *lang, options.verbose)
+        })
+        .collect();
+
+    for fr in format_results.into_iter().flatten() {
+        result.add_format_result(fr);
+    }
+    print_progress("", options.quiet || options.verbose);
+}
+
+/// Run custom rules on all files and add issues to result.
+fn run_custom_rules(
+    custom_checker: &Option<CustomRulesChecker>,
+    file_langs: &[(&PathBuf, Language)],
+    options: &RunOptions,
+    result: &mut RunResult,
+) {
+    let checker = match custom_checker {
+        Some(c) if options.mode != RunMode::FormatOnly => c,
+        _ => return,
+    };
+    if options.verbose {
+        eprintln!("Running {} custom rules...", checker.rule_count());
+    }
+    for (file, lang) in file_langs {
+        match checker.check(file, Some(lang.name())) {
+            Ok(custom_issues) => {
+                for mut issue in custom_issues {
+                    issue.language = Some(*lang);
+                    result.add_issue(issue);
+                }
+            }
+            Err(e) => {
+                if options.verbose {
+                    eprintln!("Custom rule error for {}: {}", file.display(), e);
+                }
+            }
+        }
+    }
+}
+
+/// Save cache and print cache statistics.
+fn finalize_cache(cache: Option<Mutex<LintCache>>, project_root: &Path, quiet: bool, verbose: bool) {
+    let cache_mutex = match cache {
+        Some(c) => c,
+        None => return,
+    };
+    let cache_guard = cache_mutex.lock().unwrap();
+    let stats = cache_guard.stats();
+
+    if !quiet && stats.total() > 0 {
+        eprintln!(
+            "Running [lint] check ({} cached, {} changed)",
+            stats.cache_hits,
+            stats.cache_misses,
+        );
+    }
+
+    if let Err(e) = cache_guard.save(project_root) {
+        if verbose {
+            eprintln!("Warning: Failed to save cache: {}", e);
+        }
+    }
+}
+
 /// Main entry point for running linthis.
 pub fn run(options: &RunOptions) -> Result<RunResult> {
     use utils::types::RunModeKind;
@@ -1404,57 +1787,39 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     let start = Instant::now();
     let mut result = RunResult::new();
 
-    // Set run mode for appropriate output messages
     result.run_mode = match options.mode {
         RunMode::Both => RunModeKind::Both,
         RunMode::CheckOnly => RunModeKind::CheckOnly,
         RunMode::FormatOnly => RunModeKind::FormatOnly,
     };
 
-    // Print plugins in use
     if !options.quiet && !options.plugins.is_empty() {
         eprintln!("📦 Plugins: {}", options.plugins.join(", "));
     }
 
-    // Print starting message
     if !options.quiet {
         eprint!("\x1b[36m{}\x1b[0m Scanning files...", SPINNER_CHARS[0]);
         use std::io::Write;
         let _ = std::io::stderr().flush();
     }
 
-    // Configure walker with large file detection (default: 1MB threshold)
     let walker_config = WalkerConfig {
         exclude_patterns: options.exclude_patterns.clone(),
         languages: options.languages.clone(),
-        large_file_threshold: 1048576, // 1MB default
+        large_file_threshold: 1048576,
         ..Default::default()
     };
 
-    // Collect files to process
     let (files, path_warnings) = walk_paths(&options.paths, &walker_config);
 
-    // Print warnings about paths (clear line first, then print warnings)
     if !path_warnings.is_empty() && !options.quiet {
-        eprint!("\r\x1b[K"); // Clear "Scanning files..." line
+        eprint!("\r\x1b[K");
         for warning in &path_warnings {
             eprintln!("\x1b[33mWarning\x1b[0m: {}", warning);
         }
-        eprint!(
-            "\x1b[36m{}\x1b[0m Found {} files, checking...",
-            SPINNER_CHARS[1],
-            files.len()
-        );
-        use std::io::Write;
-        let _ = std::io::stderr().flush();
+        print_found_files_status(files.len());
     } else if !options.quiet {
-        eprint!(
-            "\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...",
-            SPINNER_CHARS[1],
-            files.len()
-        );
-        use std::io::Write;
-        let _ = std::io::stderr().flush();
+        print_found_files_status(files.len());
     }
 
     if options.verbose {
@@ -1462,92 +1827,28 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         eprintln!("Found {} files to process", files.len());
     }
 
-    // Build file-to-language map
     let file_langs: Vec<_> = files
         .iter()
         .filter_map(|f| Language::from_path(f).map(|l| (f, l)))
         .collect();
-
-    // Set total_files to actual processable files count
     result.total_files = file_langs.len();
 
     // Pre-flight: auto-install missing tools
     if !file_langs.is_empty() {
         let (installed, failed) = pre_flight_install(
-            &file_langs,
-            &options.mode,
-            &options.tool_install_mode,
-            options.quiet,
+            &file_langs, &options.mode, &options.tool_install_mode, options.quiet,
         );
-        if !installed.is_empty() || !failed.is_empty() {
-            // Re-print scanning line after install output
-            if !options.quiet {
-                use std::io::Write;
-                eprint!(
-                    "\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...",
-                    SPINNER_CHARS[1],
-                    files.len()
-                );
-                let _ = std::io::stderr().flush();
-            }
+        if (!installed.is_empty() || !failed.is_empty()) && !options.quiet {
+            print_found_files_status(files.len());
         }
-        if !failed.is_empty() && !options.quiet {
-            eprint!("\r\x1b[K");
-            for (lang, is_checker, err) in &failed {
-                let tool_name = get_tool_name(*lang, *is_checker);
-                let hint = if *is_checker {
-                    get_checker_install_hint(*lang)
-                } else {
-                    get_formatter_install_hint(*lang)
-                };
-                // Record this tool as auto-install-failed
-                let tool_key = format!("{}-{}", tool_name, lang.name());
-                {
-                    let mut set = AUTO_INSTALL_FAILED.lock().unwrap();
-                    set.get_or_insert_with(HashSet::new).insert(tool_key);
-                }
-                eprintln!(
-                    "\x1b[33mWarning\x1b[0m: Auto-install failed for {} — {}\n  Manual install: {}",
-                    tool_name, err, hint
-                );
-            }
-            use std::io::Write;
-            eprint!(
-                "\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...",
-                SPINNER_CHARS[1],
-                files.len()
-            );
-            let _ = std::io::stderr().flush();
-        }
+        handle_install_failures(&failed, files.len(), options.quiet);
     }
 
-    // Load cache if enabled (only for check modes)
     let project_root = utils::get_project_root();
-    let cache = if !options.no_cache && options.mode != RunMode::FormatOnly {
-        match LintCache::load(&project_root) {
-            Ok(mut c) => {
-                c.prune(None); // Clean old entries
-                c.reset_stats();
-                Some(Mutex::new(c))
-            }
-            Err(e) => {
-                if options.verbose {
-                    eprintln!("Cache load failed: {}, starting fresh", e);
-                }
-                Some(Mutex::new(LintCache::new()))
-            }
-        }
-    } else {
-        None
-    };
+    let cache = load_cache(options.no_cache, &options.mode, options.verbose);
 
-    // Load config for custom rules and rule filtering
     let config = Config::load_merged(&project_root);
-
-    // Create rule filter from config
     let rule_filter = RuleFilter::from_config(&config.rules);
-
-    // Create custom rules checker if custom rules are defined
     let custom_checker = if config.rules.has_custom_rules() {
         match CustomRulesChecker::new(&config.rules.custom) {
             Ok(checker) => {
@@ -1565,424 +1866,31 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         None
     };
 
-    // For RunMode::Both: lint → format → lint (only files with issues)
-    if options.mode == RunMode::Both {
-        // Step 1: First lint pass (before formatting) - parallel processing
-        if options.verbose {
-            eprintln!("Step 1: Checking for issues...");
-        }
-        let total_files = file_langs.len();
-        PROGRESS_COUNTER.store(0, Ordering::Relaxed);
-        let step1_start = Instant::now();
-
-        let check_results: Vec<(PathBuf, Vec<_>)> = file_langs
-            .par_iter()
-            .map(|(file, lang)| {
-                let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
-                if !options.quiet && !options.verbose {
-                    let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
-                    print_progress_with_time(
-                        &format!(
-                            "[1/3] Checking {}/{} ({}%)...",
-                            count + 1,
-                            total_files,
-                            percentage
-                        ),
-                        false,
-                        step1_start,
-                        count,
-                    );
-                }
-
-                // Check cache first
-                if let Some(ref cache_mutex) = cache {
-                    let mut cache_guard = cache_mutex.lock().unwrap();
-                    if let Some(cached_issues) =
-                        cache_guard.check_file(lang.name(), file, &project_root)
-                    {
-                        return ((*file).clone(), cached_issues);
-                    }
-                }
-
-                // Cache miss - run actual check
-                let file_issues = run_checker_on_file(
-                    file,
-                    *lang,
-                    options.verbose,
-                    options.config_resolver.as_deref(),
-                );
-
-                // Update cache with results
-                if let Some(ref cache_mutex) = cache {
-                    let mut cache_guard = cache_mutex.lock().unwrap();
-                    let _ = cache_guard.update_file(lang.name(), file, &project_root, &file_issues);
-                }
-
-                ((*file).clone(), file_issues)
-            })
-            .collect();
-
-        // Collect results
-        let mut issues_before = Vec::new();
-        let mut files_with_issues: HashSet<PathBuf> = HashSet::new();
-        for (file, file_issues) in check_results {
-            if !file_issues.is_empty() {
-                files_with_issues.insert(file);
-            }
-            issues_before.extend(file_issues);
-        }
-        result.issues_before_format = issues_before.len();
-
-        // Step 2: Format files (only files with issues to save time) - parallel processing
-        if options.verbose {
-            eprintln!(
-                "Step 2: Formatting {} files with issues...",
-                files_with_issues.len()
-            );
-        }
-        let files_to_format: Vec<_> = file_langs
-            .iter()
-            .filter(|(f, _)| files_with_issues.contains(*f))
-            .collect();
-        let format_total = files_to_format.len();
-        PROGRESS_COUNTER.store(0, Ordering::Relaxed);
-        let step2_start = Instant::now();
-
-        let format_results: Vec<(PathBuf, Option<FormatResult>)> = files_to_format
-            .par_iter()
-            .map(|(file, lang)| {
-                let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
-                if !options.quiet && !options.verbose {
-                    let percentage = ((count + 1) as f64 / format_total as f64 * 100.0) as usize;
-                    print_progress_with_time(
-                        &format!(
-                            "[2/3] Formatting {}/{} ({}%)...",
-                            count + 1,
-                            format_total,
-                            percentage
-                        ),
-                        false,
-                        step2_start,
-                        count,
-                    );
-                }
-
-                let mut format_result = None;
-                if let Some(formatter) = get_formatter(*lang) {
-                    if formatter.is_available() {
-                        match formatter.format(file) {
-                            Ok(result) => {
-                                format_result = Some(result);
-                            }
-                            Err(e) => {
-                                if options.verbose {
-                                    eprintln!("Format error for {}: {}", file.display(), e);
-                                }
-                            }
-                        }
-                    } else {
-                        warn_missing_tool("formatter", *lang, false);
-                    }
-                }
-                ((*file).clone(), format_result)
-            })
-            .collect();
-
-        // Collect formatted files and add results
-        let mut formatted_files: HashSet<PathBuf> = HashSet::new();
-        for (file, format_result) in format_results {
-            if let Some(fr) = format_result {
-                if fr.changed {
-                    formatted_files.insert(file);
-                }
-                result.add_format_result(fr);
-            }
-        }
-
-        // Step 3: Second lint pass (only re-check files that were formatted) - parallel processing
-        if options.verbose {
-            eprintln!(
-                "Step 3: Rechecking {} formatted files...",
-                formatted_files.len()
-            );
-        }
-
-        // Helper to normalize paths for comparison
-        // Convert to absolute path for reliable comparison
-        fn normalize_path(p: &Path) -> PathBuf {
-            // Try to canonicalize (absolute path), fall back to simple normalization
-            if let Ok(canonical) = p.canonicalize() {
-                canonical
-            } else {
-                // If canonicalize fails (e.g., file doesn't exist), try to make absolute
-                if p.is_absolute() {
-                    p.to_path_buf()
-                } else {
-                    // Make relative path absolute
-                    if let Ok(current_dir) = std::env::current_dir() {
-                        let joined = current_dir.join(p);
-                        // Try to canonicalize the joined path
-                        joined.canonicalize().unwrap_or(joined)
-                    } else {
-                        // Fall back to removing "./" prefix
-                        let s = p.to_string_lossy();
-                        let s = s.strip_prefix("./").unwrap_or(&s);
-                        PathBuf::from(s)
-                    }
-                }
-            }
-        }
-
-        let recheck_total = formatted_files.len();
-        PROGRESS_COUNTER.store(0, Ordering::Relaxed);
-        let step3_start = Instant::now();
-
-        // Re-check formatted files in parallel
-        let recheck_issues: Vec<_> = file_langs
-            .par_iter()
-            .flat_map(|(file, lang)| {
-                if formatted_files.contains(*file) {
-                    let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
-                    if !options.quiet && !options.verbose {
-                        let percentage =
-                            ((count + 1) as f64 / recheck_total as f64 * 100.0) as usize;
-                        print_progress_with_time(
-                            &format!(
-                                "[3/3] Rechecking {}/{} ({}%)...",
-                                count + 1,
-                                recheck_total,
-                                percentage
-                            ),
-                            false,
-                            step3_start,
-                            count,
-                        );
-                    }
-                    run_checker_on_file(
-                        file,
-                        *lang,
-                        options.verbose,
-                        options.config_resolver.as_deref(),
-                    )
-                } else {
-                    vec![]
-                }
-            })
-            .collect();
-
-        // Add rechecked issues
-        for issue in recheck_issues {
-            result.add_issue(issue);
-        }
-
-        // Keep original issues for files that weren't formatted
-        for (file, _) in &file_langs {
-            if files_with_issues.contains(*file) && !formatted_files.contains(*file) {
-                let normalized_file = normalize_path(file);
-                for issue in &issues_before {
-                    let normalized_issue_path = normalize_path(&issue.file_path);
-                    if normalized_issue_path == normalized_file {
-                        result.add_issue(issue.clone());
-                    }
-                }
-            }
-        }
-
-        // Clear progress line
-        print_progress("", options.quiet || options.verbose);
-
-        // Calculate fixed issues (only if some files were actually formatted)
-        if !formatted_files.is_empty() && result.issues_before_format > result.issues.len() {
-            result.issues_fixed = result.issues_before_format - result.issues.len();
-        }
-    } else {
-        // FormatOnly or CheckOnly mode
-        let total_files = file_langs.len();
-        let mode_name = if options.mode == RunMode::FormatOnly {
-            "Formatting"
-        } else {
-            "Checking"
-        };
-
-        // CheckOnly mode: use parallel processing for better performance with cache support
-        if options.mode == RunMode::CheckOnly {
-            PROGRESS_COUNTER.store(0, Ordering::Relaxed);
-            let check_start = Instant::now();
-
-            let all_issues: Vec<_> = file_langs
-                .par_iter()
-                .flat_map(|(file, lang)| {
-                    let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
-                    if !options.quiet && !options.verbose {
-                        let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
-                        print_progress_with_time(
-                            &format!(
-                                "{} {}/{} ({}%)...",
-                                mode_name,
-                                count + 1,
-                                total_files,
-                                percentage
-                            ),
-                            false,
-                            check_start,
-                            count,
-                        );
-                    }
-                    if options.verbose {
-                        eprintln!("Processing: {} ({})", file.display(), lang.name());
-                    }
-
-                    // Check cache first
-                    if let Some(ref cache_mutex) = cache {
-                        let mut cache_guard = cache_mutex.lock().unwrap();
-                        if let Some(cached_issues) =
-                            cache_guard.check_file(lang.name(), file, &project_root)
-                        {
-                            return cached_issues;
-                        }
-                    }
-
-                    // Cache miss - run actual check
-                    let issues = run_checker_on_file(
-                        file,
-                        *lang,
-                        options.verbose,
-                        options.config_resolver.as_deref(),
-                    );
-
-                    // Update cache with results
-                    if let Some(ref cache_mutex) = cache {
-                        let mut cache_guard = cache_mutex.lock().unwrap();
-                        let _ = cache_guard.update_file(lang.name(), file, &project_root, &issues);
-                    }
-
-                    issues
-                })
-                .collect();
-
-            for issue in all_issues {
-                result.add_issue(issue);
-            }
-        } else {
-            // FormatOnly mode: parallel processing
-            PROGRESS_COUNTER.store(0, Ordering::Relaxed);
-            let format_start = Instant::now();
-
-            let format_results: Vec<Option<FormatResult>> = file_langs
-                .par_iter()
-                .map(|(file, lang)| {
-                    let count = PROGRESS_COUNTER.fetch_add(1, Ordering::Relaxed);
-                    if !options.quiet && !options.verbose {
-                        let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
-                        print_progress_with_time(
-                            &format!(
-                                "{} {}/{} ({}%)...",
-                                mode_name,
-                                count + 1,
-                                total_files,
-                                percentage
-                            ),
-                            false,
-                            format_start,
-                            count,
-                        );
-                    }
-                    if options.verbose {
-                        eprintln!("Processing: {} ({})", file.display(), lang.name());
-                    }
-
-                    let mut format_result = None;
-                    if let Some(formatter) = get_formatter(*lang) {
-                        if formatter.is_available() {
-                            match formatter.format(file) {
-                                Ok(result) => {
-                                    format_result = Some(result);
-                                }
-                                Err(e) => {
-                                    if options.verbose {
-                                        eprintln!("Format error for {}: {}", file.display(), e);
-                                    }
-                                }
-                            }
-                        } else {
-                            warn_missing_tool("formatter", *lang, false);
-                        }
-                    }
-                    format_result
-                })
-                .collect();
-
-            // Add format results
-            for fr in format_results.into_iter().flatten() {
-                result.add_format_result(fr);
-            }
-        }
-        // Clear progress line
-        print_progress("", options.quiet || options.verbose);
+    // Dispatch to mode-specific handler
+    match options.mode {
+        RunMode::Both => run_both_mode(&file_langs, options, &cache, &project_root, &mut result),
+        RunMode::CheckOnly => run_check_only_mode(&file_langs, options, &cache, &project_root, &mut result),
+        RunMode::FormatOnly => run_format_only_mode(&file_langs, options, &mut result),
     }
 
-    // Run custom rules checker on all files (if defined)
-    if let Some(ref checker) = custom_checker {
-        if options.mode != RunMode::FormatOnly {
-            if options.verbose {
-                eprintln!("Running {} custom rules...", checker.rule_count());
-            }
-            for (file, lang) in &file_langs {
-                match checker.check(file, Some(lang.name())) {
-                    Ok(custom_issues) => {
-                        for mut issue in custom_issues {
-                            issue.language = Some(*lang);
-                            result.add_issue(issue);
-                        }
-                    }
-                    Err(e) => {
-                        if options.verbose {
-                            eprintln!("Custom rule error for {}: {}", file.display(), e);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // Run custom rules
+    run_custom_rules(&custom_checker, &file_langs, options, &mut result);
 
-    // Apply rule filter to remove disabled rules and adjust severity
+    // Apply rule filter
     let original_count = result.issues.len();
     result.issues = rule_filter.filter_issues(result.issues);
     let filtered_count = original_count - result.issues.len();
     if options.verbose && filtered_count > 0 {
-        eprintln!(
-            "Filtered out {} issues based on rules configuration",
-            filtered_count
-        );
+        eprintln!("Filtered out {} issues based on rules configuration", filtered_count);
     }
 
-    // Calculate final stats
+    // Finalize
     result.count_files_with_issues();
     result.calculate_exit_code();
     result.duration_ms = start.elapsed().as_millis() as u64;
-
-    // Collect unavailable tools for reporting
     result.unavailable_tools = collect_unavailable_tools();
 
-    // Save cache and show stats
-    if let Some(cache_mutex) = cache {
-        let cache_guard = cache_mutex.lock().unwrap();
-        let stats = cache_guard.stats();
-
-        if !options.quiet && stats.total() > 0 {
-            eprintln!(
-                "Running [lint] check ({} cached, {} changed)",
-                stats.cache_hits,
-                stats.cache_misses,
-            );
-        }
-
-        if let Err(e) = cache_guard.save(&project_root) {
-            if options.verbose {
-                eprintln!("Warning: Failed to save cache: {}", e);
-            }
-        }
-    }
+    finalize_cache(cache, &project_root, options.quiet, options.verbose);
 
     Ok(result)
 }

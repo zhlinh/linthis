@@ -52,6 +52,120 @@ pub fn handle_config_command(action: ConfigCommands) -> ExitCode {
     }
 }
 
+/// Parse the tool filter from the --from-tool argument.
+fn parse_tool_filter(
+    from_tool: &Option<String>,
+) -> Result<Option<linthis::config::migrate::Tool>, ExitCode> {
+    use linthis::config::migrate::Tool;
+
+    match from_tool.as_ref() {
+        Some(t) => match Tool::parse(t) {
+            Some(tool) => Ok(Some(tool)),
+            None => {
+                eprintln!(
+                    "{}: Unknown tool '{}'. Supported: eslint, prettier, black, isort",
+                    "Error".red(),
+                    t
+                );
+                Err(ExitCode::from(1))
+            }
+        },
+        None => Ok(None),
+    }
+}
+
+/// Print migration warnings and return whether any errors were found.
+fn print_migration_warnings(
+    warnings: &[linthis::config::migrate::MigrationWarning],
+) -> bool {
+    use linthis::config::migrate::WarningSeverity;
+
+    let mut has_errors = false;
+    for warning in warnings {
+        let prefix = match warning.severity {
+            WarningSeverity::Info => "Info".cyan(),
+            WarningSeverity::Warning => "Warning".yellow(),
+            WarningSeverity::Error => {
+                has_errors = true;
+                "Error".red()
+            }
+        };
+        println!("  {} [{}]: {}", prefix, warning.source, warning.message);
+    }
+    has_errors
+}
+
+/// Print dry-run preview or actual migration results.
+fn print_migration_details(
+    result: &linthis::config::migrate::MigrationResult,
+    dry_run: bool,
+) {
+    if dry_run {
+        println!();
+        println!("{}", "Changes that would be made:".bold());
+        if result.config_changes.is_empty() {
+            println!("  {}", "(no changes)".dimmed());
+        } else {
+            for change in &result.config_changes {
+                println!("  {} {}", "→".cyan(), change);
+            }
+        }
+    } else {
+        if !result.backed_up_files.is_empty() {
+            println!();
+            println!("{}", "Backed up files:".bold());
+            for path in &result.backed_up_files {
+                println!("  {} {}", "✓".green(), path.display());
+            }
+        }
+        if !result.created_files.is_empty() {
+            println!();
+            println!("{}", "Created files:".bold());
+            for path in &result.created_files {
+                println!("  {} {}", "✓".green(), path.display());
+            }
+        }
+    }
+
+    if !result.suggestions.is_empty() {
+        println!();
+        println!("{}", "Suggestions:".bold());
+        for suggestion in &result.suggestions {
+            println!("  💡 {}", suggestion);
+        }
+    }
+}
+
+/// Print the migration summary line.
+fn print_migration_summary(
+    result: &linthis::config::migrate::MigrationResult,
+    dry_run: bool,
+    has_errors: bool,
+) {
+    println!();
+    if dry_run {
+        let change_count = result.config_changes.len();
+        if change_count > 0 {
+            println!(
+                "{} Dry run complete. {} change(s) would be made.",
+                "✓".green(),
+                change_count
+            );
+            println!("  Run without {} to apply changes.", "--dry-run".cyan());
+        } else {
+            println!("{} No configuration files to migrate.", "ℹ".blue());
+        }
+    } else if result.created_files.is_empty() && !has_errors {
+        println!("{} No configuration files to migrate.", "ℹ".blue());
+    } else if !has_errors {
+        println!(
+            "{} Migration complete! {} file(s) created.",
+            "✓".green(),
+            result.created_files.len()
+        );
+    }
+}
+
 /// Handle config migrate subcommand
 fn handle_config_migrate(
     from_tool: Option<String>,
@@ -59,24 +173,13 @@ fn handle_config_migrate(
     backup: bool,
     verbose: bool,
 ) -> ExitCode {
-    use linthis::config::migrate::{migrate_configs, MigrationOptions, Tool, WarningSeverity};
+    use linthis::config::migrate::{migrate_configs, MigrationOptions};
 
     let project_root = std::env::current_dir().unwrap_or_default();
 
-    // Parse tool filter
-    let tool_filter = match from_tool.as_ref() {
-        Some(t) => match Tool::parse(t) {
-            Some(tool) => Some(tool),
-            None => {
-                eprintln!(
-                    "{}: Unknown tool '{}'. Supported: eslint, prettier, black, isort",
-                    "Error".red(),
-                    t
-                );
-                return ExitCode::from(1);
-            }
-        },
-        None => None,
+    let tool_filter = match parse_tool_filter(&from_tool) {
+        Ok(f) => f,
+        Err(code) => return code,
     };
 
     let options = MigrationOptions {
@@ -97,83 +200,9 @@ fn handle_config_migrate(
 
     match migrate_configs(&project_root, &options) {
         Ok(result) => {
-            let mut has_errors = false;
-
-            // Print warnings
-            for warning in &result.warnings {
-                let prefix = match warning.severity {
-                    WarningSeverity::Info => "Info".cyan(),
-                    WarningSeverity::Warning => "Warning".yellow(),
-                    WarningSeverity::Error => {
-                        has_errors = true;
-                        "Error".red()
-                    }
-                };
-                println!("  {} [{}]: {}", prefix, warning.source, warning.message);
-            }
-
-            if dry_run {
-                // Show preview of changes
-                println!();
-                println!("{}", "Changes that would be made:".bold());
-                if result.config_changes.is_empty() {
-                    println!("  {}", "(no changes)".dimmed());
-                } else {
-                    for change in &result.config_changes {
-                        println!("  {} {}", "→".cyan(), change);
-                    }
-                }
-            } else {
-                // Show actual results
-                if !result.backed_up_files.is_empty() {
-                    println!();
-                    println!("{}", "Backed up files:".bold());
-                    for path in &result.backed_up_files {
-                        println!("  {} {}", "✓".green(), path.display());
-                    }
-                }
-
-                if !result.created_files.is_empty() {
-                    println!();
-                    println!("{}", "Created files:".bold());
-                    for path in &result.created_files {
-                        println!("  {} {}", "✓".green(), path.display());
-                    }
-                }
-            }
-
-            // Print suggestions
-            if !result.suggestions.is_empty() {
-                println!();
-                println!("{}", "Suggestions:".bold());
-                for suggestion in &result.suggestions {
-                    println!("  💡 {}", suggestion);
-                }
-            }
-
-            // Summary
-            println!();
-            if dry_run {
-                let change_count = result.config_changes.len();
-                if change_count > 0 {
-                    println!(
-                        "{} Dry run complete. {} change(s) would be made.",
-                        "✓".green(),
-                        change_count
-                    );
-                    println!("  Run without {} to apply changes.", "--dry-run".cyan());
-                } else {
-                    println!("{} No configuration files to migrate.", "ℹ".blue());
-                }
-            } else if result.created_files.is_empty() && !has_errors {
-                println!("{} No configuration files to migrate.", "ℹ".blue());
-            } else if !has_errors {
-                println!(
-                    "{} Migration complete! {} file(s) created.",
-                    "✓".green(),
-                    result.created_files.len()
-                );
-            }
+            let has_errors = print_migration_warnings(&result.warnings);
+            print_migration_details(&result, dry_run);
+            print_migration_summary(&result, dry_run, has_errors);
 
             if has_errors {
                 ExitCode::from(1)

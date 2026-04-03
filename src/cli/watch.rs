@@ -116,94 +116,93 @@ fn run_simple_watch(watcher: FileWatcher, config: WatchConfig) -> Result<(), Str
     }
 }
 
+/// Process a lint run triggered by file changes or a forced rerun.
+/// Updates app state and returns the new last-lint timestamp on success.
+fn process_tui_lint(
+    app: &mut App,
+    config: &WatchConfig,
+    ready: &[linthis::watch::WatchEvent],
+    terminal: &mut tui::Tui,
+) -> Option<Instant> {
+    let paths: Vec<PathBuf> = ready.iter().map(|e| e.path.clone()).collect();
+    app.watch_state.mark_checking(&paths);
+    app.set_status("Running...");
+
+    // Redraw to show checking status
+    terminal.draw(|frame| tui::draw(frame, app)).ok();
+
+    match run_lint(config) {
+        Ok(result) => {
+            app.update_results(&result);
+
+            #[cfg(feature = "notifications")]
+            if config.notify {
+                let watch_result = linthis::watch::WatchResult::from_run_result(&result);
+                linthis::watch::notify_issues(&watch_result);
+            }
+
+            Some(Instant::now())
+        }
+        Err(e) => {
+            app.set_status(format!("Error: {}", e));
+            None
+        }
+    }
+}
+
+/// Handle a single TUI event (key press, resize, tick).
+fn handle_tui_event(app: &mut App, event_handler: &EventHandler) {
+    if let Ok(event) = event_handler.try_next().ok_or("").map_err(|_| ()) {
+        match event {
+            tui::Event::Key(key) => {
+                tui::event::handle_key_event(app, key);
+            }
+            tui::Event::Resize(_, _) | tui::Event::Tick => {}
+            _ => {}
+        }
+    }
+}
+
 /// Run watch with TUI
 fn run_tui_watch(
     watcher: FileWatcher,
     config: WatchConfig,
     initial_result: RunResult,
 ) -> Result<(), String> {
-    // Initialize terminal
     let mut terminal =
         tui::init_terminal().map_err(|e| format!("Failed to initialize TUI: {}", e))?;
 
-    // Create app
     let mut app = App::new(config.clone());
     app.update_results(&initial_result);
 
-    // Create event handler
     let event_handler = EventHandler::new(Duration::from_millis(100));
-
-    // Create debouncer
     let mut debouncer = Debouncer::new(config.debounce_ms);
-
-    // Track last lint time
     let mut last_lint = Instant::now();
     let min_lint_interval = Duration::from_secs(1);
 
-    // Main loop
     while app.is_running() {
-        // Draw UI
         terminal
             .draw(|frame| tui::draw(frame, &app))
             .map_err(|e| format!("Failed to draw TUI: {}", e))?;
 
-        // Collect file events
         while let Some(event) = watcher.try_recv() {
             debouncer.add_event(event);
         }
 
-        // Check for ready file events
         let ready = debouncer.get_ready_events();
         let should_lint = !ready.is_empty() || app.take_force_rerun();
 
         if should_lint && last_lint.elapsed() >= min_lint_interval {
-            // Mark files as checking
-            let paths: Vec<PathBuf> = ready.iter().map(|e| e.path.clone()).collect();
-            app.watch_state.mark_checking(&paths);
-            app.set_status("Running...");
-
-            // Redraw to show checking status
-            terminal.draw(|frame| tui::draw(frame, &app)).ok();
-
-            // Run lint
-            match run_lint(&config) {
-                Ok(result) => {
-                    app.update_results(&result);
-                    last_lint = Instant::now();
-
-                    // Send notification if enabled
-                    #[cfg(feature = "notifications")]
-                    if config.notify {
-                        let watch_result = linthis::watch::WatchResult::from_run_result(&result);
-                        linthis::watch::notify_issues(&watch_result);
-                    }
-                }
-                Err(e) => {
-                    app.set_status(format!("Error: {}", e));
-                }
+            if let Some(new_time) =
+                process_tui_lint(&mut app, &config, &ready, &mut terminal)
+            {
+                last_lint = new_time;
             }
         }
 
-        // Handle keyboard events
-        if let Ok(event) = event_handler.try_next().ok_or("").map_err(|_| ()) {
-            if let Some(evt) = Some(event) {
-                match evt {
-                    tui::Event::Key(key) => {
-                        tui::event::handle_key_event(&mut app, key);
-                    }
-                    tui::Event::Resize(_, _) => {
-                        // Terminal will automatically resize
-                    }
-                    tui::Event::Tick => {
-                        // Periodic tick for UI updates
-                    }
-                    _ => {}
-                }
-            }
-        }
+        handle_tui_event(&mut app, &event_handler);
     }
 
-    // Restore terminal
     tui::restore_terminal(&mut terminal)
         .map_err(|e| format!("Failed to restore terminal: {}", e))?;
 

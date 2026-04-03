@@ -169,89 +169,63 @@ fn check_tool(lang: Language, is_checker: bool) -> ToolStatus {
     }
 }
 
+/// Static tool info entry: (name, command, version_arg)
+struct ToolInfoEntry {
+    name: &'static str,
+    cmd: &'static str,
+    version_arg: &'static str,
+}
+
+/// Get checker tool info for a language
+fn get_checker_info(lang: Language) -> ToolInfoEntry {
+    match lang {
+        Language::Rust => ToolInfoEntry { name: "clippy", cmd: "cargo", version_arg: "clippy --version" },
+        Language::Python => ToolInfoEntry { name: "ruff", cmd: "ruff", version_arg: "--version" },
+        Language::Go => ToolInfoEntry { name: "golangci-lint", cmd: "golangci-lint", version_arg: "--version" },
+        Language::TypeScript | Language::JavaScript => ToolInfoEntry { name: "eslint", cmd: "eslint", version_arg: "--version" },
+        Language::Java => ToolInfoEntry { name: "checkstyle", cmd: "checkstyle", version_arg: "--version" },
+        Language::Cpp | Language::ObjectiveC => ToolInfoEntry { name: "cpplint", cmd: "cpplint", version_arg: "--version" },
+        Language::Dart => ToolInfoEntry { name: "dart-analyze", cmd: "dart", version_arg: "--version" },
+        Language::Swift => ToolInfoEntry { name: "swiftlint", cmd: "swiftlint", version_arg: "version" },
+        Language::Kotlin => ToolInfoEntry { name: "ktlint", cmd: "ktlint", version_arg: "--version" },
+        Language::Lua => ToolInfoEntry { name: "luacheck", cmd: "luacheck", version_arg: "--version" },
+        Language::Shell => ToolInfoEntry { name: "shellcheck", cmd: "shellcheck", version_arg: "--version" },
+        Language::Ruby => ToolInfoEntry { name: "rubocop", cmd: "rubocop", version_arg: "--version" },
+        Language::Php => ToolInfoEntry { name: "phpcs", cmd: "phpcs", version_arg: "--version" },
+        Language::Scala => ToolInfoEntry { name: "scalafix", cmd: "scalafix", version_arg: "--version" },
+        Language::CSharp => ToolInfoEntry { name: "dotnet-format", cmd: "dotnet", version_arg: "format --version" },
+    }
+}
+
+/// Get formatter tool info for a language
+fn get_formatter_info(lang: Language) -> ToolInfoEntry {
+    match lang {
+        Language::Rust => ToolInfoEntry { name: "rustfmt", cmd: "rustfmt", version_arg: "--version" },
+        Language::Python => ToolInfoEntry { name: "ruff", cmd: "ruff", version_arg: "--version" },
+        Language::Go => ToolInfoEntry { name: "gofmt", cmd: "gofmt", version_arg: "-h" },
+        Language::TypeScript | Language::JavaScript => ToolInfoEntry { name: "prettier", cmd: "prettier", version_arg: "--version" },
+        Language::Java => ToolInfoEntry { name: "google-java-format", cmd: "google-java-format", version_arg: "--version" },
+        Language::Cpp | Language::ObjectiveC => ToolInfoEntry { name: "clang-format", cmd: "clang-format", version_arg: "--version" },
+        Language::Dart => ToolInfoEntry { name: "dart-format", cmd: "dart", version_arg: "--version" },
+        Language::Swift => ToolInfoEntry { name: "swift-format", cmd: "swift-format", version_arg: "--version" },
+        Language::Kotlin => ToolInfoEntry { name: "ktlint", cmd: "ktlint", version_arg: "--version" },
+        Language::Lua => ToolInfoEntry { name: "stylua", cmd: "stylua", version_arg: "--version" },
+        Language::Shell => ToolInfoEntry { name: "shfmt", cmd: "shfmt", version_arg: "--version" },
+        Language::Ruby => ToolInfoEntry { name: "rubocop", cmd: "rubocop", version_arg: "--version" },
+        Language::Php => ToolInfoEntry { name: "php-cs-fixer", cmd: "php-cs-fixer", version_arg: "--version" },
+        Language::Scala => ToolInfoEntry { name: "scalafmt", cmd: "scalafmt", version_arg: "--version" },
+        Language::CSharp => ToolInfoEntry { name: "dotnet-format", cmd: "dotnet", version_arg: "format --version" },
+    }
+}
+
 /// Get tool command info (name, command, version_arg)
 fn get_tool_info(lang: Language, is_checker: bool) -> (String, String, &'static str) {
-    match (lang, is_checker) {
-        // Checkers
-        (Language::Rust, true) => (
-            "clippy".to_string(),
-            "cargo".to_string(),
-            "clippy --version",
-        ),
-        (Language::Python, true) => ("ruff".to_string(), "ruff".to_string(), "--version"),
-        (Language::Go, true) => (
-            "golangci-lint".to_string(),
-            "golangci-lint".to_string(),
-            "--version",
-        ),
-        (Language::TypeScript, true) | (Language::JavaScript, true) => {
-            ("eslint".to_string(), "eslint".to_string(), "--version")
-        }
-        (Language::Java, true) => (
-            "checkstyle".to_string(),
-            "checkstyle".to_string(),
-            "--version",
-        ),
-        (Language::Cpp, true) | (Language::ObjectiveC, true) => {
-            ("cpplint".to_string(), "cpplint".to_string(), "--version")
-        }
-        (Language::Dart, true) => ("dart-analyze".to_string(), "dart".to_string(), "--version"),
-        (Language::Swift, true) => ("swiftlint".to_string(), "swiftlint".to_string(), "version"),
-        (Language::Kotlin, true) => ("ktlint".to_string(), "ktlint".to_string(), "--version"),
-        (Language::Lua, true) => ("luacheck".to_string(), "luacheck".to_string(), "--version"),
-        (Language::Shell, true) => (
-            "shellcheck".to_string(),
-            "shellcheck".to_string(),
-            "--version",
-        ),
-        (Language::Ruby, true) => ("rubocop".to_string(), "rubocop".to_string(), "--version"),
-        (Language::Php, true) => ("phpcs".to_string(), "phpcs".to_string(), "--version"),
-        (Language::Scala, true) => ("scalafix".to_string(), "scalafix".to_string(), "--version"),
-        (Language::CSharp, true) => (
-            "dotnet-format".to_string(),
-            "dotnet".to_string(),
-            "format --version",
-        ),
-
-        // Formatters
-        (Language::Rust, false) => ("rustfmt".to_string(), "rustfmt".to_string(), "--version"),
-        (Language::Python, false) => ("ruff".to_string(), "ruff".to_string(), "--version"),
-        (Language::Go, false) => ("gofmt".to_string(), "gofmt".to_string(), "-h"), // gofmt doesn't have --version
-        (Language::TypeScript, false) | (Language::JavaScript, false) => {
-            ("prettier".to_string(), "prettier".to_string(), "--version")
-        }
-        (Language::Java, false) => (
-            "google-java-format".to_string(),
-            "google-java-format".to_string(),
-            "--version",
-        ),
-        (Language::Cpp, false) | (Language::ObjectiveC, false) => (
-            "clang-format".to_string(),
-            "clang-format".to_string(),
-            "--version",
-        ),
-        (Language::Dart, false) => ("dart-format".to_string(), "dart".to_string(), "--version"),
-        (Language::Swift, false) => (
-            "swift-format".to_string(),
-            "swift-format".to_string(),
-            "--version",
-        ),
-        (Language::Kotlin, false) => ("ktlint".to_string(), "ktlint".to_string(), "--version"),
-        (Language::Lua, false) => ("stylua".to_string(), "stylua".to_string(), "--version"),
-        (Language::Shell, false) => ("shfmt".to_string(), "shfmt".to_string(), "--version"),
-        (Language::Ruby, false) => ("rubocop".to_string(), "rubocop".to_string(), "--version"),
-        (Language::Php, false) => (
-            "php-cs-fixer".to_string(),
-            "php-cs-fixer".to_string(),
-            "--version",
-        ),
-        (Language::Scala, false) => ("scalafmt".to_string(), "scalafmt".to_string(), "--version"),
-        (Language::CSharp, false) => (
-            "dotnet-format".to_string(),
-            "dotnet".to_string(),
-            "format --version",
-        ),
-    }
+    let entry = if is_checker {
+        get_checker_info(lang)
+    } else {
+        get_formatter_info(lang)
+    };
+    (entry.name.to_string(), entry.cmd.to_string(), entry.version_arg)
 }
 
 /// Get tool version by running command
@@ -304,112 +278,67 @@ fn get_tool_version(cmd: &str, version_arg: &str) -> Option<String> {
     }
 }
 
+/// Pick an install command based on the current OS.
+/// Arguments: (macos_hint, windows_hint, linux_hint).
+/// Pass `None` for platforms that share the same fallback.
+fn platform_hint(macos: &str, windows: Option<&str>, linux: &str) -> String {
+    if cfg!(target_os = "macos") {
+        macos.to_string()
+    } else if cfg!(target_os = "windows") {
+        windows.unwrap_or(linux).to_string()
+    } else {
+        linux.to_string()
+    }
+}
+
+/// Get installation hint for a checker tool
+fn get_checker_install_hint(lang: Language) -> String {
+    match lang {
+        Language::Rust => "rustup component add clippy".to_string(),
+        Language::Python => "pip install ruff".to_string(),
+        Language::Go => platform_hint("brew install golangci-lint", None, "go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"),
+        Language::TypeScript | Language::JavaScript => "npm install -g eslint".to_string(),
+        Language::Java => platform_hint("brew install checkstyle", None, "https://checkstyle.sourceforge.io/"),
+        Language::Cpp | Language::ObjectiveC => "pip install cpplint".to_string(),
+        Language::Dart => "https://dart.dev/get-dart".to_string(),
+        Language::Swift => platform_hint("brew install swiftlint", None, "https://github.com/realm/SwiftLint"),
+        Language::Kotlin => platform_hint("brew install ktlint", None, "https://github.com/pinterest/ktlint"),
+        Language::Lua => "luarocks install luacheck".to_string(),
+        Language::Shell => platform_hint("brew install shellcheck", Some("choco install shellcheck"), "apt install shellcheck"),
+        Language::Ruby => "gem install rubocop".to_string(),
+        Language::Php => "composer global require squizlabs/php_codesniffer".to_string(),
+        Language::Scala => "cs install scalafix".to_string(),
+        Language::CSharp => "dotnet tool install -g dotnet-format".to_string(),
+    }
+}
+
+/// Get installation hint for a formatter tool
+fn get_formatter_install_hint(lang: Language) -> String {
+    match lang {
+        Language::Rust => "rustup component add rustfmt".to_string(),
+        Language::Python => "pip install ruff".to_string(),
+        Language::Go => "Included with Go installation".to_string(),
+        Language::TypeScript | Language::JavaScript => "npm install -g prettier".to_string(),
+        Language::Java => platform_hint("brew install google-java-format", None, "https://github.com/google/google-java-format/releases"),
+        Language::Cpp | Language::ObjectiveC => platform_hint("brew install clang-format", Some("https://releases.llvm.org/download.html"), "apt install clang-format"),
+        Language::Dart => "https://dart.dev/get-dart".to_string(),
+        Language::Swift => platform_hint("brew install swift-format", None, "https://github.com/apple/swift-format"),
+        Language::Kotlin => platform_hint("brew install ktlint", None, "https://github.com/pinterest/ktlint"),
+        Language::Lua => "cargo install stylua".to_string(),
+        Language::Shell => platform_hint("brew install shfmt", Some("choco install shfmt"), "go install mvdan.cc/sh/v3/cmd/shfmt@latest"),
+        Language::Ruby => "gem install rubocop".to_string(),
+        Language::Php => "composer global require friendsofphp/php-cs-fixer".to_string(),
+        Language::Scala => "cs install scalafmt".to_string(),
+        Language::CSharp => "dotnet tool install -g dotnet-format".to_string(),
+    }
+}
+
 /// Get installation hint for a tool
 fn get_install_hint(lang: Language, is_checker: bool) -> String {
-    match (lang, is_checker) {
-        // Checkers
-        (Language::Rust, true) => "rustup component add clippy".to_string(),
-        (Language::Python, true) => "pip install ruff".to_string(),
-        (Language::Go, true) => {
-            if cfg!(target_os = "macos") {
-                "brew install golangci-lint".to_string()
-            } else {
-                "go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest".to_string()
-            }
-        }
-        (Language::TypeScript, true) | (Language::JavaScript, true) => {
-            "npm install -g eslint".to_string()
-        }
-        (Language::Java, true) => {
-            if cfg!(target_os = "macos") {
-                "brew install checkstyle".to_string()
-            } else {
-                "https://checkstyle.sourceforge.io/".to_string()
-            }
-        }
-        (Language::Cpp, true) | (Language::ObjectiveC, true) => "pip install cpplint".to_string(),
-        (Language::Dart, true) => "https://dart.dev/get-dart".to_string(),
-        (Language::Swift, true) => {
-            if cfg!(target_os = "macos") {
-                "brew install swiftlint".to_string()
-            } else {
-                "https://github.com/realm/SwiftLint".to_string()
-            }
-        }
-        (Language::Kotlin, true) => {
-            if cfg!(target_os = "macos") {
-                "brew install ktlint".to_string()
-            } else {
-                "https://github.com/pinterest/ktlint".to_string()
-            }
-        }
-        (Language::Lua, true) => "luarocks install luacheck".to_string(),
-        (Language::Shell, true) => {
-            if cfg!(target_os = "macos") {
-                "brew install shellcheck".to_string()
-            } else if cfg!(target_os = "windows") {
-                "choco install shellcheck".to_string()
-            } else {
-                "apt install shellcheck".to_string()
-            }
-        }
-        (Language::Ruby, true) => "gem install rubocop".to_string(),
-        (Language::Php, true) => "composer global require squizlabs/php_codesniffer".to_string(),
-        (Language::Scala, true) => "cs install scalafix".to_string(),
-        (Language::CSharp, true) => "dotnet tool install -g dotnet-format".to_string(),
-
-        // Formatters
-        (Language::Rust, false) => "rustup component add rustfmt".to_string(),
-        (Language::Python, false) => "pip install ruff".to_string(),
-        (Language::Go, false) => "Included with Go installation".to_string(),
-        (Language::TypeScript, false) | (Language::JavaScript, false) => {
-            "npm install -g prettier".to_string()
-        }
-        (Language::Java, false) => {
-            if cfg!(target_os = "macos") {
-                "brew install google-java-format".to_string()
-            } else {
-                "https://github.com/google/google-java-format/releases".to_string()
-            }
-        }
-        (Language::Cpp, false) | (Language::ObjectiveC, false) => {
-            if cfg!(target_os = "macos") {
-                "brew install clang-format".to_string()
-            } else if cfg!(target_os = "linux") {
-                "apt install clang-format".to_string()
-            } else {
-                "https://releases.llvm.org/download.html".to_string()
-            }
-        }
-        (Language::Dart, false) => "https://dart.dev/get-dart".to_string(),
-        (Language::Swift, false) => {
-            if cfg!(target_os = "macos") {
-                "brew install swift-format".to_string()
-            } else {
-                "https://github.com/apple/swift-format".to_string()
-            }
-        }
-        (Language::Kotlin, false) => {
-            if cfg!(target_os = "macos") {
-                "brew install ktlint".to_string()
-            } else {
-                "https://github.com/pinterest/ktlint".to_string()
-            }
-        }
-        (Language::Lua, false) => "cargo install stylua".to_string(),
-        (Language::Shell, false) => {
-            if cfg!(target_os = "macos") {
-                "brew install shfmt".to_string()
-            } else if cfg!(target_os = "windows") {
-                "choco install shfmt".to_string()
-            } else {
-                "go install mvdan.cc/sh/v3/cmd/shfmt@latest".to_string()
-            }
-        }
-        (Language::Ruby, false) => "gem install rubocop".to_string(),
-        (Language::Php, false) => "composer global require friendsofphp/php-cs-fixer".to_string(),
-        (Language::Scala, false) => "cs install scalafmt".to_string(),
-        (Language::CSharp, false) => "dotnet tool install -g dotnet-format".to_string(),
+    if is_checker {
+        get_checker_install_hint(lang)
+    } else {
+        get_formatter_install_hint(lang)
     }
 }
 
@@ -513,80 +442,65 @@ fn check_config_file(path: &std::path::Path) -> ConfigStatus {
     }
 }
 
-/// Print human-readable output
-fn print_human_output(result: &DoctorResult, languages: &[Language]) {
-    println!();
-    println!("{}", "Linthis Doctor".bold().cyan());
-    println!("{}", "═".repeat(50));
-    println!();
+/// Print a single tool's status line
+fn print_tool_status(tool: &ToolStatus) {
+    let status_icon = if tool.available {
+        "✓".green()
+    } else {
+        "✗".red()
+    };
 
-    // Group tools by language
+    let type_badge = if tool.tool_type == "checker" {
+        "lint".dimmed()
+    } else {
+        "fmt".dimmed()
+    };
+
+    if tool.available {
+        let version = tool.version.as_deref().unwrap_or("unknown");
+        println!(
+            "    {} {} ({}) - {}",
+            status_icon, tool.name, type_badge,
+            version.dimmed()
+        );
+    } else {
+        println!(
+            "    {} {} ({}) - {}",
+            status_icon, tool.name, type_badge,
+            "not found".red()
+        );
+        if let Some(ref hint) = tool.install_hint {
+            println!("      {}: {}", "Install".yellow(), hint);
+        }
+    }
+}
+
+/// Print tool availability grouped by language
+fn print_tools_section(result: &DoctorResult, languages: &[Language]) {
     println!("{}", "Tool Availability:".bold());
     println!();
 
     for lang in languages {
         let lang_name = lang.name();
-        let checkers: Vec<_> = result
-            .tools
-            .iter()
-            .filter(|t| t.language == lang_name && t.tool_type == "checker")
-            .collect();
-        let formatters: Vec<_> = result
-            .tools
-            .iter()
-            .filter(|t| t.language == lang_name && t.tool_type == "formatter")
-            .collect();
-
         println!("  {} {}:", "●".dimmed(), lang_name.bold());
 
-        for tool in checkers.iter().chain(formatters.iter()) {
-            let status_icon = if tool.available {
-                "✓".green()
-            } else {
-                "✗".red()
-            };
-
-            let type_badge = if tool.tool_type == "checker" {
-                "lint".dimmed()
-            } else {
-                "fmt".dimmed()
-            };
-
-            if tool.available {
-                let version = tool.version.as_deref().unwrap_or("unknown");
-                println!(
-                    "    {} {} ({}) - {}",
-                    status_icon,
-                    tool.name,
-                    type_badge,
-                    version.dimmed()
-                );
-            } else {
-                println!(
-                    "    {} {} ({}) - {}",
-                    status_icon,
-                    tool.name,
-                    type_badge,
-                    "not found".red()
-                );
-                if let Some(ref hint) = tool.install_hint {
-                    println!("      {}: {}", "Install".yellow(), hint);
-                }
-            }
+        for tool in result.tools.iter().filter(|t| t.language == lang_name) {
+            print_tool_status(tool);
         }
         println!();
     }
+}
 
-    // Configuration status
+/// Print configuration file status section
+fn print_configs_section(configs: &[ConfigStatus]) {
     println!("{}", "Configuration:".bold());
     println!();
 
-    for config in &result.configs {
+    for config in configs {
         if !config.exists {
             println!(
                 "    {} {} - {}",
-                "○".dimmed(),
-                config.path,
+                "○".dimmed(), config.path,
                 "not found (optional)".dimmed()
             );
         } else if config.valid {
@@ -598,31 +512,39 @@ fn print_human_output(result: &DoctorResult, languages: &[Language]) {
             }
         }
     }
+}
 
-    println!();
-    println!("{}", "═".repeat(50));
-
+/// Print the summary footer
+fn print_doctor_summary(result: &DoctorResult) {
     if result.all_passed {
         println!("{}", "All checks passed!".green().bold());
     } else {
         let missing_tools = result.tools.iter().filter(|t| !t.available).count();
-        let invalid_configs = result
-            .configs
-            .iter()
-            .filter(|c| c.exists && !c.valid)
-            .count();
+        let invalid_configs = result.configs.iter().filter(|c| c.exists && !c.valid).count();
 
         if missing_tools > 0 {
             println!("{} {} tool(s) not available", "⚠".yellow(), missing_tools);
         }
         if invalid_configs > 0 {
-            println!(
-                "{} {} config file(s) invalid",
-                "⚠".yellow(),
-                invalid_configs
-            );
+            println!("{} {} config file(s) invalid", "⚠".yellow(), invalid_configs);
         }
     }
+}
+
+/// Print human-readable output
+fn print_human_output(result: &DoctorResult, languages: &[Language]) {
+    println!();
+    println!("{}", "Linthis Doctor".bold().cyan());
+    println!("{}", "═".repeat(50));
+    println!();
+
+    print_tools_section(result, languages);
+    print_configs_section(&result.configs);
+
+    println!();
+    println!("{}", "═".repeat(50));
+
+    print_doctor_summary(result);
 
     println!();
 }

@@ -139,6 +139,46 @@ pub fn filter_files_with_exclusions(
         .collect()
 }
 
+/// Messages used by `collect_git_files` for empty / verbose / error states.
+struct GitCollectMessages<'a> {
+    empty: &'a str,
+    empty_after: &'a str,
+    verbose_prefix: &'a str,
+    error_label: &'a str,
+}
+
+/// Fetch git files, filter with exclusions, and build a result.
+fn collect_git_files<F>(
+    fetch_fn: F,
+    exclude_patterns: &[String],
+    project_root: &PathBuf,
+    verbose: bool,
+    msgs: &GitCollectMessages<'_>,
+) -> PathCollectionResult
+where
+    F: FnOnce() -> Result<Vec<PathBuf>, Box<dyn std::error::Error>>,
+{
+    match fetch_fn() {
+        Ok(files) => {
+            if files.is_empty() {
+                return PathCollectionResult::Empty(msgs.empty.yellow().to_string());
+            }
+            let filtered =
+                filter_files_with_exclusions(files, exclude_patterns, project_root, verbose);
+            if filtered.is_empty() {
+                return PathCollectionResult::Empty(msgs.empty_after.yellow().to_string());
+            }
+            if verbose {
+                eprintln!("{}{}", msgs.verbose_prefix, filtered.len());
+            }
+            PathCollectionResult::Success(filtered, exclude_patterns.to_vec())
+        }
+        Err(e) => {
+            PathCollectionResult::Error(format!("{}: {}", msgs.error_label.red(), e), 2)
+        }
+    }
+}
+
 /// Collect paths based on the specified options.
 ///
 /// Handles staged, since, uncommitted, and default path modes,
@@ -148,112 +188,55 @@ pub fn collect_paths(options: &PathCollectionOptions) -> PathCollectionResult {
     let project_root = linthis::utils::get_project_root();
 
     if options.staged {
-        match linthis::utils::get_staged_files() {
-            Ok(files) => {
-                if files.is_empty() {
-                    return PathCollectionResult::Empty(
-                        "No staged files to check".yellow().to_string(),
-                    );
-                }
-                let filtered = filter_files_with_exclusions(
-                    files,
-                    &exclude_patterns,
-                    &project_root,
-                    options.verbose,
-                );
-                if filtered.is_empty() {
-                    return PathCollectionResult::Empty(
-                        "No staged files to check after exclusions"
-                            .yellow()
-                            .to_string(),
-                    );
-                }
-                if options.verbose {
-                    eprintln!(
-                        "Checking {} staged file(s) after exclusions",
-                        filtered.len()
-                    );
-                }
-                PathCollectionResult::Success(filtered, exclude_patterns)
-            }
-            Err(e) => PathCollectionResult::Error(
-                format!("{}: {}", "Error getting staged files".red(), e),
-                2,
-            ),
-        }
+        collect_git_files(
+            || linthis::utils::get_staged_files().map_err(|e| e.into()),
+            &exclude_patterns,
+            &project_root,
+            options.verbose,
+            &GitCollectMessages {
+                empty: "No staged files to check",
+                empty_after: "No staged files to check after exclusions",
+                verbose_prefix: "Checking staged file(s) after exclusions: ",
+                error_label: "Error getting staged files",
+            },
+        )
     } else if let Some(ref base_ref) = options.since {
-        match linthis::utils::get_changed_files(Some(base_ref.as_str())) {
-            Ok(files) => {
-                if files.is_empty() {
-                    return PathCollectionResult::Empty(
-                        format!("No files changed since '{}'", base_ref)
-                            .yellow()
-                            .to_string(),
-                    );
-                }
-                let filtered = filter_files_with_exclusions(
-                    files,
-                    &exclude_patterns,
-                    &project_root,
-                    options.verbose,
-                );
-                if filtered.is_empty() {
-                    return PathCollectionResult::Empty(
-                        format!("No files to check after exclusions (since '{}')", base_ref)
-                            .yellow()
-                            .to_string(),
-                    );
-                }
-                if options.verbose {
-                    eprintln!(
-                        "Checking {} file(s) changed since '{}' after exclusions",
-                        filtered.len(),
-                        base_ref
-                    );
-                }
-                PathCollectionResult::Success(filtered, exclude_patterns)
-            }
-            Err(e) => PathCollectionResult::Error(
-                format!("{}: {}", "Error getting changed files".red(), e),
-                2,
-            ),
-        }
+        let br = base_ref.clone();
+        let empty = format!("No files changed since '{}'", base_ref);
+        let empty_after = format!(
+            "No files to check after exclusions (since '{}')",
+            base_ref
+        );
+        let verbose_prefix = format!(
+            "Checking file(s) changed since '{}' after exclusions: ",
+            base_ref
+        );
+        collect_git_files(
+            || linthis::utils::get_changed_files(Some(br.as_str())).map_err(|e| e.into()),
+            &exclude_patterns,
+            &project_root,
+            options.verbose,
+            &GitCollectMessages {
+                empty: &empty,
+                empty_after: &empty_after,
+                verbose_prefix: &verbose_prefix,
+                error_label: "Error getting changed files",
+            },
+        )
     } else if options.modified {
-        match linthis::utils::get_uncommitted_files() {
-            Ok(files) => {
-                if files.is_empty() {
-                    return PathCollectionResult::Empty(
-                        "No uncommitted files to check".yellow().to_string(),
-                    );
-                }
-                let filtered = filter_files_with_exclusions(
-                    files,
-                    &exclude_patterns,
-                    &project_root,
-                    options.verbose,
-                );
-                if filtered.is_empty() {
-                    return PathCollectionResult::Empty(
-                        "No uncommitted files to check after exclusions"
-                            .yellow()
-                            .to_string(),
-                    );
-                }
-                if options.verbose {
-                    eprintln!(
-                        "Checking {} uncommitted file(s) after exclusions",
-                        filtered.len()
-                    );
-                }
-                PathCollectionResult::Success(filtered, exclude_patterns)
-            }
-            Err(e) => PathCollectionResult::Error(
-                format!("{}: {}", "Error getting uncommitted files".red(), e),
-                2,
-            ),
-        }
+        collect_git_files(
+            || linthis::utils::get_uncommitted_files().map_err(|e| e.into()),
+            &exclude_patterns,
+            &project_root,
+            options.verbose,
+            &GitCollectMessages {
+                empty: "No uncommitted files to check",
+                empty_after: "No uncommitted files to check after exclusions",
+                verbose_prefix: "Checking uncommitted file(s) after exclusions: ",
+                error_label: "Error getting uncommitted files",
+            },
+        )
     } else if options.paths.is_empty() {
-        // Default to current directory if no paths specified
         PathCollectionResult::Success(vec![PathBuf::from(".")], exclude_patterns)
     } else {
         PathCollectionResult::Success(options.paths.clone(), exclude_patterns)
