@@ -28,18 +28,18 @@ pub fn handle_report_command(action: ReportCommands) -> ExitCode {
     match action {
         ReportCommands::Show {
             source,
+            format,
+            severity,
+            output,
+            open,
             limit,
             compact,
-            errors_only,
-            warnings_only,
-            format,
-        } => handle_show_report(&source, limit, compact, errors_only, warnings_only, &format),
-        ReportCommands::Html {
-            source,
-            output,
             with_trends,
             trend_count,
-        } => handle_html_report(&source, output, with_trends, trend_count),
+        } => match format.as_str() {
+            "html" => handle_html_report(&source, output, open, with_trends, trend_count),
+            _ => handle_show_report(&source, limit, compact, &severity, &format),
+        },
         ReportCommands::Stats { source, format } => handle_stats_report(&source, &format),
         ReportCommands::Trends { count, format } => handle_trends_report(count, &format),
         ReportCommands::Consistency { source, format } => {
@@ -80,24 +80,32 @@ fn load_result_from_source(source: &str) -> Option<RunResult> {
     }
 }
 
-/// Filter issues by severity flags and apply a display limit.
-fn filter_and_limit_issues(
-    issues: &[linthis::utils::types::LintIssue],
-    errors_only: bool,
-    warnings_only: bool,
+/// Parse severity filter string into a set of allowed severities.
+fn parse_severity_filter(severity: &str) -> Vec<Severity> {
+    if severity == "all" {
+        return vec![Severity::Error, Severity::Warning, Severity::Info];
+    }
+    severity
+        .split(',')
+        .filter_map(|s| match s.trim() {
+            "error" => Some(Severity::Error),
+            "warning" => Some(Severity::Warning),
+            "info" => Some(Severity::Info),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Filter issues by severity and apply a display limit.
+fn filter_and_limit_issues<'a>(
+    issues: &'a [linthis::utils::types::LintIssue],
+    severity: &str,
     limit: usize,
-) -> (Vec<&linthis::utils::types::LintIssue>, usize) {
+) -> (Vec<&'a linthis::utils::types::LintIssue>, usize) {
+    let allowed = parse_severity_filter(severity);
     let filtered: Vec<_> = issues
         .iter()
-        .filter(|i| {
-            if errors_only {
-                i.severity == Severity::Error
-            } else if warnings_only {
-                i.severity == Severity::Warning
-            } else {
-                true
-            }
-        })
+        .filter(|i| allowed.contains(&i.severity))
         .collect();
 
     let total = filtered.len();
@@ -188,13 +196,12 @@ fn print_numbered_issue(
     }
 }
 
-/// Show lint results in human-readable format
+/// Show lint results in human-readable or JSON format
 fn handle_show_report(
     source: &str,
     limit: usize,
     compact: bool,
-    errors_only: bool,
-    warnings_only: bool,
+    severity: &str,
     format: &str,
 ) -> ExitCode {
     let mut result = match load_result_from_source(source) {
@@ -212,31 +219,27 @@ fn handle_show_report(
     result.merge_all_check_issues();
 
     let (display_issues, total_filtered) =
-        filter_and_limit_issues(&result.issues, errors_only, warnings_only, limit);
+        filter_and_limit_issues(&result.issues, severity, limit);
     let displayed_count = display_issues.len();
 
     // Handle JSON format
     if format == "json" {
-        let (json_issues, _) =
-            filter_and_limit_issues(&result.issues, errors_only, warnings_only, 0);
+        let (json_issues, _) = filter_and_limit_issues(&result.issues, severity, 0);
         print_json_report(&result, json_issues, limit);
         return ExitCode::SUCCESS;
     }
 
     // Human-readable output
     if display_issues.is_empty() {
-        let filter_desc = if errors_only {
-            "errors"
-        } else if warnings_only {
-            "warnings"
-        } else {
-            "issues"
-        };
-        println!("{} No {} found in result.", "✓".green(), filter_desc);
+        println!(
+            "{} No issues found matching severity filter '{}'.",
+            "✓".green(),
+            severity
+        );
         return ExitCode::SUCCESS;
     }
 
-    // Separate errors and warnings for numbered output
+    // Separate errors, warnings, info for numbered output
     for (idx, issue) in display_issues
         .iter()
         .filter(|i| i.severity == Severity::Error)
@@ -250,6 +253,13 @@ fn handle_show_report(
         .enumerate()
     {
         print_numbered_issue(issue, idx, "W", compact, false);
+    }
+    for (idx, issue) in display_issues
+        .iter()
+        .filter(|i| i.severity == Severity::Info)
+        .enumerate()
+    {
+        print_numbered_issue(issue, idx, "I", compact, false);
     }
 
     // Show summary
@@ -272,6 +282,7 @@ fn handle_show_report(
 fn handle_html_report(
     source: &str,
     output: Option<PathBuf>,
+    open: bool,
     with_trends: bool,
     trend_count: usize,
 ) -> ExitCode {
@@ -327,7 +338,6 @@ fn handle_html_report(
             println!("{} HTML report generated", "✓".green());
             println!("  Location: {}", output_path.display());
 
-            // Show summary
             println!();
             println!("  {} total files", result.total_files);
             println!("  {} files with issues", result.files_with_issues);
@@ -337,12 +347,41 @@ fn handle_html_report(
                 println!("  {} trend data points included", trend_count);
             }
 
+            // Open in browser if requested
+            if open {
+                open_in_browser(&output_path);
+            }
+
             ExitCode::SUCCESS
         }
         Err(e) => {
             eprintln!("{}: Failed to write report: {}", "Error".red(), e);
             ExitCode::from(1)
         }
+    }
+}
+
+/// Open a file in the system default browser.
+fn open_in_browser(path: &Path) {
+    let cmd = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "cmd"
+    } else {
+        "xdg-open"
+    };
+
+    let result = if cfg!(target_os = "windows") {
+        std::process::Command::new(cmd)
+            .args(["/c", "start", "", &path.display().to_string()])
+            .spawn()
+    } else {
+        std::process::Command::new(cmd).arg(path).spawn()
+    };
+
+    match result {
+        Ok(_) => println!("  Opened in browser"),
+        Err(e) => eprintln!("  {}: Failed to open browser: {}", "Warning".yellow(), e),
     }
 }
 

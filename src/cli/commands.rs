@@ -1482,24 +1482,41 @@ pub enum CacheCommands {
 /// Report subcommands
 #[derive(clap::Subcommand, Debug)]
 pub enum ReportCommands {
-    /// Show full lint results in human-readable format
+    /// Show lint results (default subcommand)
     ///
-    /// Display saved lint results (JSON) in the same human-readable format
-    /// as `linthis -c` output. Useful for viewing full error details from
-    /// hook output or reviewing previous runs.
+    /// Display saved lint results in human, JSON, or HTML format.
     ///
     /// Example usage:
-    ///   linthis report show                 # Show last result
-    ///   linthis report show result.json     # Show specific file
-    ///   linthis report show -n 10           # Limit to 10 issues
-    ///   linthis report show --compact       # Compact format (no code context)
-    ///   linthis report show --errors-only   # Only show errors
+    ///   linthis report show                    # Human-readable (default)
+    ///   linthis report show -f json            # Raw JSON output
+    ///   linthis report show -f html            # Generate HTML report
+    ///   linthis report show -f html --open     # Generate HTML and open in browser
+    ///   linthis report show -f html -o r.html  # Generate HTML to specific file
+    ///   linthis report show -n 10              # Limit to 10 issues
+    ///   linthis report show -s error            # Only errors
+    ///   linthis report show -s all              # All severities including info
     Show {
         /// Source of lint results: "last" (default) or a result file path
         #[arg(default_value = "last")]
         source: String,
 
-        /// Limit number of issues to display (0 = unlimited)
+        /// Output format: human (default), json, html
+        #[arg(short, long, default_value = "human")]
+        format: String,
+
+        /// Severity filter: error, warning, info, all, or comma-separated (default: error,warning)
+        #[arg(short, long, default_value = "error,warning")]
+        severity: String,
+
+        /// Output file path (for html: default .linthis/reports/report-{timestamp}.html)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Open HTML report in browser (only with -f html)
+        #[arg(long)]
+        open: bool,
+
+        /// Limit number of issues to display (0 = unlimited, human/json only)
         #[arg(short = 'n', long, default_value = "0")]
         limit: usize,
 
@@ -1507,45 +1524,17 @@ pub enum ReportCommands {
         #[arg(long)]
         compact: bool,
 
-        /// Only show errors (skip warnings and info)
-        #[arg(long)]
-        errors_only: bool,
-
-        /// Only show warnings (skip errors and info)
-        #[arg(long)]
-        warnings_only: bool,
-
-        /// Output format: human (default), json
-        #[arg(short, long, default_value = "human")]
-        format: String,
-    },
-    /// Generate an HTML report from lint results
-    ///
-    /// Creates a self-contained HTML file with charts, statistics,
-    /// and detailed issue listings. Optionally includes trend analysis.
-    Html {
-        /// Source of lint results: "last" (default), "current", or a file path
-        #[arg(default_value = "last")]
-        source: String,
-
-        /// Output file path (default: .linthis/reports/report-{timestamp}.html)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-
-        /// Include historical trend analysis in the report
+        /// Include historical trend analysis (html format only)
         #[arg(long)]
         with_trends: bool,
 
-        /// Number of historical runs to include in trends (default: 10)
-        #[arg(short = 'n', long, default_value = "10")]
+        /// Number of historical runs for trends (default: 10)
+        #[arg(long, default_value = "10")]
         trend_count: usize,
     },
     /// Show statistics from lint results
-    ///
-    /// Displays issue counts by severity, language, tool, and rule.
-    /// Also shows top problematic files and summary metrics.
     Stats {
-        /// Source of lint results: "last" (default), "current", or a file path
+        /// Source of lint results: "last" (default) or a file path
         #[arg(default_value = "last")]
         source: String,
 
@@ -1554,9 +1543,6 @@ pub enum ReportCommands {
         format: String,
     },
     /// Analyze code quality trends over time
-    ///
-    /// Examines historical lint results to identify trends in code quality.
-    /// Shows whether issues are improving, stable, or degrading.
     Trends {
         /// Number of historical runs to analyze (default: 10)
         #[arg(short = 'n', long, default_value = "10")]
@@ -1567,11 +1553,8 @@ pub enum ReportCommands {
         format: String,
     },
     /// Analyze team code style consistency
-    ///
-    /// Identifies repeated patterns, outlier files, and systematic issues
-    /// to help improve code consistency across the codebase.
     Consistency {
-        /// Source of lint results: "last" (default), "current", or a file path
+        /// Source of lint results: "last" (default) or a file path
         #[arg(default_value = "last")]
         source: String,
 
