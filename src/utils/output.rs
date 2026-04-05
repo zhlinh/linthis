@@ -9,11 +9,29 @@
 // substantial portions of the Software.
 
 //! Output formatting utilities for linthis results.
+//!
+//! The `fix_tip_lines()` function provides a single source of truth for
+//! the "Tip: To review and fix issues" hints used in both terminal output
+//! and hook output boxes.
 
 use crate::utils::types::{LintIssue, RunResult, Severity};
 use colored::Colorize;
 use crossterm::terminal;
 use std::process::{Command, Stdio};
+
+/// Tip lines for "To review and fix issues" hints.
+/// Each entry is (command, description). Used by both terminal and hook output.
+pub fn fix_tip_lines() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("linthis report show", "view full details"),
+        ("linthis report show -f html --open", "view in browser"),
+        ("linthis backup diff", "show diff from last format/fix/hook-fix"),
+        ("linthis undo", "undo last format/fix/hook-fix"),
+        ("linthis fix", "load last result and fix"),
+        ("linthis fix --ai", "AI-powered fix suggestions (--provider and --model supported)"),
+        ("linthis fix --auto", "(dangerously) auto-fix via AI agent (--provider and --model supported)"),
+    ]
+}
 
 /// Get the terminal width, with fallback to 80 columns.
 pub fn get_terminal_width() -> usize {
@@ -915,14 +933,10 @@ fn append_hook_tip_section(
         "{}\n",
         ctx.pad_line("Tip: To review and fix issues:", 0)
     ));
-    output.push_str(&format!(
-        "{}\n",
-        ctx.pad_line("  linthis report show  - view full details", 0)
-    ));
-    output.push_str(&format!(
-        "{}\n",
-        ctx.pad_line("  linthis fix          - interactive fix", 0)
-    ));
+    for (cmd, desc) in fix_tip_lines() {
+        let line = format!("  {:<36} : {}", cmd, desc);
+        output.push_str(&format!("{}\n", ctx.pad_line(&line, 0)));
+    }
     output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
 
     let clang_tidy_count = result
