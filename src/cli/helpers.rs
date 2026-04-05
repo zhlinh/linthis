@@ -179,23 +179,12 @@ pub fn print_fix_hint(issues: &[LintIssue]) {
 
     eprintln!();
     eprintln!(
-        "  {} To review and fix issues interactively:",
+        "  {} To review and fix issues:",
         "Tip:".cyan().bold()
     );
-    eprintln!(
-        "       {}      - load last result and fix",
-        "linthis fix".cyan()
-    );
-    eprintln!(
-        "       {} - AI-powered fix suggestions ({} to choose agent)",
-        "linthis fix --ai".cyan(),
-        "--provider <name>".dimmed()
-    );
-    eprintln!(
-        "       {} - {} auto-fix via AI agent",
-        "linthis fix --auto".cyan(),
-        "(dangerously)".red().bold()
-    );
+    for (cmd, desc) in linthis::utils::output::fix_tip_lines() {
+        eprintln!("       {:<36} : {}", cmd.cyan(), desc);
+    }
 }
 
 /// Interactive AI provider selection menu.
