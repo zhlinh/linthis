@@ -631,6 +631,10 @@ pub(crate) fn build_git_with_agent_hook_script(
          \x20 {agent_check}\
          \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
          \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+         \x20\x20\x20 # Backup staged files before agent fix (for linthis undo hook)\n\
+         \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | tr '\\n' '\\0' | xargs -0 {linthis} backup create -d \"hook-agent-fix\" 2>/dev/null\n\
+         \x20\x20\x20 fi\n\
          \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
          \x20\x20\x20 {agent}\n\
          \x20\x20\x20 stop_timer\n\

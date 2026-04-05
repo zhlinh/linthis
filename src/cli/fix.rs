@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use crate::cli::backup::{
-    collect_files_from_issues, create_backup, handle_list_backups, handle_undo,
+    collect_files_from_issues, create_backup, handle_list_backups,
 };
 use crate::cli::helpers::{find_latest_result_file, resolve_ai_provider};
 use crate::cli::recheck::{
@@ -82,9 +82,14 @@ pub fn handle_fix_command(mut options: FixCommandOptions) -> ExitCode {
         return handle_list_backups("linthis fix");
     }
 
-    // Handle --undo
+    // Handle --undo (redirects to unified undo with fix filter)
     if options.undo {
-        return handle_undo(&options.source, "linthis fix --list-backups");
+        let filter = if options.source == "last" {
+            "fix".to_string()
+        } else {
+            options.source.clone()
+        };
+        return super::backup::handle_undo_filtered(&filter);
     }
 
     // Load config for AI settings
