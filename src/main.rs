@@ -97,236 +97,129 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
         Commands::Plugin { action } => Some(handle_plugin_command(action)),
         Commands::Config { action } => Some(handle_config_command(action)),
         Commands::Hook { action } => Some(handle_hook_command(action)),
-        Commands::Cmsg {
-            msg_or_file,
-            auto_fix,
-            provider,
-        } => Some(handle_commit_msg_check(
-            &msg_or_file,
-            auto_fix,
-            provider.as_deref(),
-        )),
-        Commands::Init {
-            global,
-            with_hook,
-            force,
-        } => Some(handle_init_command(global, with_hook, force)),
+        Commands::Cmsg { .. } | Commands::Init { .. } => Some(dispatch_simple(command)),
         Commands::Doctor { all, output } => Some(handle_doctor_command(all, &output)),
         Commands::Cache { action } => Some(handle_cache_command(action)),
-        Commands::Security {
-            path,
-            scan_type,
-            severity,
-            include_dev,
-            fix,
-            ignore,
-            format,
-            sbom,
-            fail_on,
-            sast_config,
-            verbose,
-        } => Some(handle_security_command(cli::SecurityCommandParams {
-            path,
-            scan_type,
-            severity,
-            include_dev,
-            fix,
-            ignore,
-            format,
-            sbom,
-            fail_on,
-            sast_config,
-            verbose,
-        })),
-        Commands::License {
-            path,
-            policy,
-            policy_file,
-            include_dev,
-            format,
-            sbom,
-            fail_on_violation,
-            verbose,
-        } => Some(handle_license_command(cli::LicenseCommandParams {
-            path,
-            policy,
-            policy_file,
-            include_dev,
-            format,
-            sbom,
-            fail_on_violation,
-            verbose,
-        })),
-        Commands::Complexity {
-            path,
-            staged,
-            modified,
-            include,
-            exclude,
-            threshold,
-            preset,
-            format,
-            with_trends,
-            trend_count,
-            only_high,
-            sort,
-            no_parallel,
-            verbose,
-        } => Some(handle_complexity_command(ComplexityCommandOptions {
-            path,
-            staged,
-            modified,
-            include,
-            exclude,
-            threshold,
-            preset,
-            format,
-            with_trends,
-            trend_count,
-            only_high,
-            sort,
-            no_parallel,
-            verbose,
-        })),
-        Commands::Format {
-            paths,
-            staged,
-            modified,
-            exclude,
-            undo,
-            source,
-            list_backups,
-            verbose,
-            quiet,
-        } => Some(handle_format_command(FormatCommandOptions {
-            paths,
-            staged,
-            modified,
-            exclude,
-            undo,
-            source,
-            list_backups,
-            verbose,
-            quiet,
-        })),
-        Commands::Fix {
-            source,
-            check,
-            format_only,
-            auto_fix,
-            ai,
-            provider,
-            model,
-            max_suggestions,
-            accept_all,
-            jobs,
-            file,
-            line,
-            message,
-            rule,
-            output,
-            with_context,
-            verbose,
-            quiet,
-            undo,
-            list_backups,
-        } => {
-            let (ai, accept_all) = if auto_fix {
-                (true, true)
-            } else {
-                (ai, accept_all)
-            };
-            Some(handle_fix_command(FixCommandOptions {
-                source,
-                check,
-                format_only,
-                ai,
-                provider,
-                model,
-                max_suggestions,
-                accept_all,
-                jobs,
-                file,
-                line,
-                message,
-                rule,
-                output,
-                with_context,
-                verbose,
-                quiet,
-                undo,
-                list_backups,
-            }))
-        }
-        Commands::Review {
-            background,
-            auto_fix,
-            auto_fix_mode,
-            reviewers,
-            provider,
-            base,
-            head,
-            no_pr,
-            notify,
-            status,
-            dry_run,
-            clean,
-            output,
-        } => Some(handle_review_command(ReviewCommandOptions {
-            background,
-            auto_fix,
-            auto_fix_mode,
-            reviewers,
-            provider,
-            base,
-            head,
-            no_pr,
-            notify,
-            status,
-            dry_run,
-            clean,
-            output,
-        })),
+        Commands::Security { .. }
+        | Commands::License { .. }
+        | Commands::Complexity { .. } => Some(dispatch_analysis(command)),
+        Commands::Format { .. } => Some(dispatch_format(command)),
+        Commands::Fix { .. } => Some(dispatch_fix(command)),
+        Commands::Review { .. } => Some(dispatch_review(command)),
         Commands::Lsp {
             mode,
             port,
             use_plugin,
         } => Some(handle_lsp_subcommand(mode, port, use_plugin)),
         Commands::Report { action } => Some(handle_report_command(action)),
-        Commands::Watch {
-            paths,
-            check_only,
-            format_only,
-            debounce,
-            notify,
-            no_tui,
-            clear,
-            lang,
-            exclude,
-            verbose,
-        } => Some(handle_watch_subcommand(WatchSubcommandArgs {
-            paths,
-            check_only,
-            format_only,
-            debounce,
-            notify,
-            no_tui,
-            clear,
-            lang,
-            exclude,
-            verbose,
-        })),
+        Commands::Watch { .. } => Some(dispatch_watch(command)),
         Commands::Backup { action } => Some(handle_backup_command(action)),
-        Commands::Undo { filter, list } => {
-            if list {
-                Some(handle_list_backups("linthis backup list"))
-            } else {
-                Some(handle_undo_filtered(&filter))
-            }
-        }
+        Commands::Undo { filter, list } => Some(if list {
+            handle_list_backups("linthis backup list")
+        } else {
+            handle_undo_filtered(&filter)
+        }),
         Commands::Redo => Some(handle_redo()),
         // Lint and Check fall through to main flow
         Commands::Lint { .. } | Commands::Check { .. } => None,
+    }
+}
+
+fn dispatch_simple(command: Commands) -> ExitCode {
+    match command {
+        Commands::Cmsg {
+            msg_or_file,
+            auto_fix,
+            provider,
+        } => handle_commit_msg_check(&msg_or_file, auto_fix, provider.as_deref()),
+        Commands::Init {
+            global,
+            with_hook,
+            force,
+        } => handle_init_command(global, with_hook, force),
+        _ => ExitCode::from(1),
+    }
+}
+
+fn dispatch_watch(command: Commands) -> ExitCode {
+    if let Commands::Watch {
+        paths, check_only, format_only, debounce, notify,
+        no_tui, clear, lang, exclude, verbose,
+    } = command {
+        handle_watch_subcommand(WatchSubcommandArgs {
+            paths, check_only, format_only, debounce, notify,
+            no_tui, clear, lang, exclude, verbose,
+        })
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn dispatch_format(command: Commands) -> ExitCode {
+    if let Commands::Format {
+        paths, staged, modified, exclude, undo, source, list_backups, verbose, quiet,
+    } = command {
+        handle_format_command(FormatCommandOptions {
+            paths, staged, modified, exclude, undo, source, list_backups, verbose, quiet,
+        })
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn dispatch_fix(command: Commands) -> ExitCode {
+    if let Commands::Fix {
+        source, check, format_only, auto_fix, ai, provider, model,
+        max_suggestions, accept_all, jobs, file, line, message, rule,
+        output, with_context, verbose, quiet, undo, list_backups,
+    } = command {
+        let (ai, accept_all) = if auto_fix { (true, true) } else { (ai, accept_all) };
+        handle_fix_command(FixCommandOptions {
+            source, check, format_only, ai, provider, model,
+            max_suggestions, accept_all, jobs, file, line, message, rule,
+            output, with_context, verbose, quiet, undo, list_backups,
+        })
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn dispatch_review(command: Commands) -> ExitCode {
+    if let Commands::Review {
+        background, auto_fix, auto_fix_mode, reviewers, provider,
+        base, head, no_pr, notify, status, dry_run, clean, output,
+    } = command {
+        handle_review_command(ReviewCommandOptions {
+            background, auto_fix, auto_fix_mode, reviewers, provider,
+            base, head, no_pr, notify, status, dry_run, clean, output,
+        })
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn dispatch_analysis(command: Commands) -> ExitCode {
+    match command {
+        Commands::Security {
+            path, scan_type, severity, include_dev, fix, ignore,
+            format, sbom, fail_on, sast_config, verbose,
+        } => handle_security_command(cli::SecurityCommandParams {
+            path, scan_type, severity, include_dev, fix, ignore,
+            format, sbom, fail_on, sast_config, verbose,
+        }),
+        Commands::License {
+            path, policy, policy_file, include_dev, format, sbom, fail_on_violation, verbose,
+        } => handle_license_command(cli::LicenseCommandParams {
+            path, policy, policy_file, include_dev, format, sbom, fail_on_violation, verbose,
+        }),
+        Commands::Complexity {
+            path, staged, modified, include, exclude, threshold, preset,
+            format, with_trends, trend_count, only_high, sort, no_parallel, verbose,
+        } => handle_complexity_command(ComplexityCommandOptions {
+            path, staged, modified, include, exclude, threshold, preset,
+            format, with_trends, trend_count, only_high, sort, no_parallel, verbose,
+        }),
+        _ => ExitCode::from(1),
     }
 }
 

@@ -63,37 +63,10 @@ pub fn handle_format_command(options: FormatCommandOptions) -> ExitCode {
     }
 
     // Collect files to format
-    let path_options = PathCollectionOptions {
-        paths: options.paths,
-        staged: options.staged,
-        since: None,
-        modified: options.modified,
-        exclude: options.exclude.unwrap_or_default(),
-        no_default_excludes: false,
-        no_gitignore: false,
-        verbose: options.verbose,
+    let files = match collect_format_files(&options) {
+        Some(f) => f,
+        None => return ExitCode::SUCCESS,
     };
-
-    let files = match collect_paths(&path_options) {
-        PathCollectionResult::Success(files, _excludes) => files,
-        PathCollectionResult::Empty(msg) => {
-            if !options.quiet {
-                println!("{} {}", "→".cyan(), msg);
-            }
-            return ExitCode::SUCCESS;
-        }
-        PathCollectionResult::Error(msg, code) => {
-            eprintln!("{}: {}", "Error".red(), msg);
-            return ExitCode::from(code as u8);
-        }
-    };
-
-    if files.is_empty() {
-        if !options.quiet {
-            println!("{} No files to format.", "→".cyan());
-        }
-        return ExitCode::SUCCESS;
-    }
 
     if !options.quiet {
         println!(
@@ -139,4 +112,41 @@ pub fn handle_format_command(options: FormatCommandOptions) -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+/// Collect files to format from options. Returns None if no files found.
+fn collect_format_files(options: &FormatCommandOptions) -> Option<Vec<std::path::PathBuf>> {
+    let path_options = PathCollectionOptions {
+        paths: options.paths.clone(),
+        staged: options.staged,
+        since: None,
+        modified: options.modified,
+        exclude: options.exclude.clone().unwrap_or_default(),
+        no_default_excludes: false,
+        no_gitignore: false,
+        verbose: options.verbose,
+    };
+
+    let files = match collect_paths(&path_options) {
+        PathCollectionResult::Success(files, _excludes) => files,
+        PathCollectionResult::Empty(msg) => {
+            if !options.quiet {
+                println!("{} {}", "→".cyan(), msg);
+            }
+            return None;
+        }
+        PathCollectionResult::Error(msg, _code) => {
+            eprintln!("{}: {}", "Error".red(), msg);
+            return None;
+        }
+    };
+
+    if files.is_empty() {
+        if !options.quiet {
+            println!("{} No files to format.", "→".cyan());
+        }
+        return None;
+    }
+
+    Some(files)
 }
