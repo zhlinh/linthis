@@ -19,7 +19,7 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use crate::cli::backup::{create_backup, handle_list_backups, handle_undo};
+use crate::cli::backup::{create_backup, handle_list_backups};
 use crate::cli::paths::{collect_paths, PathCollectionOptions, PathCollectionResult};
 use linthis::{RunMode, RunOptions};
 
@@ -52,9 +52,14 @@ pub fn handle_format_command(options: FormatCommandOptions) -> ExitCode {
         return handle_list_backups("linthis format");
     }
 
-    // Handle --undo
+    // Handle --undo (redirects to unified undo with format filter)
     if options.undo {
-        return handle_undo(&options.source, "linthis format --list-backups");
+        let filter = if options.source == "last" {
+            "format".to_string()
+        } else {
+            options.source.clone()
+        };
+        return super::backup::handle_undo_filtered(&filter);
     }
 
     // Collect files to format

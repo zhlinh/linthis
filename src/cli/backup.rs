@@ -372,7 +372,8 @@ fn restore_backup_files(
     (restored_count, failed_count)
 }
 
-/// Restore files from a backup
+/// Restore files from a backup (legacy, use handle_undo_filtered instead)
+#[allow(dead_code)]
 pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
     let backup_dir = get_backup_dir();
 
@@ -421,6 +422,354 @@ pub fn handle_undo(source: &str, list_cmd: &str) -> ExitCode {
             failed_count
         );
         ExitCode::from(1)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Unified backup / undo / redo commands
+// ═══════════════════════════════════════════════════════════════
+
+/// Handle `linthis backup create <files> -d <description>`
+pub fn handle_backup_create(files: &[PathBuf], description: &str) -> ExitCode {
+    if files.is_empty() {
+        eprintln!("{}: No files specified.", "Error".red());
+        return ExitCode::from(1);
+    }
+    match create_backup(files, description, false) {
+        Some(_) => ExitCode::SUCCESS,
+        None => {
+            eprintln!("{}: No files were backed up.", "Warning".yellow());
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// Handle `linthis backup show <id>`
+pub fn handle_backup_show(id: &str) -> ExitCode {
+    let backup_dir = get_backup_dir();
+    if !backup_dir.exists() {
+        println!("No backups found.");
+        return ExitCode::SUCCESS;
+    }
+
+    let backup_path = match resolve_backup_path(&backup_dir, id, "linthis backup list") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+
+    let manifest = match read_backup_manifest(&backup_path) {
+        Ok(m) => m,
+        Err(code) => return code,
+    };
+
+    println!("{}", "Backup Details".bold());
+    println!("  Timestamp:   {}", manifest.timestamp.cyan());
+    println!("  Description: {}", manifest.description);
+    println!("  Files ({}):", manifest.files.len());
+    for f in &manifest.files {
+        println!("    {}", f);
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Handle `linthis undo [filter]` — restore from matching backup with redo support.
+pub fn handle_undo_filtered(filter: &str) -> ExitCode {
+    let backup_dir = get_backup_dir();
+    if !backup_dir.exists() {
+        eprintln!("{}: No backups found.", "Error".red());
+        return ExitCode::from(1);
+    }
+
+    // Find matching backup
+    let backup_path = if matches!(filter, "format" | "fix" | "hook") {
+        match find_latest_backup_by_type(&backup_dir, filter) {
+            Some(p) => p,
+            None => {
+                eprintln!(
+                    "{}: No '{}' backup found. Run {} to see available backups.",
+                    "Error".red(),
+                    filter,
+                    "linthis backup list".cyan()
+                );
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        // "last" or specific timestamp
+        match resolve_backup_path(&backup_dir, filter, "linthis backup list") {
+            Ok(p) => p,
+            Err(code) => return code,
+        }
+    };
+
+    let manifest = match read_backup_manifest(&backup_path) {
+        Ok(m) => m,
+        Err(code) => return code,
+    };
+
+    println!(
+        "{} Undoing: {} ({})",
+        "←".cyan().bold(),
+        manifest.description,
+        manifest.timestamp
+    );
+
+    let project_root = linthis::utils::get_project_root();
+
+    // Save current state to redo directory before restoring
+    save_redo_state(&manifest, &project_root);
+
+    // Restore from backup
+    let (restored, failed) = restore_backup_files(&manifest, &backup_path, &project_root);
+
+    if failed == 0 {
+        println!(
+            "{} Undone: {} file{} restored. Use {} to re-apply.",
+            "✓".green(),
+            restored,
+            if restored == 1 { "" } else { "s" },
+            "linthis redo".cyan()
+        );
+        ExitCode::SUCCESS
+    } else {
+        println!(
+            "{} Restored {} file{}, {} failed",
+            "⚠".yellow(),
+            restored,
+            if restored == 1 { "" } else { "s" },
+            failed
+        );
+        ExitCode::from(1)
+    }
+}
+
+/// Handle `linthis redo` — re-apply changes that were undone.
+pub fn handle_redo() -> ExitCode {
+    let redo_dir = get_redo_dir();
+    if !redo_dir.exists() {
+        eprintln!("{}: Nothing to redo.", "Error".red());
+        return ExitCode::from(1);
+    }
+
+    let manifest = match read_backup_manifest(&redo_dir) {
+        Ok(m) => m,
+        Err(_) => {
+            eprintln!("{}: No redo state found.", "Error".red());
+            return ExitCode::from(1);
+        }
+    };
+
+    println!(
+        "{} Redoing: {} file{}",
+        "→".cyan().bold(),
+        manifest.files.len(),
+        if manifest.files.len() == 1 { "" } else { "s" }
+    );
+
+    let project_root = linthis::utils::get_project_root();
+    let (restored, failed) = restore_backup_files(&manifest, &redo_dir, &project_root);
+
+    // Clear redo directory after restore
+    let _ = fs::remove_dir_all(&redo_dir);
+
+    if failed == 0 {
+        println!(
+            "{} Redone: {} file{} restored",
+            "✓".green(),
+            restored,
+            if restored == 1 { "" } else { "s" }
+        );
+        ExitCode::SUCCESS
+    } else {
+        println!(
+            "{} Restored {} file{}, {} failed",
+            "⚠".yellow(),
+            restored,
+            if restored == 1 { "" } else { "s" },
+            failed
+        );
+        ExitCode::from(1)
+    }
+}
+
+/// Get the redo directory path.
+fn get_redo_dir() -> PathBuf {
+    let project_root = linthis::utils::get_project_root();
+    project_root.join(".linthis").join("redo")
+}
+
+/// Save current file state to redo directory before undo.
+fn save_redo_state(manifest: &BackupManifest, project_root: &std::path::Path) {
+    let redo_dir = get_redo_dir();
+
+    // Clear previous redo state
+    let _ = fs::remove_dir_all(&redo_dir);
+    if fs::create_dir_all(&redo_dir).is_err() {
+        return;
+    }
+
+    let mut saved_files = Vec::new();
+
+    for rel_path in &manifest.files {
+        let source = project_root.join(rel_path);
+        if !source.is_file() {
+            continue;
+        }
+
+        let dest = redo_dir.join(rel_path);
+        if let Some(parent) = dest.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if fs::copy(&source, &dest).is_ok() {
+            saved_files.push(rel_path.clone());
+        }
+    }
+
+    // Write redo manifest
+    let redo_manifest = BackupManifest {
+        timestamp: chrono::Local::now().format("%Y%m%d-%H%M%S").to_string(),
+        files: saved_files,
+        description: format!("redo state for undo of '{}'", manifest.description),
+    };
+    let _ = fs::write(
+        redo_dir.join("manifest.json"),
+        serde_json::to_string_pretty(&redo_manifest).unwrap_or_default(),
+    );
+}
+
+/// Find the latest backup matching a type filter (by description).
+fn find_latest_backup_by_type(backup_dir: &std::path::Path, filter: &str) -> Option<PathBuf> {
+    let mut backups: Vec<PathBuf> = fs::read_dir(backup_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.path())
+        .collect();
+
+    // Sort newest first
+    backups.sort();
+    backups.reverse();
+
+    for backup_path in backups {
+        let manifest_path = backup_path.join("manifest.json");
+        if let Ok(content) = fs::read_to_string(&manifest_path) {
+            if let Ok(manifest) = serde_json::from_str::<BackupManifest>(&content) {
+                let desc_lower = manifest.description.to_lowercase();
+                let matches = match filter {
+                    "format" => desc_lower.contains("format"),
+                    "fix" => desc_lower.contains("fix"),
+                    "hook" => desc_lower.contains("hook"),
+                    _ => false,
+                };
+                if matches {
+                    return Some(backup_path);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Handle `linthis backup diff [id]` — show diff between backup and current files.
+pub fn handle_backup_diff(id: &str) -> ExitCode {
+    let backup_dir = get_backup_dir();
+    if !backup_dir.exists() {
+        eprintln!("{}: No backups found.", "Error".red());
+        return ExitCode::from(1);
+    }
+
+    let backup_path = match resolve_backup_path(&backup_dir, id, "linthis backup list") {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
+
+    let manifest = match read_backup_manifest(&backup_path) {
+        Ok(m) => m,
+        Err(code) => return code,
+    };
+
+    let project_root = linthis::utils::get_project_root();
+
+    println!(
+        "📊 Diff: {} ({})",
+        manifest.description,
+        manifest.timestamp.cyan()
+    );
+    println!();
+
+    let mut has_diff = false;
+
+    for rel_path in &manifest.files {
+        let backup_file = backup_path.join(rel_path);
+        let current_file = project_root.join(rel_path);
+
+        let backup_content = fs::read_to_string(&backup_file).unwrap_or_default();
+        let current_content = fs::read_to_string(&current_file).unwrap_or_default();
+
+        if backup_content == current_content {
+            continue;
+        }
+
+        has_diff = true;
+        print_unified_diff(
+            &backup_content,
+            &current_content,
+            &format!("a/{} (backup)", rel_path),
+            &format!("b/{} (current)", rel_path),
+        );
+        println!();
+    }
+
+    if !has_diff {
+        println!(
+            "  {}",
+            "No differences — current files match backup.".green()
+        );
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Print a unified diff with context lines (like `git diff`).
+fn print_unified_diff(old_content: &str, new_content: &str, old_label: &str, new_label: &str) {
+    use similar::{ChangeTag, TextDiff};
+
+    let diff = TextDiff::from_lines(old_content, new_content);
+    let mut has_output = false;
+
+    for hunk in diff.unified_diff().context_radius(3).iter_hunks() {
+        if !has_output {
+            println!("{}", format!("--- {}", old_label).red());
+            println!("{}", format!("+++ {}", new_label).green());
+            has_output = true;
+        }
+        println!("{}", format!("{}", hunk.header()).cyan());
+        for change in hunk.iter_changes() {
+            match change.tag() {
+                ChangeTag::Delete => {
+                    print!("{}", format!("-{}", change).red());
+                }
+                ChangeTag::Insert => {
+                    print!("{}", format!("+{}", change).green());
+                }
+                ChangeTag::Equal => {
+                    print!(" {}", change);
+                }
+            }
+        }
+    }
+}
+
+/// Handle `linthis backup` subcommand dispatch.
+pub fn handle_backup_command(action: super::commands::BackupCommands) -> ExitCode {
+    use super::commands::BackupCommands;
+    match action {
+        BackupCommands::Create { files, description } => handle_backup_create(&files, &description),
+        BackupCommands::List => handle_list_backups("linthis backup list"),
+        BackupCommands::Show { id } => handle_backup_show(&id),
+        BackupCommands::Diff { id } => handle_backup_diff(&id),
     }
 }
 

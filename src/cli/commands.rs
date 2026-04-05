@@ -1048,6 +1048,65 @@ pub enum Commands {
         #[arg(short, long, default_value = "markdown")]
         output: String,
     },
+
+    /// Backup management: create, list, and show backups
+    Backup {
+        #[command(subcommand)]
+        action: BackupCommands,
+    },
+
+    /// Undo the last operation (format, fix, or hook fix)
+    ///
+    /// Restores files from the most recent matching backup.
+    /// Use a filter to target specific operation types:
+    ///   linthis undo          # undo last operation (any type)
+    ///   linthis undo format   # undo last format
+    ///   linthis undo fix      # undo last fix (including AI fix)
+    ///   linthis undo hook     # undo last hook-agent-fix
+    ///   linthis undo <id>     # undo specific backup by timestamp
+    Undo {
+        /// Filter: "last" (default), "format", "fix", "hook", or a backup timestamp
+        #[arg(default_value = "last")]
+        filter: String,
+
+        /// List available backups instead of restoring
+        #[arg(long)]
+        list: bool,
+    },
+
+    /// Re-apply changes that were undone by `linthis undo`
+    Redo,
+}
+
+/// Backup subcommands
+#[derive(clap::Subcommand, Debug)]
+pub enum BackupCommands {
+    /// Create a backup of specified files
+    Create {
+        /// Files to backup
+        files: Vec<std::path::PathBuf>,
+
+        /// Description of the backup
+        #[arg(short, long, default_value = "manual")]
+        description: String,
+    },
+
+    /// List available backups
+    List,
+
+    /// Show details of a specific backup
+    Show {
+        /// Backup timestamp or "last"
+        #[arg(default_value = "last")]
+        id: String,
+    },
+
+    /// Show diff between backup and current files
+    Diff {
+        /// Backup timestamp or "last"
+        #[arg(default_value = "last")]
+        id: String,
+    },
 }
 
 /// Hook subcommands
