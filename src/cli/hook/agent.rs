@@ -89,6 +89,15 @@ Auto-detect the project language and use the corresponding commands:
 
 > Detect by checking for `Cargo.toml`, `go.mod`, `package.json`, `pyproject.toml`, `Makefile`/`CMakeLists.txt`, `pom.xml`/`build.gradle` in the project root.
 
+## Worktree Isolation
+
+If your agent supports worktree (e.g. Claude Code), **prefer working in a worktree** for safe isolation:
+1. The hook script automatically creates a worktree and runs you in it
+2. Your changes are copied back to the main tree only after verification passes
+3. If interrupted (Ctrl+C), the main working tree is untouched
+
+If worktree is not available, changes are made directly with a backup safety net (`linthis undo hook` to revert).
+
 ## Steps
 
 1. **Identify** modified code files in this session (files written or edited via Write/Edit tools, or via Bash)

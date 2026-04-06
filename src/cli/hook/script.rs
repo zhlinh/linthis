@@ -318,24 +318,23 @@ pub(crate) fn shell_agent_availability_check(provider: &AgentFixProvider) -> Str
 /// Build the agent fix prompt based on the hook event type.
 /// Note: CommitMsg uses agent_fix_headless_cmd_commit_msg() instead (needs $1 expansion).
 pub(crate) fn agent_fix_prompt_for_event(_hook_event: &HookEvent) -> String {
-    "Staged files have linthis lint errors. \
-     Follow these steps: \
-     (1) Run 'git diff --cached -- <files>' and save the output as the before-snapshot. \
-     (2) Run 'linthis -s' to inspect issues. \
-     (3) Group the issues by file. For files with independent errors (no cross-file dependencies), \
+    "You are working in a git worktree (an isolated copy of the repository). \
+     Your changes will be copied back to the main working tree after verification. \
+     Lint errors were found in staged files. Follow these steps: \
+     (1) Run 'linthis -m' to inspect all issues in this worktree. \
+     (2) Group the issues by file. For files with independent errors (no cross-file dependencies), \
      fix them in parallel using concurrent tool calls — each tool call fixes one file. \
      For files with cross-file dependencies (e.g. shared type renames, API signature changes), \
      fix them sequentially in dependency order. \
      Fix by editing the code directly (do NOT use linthis --fix). \
-     (4) Verify with 'linthis -s' until it passes cleanly. \
-     (5) Run the project build/test to ensure fixes don't break anything \
+     (3) Re-run 'linthis -m' to verify all issues are resolved. \
+     (4) Run the project build/test to ensure fixes don't break anything \
      (detect project type: cargo check && cargo test for Rust, \
      go build ./... && go test ./... for Go, \
      npx tsc --noEmit for TypeScript, python -m py_compile for Python). \
      If build/tests fail, revert the problematic fix and try again. \
-     (6) Run 'git diff --cached' and display a Changes Summary showing \
-     each modified file, what was changed, and why (e.g. which lint rule). \
-     Then show the full diff output."
+     (5) Display a Changes Summary showing each modified file, \
+     what was changed, and why (e.g. which lint rule). Then show the full diff output."
         .to_string()
 }
 
@@ -583,13 +582,91 @@ pub(crate) fn build_git_with_agent_prepush_script(
 }
 
 /// Build the full git hook shell script with agent fix fallback.
+/// Generate the worktree-based agent fix shell snippet.
+fn shell_worktree_agent_fix(
+    linthis_cmd: &str,
+    fix_provider: &AgentFixProvider,
+    agent_cmd: &str,
+    error_msg: &str,
+) -> String {
+    let agent_check = shell_agent_availability_check(fix_provider);
+    format!(
+        "\x20 # Check if agent provider is available before attempting fix\n\
+         \x20 {agent_check}\
+         \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
+         \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
+         \x20\x20\x20 # Backup staged files (safety net for linthis undo hook)\n\
+         \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | tr '\\n' '\\0' | xargs -0 {linthis} backup create -d \"hook-agent-fix\" 2>/dev/null\n\
+         \x20\x20\x20 fi\n\
+         \x20\x20\x20 # Create worktree for isolated agent fix\n\
+         \x20\x20\x20 _WT_TS=$(date +%s)\n\
+         \x20\x20\x20 _WORKTREE=\".linthis/worktree/fix-$_WT_TS\"\n\
+         \x20\x20\x20 _WT_BRANCH=\"linthis-fix-$_WT_TS\"\n\
+         \x20\x20\x20 _ORIG_DIR=$(pwd)\n\
+         \x20\x20\x20 # Trap: clean up worktree on interrupt\n\
+         \x20\x20\x20 trap 'echo \"[linthis] Interrupted, cleaning up worktree...\" >&2; cd \"$_ORIG_DIR\" 2>/dev/null; git worktree remove --force \"$_WORKTREE\" 2>/dev/null; git branch -D \"$_WT_BRANCH\" 2>/dev/null; exit 1' INT TERM\n\
+         \x20\x20\x20 git worktree add \"$_WORKTREE\" -b \"$_WT_BRANCH\" HEAD 2>/dev/null\n\
+         \x20\x20\x20 # Apply staged changes to worktree\n\
+         \x20\x20\x20 git diff --cached | git -C \"$_WORKTREE\" apply 2>/dev/null\n\
+         \x20\x20\x20 # Run agent in worktree\n\
+         \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
+         \x20\x20\x20 cd \"$_WORKTREE\" && {agent} ; cd \"$_ORIG_DIR\"\n\
+         \x20\x20\x20 stop_timer\n\
+         \x20\x20\x20 # Show changes summary\n\
+         \x20\x20\x20 echo \"\" >&2\n\
+         \x20\x20\x20 echo \"[linthis] ═══ Changes Summary ═══\" >&2\n\
+         \x20\x20\x20 _HAS_CHANGES=0\n\
+         \x20\x20\x20 for _F in $_STAGED_FILES; do\n\
+         \x20\x20\x20\x20\x20 if [ -f \"$_WORKTREE/$_F\" ] && ! diff -q \"$_F\" \"$_WORKTREE/$_F\" >/dev/null 2>&1; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis]   Modified: $_F\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 _HAS_CHANGES=1\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20 done\n\
+         \x20\x20\x20 if [ \"$_HAS_CHANGES\" = \"0\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis]   No changes made by agent\" >&2\n\
+         \x20\x20\x20 else\n\
+         \x20\x20\x20\x20\x20 echo \"\" >&2\n\
+         \x20\x20\x20\x20\x20 for _F in $_STAGED_FILES; do\n\
+         \x20\x20\x20\x20\x20\x20\x20 if [ -f \"$_WORKTREE/$_F\" ] && ! diff -q \"$_F\" \"$_WORKTREE/$_F\" >/dev/null 2>&1; then\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20 diff -u \"$_F\" \"$_WORKTREE/$_F\" 2>/dev/null | head -50 >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20\x20\x20 done\n\
+         \x20\x20\x20 fi\n\
+         \x20\x20\x20 echo \"[linthis] ═══════════════════════\" >&2\n\
+         \x20\x20\x20 echo \"\" >&2\n\
+         \x20\x20\x20 # Copy fixed files back to main working tree\n\
+         \x20\x20\x20 for _F in $_STAGED_FILES; do\n\
+         \x20\x20\x20\x20\x20 if [ -f \"$_WORKTREE/$_F\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 cp \"$_WORKTREE/$_F\" \"$_F\" 2>/dev/null\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20 done\n\
+         \x20\x20\x20 # Re-stage and clean up worktree\n\
+         \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20 fi\n\
+         \x20\x20\x20 git worktree remove --force \"$_WORKTREE\" 2>/dev/null\n\
+         \x20\x20\x20 git branch -D \"$_WT_BRANCH\" 2>/dev/null\n\
+         \x20\x20\x20 trap - INT TERM\n\
+         \x20\x20\x20 # Re-verify after agent fix\n\
+         \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+         \x20\x20\x20 $LINTHIS_CMD\n\
+         \x20\x20\x20 LINTHIS_EXIT=$?\n\
+         \x20 fi\n",
+        agent_check = agent_check,
+        linthis = linthis_cmd,
+        provider = fix_provider,
+        agent = agent_cmd,
+        error_msg = error_msg,
+    )
+}
+
 pub(crate) fn build_git_with_agent_hook_script(
     linthis_cmd: &str,
     fix_provider: &AgentFixProvider,
     hook_event: &HookEvent,
     provider_args: Option<&str>,
 ) -> String {
-    // Pre-push uses a dedicated review flow (always triggers agent, not only on failure)
     if matches!(hook_event, HookEvent::PrePush) {
         return build_git_with_agent_prepush_script(linthis_cmd, fix_provider, provider_args);
     }
@@ -607,7 +684,7 @@ pub(crate) fn build_git_with_agent_hook_script(
     } else {
         String::new()
     };
-    let agent_check = shell_agent_availability_check(fix_provider);
+    let worktree_fix = shell_worktree_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg);
     format!(
         "#!/bin/sh\n\
          {timer}\
@@ -627,36 +704,14 @@ pub(crate) fn build_git_with_agent_hook_script(
          fi\n\
          \n\
          if [ $LINTHIS_EXIT -ne 0 ]; then\n\
-         \x20 # Check if agent provider is available before attempting fix\n\
-         \x20 {agent_check}\
-         \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
-         \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
-         \x20\x20\x20 # Backup staged files before agent fix (for linthis undo hook)\n\
-         \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | tr '\\n' '\\0' | xargs -0 {linthis} backup create -d \"hook-agent-fix\" 2>/dev/null\n\
-         \x20\x20\x20 fi\n\
-         \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
-         \x20\x20\x20 {agent}\n\
-         \x20\x20\x20 stop_timer\n\
-         \x20\x20\x20 # Re-stage files modified by agent fix\n\
-         \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
-         \x20\x20\x20 fi\n\
-         \x20\x20\x20 # Re-verify after agent fix\n\
-         \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-         \x20\x20\x20 $LINTHIS_CMD\n\
-         \x20\x20\x20 LINTHIS_EXIT=$?\n\
-         \x20 fi\n\
+         {worktree_fix}\
          {new_msg_print}\
          fi\n\
          \n\
          exit $LINTHIS_EXIT\n",
         timer = timer_fns,
         linthis = linthis_cmd,
-        agent_check = agent_check,
-        provider = fix_provider,
-        agent = agent_cmd,
-        error_msg = error_msg,
+        worktree_fix = worktree_fix,
         new_msg_print = new_msg_print,
     )
 }
