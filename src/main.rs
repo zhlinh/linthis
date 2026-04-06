@@ -1283,6 +1283,7 @@ fn run_additional_checks(
     cli: &Cli,
     runtime_config: &linthis::config::Config,
     runtime_project_root: &std::path::Path,
+    resolved_paths: &[std::path::PathBuf],
 ) {
     let checks_list = resolve_checks_list(&cli.checks, &runtime_config.checks.run);
 
@@ -1290,11 +1291,12 @@ fn run_additional_checks(
         result.checks_run.push("lint".to_string());
     }
 
-    let target_files: Vec<std::path::PathBuf> = cli
-        .paths
+    // Use resolved paths (from -s/staged, -m/modified, or -i/explicit)
+    // instead of cli.paths which may be empty for -s mode.
+    let target_files: Vec<std::path::PathBuf> = resolved_paths
         .iter()
         .filter(|p| p.is_file())
-        .map(|p| p.to_path_buf())
+        .cloned()
         .collect();
 
     let cache_dir = runtime_project_root.join(".linthis");
@@ -1336,6 +1338,7 @@ fn process_lint_result(
     runtime_project_root: &std::path::Path,
     output_format: OutputFormat,
     hook_type: Option<String>,
+    resolved_paths: &[std::path::PathBuf],
 ) -> ExitCode {
     if cli.staged {
         auto_restage_formatted(&result, cli.quiet);
@@ -1349,13 +1352,12 @@ fn process_lint_result(
         .unwrap_or_default();
     result.calculate_exit_code_with_fail_on(&lint_fail_on);
 
-    result.target_paths = cli
-        .paths
+    result.target_paths = resolved_paths
         .iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
 
-    run_additional_checks(&mut result, cli, runtime_config, runtime_project_root);
+    run_additional_checks(&mut result, cli, runtime_config, runtime_project_root, resolved_paths);
 
     // Merge security/complexity issues into result.issues so all formatters
     // (including hook box output) can see them
@@ -1568,6 +1570,7 @@ fn execute_run(
         cli::create_backup(&options.paths, "format (linthis main command)", cli.quiet);
     }
 
+    let resolved_paths = options.paths.clone();
     match run(options) {
         Ok(result) => process_lint_result(
             result,
@@ -1576,6 +1579,7 @@ fn execute_run(
             runtime_project_root,
             output_format,
             hook_type,
+            &resolved_paths,
         ),
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
