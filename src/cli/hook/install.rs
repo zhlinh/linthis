@@ -627,7 +627,7 @@ fn set_global_hooks_path_config(
             println!();
             println!(
                 "  {}",
-                "How it works (Strategy B — local takes priority):".dimmed()
+                "How it works (local takes priority):".dimmed()
             );
             println!(
                 "  {} If local hook has linthis → global delegates entirely",

@@ -7,7 +7,7 @@ linthis integrates with Git's hook system to run lint checks and formatting auto
 - **Project-level** — written to `.git/hooks/<event>` in a single repository
 - **Global** — written to `~/.config/git/hooks/<event>` and activated for every repository on the machine via `git config --global core.hooksPath`
 
-Global hooks use **Strategy B**: a local project hook takes priority. If the local `.git/hooks/<event>` already calls `linthis`, the global hook delegates to it entirely. If a local hook exists but does not call `linthis`, the global hook runs `linthis` first and then chains to the local hook. If there is no local hook at all, the global hook runs `linthis` directly. This design guarantees zero interference with other hook tools.
+Global hooks use a **local-priority strategy**: a local project hook takes priority. If the local `.git/hooks/<event>` already calls `linthis`, the global hook delegates to it entirely. If a local hook exists but does not call `linthis`, the global hook runs `linthis` first and then chains to the local hook. If there is no local hook at all, the global hook runs `linthis` directly. This design guarantees zero interference with other hook tools.
 
 All hook types — `git`, `prek`, `git-with-agent`, `prek-with-agent` — are supported at both scopes.
 
@@ -100,7 +100,7 @@ Git's `core.hooksPath` makes Git look in that directory for all hooks, for every
 └── ...
 ```
 
-### Strategy B explained
+### Strategy — local-priority delegation
 
 The global hook does not run blindly. Before running `linthis`, it inspects the local `.git/hooks/<event>` of the current repository:
 
@@ -311,7 +311,7 @@ Project Hooks (.git/hooks/):
 Global Hooks (~/.config/git/hooks/):
   core.hooksPath = /Users/username/.config/git/hooks
   ✓ /Users/username/.config/git/hooks/pre-commit [global]
-      ℹ Strategy B: local hook takes priority
+      ℹ Strategy: local hook takes priority
 ```
 
 The status output shows:
@@ -333,7 +333,7 @@ The status output shows:
 | Works for existing repos | Yes, immediately | Yes, immediately |
 | Committable to repo | No | No (`.git/` is not tracked) |
 | Team sharing | No | Requires prek or pre-commit type |
-| Hook coexistence | Strategy B (auto-delegation) | Manual chaining |
+| Hook coexistence | Local-priority (auto-delegation) | Manual chaining |
 | Supported types | All types | All types |
 
 ---
@@ -409,9 +409,9 @@ linthis hook status
 
 ### Q1: Can a global hook and a project-level hook coexist?
 
-Yes. This is Strategy B's primary use case. If the project has a `.git/hooks/pre-commit` that calls `linthis`, the global hook detects it and delegates entirely — `linthis` runs once, not twice. If the project hook does not call `linthis`, the global hook prepends `linthis` before calling the project hook.
+Yes. This is the local-priority strategy's primary use case. If the project has a `.git/hooks/pre-commit` that calls `linthis`, the global hook detects it and delegates entirely — `linthis` runs once, not twice. If the project hook does not call `linthis`, the global hook prepends `linthis` before calling the project hook.
 
-### Q2: How does Strategy B detect whether the local hook calls linthis?
+### Q2: How does the local-priority strategy detect whether the local hook calls linthis?
 
 It runs `grep -qE '^[^#]*linthis' "$LOCAL_HOOK"`. The pattern matches any non-comment line (`^[^#]*`) that contains the string `linthis`. Comment lines starting with `#` are ignored. This means renaming a comment or adding a note like `# previously used linthis` does not affect detection — only executable lines matter.
 
@@ -440,7 +440,7 @@ The hook first runs `linthis`. If `linthis` exits cleanly, the agent is never in
 
 ### Q6: Can I use `--type prek` or `--type pre-commit` with `--global`?
 
-Yes. All hook types are supported with `--global`. The hook script written to `~/.config/git/hooks/<event>` will invoke the appropriate runner (`prek` or `pre-commit`) rather than `linthis` directly. The same Strategy B delegation logic applies.
+Yes. All hook types are supported with `--global`. The hook script written to `~/.config/git/hooks/<event>` will invoke the appropriate runner (`prek` or `pre-commit`) rather than `linthis` directly. The same local-priority delegation logic applies.
 
 ### Q7: How do I check which `core.hooksPath` is active?
 
