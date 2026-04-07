@@ -137,6 +137,7 @@ pub mod reports;
 pub mod review;
 pub mod rules;
 pub mod security;
+pub mod vcs;
 pub mod self_update;
 pub mod templates;
 pub mod tui;
@@ -214,6 +215,9 @@ pub enum LintisError {
         language: String,
         install_hint: String,
     },
+
+    #[error("{0}")]
+    Generic(String),
 }
 
 impl LintisError {
@@ -262,6 +266,7 @@ impl LintisError {
             LintisError::UnsupportedLanguage(_) => 50,
             LintisError::Cache { .. } => 60,
             LintisError::ToolNotAvailable { .. } => 70,
+            LintisError::Generic(_) => 80,
         }
     }
 
@@ -269,7 +274,9 @@ impl LintisError {
     pub fn is_recoverable(&self) -> bool {
         matches!(
             self,
-            LintisError::ToolNotAvailable { .. } | LintisError::Cache { .. }
+            LintisError::ToolNotAvailable { .. }
+            | LintisError::Cache { .. }
+            | LintisError::Generic(_)
         )
     }
 }
