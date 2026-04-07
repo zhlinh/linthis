@@ -55,6 +55,6 @@ pub use paths::{collect_paths, PathCollectionOptions, PathCollectionResult};
 pub use plugin::handle_plugin_command;
 pub use report::handle_report_command;
 pub use review::{handle_review_command, ReviewCommandOptions};
-pub use runner::{perform_auto_sync, perform_self_update};
+pub use runner::{handle_self_update_command, perform_auto_sync, perform_self_update};
 pub use security::{handle_security_command, run_sast_scan, SecurityCommandParams};
 pub use watch::run_watch;

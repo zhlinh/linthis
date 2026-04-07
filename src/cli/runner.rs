@@ -84,6 +84,129 @@ pub fn perform_self_update(
     }
 }
 
+/// Handle the `linthis update` / `linthis upgrade` subcommand.
+/// Returns ExitCode::SUCCESS on success, ExitCode::FAILURE on error.
+pub fn handle_self_update_command(
+    check: bool,
+    force: bool,
+    target_version: Option<String>,
+) -> std::process::ExitCode {
+    use linthis::self_update::{detect_install_method, SelfUpdateManager};
+
+    let manager = SelfUpdateManager::new();
+    let current = manager.get_current_version();
+    let method = detect_install_method();
+
+    println!(
+        "linthis {} (installed via {})",
+        current.bold(),
+        method.to_string().cyan()
+    );
+
+    if let Some(ref version) = target_version {
+        handle_install_specific_version(&manager, &current, version)
+    } else {
+        handle_update_to_latest(&manager, &current, check, force)
+    }
+}
+
+/// Install a specific version of linthis.
+fn handle_install_specific_version(
+    manager: &linthis::self_update::SelfUpdateManager,
+    current: &str,
+    version: &str,
+) -> std::process::ExitCode {
+    use std::process::ExitCode;
+
+    println!(
+        "Installing version: {} → {}",
+        current.yellow(),
+        version.cyan()
+    );
+
+    match manager.install_version(version) {
+        Ok(true) => {
+            println!(
+                "{}: auto-update may override this version. To disable: {}",
+                "Note".yellow(),
+                "linthis config set self_auto_update.mode disabled".cyan()
+            );
+            let _ = manager.update_last_check_time();
+            ExitCode::SUCCESS
+        }
+        Ok(false) => ExitCode::FAILURE,
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red(), e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Check for updates and optionally upgrade to the latest version.
+fn handle_update_to_latest(
+    manager: &linthis::self_update::SelfUpdateManager,
+    current: &str,
+    check: bool,
+    force: bool,
+) -> std::process::ExitCode {
+    use std::process::ExitCode;
+
+    println!("Checking for updates...");
+    let latest = match manager.get_latest_version() {
+        Some(v) => v,
+        None => {
+            eprintln!("{}: Failed to check for latest version", "Error".red());
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let has_update = manager.compare_versions(current, &latest) < 0;
+
+    if check {
+        if has_update {
+            println!(
+                "Update available: {} → {}",
+                current.yellow(),
+                latest.green()
+            );
+        } else {
+            println!("{}", "Already on the latest version.".green());
+        }
+        let _ = manager.update_last_check_time();
+        return ExitCode::SUCCESS;
+    }
+
+    if !has_update && !force {
+        println!("{}", "Already on the latest version.".green());
+        let _ = manager.update_last_check_time();
+        return ExitCode::SUCCESS;
+    }
+
+    if has_update {
+        println!("Updating: {} → {}", current.yellow(), latest.green());
+    } else {
+        println!("Force reinstalling version {}...", current);
+    }
+
+    let result = if force {
+        manager.force_upgrade()
+    } else {
+        manager.upgrade()
+    };
+
+    match result {
+        Ok(true) => {
+            let _ = manager.update_last_check_time();
+            ExitCode::SUCCESS
+        }
+        Ok(false) => ExitCode::FAILURE,
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red(), e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// Collect all plugins from both project and global configs.
 fn collect_all_plugins() -> Vec<(String, String, Option<String>)> {
     use linthis::plugin::PluginConfigManager;
