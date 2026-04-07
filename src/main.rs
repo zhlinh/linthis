@@ -136,11 +136,6 @@ fn dispatch_utility(command: Commands) -> ExitCode {
             check,
             force,
             target_version,
-        }
-        | Commands::Upgrade {
-            check,
-            force,
-            target_version,
         } => handle_self_update_command(check, force, target_version),
         _ => ExitCode::from(1),
     }

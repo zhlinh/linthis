@@ -1088,25 +1088,8 @@ pub enum Commands {
     ///   linthis update --check          # Only check, don't install
     ///   linthis update --force          # Force reinstall
     ///   linthis update -v 0.16.0        # Install specific version
+    #[command(visible_alias = "upgrade")]
     Update {
-        /// Check for updates without installing
-        #[arg(long)]
-        check: bool,
-
-        /// Force reinstall even if already on latest version
-        #[arg(long)]
-        force: bool,
-
-        /// Install a specific version (e.g. 0.16.0)
-        #[arg(short = 'v', long = "version", value_name = "VERSION")]
-        target_version: Option<String>,
-    },
-
-    /// Self-update linthis to the latest version (alias for `update`)
-    ///
-    /// Same as `linthis update`. Detects the installation method and uses
-    /// the appropriate upgrade command.
-    Upgrade {
         /// Check for updates without installing
         #[arg(long)]
         check: bool,
