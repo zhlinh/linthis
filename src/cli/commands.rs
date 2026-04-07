@@ -1198,7 +1198,7 @@ pub enum HookCommands {
         /// - For --type agent: installs skills into user home directory (~/.claude/, ~/.cursor/, etc.)
         ///
         /// - For other types: installs hook into ~/.config/git/hooks/ and sets core.hooksPath
-        ///   (Strategy B: local hook takes priority; global runs linthis only when local has no linthis)
+        ///   (local hook takes priority; global runs linthis only when local has no linthis)
         #[arg(short = 'g', long)]
         global: bool,
 

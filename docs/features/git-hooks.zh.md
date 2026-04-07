@@ -311,7 +311,7 @@ Project Hooks (.git/hooks/):
 Global Hooks (~/.config/git/hooks/):
   core.hooksPath = /Users/username/.config/git/hooks
   ✓ /Users/username/.config/git/hooks/pre-commit [global]
-      ℹ Strategy B: local hook takes priority
+      ℹ Strategy: local hook takes priority
 ```
 
 状态输出包含：

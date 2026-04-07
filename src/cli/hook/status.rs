@@ -96,7 +96,7 @@ fn print_global_hook_status(hook_events: &[HookEvent]) {
                 let has_linthis = is_linthis_hook_file(&hook_path);
                 if has_linthis {
                     println!("{} {} [global]", "✓".green(), hook_path.display());
-                    println!("    {} Strategy B: local hook takes priority", "ℹ".dimmed());
+                    println!("    {} Strategy: local hook takes priority", "ℹ".dimmed());
                 } else {
                     println!(
                         "{} {} [global, not by linthis]",

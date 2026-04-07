@@ -623,7 +623,7 @@ All modifications preserve TOML file format and comments.
 - `prek`: Rust-based pre-commit tool (faster)
 - `prek-with-agent`: prek hook + AI agent auto-fix on failure
 
-**Global hooks**: Use `-g` / `--global` with any hook type. For `agent` type, installs rules to the user home directory. For all other types, installs to `~/.config/git/hooks/` and sets `git config --global core.hooksPath`. Local hooks take priority over global hooks (Strategy B).
+**Global hooks**: Use `-g` / `--global` with any hook type. For `agent` type, installs rules to the user home directory. For all other types, installs to `~/.config/git/hooks/` and sets `git config --global core.hooksPath`. Local hooks take priority over global hooks.
 
 <video src="docs/assets/videos/AgentHook-en.mp4" controls width="100%"></video>
 
