@@ -23,7 +23,8 @@ use cli::{
     handle_format_command, handle_hook_command, handle_init_command, handle_license_command,
     handle_list_backups, handle_plugin_command, handle_redo, handle_report_command,
     handle_review_command, handle_security_command, handle_undo_filtered, init_linter_configs,
-    perform_auto_sync, perform_self_update, print_fix_hint, run_benchmark, run_complexity_analysis,
+    handle_self_update_command, perform_auto_sync, perform_self_update, print_fix_hint,
+    run_benchmark, run_complexity_analysis,
     run_sast_scan, run_watch, strip_ansi_codes, Cli, Commands, ComplexityCommandOptions,
     FixCommandOptions, FormatCommandOptions, PathCollectionOptions, PathCollectionResult,
     ReviewCommandOptions,
@@ -98,30 +99,50 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
         Commands::Config { action } => Some(handle_config_command(action)),
         Commands::Hook { action } => Some(handle_hook_command(action)),
         Commands::Cmsg { .. } | Commands::Init { .. } => Some(dispatch_simple(command)),
-        Commands::Doctor { all, output } => Some(handle_doctor_command(all, &output)),
-        Commands::Cache { action } => Some(handle_cache_command(action)),
         Commands::Security { .. }
         | Commands::License { .. }
         | Commands::Complexity { .. } => Some(dispatch_analysis(command)),
         Commands::Format { .. } => Some(dispatch_format(command)),
         Commands::Fix { .. } => Some(dispatch_fix(command)),
         Commands::Review { .. } => Some(dispatch_review(command)),
+        Commands::Watch { .. } => Some(dispatch_watch(command)),
+        // Lint and Check fall through to main flow
+        Commands::Lint { .. } | Commands::Check { .. } => None,
+        other => Some(dispatch_utility(other)),
+    }
+}
+
+/// Dispatch utility and management subcommands.
+fn dispatch_utility(command: Commands) -> ExitCode {
+    match command {
+        Commands::Doctor { all, output } => handle_doctor_command(all, &output),
+        Commands::Cache { action } => handle_cache_command(action),
         Commands::Lsp {
             mode,
             port,
             use_plugin,
-        } => Some(handle_lsp_subcommand(mode, port, use_plugin)),
-        Commands::Report { action } => Some(handle_report_command(action)),
-        Commands::Watch { .. } => Some(dispatch_watch(command)),
-        Commands::Backup { action } => Some(handle_backup_command(action)),
-        Commands::Undo { filter, list } => Some(if list {
-            handle_list_backups("linthis backup list")
-        } else {
-            handle_undo_filtered(&filter)
-        }),
-        Commands::Redo => Some(handle_redo()),
-        // Lint and Check fall through to main flow
-        Commands::Lint { .. } | Commands::Check { .. } => None,
+        } => handle_lsp_subcommand(mode, port, use_plugin),
+        Commands::Report { action } => handle_report_command(action),
+        Commands::Backup { action } => handle_backup_command(action),
+        Commands::Undo { filter, list } => {
+            if list {
+                handle_list_backups("linthis backup list")
+            } else {
+                handle_undo_filtered(&filter)
+            }
+        }
+        Commands::Redo => handle_redo(),
+        Commands::Update {
+            check,
+            force,
+            target_version,
+        }
+        | Commands::Upgrade {
+            check,
+            force,
+            target_version,
+        } => handle_self_update_command(check, force, target_version),
+        _ => ExitCode::from(1),
     }
 }
 

@@ -14,11 +14,74 @@
 //! inspired by oh-my-zsh's auto-update mechanism.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// How linthis was installed — determines the upgrade command.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InstallMethod {
+    /// Installed via `cargo install linthis` (or `cargo install --path .`)
+    Cargo,
+    /// Installed via `uv tool install linthis`
+    UvTool,
+    /// Installed via `pipx install linthis`
+    PipX,
+    /// Installed via `pip install linthis` (or `uv pip install linthis`)
+    Pip,
+    /// Unknown installation method
+    Unknown,
+}
+
+impl fmt::Display for InstallMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InstallMethod::Cargo => write!(f, "cargo install"),
+            InstallMethod::UvTool => write!(f, "uv tool install"),
+            InstallMethod::PipX => write!(f, "pipx install"),
+            InstallMethod::Pip => write!(f, "pip install"),
+            InstallMethod::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+/// Detect how linthis was installed by inspecting the current executable path.
+pub fn detect_install_method() -> InstallMethod {
+    let exe_path = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return InstallMethod::Unknown,
+    };
+
+    let path_str = exe_path.to_string_lossy();
+
+    // cargo install: ~/.cargo/bin/linthis
+    if path_str.contains(".cargo/bin") || path_str.contains("\\.cargo\\bin") {
+        return InstallMethod::Cargo;
+    }
+
+    // uv tool install:
+    //   Linux: ~/.local/share/uv/tools/
+    //   macOS: ~/Library/Application Support/uv/tools/
+    //   Windows: %APPDATA%\uv\tools\
+    if path_str.contains("/uv/tools/")
+        || path_str.contains("\\uv\\tools\\")
+        || path_str.contains("Application Support/uv/tools")
+    {
+        return InstallMethod::UvTool;
+    }
+
+    // pipx install: ~/.local/pipx/venvs/
+    if path_str.contains(".local/pipx/venvs") || path_str.contains("\\pipx\\venvs") {
+        return InstallMethod::PipX;
+    }
+
+    // Fallback: assume pip-based installation for any other Python-related path
+    // (.local/bin, site-packages, venv, etc.)
+    InstallMethod::Pip
+}
 
 /// Configuration for self-update
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -163,9 +226,18 @@ impl SelfUpdateManager {
         env!("CARGO_PKG_VERSION").to_string()
     }
 
-    /// Check PyPI for the latest version
+    /// Get the latest version, dispatching to the appropriate source
+    /// based on the install method.
     pub fn get_latest_version(&self) -> Option<String> {
-        // Use pip to check the latest version
+        let method = detect_install_method();
+        match method {
+            InstallMethod::Cargo => self.get_latest_version_crates_io(),
+            _ => self.get_latest_version_pypi(),
+        }
+    }
+
+    /// Check PyPI for the latest version via pip.
+    pub fn get_latest_version_pypi(&self) -> Option<String> {
         let output = Command::new("pip")
             .args(["index", "versions", "linthis"])
             .output()
@@ -177,12 +249,9 @@ impl SelfUpdateManager {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        // Parse output to find available versions
-        // Expected format: "linthis (0.0.4)"
-        // Available versions: 0.0.4, 0.0.3, ...
+        // Parse output: "Available versions: 0.17.1, 0.17.0, ..."
         for line in stdout.lines() {
             if line.contains("Available versions:") {
-                // Extract first version (latest)
                 if let Some(versions_str) = line.split(':').nth(1) {
                     if let Some(latest) = versions_str.split(',').next() {
                         return Some(latest.trim().to_string());
@@ -192,6 +261,34 @@ impl SelfUpdateManager {
         }
 
         None
+    }
+
+    /// Check crates.io for the latest version via API.
+    pub fn get_latest_version_crates_io(&self) -> Option<String> {
+        #[derive(Deserialize)]
+        struct CrateResponse {
+            #[serde(rename = "crate")]
+            krate: CrateInfo,
+        }
+        #[derive(Deserialize)]
+        struct CrateInfo {
+            max_version: String,
+        }
+
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("linthis-self-update")
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .ok()?;
+
+        let resp: CrateResponse = client
+            .get("https://crates.io/api/v1/crates/linthis")
+            .send()
+            .ok()?
+            .json()
+            .ok()?;
+
+        Some(resp.krate.max_version)
     }
 
     /// Check if an update is available
@@ -209,7 +306,7 @@ impl SelfUpdateManager {
 
     /// Compare two version strings (simple lexicographic comparison)
     /// Returns: -1 if v1 < v2, 0 if equal, 1 if v1 > v2
-    fn compare_versions(&self, v1: &str, v2: &str) -> i32 {
+    pub fn compare_versions(&self, v1: &str, v2: &str) -> i32 {
         let parts1: Vec<u32> = v1.split('.').filter_map(|s| s.parse().ok()).collect();
         let parts2: Vec<u32> = v2.split('.').filter_map(|s| s.parse().ok()).collect();
 
@@ -242,20 +339,102 @@ impl SelfUpdateManager {
         response.is_empty() || response == "y" || response == "yes"
     }
 
-    /// Execute pip upgrade
+    /// Execute upgrade using the detected install method.
     pub fn upgrade(&self) -> io::Result<bool> {
-        println!("↓ Upgrading linthis via pip...");
+        self.run_upgrade(false)
+    }
 
-        let output = Command::new("pip")
-            .args(["install", "--upgrade", "linthis"])
-            .output()?;
+    /// Execute force upgrade using the detected install method.
+    pub fn force_upgrade(&self) -> io::Result<bool> {
+        self.run_upgrade(true)
+    }
+
+    /// Run the upgrade command, optionally forcing reinstall.
+    fn run_upgrade(&self, force: bool) -> io::Result<bool> {
+        let method = detect_install_method();
+        let (cmd, args, label) = match method {
+            InstallMethod::Cargo => {
+                let mut args = vec!["install", "linthis", "--force"];
+                if force {
+                    args.push("--force");
+                }
+                ("cargo", args, "cargo")
+            }
+            InstallMethod::UvTool => {
+                let args = if force {
+                    vec!["tool", "install", "--force", "linthis"]
+                } else {
+                    vec!["tool", "upgrade", "linthis"]
+                };
+                ("uv", args, "uv tool")
+            }
+            InstallMethod::PipX => {
+                let args = if force {
+                    vec!["install", "--force", "linthis"]
+                } else {
+                    vec!["upgrade", "linthis"]
+                };
+                ("pipx", args, "pipx")
+            }
+            InstallMethod::Pip | InstallMethod::Unknown => {
+                let mut args = vec!["install", "--upgrade", "linthis"];
+                if force {
+                    args.push("--force-reinstall");
+                }
+                ("pip", args, "pip")
+            }
+        };
+
+        println!("↓ Upgrading linthis via {}...", label);
+
+        let output = Command::new(cmd).args(&args).output()?;
 
         if output.status.success() {
-            println!("✓ linthis upgraded successfully");
+            println!("✓ linthis upgraded successfully via {}", label);
             Ok(true)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("✗ Failed to upgrade linthis: {}", stderr);
+            eprintln!("✗ Failed to upgrade linthis via {}: {}", label, stderr);
+            Ok(false)
+        }
+    }
+
+    /// Install a specific version of linthis.
+    pub fn install_version(&self, version: &str) -> io::Result<bool> {
+        let method = detect_install_method();
+        let version_spec = format!("linthis=={}", version);
+        let cargo_version_spec = format!("linthis@{}", version);
+
+        let (cmd, args, label) = match method {
+            InstallMethod::Cargo => (
+                "cargo",
+                vec!["install", &cargo_version_spec, "--force"],
+                "cargo",
+            ),
+            InstallMethod::UvTool => (
+                "uv",
+                vec!["tool", "install", &version_spec, "--force"],
+                "uv tool",
+            ),
+            InstallMethod::PipX => ("pipx", vec!["install", &version_spec, "--force"], "pipx"),
+            InstallMethod::Pip | InstallMethod::Unknown => {
+                ("pip", vec!["install", &version_spec], "pip")
+            }
+        };
+
+        println!("↓ Installing linthis {} via {}...", version, label);
+
+        let output = Command::new(cmd).args(&args).output()?;
+
+        if output.status.success() {
+            println!("✓ linthis {} installed successfully via {}", version, label);
+            Ok(true)
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!(
+                "✗ Failed to install linthis {} via {}: {}",
+                version, label, stderr
+            );
             Ok(false)
         }
     }
