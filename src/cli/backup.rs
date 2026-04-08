@@ -154,8 +154,9 @@ pub fn create_backup(files: &[PathBuf], description: &str, quiet: bool) -> Optio
 /// If `max_backups` is 0, no cleanup is performed (unlimited).
 /// Always keeps at least 1 backup.
 ///
-/// When over the limit, first removes backups with no actual file differences
-/// (no-diff backups), then falls back to removing the oldest.
+/// When over the limit, first trims consecutive no-diff backups from the
+/// newest end (preserving the undo chain order), then falls back to
+/// removing the oldest.
 pub fn cleanup_old_backups_with_limit(max_backups: usize) {
     if max_backups == 0 {
         return; // unlimited
@@ -185,23 +186,24 @@ pub fn cleanup_old_backups_with_limit(max_backups: usize) {
 
     let project_root = linthis::utils::get_project_root();
 
-    // First pass: remove no-diff backups (oldest first, never remove the newest)
-    let mut i = 0;
-    while backups.len() > keep && i < backups.len().saturating_sub(1) {
-        if !backup_has_diff(&backups[i], &project_root) {
-            let _ = fs::remove_dir_all(&backups[i]);
-            backups.remove(i);
+    // First pass: remove consecutive no-diff backups from the newest end.
+    // The undo chain goes newest→oldest, so only the newest tail that
+    // matches current files is redundant. Once we hit a backup with real
+    // changes, everything older is part of the chain and must stay.
+    while backups.len() > keep {
+        let last_idx = backups.len() - 1;
+        if !backup_has_diff(&backups[last_idx], &project_root) {
+            let _ = fs::remove_dir_all(&backups[last_idx]);
+            backups.remove(last_idx);
         } else {
-            i += 1;
+            break;
         }
     }
 
     // Second pass: if still over limit, remove oldest regardless
     while backups.len() > keep {
-        if let Some(oldest) = backups.first() {
-            let _ = fs::remove_dir_all(oldest);
-            backups.remove(0);
-        }
+        let _ = fs::remove_dir_all(&backups[0]);
+        backups.remove(0);
     }
 }
 
