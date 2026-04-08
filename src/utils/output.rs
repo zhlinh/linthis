@@ -888,6 +888,48 @@ fn format_hook_success_box(
             0
         )
     ));
+
+    // Show formatted file list when files were actually formatted
+    if result.files_formatted > 0 {
+        for fr in &result.format_results {
+            if !fr.changed {
+                continue;
+            }
+            let filename = fr
+                .file_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
+            let lines_changed = fr
+                .diff
+                .as_ref()
+                .map(|d| d.lines().filter(|l| l.starts_with('+') || l.starts_with('-')).count())
+                .unwrap_or(0);
+            let detail = if lines_changed > 0 {
+                format!("  {}  ({} lines)", filename, lines_changed)
+            } else {
+                format!("  {}", filename)
+            };
+            output.push_str(&format!("{}\n", ctx.pad_line(&detail, 0)));
+        }
+        output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line("Pre-change state saved in stash.", 0)
+        ));
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line(
+                "  git stash show -p  \u{2014} review format changes",
+                0
+            )
+        ));
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line("  git stash drop     \u{2014} discard snapshot", 0)
+        ));
+    }
+
     output.push_str(&format!("{}", ctx.bot_border.green()));
     output.push_str(&format_hook_paths_footer(hook_type));
     output

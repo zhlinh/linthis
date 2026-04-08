@@ -287,6 +287,30 @@ pub(crate) fn handle_hook_install(params: HookInstallParams) -> ExitCode {
                 overall = code;
             }
         }
+
+        // Auto-install post-commit hook alongside pre-commit for git/git-with-agent
+        // types to support the two-commit fix mode. The post-commit script self-guards
+        // and exits immediately unless fix_mode == "two-commit".
+        let is_git_type = matches!(hook_type, HookTool::Git | HookTool::GitWithAgent);
+        let has_pre_commit = hook_events
+            .iter()
+            .any(|e| matches!(e, HookEvent::PreCommit));
+        if is_git_type && has_pre_commit {
+            let code = handle_hook_install_single(&HookInstallSingleParams {
+                hook_type: Some(hook_type.clone()),
+                hook_event: HookEvent::PostCommit,
+                force,
+                yes,
+                global,
+                provider: provider.clone(),
+                preresolved_fix_provider: preresolved_fix_provider.clone(),
+                args: args.clone(),
+                provider_args: provider_args.clone(),
+            });
+            if code != ExitCode::SUCCESS {
+                overall = code;
+            }
+        }
     }
     overall
 }

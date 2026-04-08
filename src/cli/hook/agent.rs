@@ -49,6 +49,7 @@ fn agent_event_content_generic(event: &HookEvent) -> String {
         HookEvent::PreCommit => agent_lint_body(),
         HookEvent::CommitMsg => agent_cmsg_body(),
         HookEvent::PrePush => agent_review_body(),
+        HookEvent::PostCommit => agent_lint_body(), // Reuse lint body for post-commit fixes
     }
 }
 
@@ -64,6 +65,20 @@ Catch and fix code quality issues before they enter the repository. Running lint
 ## When to Skip
 
 If no code files were modified in this session, approve immediately.
+
+## Fix Mode
+
+Before starting, check the fix mode:
+```bash
+linthis config get hook.pre_commit.fix_mode
+```
+
+Behavior depends on the mode:
+- **one-commit** (default): fix all issues → `git add` changed files → approve commit
+- **leave-on-dirty**: fix all issues → do NOT `git add` → **reject** commit with message: "Review changes with `git diff`, then `git add` and commit again"
+- **two-commit**: only run check (`linthis -s -c`), do NOT fix issues → **approve** commit (post-commit hook handles formatting)
+
+If the config command fails, default to `one-commit`.
 
 ## Key Commands
 
@@ -397,6 +412,7 @@ fn event_short_name(event: &HookEvent) -> &'static str {
         HookEvent::PreCommit => "lint",
         HookEvent::CommitMsg => "cmsg",
         HookEvent::PrePush => "review",
+        HookEvent::PostCommit => "postfix",
     }
 }
 
@@ -410,6 +426,7 @@ fn resolve_skill_name(
         HookEvent::PreCommit => sn.pre_commit.as_deref(),
         HookEvent::CommitMsg => sn.commit_msg.as_deref(),
         HookEvent::PrePush => sn.pre_push.as_deref(),
+        HookEvent::PostCommit => None, // No custom name for post-commit yet
     });
     custom.map_or_else(
         || format!("{}{}", prefix, event_short_name(event)),
@@ -506,11 +523,7 @@ fn print_agent_installed_info(
     for event in &events {
         let path = agent_skill_path(base, provider, global, event, skill_names);
         if path.exists() {
-            let event_name = match event {
-                HookEvent::PreCommit => "pre-commit",
-                HookEvent::CommitMsg => "commit-msg",
-                HookEvent::PrePush => "pre-push",
-            };
+            let event_name = event.hook_filename();
             println!(
                 "       {} {} ({})",
                 "File:".dimmed(),
@@ -1254,6 +1267,7 @@ pub(crate) fn agent_event_skill_metadata(
         HookEvent::PreCommit => sn.pre_commit.as_deref(),
         HookEvent::CommitMsg => sn.commit_msg.as_deref(),
         HookEvent::PrePush => sn.pre_push.as_deref(),
+        HookEvent::PostCommit => None,
     });
     match event {
         HookEvent::PreCommit => (
@@ -1268,6 +1282,10 @@ pub(crate) fn agent_event_skill_metadata(
             custom_name.unwrap_or("lt-review").to_string(),
             "推送前审查待推送的提交，检查代码质量、安全性和正确性问题。检查完整 diff 发现逻辑错误、安全漏洞（注入、硬编码密钥）、代码质量问题及测试覆盖缺失。由 pre-push hook 触发。Review outgoing commits for quality, security, and correctness before pushing. Catches logic errors, security vulnerabilities, code quality issues. Triggered by pre-push hook.",
         ),
+        HookEvent::PostCommit => (
+            custom_name.unwrap_or("lt-postfix").to_string(),
+            "提交后自动格式化和修复代码（two-commit 模式）。检查刚提交的文件，格式化后创建一个单独的 fixup commit。Post-commit auto-format and fix (two-commit mode). Formats committed files and creates a separate fixup commit.",
+        ),
     }
 }
 
@@ -1276,6 +1294,7 @@ fn agent_event_section_marker(event: &HookEvent) -> &'static str {
         HookEvent::PreCommit => "## Linthis Lint Rule",
         HookEvent::CommitMsg => "## Linthis Commit Message Rule",
         HookEvent::PrePush => "## Linthis Review Rule",
+        HookEvent::PostCommit => "## Linthis Post-Commit Fix Rule",
     }
 }
 

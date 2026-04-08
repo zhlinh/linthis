@@ -511,10 +511,14 @@ pub(crate) fn build_git_with_agent_prepush_script(
     let agent_cmd = agent_fix_headless_cmd(fix_provider, prepush_review_prompt(), provider_args);
     let timer_fns = shell_timer_functions();
     let review_box = shell_review_box_fn();
+    let fix_mode_section = shell_read_fix_mode("pre_push");
     format!(
         "#!/bin/sh\n\
          {timer}\
          {review_box}\
+         \n\
+         # Read fix_mode from config\n\
+         {fix_mode}\
          \n\
          # Compute files changed in commits being pushed vs upstream (or HEAD~1 as fallback)\n\
          _BASE=$(git rev-parse '@{{u}}' 2>/dev/null || \\\n\
@@ -536,6 +540,7 @@ pub(crate) fn build_git_with_agent_prepush_script(
          \x20 # Extract actual number of files checked from linthis output\n\
          \x20 _LINTHIS_CHECKED=$(printf \"%s\" \"$_LINT_OUT\" | sed -n 's/.*Files checked:[[:space:]]*\\([0-9]*\\).*/\\1/p' | tail -1)\n\
          \x20 _LINTHIS_CHECKED=${{_LINTHIS_CHECKED:-0}}\n\
+         {prepush_fix_mode_handler}\\
          fi\n\
          \n\
          # Skip agent review if no files were actually checked\n\
@@ -575,6 +580,8 @@ pub(crate) fn build_git_with_agent_prepush_script(
          exit $REVIEW_EXIT\n",
         timer = timer_fns,
         review_box = review_box,
+        fix_mode = fix_mode_section,
+        prepush_fix_mode_handler = shell_prepush_fix_mode_handler(linthis_cmd),
         linthis = linthis_cmd,
         provider = fix_provider,
         agent = agent_cmd,
@@ -621,44 +628,30 @@ fn shell_worktree_agent_fix(
     )
 }
 
-pub(crate) fn build_git_with_agent_hook_script(
+/// Build the git-with-agent script for commit-msg hooks (no fix_mode branching).
+fn build_git_with_agent_commitmsg_script(
     linthis_cmd: &str,
     fix_provider: &AgentFixProvider,
-    hook_event: &HookEvent,
     provider_args: Option<&str>,
 ) -> String {
-    if matches!(hook_event, HookEvent::PrePush) {
-        return build_git_with_agent_prepush_script(linthis_cmd, fix_provider, provider_args);
-    }
-
-    let agent_cmd = if matches!(hook_event, HookEvent::CommitMsg) {
-        agent_fix_headless_cmd_commit_msg(fix_provider, provider_args)
-    } else {
-        let prompt = agent_fix_prompt_for_event(hook_event);
-        agent_fix_headless_cmd(fix_provider, &prompt, provider_args)
-    };
-    let error_msg = agent_fix_error_msg(hook_event);
+    let agent_cmd = agent_fix_headless_cmd_commit_msg(fix_provider, provider_args);
+    let error_msg = agent_fix_error_msg(&HookEvent::CommitMsg);
     let timer_fns = shell_timer_functions();
-    let new_msg_print = if matches!(hook_event, HookEvent::CommitMsg) {
-        agent_fix_show_fixed_cmsg("  ")
-    } else {
-        String::new()
-    };
-    let worktree_fix = shell_worktree_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg);
+    let new_msg_print = agent_fix_show_fixed_cmsg("  ");
+    let worktree_fix =
+        shell_worktree_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg);
     format!(
         "#!/bin/sh\n\
          {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
          _STAGED_FILES=$(git diff --cached --name-only)\n\
          \n\
-         # Skip entirely if no staged files (empty commit)\n\
          if [ -z \"$_STAGED_FILES\" ]; then\n\
          \x20 exit 0\n\
          fi\n\
          \n\
          $LINTHIS_CMD\n\
          LINTHIS_EXIT=$?\n\
-         # Re-stage files modified by linthis -f (auto-format), regardless of exit code\n\
          if [ -n \"$_STAGED_FILES\" ]; then\n\
          \x20 echo \"$_STAGED_FILES\" | xargs git add\n\
          fi\n\
@@ -673,6 +666,172 @@ pub(crate) fn build_git_with_agent_hook_script(
         linthis = linthis_cmd,
         worktree_fix = worktree_fix,
         new_msg_print = new_msg_print,
+    )
+}
+
+pub(crate) fn build_git_with_agent_hook_script(
+    linthis_cmd: &str,
+    fix_provider: &AgentFixProvider,
+    hook_event: &HookEvent,
+    provider_args: Option<&str>,
+) -> String {
+    if matches!(hook_event, HookEvent::PrePush) {
+        return build_git_with_agent_prepush_script(linthis_cmd, fix_provider, provider_args);
+    }
+    if matches!(hook_event, HookEvent::CommitMsg) {
+        return build_git_with_agent_commitmsg_script(linthis_cmd, fix_provider, provider_args);
+    }
+
+    let prompt = agent_fix_prompt_for_event(hook_event);
+    let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt, provider_args);
+    let error_msg = agent_fix_error_msg(hook_event);
+    let timer_fns = shell_timer_functions();
+    let worktree_fix = shell_worktree_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg);
+
+    // For pre-commit (and post-commit), add fix_mode branching
+    let fix_mode_section = shell_read_fix_mode("pre_commit");
+    let linthis_check_only = linthis_cmd.replace("-c -f", "-c");
+
+    format!(
+        "#!/bin/sh\n\
+         {timer}\
+         _STAGED_FILES=$(git diff --cached --name-only)\n\
+         \n\
+         # Skip entirely if no staged files (empty commit)\n\
+         if [ -z \"$_STAGED_FILES\" ]; then\n\
+         \x20 exit 0\n\
+         fi\n\
+         \n\
+         # Read fix_mode from config\n\
+         {fix_mode}\
+         \n\
+         if [ \"$_FIX_MODE\" = \"two-commit\" ]; then\n\
+         \x20 # two-commit: check only, let commit through, post-commit handles format\n\
+         \x20 {linthis_check_only}\n\
+         \x20 exit 0\n\
+         fi\n\
+         \n\
+         # one-commit / leave-on-dirty: run check + format\n\
+         # Snapshot pre-format state for stash (one-commit mode)\n\
+         if [ \"$_FIX_MODE\" = \"one-commit\" ]; then\n\
+         \x20 _STASH_REF=$(git stash create 2>/dev/null)\n\
+         fi\n\
+         \n\
+         LINTHIS_CMD=\"{linthis}\"\n\
+         $LINTHIS_CMD\n\
+         LINTHIS_EXIT=$?\n\
+         \n\
+         if [ \"$_FIX_MODE\" = \"one-commit\" ]; then\n\
+         \x20 # Re-stage files modified by linthis -f (auto-format)\n\
+         \x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20 fi\n\
+         \x20 # Save stash if files were formatted\n\
+         \x20 if [ -n \"$_STASH_REF\" ]; then\n\
+         \x20\x20\x20 git stash store -m \"linthis: pre-format snapshot\" \"$_STASH_REF\" 2>/dev/null\n\
+         \x20 fi\n\
+         elif [ \"$_FIX_MODE\" = \"leave-on-dirty\" ]; then\n\
+         \x20 # leave-on-dirty: do NOT re-stage, block commit if files changed\n\
+         \x20 _DIRTY=$(git diff --name-only)\n\
+         \x20 if [ -n \"$_DIRTY\" ]; then\n\
+         \x20\x20\x20 echo \"[linthis] Files formatted but not staged (leave-on-dirty mode).\" >&2\n\
+         \x20\x20\x20 echo \"  Review changes: git diff\" >&2\n\
+         \x20\x20\x20 echo \"  Stage and retry: git add -u && git commit\" >&2\n\
+         \x20\x20\x20 exit 1\n\
+         \x20 fi\n\
+         fi\n\
+         \n\
+         if [ $LINTHIS_EXIT -ne 0 ]; then\n\
+         {worktree_fix}\
+         fi\n\
+         \n\
+         exit $LINTHIS_EXIT\n",
+        timer = timer_fns,
+        fix_mode = fix_mode_section,
+        linthis_check_only = linthis_check_only,
+        linthis = linthis_cmd,
+        worktree_fix = worktree_fix,
+    )
+}
+
+/// Generate the pre-push fix_mode handler shell snippet.
+fn shell_prepush_fix_mode_handler(linthis_cmd: &str) -> String {
+    format!(
+        "\x20 # Handle fix_mode for pre-push\n\
+         \x20 if [ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_FIX_MODE\" = \"leave-on-dirty\" ]; then\n\
+         \x20\x20\x20 exit $LINTHIS_EXIT\n\
+         \x20 fi\n\
+         \x20 if [ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_FIX_MODE\" = \"one-commit\" ]; then\n\
+         \x20\x20\x20 # Format + amend latest commit\n\
+         \x20\x20\x20 _STASH_REF=$(git stash create 2>/dev/null)\n\
+         \x20\x20\x20 {linthis} \"$@\" -f 2>&1\n\
+         \x20\x20\x20 _CHANGED=$(git diff --name-only)\n\
+         \x20\x20\x20 if [ -n \"$_CHANGED\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
+         \x20\x20\x20\x20\x20 git commit --amend --no-verify --no-edit\n\
+         \x20\x20\x20\x20\x20 [ -n \"$_STASH_REF\" ] && git stash store -m \"linthis: pre-format snapshot\" \"$_STASH_REF\" 2>/dev/null\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Format changes amended into latest commit\" >&2\n\
+         \x20\x20\x20 fi\n\
+         \x20 fi\n\
+         \x20 if [ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_FIX_MODE\" = \"two-commit\" ]; then\n\
+         \x20\x20\x20 # Format + create fixup commit\n\
+         \x20\x20\x20 {linthis} \"$@\" -f 2>&1\n\
+         \x20\x20\x20 _CHANGED=$(git diff --name-only)\n\
+         \x20\x20\x20 if [ -n \"$_CHANGED\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
+         \x20\x20\x20\x20\x20 git commit --no-verify -m \"style(linthis): auto-format\"\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
+         \x20\x20\x20 fi\n\
+         \x20 fi\n",
+        linthis = linthis_cmd,
+    )
+}
+
+/// Generate shell snippet to read fix_mode from linthis config.
+/// `config_section` is "pre_commit" or "pre_push".
+fn shell_read_fix_mode(config_section: &str) -> String {
+    let default = if config_section == "pre_commit" {
+        "one-commit"
+    } else {
+        "leave-on-dirty"
+    };
+    format!(
+        "_FIX_MODE=$(linthis config get hook.{section}.fix_mode 2>/dev/null || echo \"{default}\")\n",
+        section = config_section,
+        default = default,
+    )
+}
+
+/// Build a post-commit hook script for two-commit fix mode.
+pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
+    let timer_fns = shell_timer_functions();
+    let fix_mode_section = shell_read_fix_mode("pre_commit");
+    format!(
+        "#!/bin/sh\n\
+         {timer}\
+         # Read fix_mode — only activate in two-commit mode\n\
+         {fix_mode}\
+         if [ \"$_FIX_MODE\" != \"two-commit\" ]; then\n\
+         \x20 exit 0\n\
+         fi\n\
+         \n\
+         # Get files from the commit that was just created\n\
+         _FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)\n\
+         [ -z \"$_FILES\" ] && exit 0\n\
+         \n\
+         # Format committed files\n\
+         echo \"$_FILES\" | tr '\\n' '\\0' | xargs -0 -I{{}} {linthis} -i {{}} -f --hook-event=post-commit\n\
+         \n\
+         # If any files changed, create fixup commit\n\
+         _CHANGED=$(git diff --name-only)\n\
+         if [ -n \"$_CHANGED\" ]; then\n\
+         \x20 echo \"$_CHANGED\" | xargs git add\n\
+         \x20 git commit --no-verify -m \"style(linthis): auto-format\"\n\
+         \x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
+         fi\n",
+        timer = timer_fns,
+        fix_mode = fix_mode_section,
+        linthis = linthis_cmd,
     )
 }
 
@@ -695,6 +854,11 @@ pub(crate) fn build_hook_command(hook_event: &HookEvent, args: &Option<String>) 
             // For commit-msg: validate commit message using the msg file passed as $1
             "linthis cmsg \"$1\"".to_string()
         }
+        HookEvent::PostCommit => {
+            // For post-commit: format files from the last commit (two-commit mode)
+            let extra = args.as_deref().unwrap_or("-f");
+            format!("linthis {} --hook-event=post-commit", extra)
+        }
     }
 }
 
@@ -704,6 +868,7 @@ pub(crate) fn hook_action(hook_event: &HookEvent) -> &'static str {
         HookEvent::PreCommit => "commit",
         HookEvent::PrePush => "push",
         HookEvent::CommitMsg => "commit",
+        HookEvent::PostCommit => "commit",
     }
 }
 

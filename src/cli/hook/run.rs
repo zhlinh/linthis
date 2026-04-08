@@ -15,7 +15,8 @@ use colored::Colorize;
 use super::config::describe_hook_source;
 use super::script::{
     build_git_with_agent_hook_script, build_global_hook_script_for_event, build_hook_command,
-    merge_model_into_provider_args, parse_agent_fix_provider_name, parse_provider_with_model,
+    build_post_commit_script, merge_model_into_provider_args, parse_agent_fix_provider_name,
+    parse_provider_with_model,
 };
 use crate::cli::commands::{AgentFixProvider, HookEvent, HookTool};
 
@@ -67,28 +68,39 @@ pub(crate) fn handle_hook_run(
 
     let already_running = std::env::vars().any(|(k, _)| k.starts_with(LINTHIS_HOOK_RUNNING_PREFIX));
 
-    let script = match hook_type {
-        HookTool::Git => {
-            if already_running {
-                build_reentrant_git_script(event)
-            } else {
-                build_global_hook_script_for_event(event, &None, None)
+    // PostCommit uses a dedicated script regardless of hook type
+    let script = if matches!(event, HookEvent::PostCommit) {
+        let linthis_cmd = build_hook_command(event, &None);
+        build_post_commit_script(&linthis_cmd)
+    } else {
+        match hook_type {
+            HookTool::Git => {
+                if already_running {
+                    build_reentrant_git_script(event)
+                } else {
+                    build_global_hook_script_for_event(event, &None, None)
+                }
             }
-        }
-        HookTool::GitWithAgent => {
-            let fix_provider = provider
-                .and_then(parse_agent_fix_provider_name)
-                .unwrap_or(AgentFixProvider::Claude);
-            let linthis_cmd = build_hook_command(event, &None);
-            build_git_with_agent_hook_script(&linthis_cmd, &fix_provider, event, provider_args)
-        }
-        _ => {
-            eprintln!(
-                "{}: hook run: unsupported hook type '{}' (supported: git, git-with-agent)",
-                "Error".red(),
-                hook_type.as_str()
-            );
-            return 1;
+            HookTool::GitWithAgent => {
+                let fix_provider = provider
+                    .and_then(parse_agent_fix_provider_name)
+                    .unwrap_or(AgentFixProvider::Claude);
+                let linthis_cmd = build_hook_command(event, &None);
+                build_git_with_agent_hook_script(
+                    &linthis_cmd,
+                    &fix_provider,
+                    event,
+                    provider_args,
+                )
+            }
+            _ => {
+                eprintln!(
+                    "{}: hook run: unsupported hook type '{}' (supported: git, git-with-agent)",
+                    "Error".red(),
+                    hook_type.as_str()
+                );
+                return 1;
+            }
         }
     };
 
