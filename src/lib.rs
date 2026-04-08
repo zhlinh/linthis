@@ -1807,12 +1807,16 @@ fn finalize_cache(cache: Option<Mutex<LintCache>>, project_root: &Path, quiet: b
     let cache_guard = cache_mutex.lock().unwrap();
     let stats = cache_guard.stats();
 
-    if !quiet && stats.total() > 0 {
-        eprintln!(
-            "Running [lint] check ({} cached, {} changed)",
-            stats.cache_hits,
-            stats.cache_misses,
-        );
+    if !quiet {
+        if stats.total() == 0 {
+            eprintln!("Running [lint] check...");
+        } else {
+            eprintln!(
+                "Running [lint] check ({} cached, {} changed)",
+                stats.cache_hits,
+                stats.cache_misses,
+            );
+        }
     }
 
     if let Err(e) = cache_guard.save(project_root) {
