@@ -292,7 +292,8 @@ pub fn handle_config_set(field: &str, value_str: &str, global: bool) -> ExitCode
         }
     };
 
-    doc[field] = parsed_value;
+    // Support dotted keys like "hook.pre_commit.fix_mode"
+    resolve_dotted_set(&mut doc, field, parsed_value);
 
     if let Err(e) = save_toml_doc(&config_path, &doc) {
         eprintln!("{}: {}", "Error".red(), e);
@@ -392,23 +393,28 @@ pub fn handle_config_get(field: &str, global: bool) -> ExitCode {
         }
     };
 
-    match doc.get(field) {
-        Some(value) => {
-            if let Some(arr) = value.as_array() {
+    // Support dotted keys like "hook.pre_commit.fix_mode"
+    let value = resolve_dotted_get(&doc, field);
+
+    match value {
+        Some(v) => {
+            if let Some(arr) = v.as_array() {
                 print!("[");
-                for (i, v) in arr.iter().enumerate() {
+                for (i, item) in arr.iter().enumerate() {
                     if i > 0 {
                         print!(", ");
                     }
-                    if let Some(s) = v.as_str() {
+                    if let Some(s) = item.as_str() {
                         print!("\"{}\"", s);
                     } else {
-                        print!("{}", v);
+                        print!("{}", item);
                     }
                 }
                 println!("]");
+            } else if let Some(s) = v.as_str() {
+                println!("{}", s);
             } else {
-                println!("{}", value);
+                println!("{}", v);
             }
         }
         None => {
@@ -418,6 +424,48 @@ pub fn handle_config_get(field: &str, global: bool) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Resolve a dotted key path in a TOML document (e.g. "hook.pre_commit.fix_mode").
+fn resolve_dotted_get<'a>(
+    doc: &'a DocumentMut,
+    field: &str,
+) -> Option<&'a toml_edit::Item> {
+    let parts: Vec<&str> = field.split('.').collect();
+    if parts.len() == 1 {
+        return doc.get(field);
+    }
+
+    let mut current: &toml_edit::Item = doc.as_item();
+    for part in &parts {
+        current = current.get(part)?;
+    }
+    Some(current)
+}
+
+/// Set a value at a dotted key path (e.g. "hook.pre_commit.fix_mode").
+/// Creates intermediate tables as needed.
+fn resolve_dotted_set(doc: &mut DocumentMut, field: &str, value: toml_edit::Item) {
+    let parts: Vec<&str> = field.split('.').collect();
+    if parts.len() == 1 {
+        doc[field] = value;
+        return;
+    }
+
+    // Navigate/create intermediate tables, then set the leaf value
+    let mut current: &mut toml_edit::Item = doc.as_item_mut();
+    for (i, part) in parts.iter().enumerate() {
+        if i == parts.len() - 1 {
+            // Last part: set the value
+            current[part] = value;
+            return;
+        }
+        // Ensure intermediate table exists
+        if current.get(part).is_none() || !current[part].is_table_like() {
+            current[part] = toml_edit::Item::Table(toml_edit::Table::new());
+        }
+        current = &mut current[part];
+    }
 }
 
 /// List all configuration values
