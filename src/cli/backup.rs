@@ -672,7 +672,31 @@ fn find_latest_backup_by_type(backup_dir: &std::path::Path, filter: &str) -> Opt
     None
 }
 
+/// Check if a backup has any actual differences compared to current files.
+fn backup_has_diff(backup_path: &std::path::Path, project_root: &std::path::Path) -> bool {
+    let manifest = match read_backup_manifest(backup_path) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+
+    for rel_path in &manifest.files {
+        let backup_file = backup_path.join(rel_path);
+        let current_file = project_root.join(rel_path);
+
+        let backup_content = fs::read_to_string(&backup_file).unwrap_or_default();
+        let current_content = fs::read_to_string(&current_file).unwrap_or_default();
+
+        if backup_content != current_content {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Handle `linthis backup diff [id]` — show diff between backup and current files.
+/// When id is "last", automatically skips backups with no changes and finds
+/// the most recent backup that has actual differences.
 pub fn handle_backup_diff(id: &str) -> ExitCode {
     let backup_dir = get_backup_dir();
     if !backup_dir.exists() {
@@ -680,17 +704,31 @@ pub fn handle_backup_diff(id: &str) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let backup_path = match resolve_backup_path(&backup_dir, id, "linthis backup list") {
-        Ok(p) => p,
-        Err(code) => return code,
+    let project_root = linthis::utils::get_project_root();
+
+    // When "last", find the most recent backup with actual changes
+    let backup_path = if id == "last" {
+        match find_latest_backup_with_diff(&backup_dir, &project_root) {
+            Some(p) => p,
+            None => {
+                println!(
+                    "  {}",
+                    "No backups with differences found.".green()
+                );
+                return ExitCode::SUCCESS;
+            }
+        }
+    } else {
+        match resolve_backup_path(&backup_dir, id, "linthis backup list") {
+            Ok(p) => p,
+            Err(code) => return code,
+        }
     };
 
     let manifest = match read_backup_manifest(&backup_path) {
         Ok(m) => m,
         Err(code) => return code,
     };
-
-    let project_root = linthis::utils::get_project_root();
 
     println!(
         "📊 Diff: {} ({})",
@@ -730,6 +768,35 @@ pub fn handle_backup_diff(id: &str) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Find the most recent backup that has actual file differences.
+/// Walks backwards through sorted backups until one with a diff is found.
+fn find_latest_backup_with_diff(
+    backup_dir: &std::path::Path,
+    project_root: &std::path::Path,
+) -> Option<PathBuf> {
+    let mut backups: Vec<PathBuf> = fs::read_dir(backup_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.path())
+        .collect();
+
+    if backups.is_empty() {
+        return None;
+    }
+
+    // Sort ascending by name (timestamp-based), then iterate from newest
+    backups.sort();
+
+    for backup_path in backups.iter().rev() {
+        if backup_has_diff(backup_path, project_root) {
+            return Some(backup_path.clone());
+        }
+    }
+
+    None
 }
 
 /// Print a unified diff with context lines (like `git diff`).
