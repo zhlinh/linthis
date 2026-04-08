@@ -186,15 +186,17 @@ pub fn cleanup_old_backups_with_limit(max_backups: usize) {
 
     let project_root = linthis::utils::get_project_root();
 
-    // First pass: remove consecutive no-diff backups from the newest end.
-    // The undo chain goes newest→oldest, so only the newest tail that
-    // matches current files is redundant. Once we hit a backup with real
-    // changes, everything older is part of the chain and must stay.
-    while backups.len() > keep {
-        let last_idx = backups.len() - 1;
-        if !backup_has_diff(&backups[last_idx], &project_root) {
-            let _ = fs::remove_dir_all(&backups[last_idx]);
-            backups.remove(last_idx);
+    // First pass: remove consecutive no-diff backups from the newest end,
+    // but always skip the very latest backup (index len-1) — it was just
+    // created from current files so it will always match. Start checking
+    // from the second-newest backwards. Stop at the first backup that has
+    // real changes, since older entries may differ from their successors
+    // and are needed for the undo chain.
+    while backups.len() > keep && backups.len() >= 2 {
+        let check_idx = backups.len() - 2;
+        if !backup_has_diff(&backups[check_idx], &project_root) {
+            let _ = fs::remove_dir_all(&backups[check_idx]);
+            backups.remove(check_idx);
         } else {
             break;
         }
