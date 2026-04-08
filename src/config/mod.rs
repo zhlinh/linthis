@@ -486,6 +486,14 @@ pub struct HookConfig {
     /// `[hook.review]` — auto-fix mode for background/hook context
     #[serde(default)]
     pub review: HookReviewConfig,
+
+    // ── Per-event fix mode ──────────────────────────────────────────────
+    /// `[hook.pre_commit]` — pre-commit hook behavior
+    #[serde(default)]
+    pub pre_commit: HookEventFixConfig,
+    /// `[hook.pre_push]` — pre-push hook behavior
+    #[serde(default)]
+    pub pre_push: HookEventFixConfig,
 }
 
 /// Agent namespace configuration — `[hook.agent]` in TOML.
@@ -518,6 +526,31 @@ impl Default for HookReviewConfig {
 
 fn default_hook_review_auto_fix_mode() -> AutoFixMode {
     AutoFixMode::Pr
+}
+
+/// Per-event hook fix mode configuration.
+///
+/// Controls how auto-format and agent fix changes are applied:
+/// - `"one-commit"` — merge all fixes into the current commit (default for pre-commit)
+/// - `"leave-on-dirty"` — leave fixes in the working tree and block (default for pre-push)
+/// - `"two-commit"` — create a separate fixup commit for fixes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookEventFixConfig {
+    /// Fix mode: "one-commit", "leave-on-dirty", or "two-commit"
+    #[serde(default = "default_fix_mode_one_commit")]
+    pub fix_mode: String,
+}
+
+fn default_fix_mode_one_commit() -> String {
+    "one-commit".to_string()
+}
+
+impl Default for HookEventFixConfig {
+    fn default() -> Self {
+        Self {
+            fix_mode: default_fix_mode_one_commit(),
+        }
+    }
 }
 
 /// Configurable skill directory/file names for each hook event.
@@ -557,6 +590,12 @@ impl Default for HookConfig {
             prek_with_agent: HashMap::new(),
             agent: AgentConfig::default(),
             review: HookReviewConfig::default(),
+            pre_commit: HookEventFixConfig {
+                fix_mode: "one-commit".to_string(),
+            },
+            pre_push: HookEventFixConfig {
+                fix_mode: "leave-on-dirty".to_string(),
+            },
         }
     }
 }

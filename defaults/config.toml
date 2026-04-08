@@ -98,6 +98,18 @@ linelength = 120
 # Cpplint filter rules - disable checks not applicable to Objective-C
 cpplint_filter = "-build/c++11,-build/c++14,-build/header_guard,-build/include,-legal/copyright,-readability/casting,-runtime/references,-runtime/int,-whitespace/braces,-whitespace/blank_line,-readability/braces,-whitespace/empty_if_body"
 
+# Hook fix mode settings
+# Controls how auto-format and agent fix changes are applied during hooks.
+# Modes:
+#   "one-commit"     — merge fixes into the current commit (pre-commit default)
+#   "leave-on-dirty" — leave fixes in working tree and block (pre-push default)
+#   "two-commit"     — create a separate fixup commit for fixes
+[hook.pre_commit]
+fix_mode = "one-commit"
+
+[hook.pre_push]
+fix_mode = "leave-on-dirty"
+
 # Plugin settings
 [plugin]
 # Auto-sync settings (inspired by oh-my-zsh auto-update)
