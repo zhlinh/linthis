@@ -27,8 +27,8 @@ impl Default for ThresholdConfig {
     fn default() -> Self {
         Self {
             good: 10,
-            warning: 20,  // good + 10
-            high: 30,     // good + 20
+            warning: 20, // good + 10
+            high: 30,    // good + 20
         }
     }
 }

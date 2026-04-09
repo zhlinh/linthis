@@ -620,8 +620,8 @@ impl AiProvider {
             .unwrap_or(AiProviderKind::Claude);
 
         let api_key = resolve_api_key(&kind);
-        let model = env::var("LINTHIS_AI_MODEL")
-            .unwrap_or_else(|_| default_model_for_provider(&kind));
+        let model =
+            env::var("LINTHIS_AI_MODEL").unwrap_or_else(|_| default_model_for_provider(&kind));
         let endpoint = resolve_endpoint(&kind);
 
         Self {

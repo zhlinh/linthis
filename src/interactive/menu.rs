@@ -341,8 +341,9 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
         "s" | "skip" | "" => InteractiveAction::Skip,
         "p" | "prev" | "previous" => InteractiveAction::Previous,
         "q" | "quit" => InteractiveAction::Quit,
-        input if input.starts_with("g") => parse_goto_input(input)
-            .unwrap_or_else(|| show_issue_menu(issue, current, total)),
+        input if input.starts_with("g") => {
+            parse_goto_input(input).unwrap_or_else(|| show_issue_menu(issue, current, total))
+        }
         _ => {
             println!("{}", "Invalid choice. Use: e/i/s/p/g/q".yellow());
             show_issue_menu(issue, current, total)

@@ -279,14 +279,23 @@ pub fn format_benchmark_table(comparison: &BenchmarkComparison) -> String {
 
     // Tool availability notes
     if !comparison.ruff.available {
-        output.push_str(&format!("\n⚠ ruff not installed. {}\n", crate::python_tool_install_hint("ruff")));
+        output.push_str(&format!(
+            "\n⚠ ruff not installed. {}\n",
+            crate::python_tool_install_hint("ruff")
+        ));
     }
     if !comparison.legacy.available {
         if !is_tool_available("flake8") {
-            output.push_str(&format!("\n⚠ flake8 not installed. {}\n", crate::python_tool_install_hint("flake8")));
+            output.push_str(&format!(
+                "\n⚠ flake8 not installed. {}\n",
+                crate::python_tool_install_hint("flake8")
+            ));
         }
         if !is_tool_available("black") {
-            output.push_str(&format!("\n⚠ black not installed. {}\n", crate::python_tool_install_hint("black")));
+            output.push_str(&format!(
+                "\n⚠ black not installed. {}\n",
+                crate::python_tool_install_hint("black")
+            ));
         }
     }
 

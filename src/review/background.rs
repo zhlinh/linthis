@@ -214,10 +214,7 @@ pub fn clean_artifacts_by_count(max_reviews: usize) -> Result<usize, String> {
     let dir = review_dir()?;
     let entries = fs::read_dir(&dir).map_err(|e| format!("Failed to read review dir: {}", e))?;
 
-    let mut files: Vec<_> = entries
-        .flatten()
-        .filter(|e| e.path().is_file())
-        .collect();
+    let mut files: Vec<_> = entries.flatten().filter(|e| e.path().is_file()).collect();
 
     // Sort by modified time, newest first
     files.sort_by(|a, b| {

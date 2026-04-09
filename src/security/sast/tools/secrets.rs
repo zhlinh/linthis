@@ -304,8 +304,7 @@ impl SecretsScanner {
         let mut next_line_directive: Option<String> = None;
 
         for (line_num, line) in lines.iter().enumerate() {
-            let effective_directive =
-                resolve_effective_directive(line, &mut next_line_directive);
+            let effective_directive = resolve_effective_directive(line, &mut next_line_directive);
 
             self.scan_line(
                 file_path,
@@ -340,9 +339,7 @@ impl SecretsScanner {
                     continue;
                 }
 
-                findings.push(build_finding(
-                    pattern, file_path, ext, line, line_num, &m,
-                ));
+                findings.push(build_finding(pattern, file_path, ext, line, line_num, &m));
                 break;
             }
         }
@@ -466,9 +463,7 @@ fn build_finding(
         end_line: None,
         end_column: Some(m.end() + 1),
         code_snippet: Some(line.to_string()),
-        fix_suggestion: Some(
-            "Move secret to environment variable or secrets manager".to_string(),
-        ),
+        fix_suggestion: Some("Move secret to environment variable or secrets manager".to_string()),
         category: "secrets".to_string(),
         cwe_ids: vec![pattern.cwe.clone()],
         source: "linthis-secrets".to_string(),

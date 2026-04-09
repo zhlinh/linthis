@@ -87,12 +87,7 @@ pub fn open_in_editor(file: &Path, line: usize, column: Option<usize>) -> Editor
 }
 
 /// Build a Command with the correct arguments for the detected editor.
-fn build_editor_command(
-    editor: &str,
-    file: &Path,
-    line: usize,
-    column: Option<usize>,
-) -> Command {
+fn build_editor_command(editor: &str, file: &Path, line: usize, column: Option<usize>) -> Command {
     let editor_lower = editor.to_lowercase();
     let mut cmd = Command::new(editor);
 

@@ -25,11 +25,20 @@ pub fn fix_tip_lines() -> Vec<(&'static str, &'static str)> {
     vec![
         ("linthis report show", "view full details"),
         ("linthis report show -f html --open", "view in browser"),
-        ("linthis backup diff", "show diff from last format/fix/hook-fix"),
+        (
+            "linthis backup diff",
+            "show diff from last format/fix/hook-fix",
+        ),
         ("linthis undo", "undo last format/fix/hook-fix"),
         ("linthis fix", "load last result and fix"),
-        ("linthis fix --ai", "AI-powered fix suggestions (--provider and --model supported)"),
-        ("linthis fix --auto", "(dangerously) auto-fix via AI agent (--provider and --model supported)"),
+        (
+            "linthis fix --ai",
+            "AI-powered fix suggestions (--provider and --model supported)",
+        ),
+        (
+            "linthis fix --auto",
+            "(dangerously) auto-fix via AI agent (--provider and --model supported)",
+        ),
     ]
 }
 
@@ -903,7 +912,11 @@ fn format_hook_success_box(
             let lines_changed = fr
                 .diff
                 .as_ref()
-                .map(|d| d.lines().filter(|l| l.starts_with('+') || l.starts_with('-')).count())
+                .map(|d| {
+                    d.lines()
+                        .filter(|l| l.starts_with('+') || l.starts_with('-'))
+                        .count()
+                })
                 .unwrap_or(0);
             let detail = if lines_changed > 0 {
                 format!("  {}  ({} lines)", filename, lines_changed)
@@ -919,10 +932,7 @@ fn format_hook_success_box(
         ));
         output.push_str(&format!(
             "{}\n",
-            ctx.pad_line(
-                "  git stash show -p  \u{2014} review format changes",
-                0
-            )
+            ctx.pad_line("  git stash show -p  \u{2014} review format changes", 0)
         ));
         output.push_str(&format!(
             "{}\n",
