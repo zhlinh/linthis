@@ -148,8 +148,7 @@ fn build_analysis_options(
 
 /// Display per-file cache status.
 fn show_cache_status(analysis_options: &AnalysisOptions, options: &ComplexityCommandOptions) {
-    let project_root = linthis::utils::get_project_root();
-    let cache_path = project_root.join(".linthis").join("complexity-cache.json");
+    let cache_path = linthis::utils::get_cache_dir().join("complexity-cache.json");
     let cache = PerFileCache::load(&cache_path);
 
     let cache_target = if !analysis_options.files.is_empty() {
@@ -208,8 +207,7 @@ fn collect_complexity_files(path: &Path) -> Vec<PathBuf> {
 
 /// Update the per-file cache after analysis.
 fn update_cache_after_analysis(result: &AnalysisResult) {
-    let project_root = linthis::utils::get_project_root();
-    let cache_path = project_root.join(".linthis").join("complexity-cache.json");
+    let cache_path = linthis::utils::get_cache_dir().join("complexity-cache.json");
     let mut cache = PerFileCache::load(&cache_path);
     let analyzed_files: Vec<PathBuf> = result.files.iter().map(|f| f.path.clone()).collect();
     cache.update_from_complexity(&analyzed_files, result);

@@ -43,7 +43,7 @@ fn handle_cache_clear() -> ExitCode {
 /// Show cache status and statistics
 fn handle_cache_status() -> ExitCode {
     let project_root = get_project_root();
-    let cache_path = project_root.join(".linthis").join("cache.json");
+    let cache_path = linthis::utils::get_cache_dir().join("lint-cache.json");
 
     if !cache_path.exists() {
         println!("{} No cache found", "ℹ".blue());

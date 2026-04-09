@@ -26,11 +26,8 @@ const CACHE_VERSION: u32 = 1;
 /// Default cache max age in days
 const DEFAULT_CACHE_MAX_AGE_DAYS: u32 = 30;
 
-/// Cache directory name
-const CACHE_DIR: &str = ".linthis";
-
 /// Cache file name
-const CACHE_FILE: &str = "cache.json";
+const CACHE_FILE: &str = "lint-cache.json";
 
 /// The main lint cache structure
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -83,7 +80,7 @@ impl LintCache {
 
     /// Save cache to disk
     pub fn save(&self, project_root: &Path) -> Result<()> {
-        let cache_dir = project_root.join(CACHE_DIR);
+        let cache_dir = crate::utils::get_cache_dir();
         if !cache_dir.exists() {
             fs::create_dir_all(&cache_dir)?;
         }
@@ -96,8 +93,8 @@ impl LintCache {
     }
 
     /// Get the cache file path
-    fn cache_path(project_root: &Path) -> PathBuf {
-        project_root.join(CACHE_DIR).join(CACHE_FILE)
+    fn cache_path(_project_root: &Path) -> PathBuf {
+        crate::utils::get_cache_dir().join(CACHE_FILE)
     }
 
     /// Clear the cache file
