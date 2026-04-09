@@ -66,19 +66,13 @@ Catch and fix code quality issues before they enter the repository. Running lint
 
 If no code files were modified in this session, approve immediately.
 
-## Fix Mode
+## Fix Commit Mode
 
-Before starting, check the fix mode:
+Before starting, check the fix commit mode:
 ```bash
 linthis config get hook.pre_commit.fix_commit_mode
 ```
-
-Behavior depends on the mode:
-- **squash** (default): fix all issues → `git add` changed files → approve commit
-- **dirty**: fix all issues → do NOT `git add` → **reject** commit with message: "Review changes with `git diff`, then `git add` and commit again"
-- **fixup**: only run check (`linthis -s -c`), do NOT fix issues → **approve** commit (post-commit hook handles formatting)
-
-If the config command fails, default to `squash`.
+If the command fails, default to `squash`. The mode determines the workflow in the Steps section below.
 
 ## Key Commands
 
@@ -115,6 +109,15 @@ If worktree is not available, changes are made directly with a backup safety net
 
 ## Steps
 
+### If fix_commit_mode = `fixup`
+
+1. **Identify** modified code files in this session
+2. **Check only**: run `linthis -s -c` (check only, no format, no fix)
+3. **Report** any issues found, but do NOT fix them
+4. **Approve** the commit — the post-commit hook will handle formatting and create a separate fixup commit
+
+### If fix_commit_mode = `squash` (default) or `dirty`
+
 1. **Identify** modified code files in this session (files written or edited via Write/Edit tools, or via Bash)
 2. **Snapshot before fixing**: save current state so we can generate a diff later
    ```bash
@@ -148,24 +151,26 @@ If worktree is not available, changes are made directly with a backup safety net
    ## Changes Summary
    - src/foo.rs:42 — fixed unused variable `x` (lint: unused_variables)
    - src/bar.rs:15 — added doc comment for exported function (lint: missing_docs)
-   - src/baz.rs:80 — reduced function complexity by extracting helper (complexity: threshold 20)
+   ```
 
-   ## Diff
-   <full git diff output>
-   ```
-9. **Re-stage**: if any files were already staged before step 3, linting/formatting may have changed them on disk. You must re-stage those files so the index matches the working tree:
-   ```
-   git add <formatted or fixed files>
-   ```
+### Then, based on mode:
+
+**If `squash`:**
+9. **Re-stage**: `git add` all changed files so the fixes are included in the current commit
 10. **Final check**: run `linthis -s -c` (check-only on staged files) to verify the staging area is clean
-11. Only approve the commit once **all lint checks pass** AND **build/tests pass**
+11. Only **approve** the commit once **all lint checks pass** AND **build/tests pass**
+
+**If `dirty`:**
+9. Do **NOT** run `git add` — leave all changes in the working tree
+10. **Reject** the commit with a message like:
+    "Lint issues fixed. Review changes with `git diff`, then `git add -u && git commit` to include them."
 
 ## Key Rules
 
 - **One `-i` per file**: `linthis -i src/foo.go -i src/bar.go` (not glob patterns)
 - **Fix manually**: Read the error, understand the root cause, then edit
 - **Build must pass**: Never approve a commit if the build or tests are broken after fixing
-- **Always re-stage**: After any fix or format, `git add` the changed files
+- **Re-stage only in squash mode**: After any fix or format, `git add` the changed files only when fix_commit_mode is `squash`
 - **Always show diff**: After all fixes, display the changes summary and diff so the user can review what was modified
 
 ## Example
