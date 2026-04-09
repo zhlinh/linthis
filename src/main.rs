@@ -1660,6 +1660,34 @@ fn main() -> ExitCode {
         tool_install_mode,
     );
 
+    // Pre-flight: auto-create .gitignore if missing in a git repo
+    if !matches!(mode, RunMode::FormatOnly) {
+        let is_pre_push = cli.hook_mode.as_deref() == Some("pre-push");
+        if let Some(violations) =
+            linthis::gitignore::check_and_create(&runtime_project_root, cli.quiet, is_pre_push)
+        {
+            if !violations.is_empty() {
+                if !cli.quiet {
+                    if is_pre_push {
+                        eprintln!("Warning: Committed files should be ignored. Fix with:");
+                        for v in &violations {
+                            eprintln!("  git rm --cached {}", v);
+                        }
+                        eprintln!("  git commit --amend --no-edit");
+                    } else {
+                        eprintln!(
+                            "Warning: Staged files should be ignored (remove with git rm --cached):"
+                        );
+                        for v in &violations {
+                            eprintln!("  git rm --cached {}", v);
+                        }
+                    }
+                }
+                return ExitCode::from(1);
+            }
+        }
+    }
+
     execute_run(&cli, &options, &runtime_config, &runtime_project_root, mode)
 }
 
