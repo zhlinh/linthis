@@ -531,24 +531,24 @@ fn default_hook_review_auto_fix_mode() -> AutoFixMode {
 /// Per-event hook fix mode configuration.
 ///
 /// Controls how auto-format and agent fix changes are applied:
-/// - `"one-commit"` — merge all fixes into the current commit (default for pre-commit)
-/// - `"leave-on-dirty"` — leave fixes in the working tree and block (default for pre-push)
-/// - `"two-commit"` — create a separate fixup commit for fixes
+/// - `"squash"` — merge all fixes into the current commit (default for pre-commit)
+/// - `"dirty"` — leave fixes in the working tree and block (default for pre-push)
+/// - `"fixup"` — create a separate fixup commit for fixes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookEventFixConfig {
-    /// Fix mode: "one-commit", "leave-on-dirty", or "two-commit"
-    #[serde(default = "default_fix_mode_one_commit")]
-    pub fix_mode: String,
+    /// Fix mode: "squash", "dirty", or "fixup"
+    #[serde(default = "default_fix_commit_mode_one_commit")]
+    pub fix_commit_mode: String,
 }
 
-fn default_fix_mode_one_commit() -> String {
-    "one-commit".to_string()
+fn default_fix_commit_mode_one_commit() -> String {
+    "squash".to_string()
 }
 
 impl Default for HookEventFixConfig {
     fn default() -> Self {
         Self {
-            fix_mode: default_fix_mode_one_commit(),
+            fix_commit_mode: default_fix_commit_mode_one_commit(),
         }
     }
 }
@@ -591,10 +591,10 @@ impl Default for HookConfig {
             agent: AgentConfig::default(),
             review: HookReviewConfig::default(),
             pre_commit: HookEventFixConfig {
-                fix_mode: "one-commit".to_string(),
+                fix_commit_mode: "squash".to_string(),
             },
             pre_push: HookEventFixConfig {
-                fix_mode: "leave-on-dirty".to_string(),
+                fix_commit_mode: "dirty".to_string(),
             },
         }
     }

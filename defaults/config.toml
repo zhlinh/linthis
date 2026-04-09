@@ -101,14 +101,14 @@ cpplint_filter = "-build/c++11,-build/c++14,-build/header_guard,-build/include,-
 # Hook fix mode settings
 # Controls how auto-format and agent fix changes are applied during hooks.
 # Modes:
-#   "one-commit"     — merge fixes into the current commit (pre-commit default)
-#   "leave-on-dirty" — leave fixes in working tree and block (pre-push default)
-#   "two-commit"     — create a separate fixup commit for fixes
+#   "squash"     — merge fixes into the current commit (pre-commit default)
+#   "dirty" — leave fixes in working tree and block (pre-push default)
+#   "fixup"     — create a separate fixup commit for fixes
 [hook.pre_commit]
-fix_mode = "one-commit"
+fix_commit_mode = "squash"
 
 [hook.pre_push]
-fix_mode = "leave-on-dirty"
+fix_commit_mode = "dirty"
 
 # Plugin settings
 [plugin]

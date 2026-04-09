@@ -341,7 +341,7 @@ pub enum HookEvent {
     PrePush,
     /// Commit-msg hook (validates commit message format)
     CommitMsg,
-    /// Post-commit hook (runs after commit is created, used by two-commit fix mode)
+    /// Post-commit hook (runs after commit is created, used by fixup fix mode)
     PostCommit,
 }
 
@@ -367,7 +367,7 @@ impl HookEvent {
             HookEvent::PreCommit => "pre-commit (runs before commit)",
             HookEvent::PrePush => "pre-push (runs before push)",
             HookEvent::CommitMsg => "commit-msg (validates commit message)",
-            HookEvent::PostCommit => "post-commit (runs after commit, for two-commit fix mode)",
+            HookEvent::PostCommit => "post-commit (runs after commit, for fixup fix mode)",
         }
     }
 }
@@ -1209,12 +1209,12 @@ pub enum HookCommands {
         #[arg(long, allow_hyphen_values = true)]
         provider_args: Option<String>,
 
-        /// Set the hook fix mode (one-commit, leave-on-dirty, two-commit)
+        /// Set the hook fix mode (squash, dirty, fixup)
         ///
         /// Controls how auto-format and agent fix changes are applied.
         /// Sets the corresponding config value for the installed event(s).
         #[arg(long, value_name = "MODE")]
-        fix_mode: Option<String>,
+        fix_commit_mode: Option<String>,
     },
     /// Uninstall git hook
     Uninstall {
