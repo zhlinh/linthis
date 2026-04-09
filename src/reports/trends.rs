@@ -291,9 +291,9 @@ impl TrendAnalysis {
     }
 }
 
-/// Load historical results from the .linthis/result/ directory.
-pub fn load_historical_results(project_root: &Path, limit: usize) -> Vec<(PathBuf, RunResult)> {
-    let result_dir = project_root.join(".linthis").join("result");
+/// Load historical results from the global check/result/ directory.
+pub fn load_historical_results(_project_root: &Path, limit: usize) -> Vec<(PathBuf, RunResult)> {
+    let result_dir = crate::utils::get_result_dir();
 
     if !result_dir.exists() {
         return Vec::new();

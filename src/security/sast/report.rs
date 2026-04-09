@@ -240,14 +240,13 @@ fn format_summary_line(
     }
 }
 
-/// Persist the scan result as JSON to .linthis/result/.
+/// Persist the scan result as JSON to the global check/result/ directory.
 fn save_result_to_disk(output: &mut String, result: &SastResult) {
     use chrono::Local;
     use std::fs::{self, File};
     use std::io::Write;
 
-    let project_root = crate::utils::get_project_root();
-    let result_dir = project_root.join(".linthis").join("result");
+    let result_dir = crate::utils::get_result_dir();
     if fs::create_dir_all(&result_dir).is_ok() {
         let timestamp = Local::now().format("%Y%m%d-%H%M%S");
         let result_file = result_dir.join(format!("security-{}.json", timestamp));

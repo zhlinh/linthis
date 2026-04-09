@@ -486,8 +486,9 @@ pub(crate) fn prepush_review_prompt() -> &'static str {
      git diff $BASE_SHA..HEAD --stat; git diff $BASE_SHA..HEAD --name-status; git diff $BASE_SHA..HEAD. \
      (2) Review for Critical (security, data loss, broken API, logic errors), \
      Important (missing error handling, performance), and Minor issues. \
-     (3) Write the review to .linthis/review/result/review-$(date +%Y%m%d-%H%M%S).md \
-     (create the directory if needed). \
+     (3) Get the review dir: _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//'); \
+     _REVIEW_DIR=\"$HOME/.linthis/projects/$_SLUG/review/result\"; mkdir -p \"$_REVIEW_DIR\". \
+     Write the review to $_REVIEW_DIR/review-$(date +%Y%m%d-%H%M%S).md. \
      (4) If Critical issues found: save a snapshot with 'git diff', auto-fix the issues, \
      then run build/test to verify fixes don't break anything \
      (detect project type: cargo check && cargo test for Rust, \
@@ -563,7 +564,9 @@ pub(crate) fn build_git_with_agent_prepush_script(
          stop_timer\n\
          \n\
          # Find the latest review report and check for critical issues\n\
-         REVIEW_REPORT=$(ls -t .linthis/review/result/review-*.md 2>/dev/null | head -1)\n\
+         _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
+         _REVIEW_DIR=\"$HOME/.linthis/projects/$_SLUG/review/result\"\n\
+         REVIEW_REPORT=$(ls -t \"$_REVIEW_DIR\"/review-*.md 2>/dev/null | head -1)\n\
          if [ -n \"$REVIEW_REPORT\" ]; then\n\
          \x20 # Check for actual critical issues (agent exit code is unreliable)\n\
          \x20 _CRITICAL=$(awk '/^## Critical Issues/{{found=1;next}} found && /^## /{{found=0}} found && /^- \\[/{{print}}' \"$REVIEW_REPORT\")\n\

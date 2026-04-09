@@ -899,7 +899,7 @@ fn save_results(result: &linthis::utils::types::RunResult, output: &str, cli: &C
         }
         custom_path.clone()
     } else {
-        let result_dir = project_root.join(".linthis").join("result");
+        let result_dir = linthis::utils::get_result_dir();
         if let Err(e) = fs::create_dir_all(&result_dir) {
             eprintln!(
                 "{}: Failed to create {}: {}",
@@ -909,8 +909,6 @@ fn save_results(result: &linthis::utils::types::RunResult, output: &str, cli: &C
             );
             return;
         }
-        // Ensure .linthis/ is in .gitignore so it doesn't pollute the user's repo
-        linthis::utils::ensure_gitignore_has_linthis(&project_root);
         let timestamp = Local::now().format("%Y%m%d-%H%M%S");
         result_dir.join(format!("result-{}.json", timestamp))
     };
@@ -963,7 +961,7 @@ fn save_results(result: &linthis::utils::types::RunResult, output: &str, cli: &C
 fn cleanup_old_results(keep_results: usize, verbose: bool) {
     use std::fs;
 
-    let result_dir = PathBuf::from(".linthis").join("result");
+    let result_dir = linthis::utils::get_result_dir();
     if let Ok(entries) = fs::read_dir(&result_dir) {
         let mut result_files: Vec<_> = entries
             .filter_map(|e| e.ok())
@@ -1628,6 +1626,9 @@ fn main() -> ExitCode {
     }
 
     run_update_checks();
+
+    // Migrate legacy project-local data dirs to global path (one-time, silent)
+    linthis::utils::migrate_legacy_data_dirs();
 
     let (loaded_plugins, config_resolver) = match load_plugins(&cli) {
         Ok(result) => result,

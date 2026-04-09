@@ -77,13 +77,11 @@ pub fn strip_ansi_codes(s: &str) -> String {
     ansi_regex.replace_all(s, "").to_string()
 }
 
-/// Find the most recent result file in <project_root>/.linthis/result/
+/// Find the most recent result file in the global check/result/ directory
 pub fn find_latest_result_file() -> Option<PathBuf> {
     use std::fs;
 
-    // Use project root to find .linthis directory
-    let project_root = linthis::utils::get_project_root();
-    let result_dir = project_root.join(".linthis").join("result");
+    let result_dir = linthis::utils::get_result_dir();
     if !result_dir.exists() {
         return None;
     }

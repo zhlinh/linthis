@@ -324,7 +324,7 @@ mod tests {
         let content = super::agent::agent_event_content_generic_test(&HookEvent::PrePush);
         assert!(content.contains("git diff"));
         assert!(content.contains("Critical"));
-        assert!(content.contains(".linthis/review/"));
+        assert!(content.contains("review"));
     }
 
     #[test]

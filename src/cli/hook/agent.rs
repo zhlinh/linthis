@@ -320,7 +320,7 @@ Focus on the diff, not the whole file — only review what changed. Explain **wh
 
 ### Step 4 — Write structured review
 
-Output to terminal AND write to `.linthis/review/result/review-<YYYYMMDD-HHMMSS>.md`:
+Output to terminal AND write to the global review result directory (review-<YYYYMMDD-HHMMSS>.md):
 
 ```markdown
 # Code Review — <HEAD_SHA>
@@ -344,7 +344,7 @@ Files: N changed, +X -Y
 BLOCK / PROCEED WITH FIXES / APPROVED
 ```
 
-Create `.linthis/review/result/` directory if it doesn't exist.
+The review result directory is created automatically.
 
 ### Step 5 — Gate the push
 

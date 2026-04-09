@@ -263,14 +263,13 @@ fn filter_and_sort(result: &mut AnalysisResult, options: &ComplexityCommandOptio
     }
 }
 
-/// Save complexity result as JSON to .linthis/result/.
+/// Save complexity result as JSON to the global check/result/ directory.
 fn save_complexity_result(result: &AnalysisResult, verbose: bool) {
     use chrono::Local;
     use std::fs::{self, File};
     use std::io::Write;
 
-    let project_root = linthis::utils::get_project_root();
-    let result_dir = project_root.join(".linthis").join("result");
+    let result_dir = linthis::utils::get_result_dir();
     if let Err(e) = fs::create_dir_all(&result_dir) {
         eprintln!("Warning: Failed to create {}: {}", result_dir.display(), e);
         return;

@@ -216,6 +216,69 @@ pub fn get_project_root() -> std::path::PathBuf {
     crate::vcs::detect_vcs().project_root().to_path_buf()
 }
 
+/// Get the global data directory for a project: `~/.linthis/projects/<slug>/`.
+/// The slug is the project root path with `/` replaced by `-`.
+/// Creates the directory if it doesn't exist.
+pub fn get_global_project_dir() -> std::path::PathBuf {
+    let project_root = get_project_root();
+    let slug = project_root
+        .to_string_lossy()
+        .replace(['/', '\\'], "-");
+    let slug = slug.trim_start_matches('-');
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = home.join(".linthis").join("projects").join(slug);
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Get the result directory: `~/.linthis/projects/<slug>/check/result/`.
+pub fn get_result_dir() -> std::path::PathBuf {
+    get_global_project_dir().join("check").join("result")
+}
+
+/// Get the review result directory: `~/.linthis/projects/<slug>/review/result/`.
+pub fn get_review_dir() -> std::path::PathBuf {
+    get_global_project_dir().join("review").join("result")
+}
+
+/// Get the backup directory: `~/.linthis/projects/<slug>/backup/`.
+pub fn get_backup_dir() -> std::path::PathBuf {
+    get_global_project_dir().join("backup")
+}
+
+/// Migrate legacy project-local data directories to global path.
+/// Called once on first access; silently moves old dirs if they exist.
+pub fn migrate_legacy_data_dirs() {
+    let project_root = get_project_root();
+    let global_dir = get_global_project_dir();
+
+    let migrations: &[(&str, &str)] = &[
+        ("result", "check/result"),
+        ("review", "review"),
+        ("backup", "backup"),
+    ];
+
+    for (old_name, new_name) in migrations {
+        let old_dir = project_root.join(".linthis").join(old_name);
+        let new_dir = global_dir.join(new_name);
+        if old_dir.exists() && !new_dir.exists() {
+            if let Some(parent) = new_dir.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::rename(&old_dir, &new_dir).is_ok() {
+                eprintln!(
+                    "Note: Migrated .linthis/{} → {}",
+                    old_name,
+                    new_dir.display()
+                );
+            }
+        }
+    }
+}
+
 /// Check if we're in a git repository.
 pub fn is_git_repo() -> bool {
     crate::vcs::detect_vcs().kind() == crate::vcs::VcsKind::Git
