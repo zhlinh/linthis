@@ -41,9 +41,14 @@ Desktop.ini
 ";
 
 /// Check if a .gitignore should be created and do so if needed.
-/// Returns a list of staged files that match the new ignore patterns (violations).
+/// Returns a list of files that match the new ignore patterns (violations).
+/// For pre-push, checks committed files (HEAD); otherwise checks staged files.
 /// Returns `None` if no action was needed (not a git repo, or .gitignore exists).
-pub fn check_and_create(project_root: &Path, quiet: bool) -> Option<Vec<String>> {
+pub fn check_and_create(
+    project_root: &Path,
+    quiet: bool,
+    is_pre_push: bool,
+) -> Option<Vec<String>> {
     if !crate::utils::is_git_repo() {
         return None;
     }
@@ -69,8 +74,12 @@ pub fn check_and_create(project_root: &Path, quiet: bool) -> Option<Vec<String>>
         eprintln!("\u{26a0} Created .gitignore (was missing)");
     }
 
-    // Check if any staged files match the new ignore patterns
-    let violations = check_staged_against_ignores(project_root);
+    // Check files against ignore patterns
+    let violations = if is_pre_push {
+        check_committed_against_ignores(project_root)
+    } else {
+        check_staged_against_ignores(project_root)
+    };
     Some(violations)
 }
 
@@ -127,8 +136,58 @@ fn generate_gitignore_content(markers: &[&str]) -> String {
     content
 }
 
+/// Directory/file patterns that should be ignored.
+const IGNORE_PATTERNS: &[&str] = &[
+    "node_modules/",
+    "__pycache__/",
+    "target/",
+    ".venv/",
+    "venv/",
+    "build/",
+    "dist/",
+    ".gradle/",
+    ".idea/",
+    ".vscode/",
+    ".linthis/",
+    ".env",
+    ".DS_Store",
+    "Thumbs.db",
+    "Pods/",
+    "DerivedData/",
+];
+
+/// File extension patterns that should be ignored.
+const IGNORE_EXT_PATTERNS: &[&str] = &[".pyc", ".pyo", ".class", ".o", ".so", ".dylib", ".a"];
+
+/// Filter a list of file paths, returning those that match ignore patterns.
+fn filter_ignorable_files(file_list: &str) -> Vec<String> {
+    file_list
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return false;
+            }
+            for pat in IGNORE_PATTERNS {
+                if line.starts_with(pat) || line.contains(&format!("/{}", pat)) {
+                    return true;
+                }
+                if !pat.ends_with('/') && line == *pat {
+                    return true;
+                }
+            }
+            for ext in IGNORE_EXT_PATTERNS {
+                if line.ends_with(ext) {
+                    return true;
+                }
+            }
+            false
+        })
+        .map(|s| s.to_string())
+        .collect()
+}
+
 /// Check staged files against common ignore patterns.
-/// Returns file paths that should probably be ignored.
 fn check_staged_against_ignores(project_root: &Path) -> Vec<String> {
     let output = match Command::new("git")
         .args(["diff", "--cached", "--name-only"])
@@ -138,56 +197,20 @@ fn check_staged_against_ignores(project_root: &Path) -> Vec<String> {
         Ok(o) if o.status.success() => o,
         _ => return Vec::new(),
     };
+    filter_ignorable_files(&String::from_utf8_lossy(&output.stdout))
+}
 
-    let staged = String::from_utf8_lossy(&output.stdout);
-    let patterns: &[&str] = &[
-        "node_modules/",
-        "__pycache__/",
-        "target/",
-        ".venv/",
-        "venv/",
-        "build/",
-        "dist/",
-        ".gradle/",
-        ".idea/",
-        ".vscode/",
-        ".linthis/",
-        ".env",
-        ".DS_Store",
-        "Thumbs.db",
-        "Pods/",
-        "DerivedData/",
-    ];
-
-    let ext_patterns: &[&str] = &[".pyc", ".pyo", ".class", ".o", ".so", ".dylib", ".a"];
-
-    staged
-        .lines()
-        .filter(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                return false;
-            }
-            // Check directory prefixes
-            for pat in patterns {
-                if line.starts_with(pat) || line.contains(&format!("/{}", pat)) {
-                    return true;
-                }
-                // Exact file match (e.g. ".env", ".DS_Store")
-                if !pat.ends_with('/') && line == *pat {
-                    return true;
-                }
-            }
-            // Check file extension patterns
-            for ext in ext_patterns {
-                if line.ends_with(ext) {
-                    return true;
-                }
-            }
-            false
-        })
-        .map(|s| s.to_string())
-        .collect()
+/// Check committed files (in HEAD) against common ignore patterns.
+fn check_committed_against_ignores(project_root: &Path) -> Vec<String> {
+    let output = match Command::new("git")
+        .args(["ls-tree", "-r", "--name-only", "HEAD"])
+        .current_dir(project_root)
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    filter_ignorable_files(&String::from_utf8_lossy(&output.stdout))
 }
 
 #[cfg(test)]
