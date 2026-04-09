@@ -638,6 +638,8 @@ pub struct RunOptions {
     pub config_resolver: Option<SharedConfigResolver>,
     /// How to handle missing tools during linting
     pub tool_install_mode: ToolInstallMode,
+    /// Hook event context (if running inside a git hook)
+    pub hook_event: Option<String>,
 }
 
 impl std::fmt::Debug for RunOptions {
@@ -675,6 +677,7 @@ impl Default for RunOptions {
             no_cache: false,
             config_resolver: None,
             tool_install_mode: ToolInstallMode::Prompt,
+            hook_event: None,
         }
     }
 }
@@ -1943,13 +1946,23 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     if !matches!(result.run_mode, RunModeKind::FormatOnly) {
         let project_root = utils::get_project_root();
         if let Some(violations) = gitignore::check_and_create(&project_root, options.quiet) {
-            if !violations.is_empty() {
-                if !options.quiet {
+            if !violations.is_empty() && !options.quiet {
+                let is_pre_push =
+                    options.hook_event.as_deref() == Some("pre-push");
+                if is_pre_push {
+                    eprintln!(
+                        "Warning: Committed files should be ignored. Fix with:"
+                    );
+                    for v in &violations {
+                        eprintln!("  git rm --cached {}", v);
+                    }
+                    eprintln!("  git commit --amend --no-edit");
+                } else {
                     eprintln!(
                         "Warning: Staged files should be ignored (remove with git rm --cached):"
                     );
                     for v in &violations {
-                        eprintln!("  {}", v);
+                        eprintln!("  git rm --cached {}", v);
                     }
                 }
                 result.exit_code = 1;

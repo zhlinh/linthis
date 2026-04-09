@@ -159,6 +159,7 @@ fn handle_fix_with_lint(options: &FixCommandOptions, config: &Config) -> ExitCod
         no_cache: false,
         config_resolver: None,
         tool_install_mode: linthis::ToolInstallMode::Prompt,
+        hook_event: None,
     };
 
     match run(&run_options) {
@@ -446,6 +447,7 @@ fn recheck_modified_paths(
         no_cache: true,
         config_resolver: None,
         tool_install_mode: linthis::ToolInstallMode::Disabled,
+        hook_event: None,
     };
 
     match run(&run_options) {
