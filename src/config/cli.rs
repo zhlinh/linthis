@@ -427,10 +427,7 @@ pub fn handle_config_get(field: &str, global: bool) -> ExitCode {
 }
 
 /// Resolve a dotted key path in a TOML document (e.g. "hook.pre_commit.fix_commit_mode").
-fn resolve_dotted_get<'a>(
-    doc: &'a DocumentMut,
-    field: &str,
-) -> Option<&'a toml_edit::Item> {
+fn resolve_dotted_get<'a>(doc: &'a DocumentMut, field: &str) -> Option<&'a toml_edit::Item> {
     let parts: Vec<&str> = field.split('.').collect();
     if parts.len() == 1 {
         return doc.get(field);

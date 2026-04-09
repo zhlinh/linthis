@@ -420,35 +420,23 @@ impl CpplintFixer {
         Ok(modified)
     }
 
-    /// Fix a single cpplint error by category. Returns true if a fix was applied.
-    fn fix_single_error(
+    /// Check if a category should be skipped for Objective-C files.
+    fn is_objc_incompatible(category: &str) -> bool {
+        matches!(
+            category,
+            "build/header_guard" | "readability/casting" | "whitespace/operators"
+        )
+    }
+
+    /// Dispatch a cpplint error to the appropriate fix handler by category.
+    /// Returns `None` if the category is unsupported.
+    fn dispatch_fix(
         &mut self,
         lines: &mut Vec<String>,
         error: &CpplintError,
-        debug: bool,
-    ) -> bool {
-        // Skip OC-incompatible categories early
-        let skip_for_objc = matches!(
-            error.category.as_str(),
-            "build/header_guard" | "readability/casting" | "whitespace/operators"
-        );
-        if self.is_objc && skip_for_objc {
-            if debug {
-                eprintln!("[cpplint-fixer] Skipping {} for OC file", error.category);
-            }
-            return false;
-        }
-
-        let fixed = match error.category.as_str() {
-            "build/header_guard" if self.config.header_guard_mode == HeaderGuardMode::FixName => {
-                self.fix_header_guard_from_error(lines, error)
-            }
-            "build/header_guard"
-                if self.config.header_guard_mode == HeaderGuardMode::PragmaOnce =>
-            {
-                self.convert_to_pragma_once(lines)
-            }
-            "build/header_guard" => false,
+    ) -> Option<bool> {
+        Some(match error.category.as_str() {
+            "build/header_guard" => self.fix_header_guard_by_mode(lines, error),
             "readability/todo" => self.fix_todo_from_error(lines, error),
             "legal/copyright" => self.fix_copyright_from_error(lines),
             "readability/casting" => self.fix_c_style_cast(lines, error),
@@ -457,7 +445,28 @@ impl CpplintFixer {
             "whitespace/semicolon" => self.fix_empty_semicolon(lines, error),
             "whitespace/comma" => self.fix_comma_spacing(lines, error),
             "whitespace/operators" => self.fix_operator_spacing(lines, error),
-            _ => {
+            _ => return None,
+        })
+    }
+
+    /// Fix a single cpplint error by category. Returns true if a fix was applied.
+    fn fix_single_error(
+        &mut self,
+        lines: &mut Vec<String>,
+        error: &CpplintError,
+        debug: bool,
+    ) -> bool {
+        // Skip OC-incompatible categories early
+        if self.is_objc && Self::is_objc_incompatible(&error.category) {
+            if debug {
+                eprintln!("[cpplint-fixer] Skipping {} for OC file", error.category);
+            }
+            return false;
+        }
+
+        let fixed = match self.dispatch_fix(lines, error) {
+            Some(result) => result,
+            None => {
                 if debug {
                     eprintln!(
                         "[cpplint-fixer] Skipping unsupported category: {}",
@@ -475,6 +484,15 @@ impl CpplintFixer {
             );
         }
         fixed
+    }
+
+    /// Handle header guard fixes based on the configured mode.
+    fn fix_header_guard_by_mode(&mut self, lines: &mut Vec<String>, error: &CpplintError) -> bool {
+        match self.config.header_guard_mode {
+            HeaderGuardMode::FixName => self.fix_header_guard_from_error(lines, error),
+            HeaderGuardMode::PragmaOnce => self.convert_to_pragma_once(lines),
+            HeaderGuardMode::Disabled => false,
+        }
     }
 
     /// Fix header guard based on cpplint error message
@@ -527,7 +545,10 @@ impl CpplintFixer {
     /// Extract the suggested guard name from a cpplint error message.
     fn extract_guard_name(message: &str) -> Option<String> {
         if message.contains("please use:") {
-            message.split("please use:").nth(1).map(|s| s.trim().to_string())
+            message
+                .split("please use:")
+                .nth(1)
+                .map(|s| s.trim().to_string())
         } else if message.contains("#endif line should be") {
             Regex::new(r#"#endif\s+//\s+(\w+)"#)
                 .ok()

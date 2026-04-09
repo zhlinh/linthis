@@ -62,10 +62,21 @@ fn format_human(result: &SastResult) -> String {
     let infos: Vec<_> = result
         .findings
         .iter()
-        .filter(|f| matches!(f.severity, Severity::Low | Severity::None | Severity::Unknown))
+        .filter(|f| {
+            matches!(
+                f.severity,
+                Severity::Low | Severity::None | Severity::Unknown
+            )
+        })
         .collect();
 
-    format_issue_counts(&mut output, result.findings.len(), &errors, &warnings, &infos);
+    format_issue_counts(
+        &mut output,
+        result.findings.len(),
+        &errors,
+        &warnings,
+        &infos,
+    );
     format_grouped_findings(&mut output, &errors, &warnings, &infos);
     format_summary_line(&mut output, result, &errors, &warnings, &infos);
     save_result_to_disk(&mut output, result);
@@ -118,11 +129,8 @@ fn format_grouped_findings(
     warnings: &[&SastFinding],
     infos: &[&SastFinding],
 ) {
-    let all_groups: Vec<(&str, &[&SastFinding])> = vec![
-        ("ERROR", errors),
-        ("WARN", warnings),
-        ("INFO", infos),
-    ];
+    let all_groups: Vec<(&str, &[&SastFinding])> =
+        vec![("ERROR", errors), ("WARN", warnings), ("INFO", infos)];
 
     let mut issue_num = 0usize;
     for (label, findings) in all_groups {
@@ -146,7 +154,10 @@ fn format_single_finding(
         _ => format!("[{}]", label).cyan().to_string(),
     };
 
-    output.push_str(&format!("  {}. {} {}\n", issue_num, colored_label, finding.message));
+    output.push_str(&format!(
+        "  {}. {} {}\n",
+        issue_num, colored_label, finding.message
+    ));
     output.push_str(&format!(
         "    File: {}:{}\n",
         finding.file_path.display(),
@@ -204,7 +215,11 @@ fn format_summary_line(
 
     output.push_str(&format!(
         "  {} {} issue(s) ({} error{}, {} warning{}, {} info) in {} file(s)\n",
-        if error_count > 0 { "✗".red().to_string() } else { "⚠".yellow().to_string() },
+        if error_count > 0 {
+            "✗".red().to_string()
+        } else {
+            "⚠".yellow().to_string()
+        },
         total,
         error_count,
         if error_count == 1 { "" } else { "s" },
@@ -218,7 +233,9 @@ fn format_summary_line(
     if error_count > 0 {
         output.push_str(&format!(
             "\n  {}\n",
-            "✗ Security scan failed due to errors. Fix the issues above.".red().bold()
+            "✗ Security scan failed due to errors. Fix the issues above."
+                .red()
+                .bold()
         ));
     }
 }

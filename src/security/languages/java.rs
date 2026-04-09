@@ -211,7 +211,10 @@ impl LanguageSecurityScanner for JavaSecurityScanner {
     }
 
     fn fix(&self, _path: &Path, vulnerabilities: &[Vulnerability]) -> Result<FixResult, String> {
-        let unfixed: Vec<String> = vulnerabilities.iter().map(|v| v.advisory.id.clone()).collect();
+        let unfixed: Vec<String> = vulnerabilities
+            .iter()
+            .map(|v| v.advisory.id.clone())
+            .collect();
         let result = FixResult {
             needs_review: true,
             messages: vec![

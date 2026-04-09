@@ -87,9 +87,7 @@ impl PerFileCache {
             match self.entries.get(&key) {
                 Some((cached_hash, findings_json)) if *cached_hash == current_hash => {
                     result.cache_hits += 1;
-                    if let Ok(findings) =
-                        serde_json::from_str::<Vec<SastFinding>>(findings_json)
-                    {
+                    if let Ok(findings) = serde_json::from_str::<Vec<SastFinding>>(findings_json) {
                         result.cached_findings.extend(findings);
                     }
                 }
@@ -119,8 +117,7 @@ impl PerFileCache {
                 .filter(|f| f.file_path == *file)
                 .collect();
 
-            let json =
-                serde_json::to_string(&file_findings).unwrap_or_else(|_| "[]".to_string());
+            let json = serde_json::to_string(&file_findings).unwrap_or_else(|_| "[]".to_string());
             self.entries.insert(key, (hash, json));
         }
     }

@@ -363,7 +363,11 @@ pub fn load_result_from_file(path: &Path) -> Option<RunResult> {
 
 /// Parse a severity string into a `Severity` enum value.
 fn parse_severity(value: &serde_json::Value, default: &str) -> Severity {
-    match value.get("severity").and_then(|v| v.as_str()).unwrap_or(default) {
+    match value
+        .get("severity")
+        .and_then(|v| v.as_str())
+        .unwrap_or(default)
+    {
         "error" => Severity::Error,
         "warning" => Severity::Warning,
         _ => Severity::Info,
@@ -371,10 +375,7 @@ fn parse_severity(value: &serde_json::Value, default: &str) -> Severity {
 }
 
 /// Extract lint issues from the unified format's "lint" section.
-fn parse_unified_lint_section(
-    unified: &serde_json::Value,
-    result: &mut RunResult,
-) {
+fn parse_unified_lint_section(unified: &serde_json::Value, result: &mut RunResult) {
     let lint = match unified.get("lint") {
         Some(l) => l,
         None => return,
@@ -438,10 +439,7 @@ fn parse_lint_issue(iv: &serde_json::Value) -> crate::utils::types::LintIssue {
 }
 
 /// Extract top-level metadata (exit_code, duration, checks_run, target_paths).
-fn parse_unified_metadata(
-    unified: &serde_json::Value,
-    result: &mut RunResult,
-) {
+fn parse_unified_metadata(unified: &serde_json::Value, result: &mut RunResult) {
     result.exit_code = unified
         .get("exit_code")
         .and_then(|v| v.as_i64())
@@ -466,10 +464,7 @@ fn parse_unified_metadata(
 }
 
 /// Parse security issues from the unified format's "security" section.
-fn parse_unified_security_issues(
-    unified: &serde_json::Value,
-    result: &mut RunResult,
-) {
+fn parse_unified_security_issues(unified: &serde_json::Value, result: &mut RunResult) {
     let sec = match unified.get("security") {
         Some(s) => s,
         None => return,
@@ -507,10 +502,7 @@ fn parse_unified_security_issues(
 }
 
 /// Parse complexity issues from the unified format's "complexity" section.
-fn parse_unified_complexity_issues(
-    unified: &serde_json::Value,
-    result: &mut RunResult,
-) {
+fn parse_unified_complexity_issues(unified: &serde_json::Value, result: &mut RunResult) {
     let cx = match unified.get("complexity") {
         Some(c) => c,
         None => return,

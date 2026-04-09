@@ -286,11 +286,7 @@ impl CppFormatter {
     }
 
     /// Run clang-format on a file, returning an error FormatResult if it fails
-    fn run_clang_format(
-        &self,
-        path: &Path,
-        language: &str,
-    ) -> Result<Option<FormatResult>> {
+    fn run_clang_format(&self, path: &Path, language: &str) -> Result<Option<FormatResult>> {
         let mut cmd = Command::new("clang-format");
         cmd.arg("-i");
 
@@ -354,12 +350,9 @@ fn is_build_directory(name_lower: &str, depth: usize) -> bool {
 /// Check if a directory name matches platform/architecture patterns
 fn is_platform_subdirectory(name_lower: &str) -> bool {
     const PLATFORM_KEYWORDS: &[&str] = &[
-        "android", "ios", "linux", "windows", "arm", "x86", "static", "shared", "debug",
-        "release",
+        "android", "ios", "linux", "windows", "arm", "x86", "static", "shared", "debug", "release",
     ];
-    PLATFORM_KEYWORDS
-        .iter()
-        .any(|kw| name_lower.contains(kw))
+    PLATFORM_KEYWORDS.iter().any(|kw| name_lower.contains(kw))
 }
 
 impl Default for CppFormatter {

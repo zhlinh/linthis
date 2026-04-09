@@ -368,7 +368,10 @@ pub fn ensure_gitignore_has_linthis(project_root: &Path) {
 
     // 2. Check global gitignore
     let global_gitignore = resolve_global_gitignore_path();
-    if global_gitignore.as_ref().is_some_and(|p| file_has_linthis_ignore(p)) {
+    if global_gitignore
+        .as_ref()
+        .is_some_and(|p| file_has_linthis_ignore(p))
+    {
         return;
     }
 
@@ -543,9 +546,7 @@ fn ensure_vscode_exclude(project_root: &Path) {
     }
 
     // 4. Fall back to project .vscode/settings.json (only if .vscode/ exists)
-    if project_root.join(".vscode").is_dir()
-        && add_linthis_to_vscode_settings(&project_settings)
-    {
+    if project_root.join(".vscode").is_dir() && add_linthis_to_vscode_settings(&project_settings) {
         eprintln!("[linthis] Added .linthis/ to .vscode/settings.json search.exclude");
     }
 }

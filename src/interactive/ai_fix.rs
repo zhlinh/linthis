@@ -534,29 +534,21 @@ struct BatchResult {
 /// Maximum number of files per batch CLI call
 const FILES_PER_BATCH: usize = 8;
 
-/// Run CLI file fix in parallel batches.
-/// Groups files into batches, each batch handled by one `claude -p` call.
-/// Multiple batches run in parallel via rayon.
-fn run_cli_file_fix_parallel(
-    file_list: &[(PathBuf, Vec<&LintIssue>)],
-    provider_config: &AiProviderConfig,
-    config: &AiFixConfig,
-    total_files: usize,
-) -> AiFixResult {
-    use std::sync::Mutex;
-
-    let mut fix_result = AiFixResult::default();
-    let cli_name = match &config.provider {
+/// Get display name for a CLI-based AI provider.
+fn get_cli_display_name(provider: &AiProviderKind) -> &str {
+    match provider {
         AiProviderKind::ClaudeCli => "Claude",
         AiProviderKind::CodeBuddyCli => "CodeBuddy",
         AiProviderKind::CodexCli => "Codex",
         AiProviderKind::GeminiCli => "Gemini",
         AiProviderKind::Custom(name) => name.as_str(),
         _ => "CLI",
-    };
+    }
+}
 
-    // Prepare file data
-    let file_data: Vec<FileIssueData> = file_list
+/// Prepare file data from lint issues for batch processing.
+fn prepare_file_data(file_list: &[(PathBuf, Vec<&LintIssue>)]) -> Vec<FileIssueData> {
+    file_list
         .iter()
         .map(|(path, issues)| {
             let issues_data: Vec<(usize, String, String)> = issues
@@ -572,7 +564,118 @@ fn run_cli_file_fix_parallel(
             let count = issues.len();
             (path.clone(), issues_data, count)
         })
+        .collect()
+}
+
+/// Print the batch plan summary line.
+fn print_batch_plan(
+    total_issues: usize,
+    total_files: usize,
+    total_batches: usize,
+    actual_files_per_batch: usize,
+    actual_parallel: usize,
+) {
+    println!(
+        "  {} {} issues in {} files, {} batch{} (up to {} files/batch, {} parallel)",
+        "→".cyan(),
+        total_issues,
+        total_files,
+        total_batches,
+        if total_batches == 1 { "" } else { "es" },
+        actual_files_per_batch,
+        actual_parallel
+    );
+    println!();
+}
+
+/// Spawn a progress spinner thread that displays batch completion status.
+fn spawn_progress_spinner(
+    progress: Arc<AtomicUsize>,
+    total_batches: usize,
+    cli_name: String,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let start_time = std::time::Instant::now();
+        let mut idx = 0;
+
+        loop {
+            let current = progress.load(Ordering::Relaxed);
+            let elapsed = start_time.elapsed();
+            let secs = elapsed.as_secs();
+            let time_str = if secs >= 60 {
+                format!("{}m {}s", secs / 60, secs % 60)
+            } else {
+                format!("{}s", secs)
+            };
+
+            print!(
+                "\r  {} [batch {}/{}] Running {} CLI... ({})\x1B[K",
+                spinner_chars[idx].to_string().cyan(),
+                current,
+                total_batches,
+                cli_name,
+                time_str.dimmed()
+            );
+            io::stdout().flush().ok();
+
+            if current >= total_batches {
+                break;
+            }
+
+            idx = (idx + 1) % spinner_chars.len();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    })
+}
+
+/// Process a single batch of files using the AI provider CLI.
+fn process_single_batch(
+    batch: &FileBatch<'_>,
+    provider_config: &AiProviderConfig,
+    working_dir: &std::path::Path,
+) -> BatchResult {
+    let provider = AiProvider::new(provider_config.clone());
+
+    let batch_files: Vec<BatchFileInput<'_>> = batch
+        .iter()
+        .map(|(path, issues, _count)| (path.as_path(), issues.as_slice()))
         .collect();
+
+    let files_info: Vec<(PathBuf, usize)> = batch
+        .iter()
+        .map(|(path, _, count)| (path.clone(), *count))
+        .collect();
+
+    match provider.fix_files_batch_with_cli(&batch_files, working_dir) {
+        Ok(diffs) => BatchResult {
+            diffs,
+            files: files_info,
+            error: None,
+        },
+        Err(e) => BatchResult {
+            diffs: std::collections::HashMap::new(),
+            files: files_info,
+            error: Some(e),
+        },
+    }
+}
+
+/// Run CLI file fix in parallel batches.
+/// Groups files into batches, each batch handled by one `claude -p` call.
+/// Multiple batches run in parallel via rayon.
+fn run_cli_file_fix_parallel(
+    file_list: &[(PathBuf, Vec<&LintIssue>)],
+    provider_config: &AiProviderConfig,
+    config: &AiFixConfig,
+    total_files: usize,
+) -> AiFixResult {
+    use std::sync::Mutex;
+
+    let mut fix_result = AiFixResult::default();
+    let cli_name = get_cli_display_name(&config.provider);
+
+    let file_data = prepare_file_data(file_list);
 
     // Split into batches
     let batches: Vec<FileBatch<'_>> = file_data
@@ -591,57 +694,17 @@ fn run_cli_file_fix_parallel(
         total_files
     };
 
-    println!(
-        "  {} {} issues in {} files, {} batch{} (up to {} files/batch, {} parallel)",
-        "→".cyan(),
+    print_batch_plan(
         total_issues,
         total_files,
         total_batches,
-        if total_batches == 1 { "" } else { "es" },
         actual_files_per_batch,
-        actual_parallel
+        actual_parallel,
     );
-    println!();
 
-    // Progress counter (tracks completed batches)
     let progress = Arc::new(AtomicUsize::new(0));
-
-    // Start progress display thread
-    let progress_clone = Arc::clone(&progress);
-    let cli_name_owned = cli_name.to_string();
-    let progress_handle = std::thread::spawn(move || {
-        let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let start_time = std::time::Instant::now();
-        let mut idx = 0;
-
-        loop {
-            let current = progress_clone.load(Ordering::Relaxed);
-            let elapsed = start_time.elapsed();
-            let secs = elapsed.as_secs();
-            let time_str = if secs >= 60 {
-                format!("{}m {}s", secs / 60, secs % 60)
-            } else {
-                format!("{}s", secs)
-            };
-
-            print!(
-                "\r  {} [batch {}/{}] Running {} CLI... ({})\x1B[K",
-                spinner_chars[idx].to_string().cyan(),
-                current,
-                total_batches,
-                cli_name_owned,
-                time_str.dimmed()
-            );
-            io::stdout().flush().ok();
-
-            if current >= total_batches {
-                break;
-            }
-
-            idx = (idx + 1) % spinner_chars.len();
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-    });
+    let progress_handle =
+        spawn_progress_spinner(Arc::clone(&progress), total_batches, cli_name.to_string());
 
     // Build thread pool
     let pool = rayon::ThreadPoolBuilder::new()
@@ -649,59 +712,27 @@ fn run_cli_file_fix_parallel(
         .build()
         .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
 
-    // Find common working directory (project root)
     let working_dir = crate::utils::get_project_root();
-
-    // Process batches in parallel
     let results_mutex = Arc::new(Mutex::new(Vec::new()));
-    let provider_config_clone = provider_config.clone();
 
     pool.install(|| {
         batches.par_iter().for_each(|batch| {
-            let provider = AiProvider::new(provider_config_clone.clone());
-
-            // Build batch file list for the provider
-            let batch_files: Vec<BatchFileInput<'_>> = batch
-                .iter()
-                .map(|(path, issues, _count)| (path.as_path(), issues.as_slice()))
-                .collect();
-
-            let files_info: Vec<(PathBuf, usize)> = batch
-                .iter()
-                .map(|(path, _, count)| (path.clone(), *count))
-                .collect();
-
-            let result = match provider.fix_files_batch_with_cli(&batch_files, &working_dir) {
-                Ok(diffs) => BatchResult {
-                    diffs,
-                    files: files_info,
-                    error: None,
-                },
-                Err(e) => BatchResult {
-                    diffs: std::collections::HashMap::new(),
-                    files: files_info,
-                    error: Some(e),
-                },
-            };
-
+            let result = process_single_batch(batch, provider_config, &working_dir);
             progress.fetch_add(1, Ordering::Relaxed);
             results_mutex.lock().unwrap().push(result);
         });
     });
 
-    // Wait for progress thread to finish
     let _ = progress_handle.join();
     println!(); // New line after progress
     println!();
 
-    // Collect and display results
     let results = Arc::try_unwrap(results_mutex)
         .expect("All parallel tasks completed")
         .into_inner()
         .unwrap();
 
     collect_batch_results(&results, total_files, &mut fix_result);
-
     print_cli_fix_summary(&fix_result, total_files);
 
     fix_result
@@ -921,10 +952,7 @@ fn try_apply_suggestion(issue: &LintIssue, suggestion: &FixSuggestion) -> bool {
 
 /// Prompt the user to choose which suggestion to apply.
 /// Returns (applied, quit).
-fn prompt_suggestion_choice(
-    issue: &LintIssue,
-    suggestions: &[FixSuggestion],
-) -> (bool, bool) {
+fn prompt_suggestion_choice(issue: &LintIssue, suggestions: &[FixSuggestion]) -> (bool, bool) {
     for i in 1..=suggestions.len() {
         if i == 1 {
             println!(
@@ -1409,13 +1437,8 @@ pub fn run_ai_fix_all(result: &RunResult, config: &AiFixConfig) -> AiFixResult {
     // ═══════════════════════════════════════════════════════════
     // Phase 2: Interactive review (no waiting)
     // ═══════════════════════════════════════════════════════════
-    let fix_result = run_interactive_review(
-        issues,
-        &cached_suggestions,
-        config,
-        errors,
-        successful,
-    );
+    let fix_result =
+        run_interactive_review(issues, &cached_suggestions, config, errors, successful);
 
     print_fix_summary(&fix_result);
     fix_result
@@ -1431,16 +1454,29 @@ enum ReviewAction {
     Quit,
 }
 
-/// Run the interactive review phase: iterate through issues, show suggestions, handle user input.
-fn run_interactive_review(
-    issues: &[LintIssue],
-    cached_suggestions: &[CachedSuggestion],
-    config: &AiFixConfig,
-    errors: usize,
-    successful: usize,
-) -> AiFixResult {
-    let total = issues.len();
+/// Apply a NOLINT comment to ignore a lint issue.
+fn apply_nolint_action(issue: &LintIssue, fix_result: &mut AiFixResult) {
+    match add_nolint_comment(issue) {
+        NolintResult::Success(diffs) => {
+            fix_result.applied += 1;
+            println!("{} Added NOLINT comment", "✓".green());
+            println!();
+            print_diff(&diffs, &issue.file_path);
+            fix_result.modified_files.insert(issue.file_path.clone());
+        }
+        NolintResult::AlreadyIgnored => {
+            println!("{}", "Already has NOLINT comment".yellow());
+            fix_result.skipped += 1;
+        }
+        NolintResult::Error(e) => {
+            eprintln!("{}: {}", "Failed to add NOLINT".red(), e);
+            fix_result.skipped += 1;
+        }
+    }
+}
 
+/// Print the interactive review phase header.
+fn print_review_header() {
     println!("{}", "─".repeat(60).dimmed());
     println!(
         "  {} Review suggestions (no more waiting)",
@@ -1450,6 +1486,117 @@ fn run_interactive_review(
     println!();
     println!("  Navigation: [p]revious, [g]o to #N, [q]uit");
     println!();
+}
+
+/// Result of handling a single review action.
+enum ReviewStep {
+    /// Continue to the given index.
+    Continue(usize),
+    /// Stop the review loop.
+    Break,
+}
+
+/// Context for the current review step, bundling issue data and state.
+struct ReviewStepContext<'a> {
+    idx: usize,
+    applied: bool,
+    total: usize,
+    issues: &'a [LintIssue],
+    cached_suggestions: &'a [CachedSuggestion],
+}
+
+/// Handle a single `ReviewAction` and return whether the loop should continue.
+fn handle_review_action(
+    action: ReviewAction,
+    ctx: &ReviewStepContext<'_>,
+    processed: &mut [bool],
+    fix_result: &mut AiFixResult,
+) -> ReviewStep {
+    match action {
+        ReviewAction::Next => handle_next_action(ctx.idx, ctx.applied, processed, fix_result),
+        ReviewAction::Previous => handle_previous_action(ctx.idx),
+        ReviewAction::GoTo(target) => handle_goto_action(ctx.idx, target, ctx.total),
+        ReviewAction::Ignore => {
+            processed[ctx.idx] = true;
+            apply_nolint_action(&ctx.issues[ctx.idx], fix_result);
+            ReviewStep::Continue(ctx.idx + 1)
+        }
+        ReviewAction::AcceptAll => {
+            apply_remaining_from(
+                ctx.idx,
+                ctx.applied,
+                ctx.issues,
+                ctx.cached_suggestions,
+                processed,
+                fix_result,
+            );
+            ReviewStep::Break
+        }
+        ReviewAction::Quit => handle_quit_action(ctx.idx, processed, fix_result),
+    }
+}
+
+/// Handle the "Next" review action.
+fn handle_next_action(
+    idx: usize,
+    applied: bool,
+    processed: &mut [bool],
+    fix_result: &mut AiFixResult,
+) -> ReviewStep {
+    if !applied && !processed[idx] {
+        fix_result.skipped += 1;
+    }
+    processed[idx] = true;
+    ReviewStep::Continue(idx + 1)
+}
+
+/// Handle the "Previous" review action.
+fn handle_previous_action(idx: usize) -> ReviewStep {
+    if idx > 0 {
+        println!("{}", "  (Going back to previous issue)".dimmed());
+        ReviewStep::Continue(idx - 1)
+    } else {
+        println!("{}", "  Already at first issue".yellow());
+        ReviewStep::Continue(idx)
+    }
+}
+
+/// Handle the "GoTo" review action.
+fn handle_goto_action(idx: usize, target: usize, total: usize) -> ReviewStep {
+    if target > 0 && target <= total {
+        ReviewStep::Continue(target - 1)
+    } else {
+        println!(
+            "  {} Issue #{} out of range (1-{})",
+            "Invalid:".yellow(),
+            target,
+            total
+        );
+        ReviewStep::Continue(idx)
+    }
+}
+
+/// Handle the "Quit" review action.
+fn handle_quit_action(idx: usize, processed: &[bool], fix_result: &mut AiFixResult) -> ReviewStep {
+    fix_result.quit_early = true;
+    for (i, &was_processed) in processed.iter().enumerate() {
+        if !was_processed && i >= idx {
+            fix_result.skipped += 1;
+        }
+    }
+    ReviewStep::Break
+}
+
+/// Run the interactive review phase: iterate through issues, show suggestions, handle user input.
+fn run_interactive_review(
+    issues: &[LintIssue],
+    cached_suggestions: &[CachedSuggestion],
+    config: &AiFixConfig,
+    errors: usize,
+    successful: usize,
+) -> AiFixResult {
+    let total = issues.len();
+    print_review_header();
 
     let mut fix_result = AiFixResult {
         errors,
@@ -1474,75 +1621,17 @@ fn run_interactive_review(
             processed[idx] = true;
         }
 
-        match action {
-            ReviewAction::Next => {
-                if !applied && !processed[idx] {
-                    fix_result.skipped += 1;
-                }
-                processed[idx] = true;
-                idx += 1;
-            }
-            ReviewAction::Previous => {
-                if idx > 0 {
-                    idx -= 1;
-                    println!("{}", "  (Going back to previous issue)".dimmed());
-                } else {
-                    println!("{}", "  Already at first issue".yellow());
-                }
-            }
-            ReviewAction::GoTo(target) => {
-                if target > 0 && target <= total {
-                    idx = target - 1;
-                } else {
-                    println!(
-                        "  {} Issue #{} out of range (1-{})",
-                        "Invalid:".yellow(),
-                        target,
-                        total
-                    );
-                }
-            }
-            ReviewAction::Ignore => {
-                processed[idx] = true;
-                match add_nolint_comment(issue) {
-                    NolintResult::Success(diffs) => {
-                        fix_result.applied += 1;
-                        println!("{} Added NOLINT comment", "✓".green());
-                        println!();
-                        print_diff(&diffs, &issue.file_path);
-                        fix_result.modified_files.insert(issue.file_path.clone());
-                    }
-                    NolintResult::AlreadyIgnored => {
-                        println!("{}", "Already has NOLINT comment".yellow());
-                        fix_result.skipped += 1;
-                    }
-                    NolintResult::Error(e) => {
-                        eprintln!("{}: {}", "Failed to add NOLINT".red(), e);
-                        fix_result.skipped += 1;
-                    }
-                }
-                idx += 1;
-            }
-            ReviewAction::AcceptAll => {
-                apply_remaining_from(
-                    idx,
-                    applied,
-                    issues,
-                    cached_suggestions,
-                    &mut processed,
-                    &mut fix_result,
-                );
-                break;
-            }
-            ReviewAction::Quit => {
-                fix_result.quit_early = true;
-                for (i, &was_processed) in processed.iter().enumerate() {
-                    if !was_processed && i >= idx {
-                        fix_result.skipped += 1;
-                    }
-                }
-                break;
-            }
+        let ctx = ReviewStepContext {
+            idx,
+            applied,
+            total,
+            issues,
+            cached_suggestions,
+        };
+
+        match handle_review_action(action, &ctx, &mut processed, &mut fix_result) {
+            ReviewStep::Continue(new_idx) => idx = new_idx,
+            ReviewStep::Break => break,
         }
     }
 
@@ -1584,7 +1673,11 @@ fn print_issue_header(issue: &LintIssue, idx: usize, total: usize, verbose: bool
 
     println!(
         "  {} {}{} {} {}",
-        severity_badge, lang_tag, source_tag, location.white().bold(), progress
+        severity_badge,
+        lang_tag,
+        source_tag,
+        location.white().bold(),
+        progress
     );
 
     print_code_context(issue);
@@ -1815,10 +1908,7 @@ fn print_review_menu(issue: &LintIssue, current: usize, total: usize, suggestion
 }
 
 /// Handle user input for the review menu and return (applied, action).
-fn handle_review_input(
-    issue: &LintIssue,
-    result: &SuggestionResult,
-) -> (bool, ReviewAction) {
+fn handle_review_input(issue: &LintIssue, result: &SuggestionResult) -> (bool, ReviewAction) {
     let input = read_line().trim().to_lowercase();
     let input = if input.is_empty() { "1" } else { &input };
 
