@@ -1560,6 +1560,7 @@ fn build_run_options(
             Some(Arc::new(config_resolver))
         },
         tool_install_mode,
+        hook_event: cli.hook_mode.clone(),
     }
 }
 
