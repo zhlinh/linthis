@@ -128,6 +128,7 @@ pub mod ai;
 pub mod complexity;
 pub mod fixers;
 pub mod formatters;
+pub mod gitignore;
 pub mod interactive;
 pub mod license;
 pub mod lsp;
@@ -137,11 +138,11 @@ pub mod reports;
 pub mod review;
 pub mod rules;
 pub mod security;
-pub mod vcs;
 pub mod self_update;
 pub mod templates;
 pub mod tui;
 pub mod utils;
+pub mod vcs;
 pub mod watch;
 
 use std::collections::HashSet;
@@ -275,8 +276,8 @@ impl LintisError {
         matches!(
             self,
             LintisError::ToolNotAvailable { .. }
-            | LintisError::Cache { .. }
-            | LintisError::Generic(_)
+                | LintisError::Cache { .. }
+                | LintisError::Generic(_)
         )
     }
 }
@@ -328,8 +329,7 @@ pub enum Language {
 impl Language {
     pub fn from_extension(ext: &str) -> Option<Self> {
         let lower = ext.to_lowercase();
-        Self::from_extension_compiled(&lower)
-            .or_else(|| Self::from_extension_scripting(&lower))
+        Self::from_extension_compiled(&lower).or_else(|| Self::from_extension_scripting(&lower))
     }
 
     /// Match compiled language extensions.
@@ -853,7 +853,8 @@ fn get_checker_install_hint_ruby() -> String {
     if is_command_available("gem") {
         "Install: gem install rubocop".to_string()
     } else {
-        "Install: 1) Install Ruby from https://www.ruby-lang.org/\n         2) gem install rubocop".to_string()
+        "Install: 1) Install Ruby from https://www.ruby-lang.org/\n         2) gem install rubocop"
+            .to_string()
     }
 }
 
@@ -942,10 +943,18 @@ fn get_checker_install_commands(lang: Language) -> Vec<Vec<String>> {
         Language::Lua => vec![cmd!["luarocks", "install", "luacheck"]],
         Language::Shell => platform_install_cmd("shellcheck", "shellcheck", "shellcheck"),
         Language::Ruby => vec![cmd!["gem", "install", "rubocop"]],
-        Language::Php => vec![cmd!["composer", "global", "require", "squizlabs/php_codesniffer"]],
+        Language::Php => vec![cmd![
+            "composer",
+            "global",
+            "require",
+            "squizlabs/php_codesniffer"
+        ]],
         Language::Scala => {
-            if cfg!(target_os = "macos") { vec![cmd!["brew", "install", "scalafix"]] }
-            else { vec![cmd!["cs", "install", "scalafix"]] }
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "scalafix"]]
+            } else {
+                vec![cmd!["cs", "install", "scalafix"]]
+            }
         }
         Language::CSharp => vec![cmd!["dotnet", "tool", "install", "-g", "dotnet-format"]],
     }
@@ -961,19 +970,31 @@ fn get_formatter_install_commands(lang: Language) -> Vec<Vec<String>> {
         Language::Rust => vec![cmd!["rustup", "component", "add", "rustfmt"]],
         Language::Python => pip_install_cmd("ruff"),
         Language::Go => vec![],
-        Language::TypeScript | Language::JavaScript => vec![cmd!["npm", "install", "-g", "prettier"]],
+        Language::TypeScript | Language::JavaScript => {
+            vec![cmd!["npm", "install", "-g", "prettier"]]
+        }
         Language::Java => get_auto_install_java_formatter(),
-        Language::Cpp | Language::ObjectiveC => platform_install_cmd("clang-format", "llvm", "clang-format"),
+        Language::Cpp | Language::ObjectiveC => {
+            platform_install_cmd("clang-format", "llvm", "clang-format")
+        }
         Language::Dart => vec![],
         Language::Swift => macos_only_brew("swift-format"),
         Language::Kotlin => get_auto_install_kotlin(),
         Language::Lua => vec![cmd!["cargo", "install", "stylua"]],
         Language::Shell => get_auto_install_shfmt(),
         Language::Ruby => vec![cmd!["gem", "install", "rubocop"]],
-        Language::Php => vec![cmd!["composer", "global", "require", "friendsofphp/php-cs-fixer"]],
+        Language::Php => vec![cmd![
+            "composer",
+            "global",
+            "require",
+            "friendsofphp/php-cs-fixer"
+        ]],
         Language::Scala => {
-            if cfg!(target_os = "macos") { vec![cmd!["brew", "install", "scalafmt"]] }
-            else { vec![cmd!["cs", "install", "scalafmt"]] }
+            if cfg!(target_os = "macos") {
+                vec![cmd!["brew", "install", "scalafmt"]]
+            } else {
+                vec![cmd!["cs", "install", "scalafmt"]]
+            }
         }
         Language::CSharp => vec![cmd!["dotnet", "tool", "install", "-g", "dotnet-format"]],
     }
@@ -983,7 +1004,13 @@ fn get_formatter_install_commands(lang: Language) -> Vec<Vec<String>> {
 fn pip_install_cmd(package: &str) -> Vec<Vec<String>> {
     let p = package.to_string();
     vec![
-        vec!["uv".into(), "pip".into(), "install".into(), "--system".into(), p.clone()],
+        vec![
+            "uv".into(),
+            "pip".into(),
+            "install".into(),
+            "--system".into(),
+            p.clone(),
+        ],
         vec!["pip3".into(), "install".into(), p.clone()],
         vec!["pip".into(), "install".into(), p],
     ]
@@ -996,17 +1023,28 @@ fn platform_install_cmd(brew_pkg: &str, choco_pkg: &str, apt_pkg: &str) -> Vec<V
     } else if cfg!(target_os = "windows") {
         vec![vec!["choco".into(), "install".into(), choco_pkg.into()]]
     } else {
-        vec![vec!["sudo".into(), "apt-get".into(), "install".into(), "-y".into(), apt_pkg.into()]]
+        vec![vec![
+            "sudo".into(),
+            "apt-get".into(),
+            "install".into(),
+            "-y".into(),
+            apt_pkg.into(),
+        ]]
     }
 }
 
 /// Go checker auto-install commands.
 fn get_auto_install_go_checker() -> Vec<Vec<String>> {
     if cfg!(target_os = "macos") {
-        vec![vec!["brew".into(), "install".into(), "golangci-lint".into()]]
+        vec![vec![
+            "brew".into(),
+            "install".into(),
+            "golangci-lint".into(),
+        ]]
     } else {
         vec![vec![
-            "go".into(), "install".into(),
+            "go".into(),
+            "install".into(),
             "github.com/golangci/golangci-lint/cmd/golangci-lint@latest".into(),
         ]]
     }
@@ -1015,7 +1053,11 @@ fn get_auto_install_go_checker() -> Vec<Vec<String>> {
 /// Java formatter auto-install commands.
 fn get_auto_install_java_formatter() -> Vec<Vec<String>> {
     if cfg!(target_os = "macos") {
-        vec![vec!["brew".into(), "install".into(), "google-java-format".into()]]
+        vec![vec![
+            "brew".into(),
+            "install".into(),
+            "google-java-format".into(),
+        ]]
     } else {
         vec![]
     }
@@ -1040,8 +1082,18 @@ fn get_auto_install_shfmt() -> Vec<Vec<String>> {
         vec![vec!["choco".into(), "install".into(), "shfmt".into()]]
     } else {
         vec![
-            vec!["sudo".into(), "apt-get".into(), "install".into(), "-y".into(), "shfmt".into()],
-            vec!["go".into(), "install".into(), "mvdan.cc/sh/v3/cmd/shfmt@latest".into()],
+            vec![
+                "sudo".into(),
+                "apt-get".into(),
+                "install".into(),
+                "-y".into(),
+                "shfmt".into(),
+            ],
+            vec![
+                "go".into(),
+                "install".into(),
+                "mvdan.cc/sh/v3/cmd/shfmt@latest".into(),
+            ],
         ]
     }
 }
@@ -1104,8 +1156,7 @@ fn prompt_tool_install(lang: Language, tool_name: &str) -> bool {
     );
     let _ = std::io::stderr().flush();
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input).is_ok()
-        && input.trim().eq_ignore_ascii_case("y")
+    std::io::stdin().read_line(&mut input).is_ok() && input.trim().eq_ignore_ascii_case("y")
 }
 
 /// Attempt to install a tool using candidate commands. Returns Ok on success, Err with last error.
@@ -1427,8 +1478,7 @@ fn print_found_files_status(file_count: usize) {
     use std::io::Write;
     eprint!(
         "\r\x1b[K\x1b[36m{}\x1b[0m Found {} files, checking...",
-        SPINNER_CHARS[1],
-        file_count
+        SPINNER_CHARS[1], file_count
     );
     let _ = std::io::stderr().flush();
 }
@@ -1512,11 +1562,7 @@ fn check_file_with_cache(
 }
 
 /// Format a single file. Returns the format result if available.
-fn format_single_file(
-    file: &Path,
-    lang: Language,
-    verbose: bool,
-) -> Option<FormatResult> {
+fn format_single_file(file: &Path, lang: Language, verbose: bool) -> Option<FormatResult> {
     let formatter = get_formatter(lang)?;
     if !formatter.is_available() {
         warn_missing_tool("formatter", lang, false);
@@ -1557,13 +1603,25 @@ fn run_both_mode(
             if !options.quiet && !options.verbose {
                 let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
                 print_progress_with_time(
-                    &format!("[1/3] Checking {}/{} ({}%)...", count + 1, total_files, percentage),
+                    &format!(
+                        "[1/3] Checking {}/{} ({}%)...",
+                        count + 1,
+                        total_files,
+                        percentage
+                    ),
                     false,
                     step1_start,
                     count,
                 );
             }
-            let issues = check_file_with_cache(file, *lang, options.verbose, options.config_resolver.as_deref(), cache, project_root);
+            let issues = check_file_with_cache(
+                file,
+                *lang,
+                options.verbose,
+                options.config_resolver.as_deref(),
+                cache,
+                project_root,
+            );
             ((*file).clone(), issues)
         })
         .collect();
@@ -1619,7 +1677,10 @@ fn run_both_format_step(
     result: &mut RunResult,
 ) {
     if options.verbose {
-        eprintln!("Step 2: Formatting {} files with issues...", files_with_issues.len());
+        eprintln!(
+            "Step 2: Formatting {} files with issues...",
+            files_with_issues.len()
+        );
     }
     let files_to_format: Vec<_> = file_langs
         .iter()
@@ -1636,7 +1697,12 @@ fn run_both_format_step(
             if !options.quiet && !options.verbose {
                 let percentage = ((count + 1) as f64 / format_total as f64 * 100.0) as usize;
                 print_progress_with_time(
-                    &format!("[2/3] Formatting {}/{} ({}%)...", count + 1, format_total, percentage),
+                    &format!(
+                        "[2/3] Formatting {}/{} ({}%)...",
+                        count + 1,
+                        format_total,
+                        percentage
+                    ),
                     false,
                     step2_start,
                     count,
@@ -1662,7 +1728,10 @@ fn run_both_recheck_step(
     result: &mut RunResult,
 ) {
     if options.verbose {
-        eprintln!("Step 3: Rechecking {} formatted files...", formatted_files.len());
+        eprintln!(
+            "Step 3: Rechecking {} formatted files...",
+            formatted_files.len()
+        );
     }
     let recheck_total = formatted_files.len();
     PROGRESS_COUNTER.store(0, Ordering::Relaxed);
@@ -1678,13 +1747,23 @@ fn run_both_recheck_step(
             if !options.quiet && !options.verbose {
                 let percentage = ((count + 1) as f64 / recheck_total as f64 * 100.0) as usize;
                 print_progress_with_time(
-                    &format!("[3/3] Rechecking {}/{} ({}%)...", count + 1, recheck_total, percentage),
+                    &format!(
+                        "[3/3] Rechecking {}/{} ({}%)...",
+                        count + 1,
+                        recheck_total,
+                        percentage
+                    ),
                     false,
                     step3_start,
                     count,
                 );
             }
-            run_checker_on_file(file, *lang, options.verbose, options.config_resolver.as_deref())
+            run_checker_on_file(
+                file,
+                *lang,
+                options.verbose,
+                options.config_resolver.as_deref(),
+            )
         })
         .collect();
 
@@ -1712,7 +1791,12 @@ fn run_check_only_mode(
             if !options.quiet && !options.verbose {
                 let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
                 print_progress_with_time(
-                    &format!("Checking {}/{} ({}%)...", count + 1, total_files, percentage),
+                    &format!(
+                        "Checking {}/{} ({}%)...",
+                        count + 1,
+                        total_files,
+                        percentage
+                    ),
                     false,
                     check_start,
                     count,
@@ -1721,7 +1805,14 @@ fn run_check_only_mode(
             if options.verbose {
                 eprintln!("Processing: {} ({})", file.display(), lang.name());
             }
-            check_file_with_cache(file, *lang, options.verbose, options.config_resolver.as_deref(), cache, project_root)
+            check_file_with_cache(
+                file,
+                *lang,
+                options.verbose,
+                options.config_resolver.as_deref(),
+                cache,
+                project_root,
+            )
         })
         .collect();
 
@@ -1748,7 +1839,12 @@ fn run_format_only_mode(
             if !options.quiet && !options.verbose {
                 let percentage = ((count + 1) as f64 / total_files as f64 * 100.0) as usize;
                 print_progress_with_time(
-                    &format!("Formatting {}/{} ({}%)...", count + 1, total_files, percentage),
+                    &format!(
+                        "Formatting {}/{} ({}%)...",
+                        count + 1,
+                        total_files,
+                        percentage
+                    ),
                     false,
                     format_start,
                     count,
@@ -1799,7 +1895,12 @@ fn run_custom_rules(
 }
 
 /// Save cache and print cache statistics.
-fn finalize_cache(cache: Option<Mutex<LintCache>>, project_root: &Path, quiet: bool, verbose: bool) {
+fn finalize_cache(
+    cache: Option<Mutex<LintCache>>,
+    project_root: &Path,
+    quiet: bool,
+    verbose: bool,
+) {
     let cache_mutex = match cache {
         Some(c) => c,
         None => return,
@@ -1813,8 +1914,7 @@ fn finalize_cache(cache: Option<Mutex<LintCache>>, project_root: &Path, quiet: b
         } else {
             eprintln!(
                 "Running [lint] check ({} cached, {} changed)",
-                stats.cache_hits,
-                stats.cache_misses,
+                stats.cache_hits, stats.cache_misses,
             );
         }
     }
@@ -1838,6 +1938,25 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
         RunMode::CheckOnly => RunModeKind::CheckOnly,
         RunMode::FormatOnly => RunModeKind::FormatOnly,
     };
+
+    // Pre-flight: auto-create .gitignore if missing in a git repo
+    if !matches!(result.run_mode, RunModeKind::FormatOnly) {
+        let project_root = utils::get_project_root();
+        if let Some(violations) = gitignore::check_and_create(&project_root, options.quiet) {
+            if !violations.is_empty() {
+                if !options.quiet {
+                    eprintln!(
+                        "Warning: Staged files should be ignored (remove with git rm --cached):"
+                    );
+                    for v in &violations {
+                        eprintln!("  {}", v);
+                    }
+                }
+                result.exit_code = 1;
+                return Ok(result);
+            }
+        }
+    }
 
     // Scan and discover files
     let files = scan_files(options);
@@ -1868,7 +1987,9 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     // Dispatch to mode-specific handler
     match options.mode {
         RunMode::Both => run_both_mode(&file_langs, options, &cache, &project_root, &mut result),
-        RunMode::CheckOnly => run_check_only_mode(&file_langs, options, &cache, &project_root, &mut result),
+        RunMode::CheckOnly => {
+            run_check_only_mode(&file_langs, options, &cache, &project_root, &mut result)
+        }
         RunMode::FormatOnly => run_format_only_mode(&file_langs, options, &mut result),
     }
 
