@@ -161,9 +161,12 @@ If worktree is not available, changes are made directly with a backup safety net
 11. Only **approve** the commit once **all lint checks pass** AND **build/tests pass**
 
 **If `dirty`:**
-9. Do **NOT** run `git add` — leave all changes in the working tree
-10. **Reject** the commit with a message like:
-    "Lint issues fixed. Review changes with `git diff`, then `git add -u && git commit` to include them."
+9. Do **NOT** run `git add` yet — leave all changes in the working tree
+10. Show the diff summary, then **you MUST use the AskUserQuestion tool** to ask: "Lint fixes applied. Review the changes above. Proceed to stage and commit?"
+    - Provide options: "Yes, stage and commit" / "No, leave for manual review"
+    - If the user selects yes: run `git add` on changed files → **final check** with `linthis -s -c` → **approve** the commit
+    - If the user selects no: **reject** the commit with message: "Changes left in working tree. Review with `git diff`, then `git add -u && git commit` when ready."
+    - **Important**: Do NOT skip the question by assuming the answer. Always ask.
 
 ## Key Rules
 
