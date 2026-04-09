@@ -289,8 +289,8 @@ pub(crate) fn handle_hook_install(params: HookInstallParams) -> ExitCode {
         }
 
         // Auto-install post-commit hook alongside pre-commit for git/git-with-agent
-        // types to support the two-commit fix mode. The post-commit script self-guards
-        // and exits immediately unless fix_mode == "two-commit".
+        // types to support the fixup fix_commit_mode. The post-commit script self-guards
+        // and exits immediately unless fix_commit_mode == "fixup".
         let is_git_type = matches!(hook_type, HookTool::Git | HookTool::GitWithAgent);
         let has_pre_commit = hook_events
             .iter()

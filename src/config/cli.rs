@@ -292,7 +292,7 @@ pub fn handle_config_set(field: &str, value_str: &str, global: bool) -> ExitCode
         }
     };
 
-    // Support dotted keys like "hook.pre_commit.fix_mode"
+    // Support dotted keys like "hook.pre_commit.fix_commit_mode"
     resolve_dotted_set(&mut doc, field, parsed_value);
 
     if let Err(e) = save_toml_doc(&config_path, &doc) {
@@ -393,7 +393,7 @@ pub fn handle_config_get(field: &str, global: bool) -> ExitCode {
         }
     };
 
-    // Support dotted keys like "hook.pre_commit.fix_mode"
+    // Support dotted keys like "hook.pre_commit.fix_commit_mode"
     let value = resolve_dotted_get(&doc, field);
 
     match value {
@@ -426,7 +426,7 @@ pub fn handle_config_get(field: &str, global: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Resolve a dotted key path in a TOML document (e.g. "hook.pre_commit.fix_mode").
+/// Resolve a dotted key path in a TOML document (e.g. "hook.pre_commit.fix_commit_mode").
 fn resolve_dotted_get<'a>(
     doc: &'a DocumentMut,
     field: &str,
@@ -443,7 +443,7 @@ fn resolve_dotted_get<'a>(
     Some(current)
 }
 
-/// Set a value at a dotted key path (e.g. "hook.pre_commit.fix_mode").
+/// Set a value at a dotted key path (e.g. "hook.pre_commit.fix_commit_mode").
 /// Creates intermediate tables as needed.
 fn resolve_dotted_set(doc: &mut DocumentMut, field: &str, value: toml_edit::Item) {
     let parts: Vec<&str> = field.split('.').collect();

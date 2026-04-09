@@ -70,15 +70,15 @@ If no code files were modified in this session, approve immediately.
 
 Before starting, check the fix mode:
 ```bash
-linthis config get hook.pre_commit.fix_mode
+linthis config get hook.pre_commit.fix_commit_mode
 ```
 
 Behavior depends on the mode:
-- **one-commit** (default): fix all issues → `git add` changed files → approve commit
-- **leave-on-dirty**: fix all issues → do NOT `git add` → **reject** commit with message: "Review changes with `git diff`, then `git add` and commit again"
-- **two-commit**: only run check (`linthis -s -c`), do NOT fix issues → **approve** commit (post-commit hook handles formatting)
+- **squash** (default): fix all issues → `git add` changed files → approve commit
+- **dirty**: fix all issues → do NOT `git add` → **reject** commit with message: "Review changes with `git diff`, then `git add` and commit again"
+- **fixup**: only run check (`linthis -s -c`), do NOT fix issues → **approve** commit (post-commit hook handles formatting)
 
-If the config command fails, default to `one-commit`.
+If the config command fails, default to `squash`.
 
 ## Key Commands
 
@@ -1284,7 +1284,7 @@ pub(crate) fn agent_event_skill_metadata(
         ),
         HookEvent::PostCommit => (
             custom_name.unwrap_or("lt-postfix").to_string(),
-            "提交后自动格式化和修复代码（two-commit 模式）。检查刚提交的文件，格式化后创建一个单独的 fixup commit。Post-commit auto-format and fix (two-commit mode). Formats committed files and creates a separate fixup commit.",
+            "提交后自动格式化和修复代码（fixup 模式）。检查刚提交的文件，格式化后创建一个单独的 fixup commit。Post-commit auto-format and fix (fixup mode). Formats committed files and creates a separate fixup commit.",
         ),
     }
 }

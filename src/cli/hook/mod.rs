@@ -59,10 +59,10 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             provider,
             args,
             provider_args,
-            fix_mode,
+            fix_commit_mode,
         } => {
-            if let Some(ref mode) = fix_mode {
-                if let Err(code) = apply_fix_mode(mode, global) {
+            if let Some(ref mode) = fix_commit_mode {
+                if let Err(code) = apply_fix_commit_mode(mode, global) {
                     return code;
                 }
             }
@@ -151,20 +151,20 @@ pub fn find_git_root() -> Option<PathBuf> {
     }
 }
 
-/// Validate and apply --fix-mode to config.
-fn apply_fix_mode(mode: &str, global: bool) -> Result<(), ExitCode> {
-    let valid_modes = ["one-commit", "leave-on-dirty", "two-commit"];
+/// Validate and apply --fix-commit-mode to config.
+fn apply_fix_commit_mode(mode: &str, global: bool) -> Result<(), ExitCode> {
+    let valid_modes = ["squash", "dirty", "fixup"];
     if !valid_modes.contains(&mode) {
         eprintln!(
-            "{}: Invalid fix_mode '{}'. Must be one of: {}",
+            "{}: Invalid fix_commit_mode '{}'. Must be one of: {}",
             "Error".red(),
             mode,
             valid_modes.join(", ")
         );
         return Err(ExitCode::from(1));
     }
-    let _ = linthis::config::cli::handle_config_set("hook.pre_commit.fix_mode", mode, global);
-    let _ = linthis::config::cli::handle_config_set("hook.pre_push.fix_mode", mode, global);
+    let _ = linthis::config::cli::handle_config_set("hook.pre_commit.fix_commit_mode", mode, global);
+    let _ = linthis::config::cli::handle_config_set("hook.pre_push.fix_commit_mode", mode, global);
     Ok(())
 }
 
