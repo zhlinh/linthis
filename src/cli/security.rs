@@ -336,8 +336,7 @@ fn run_cached_sast_scan(
     sast_options: &SastScanOptions,
     report_format: SecurityReportFormat,
 ) -> SastResult {
-    let project_root = linthis::utils::get_project_root();
-    let cache_path = project_root.join(".linthis").join("security-cache.json");
+    let cache_path = linthis::utils::get_cache_dir().join("security-cache.json");
     let mut cache = PerFileCache::load(&cache_path);
 
     let target_files = collect_sast_target_files(path);

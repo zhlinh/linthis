@@ -1313,7 +1313,7 @@ fn run_additional_checks(
         .cloned()
         .collect();
 
-    let cache_dir = runtime_project_root.join(".linthis");
+    let cache_dir = linthis::utils::get_cache_dir();
     let security_cache_path = cache_dir.join("security-cache.json");
     let complexity_cache_path = cache_dir.join("complexity-cache.json");
 

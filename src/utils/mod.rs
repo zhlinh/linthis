@@ -221,9 +221,7 @@ pub fn get_project_root() -> std::path::PathBuf {
 /// Creates the directory if it doesn't exist.
 pub fn get_global_project_dir() -> std::path::PathBuf {
     let project_root = get_project_root();
-    let slug = project_root
-        .to_string_lossy()
-        .replace(['/', '\\'], "-");
+    let slug = project_root.to_string_lossy().replace(['/', '\\'], "-");
     let slug = slug.trim_start_matches('-');
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -247,6 +245,11 @@ pub fn get_review_dir() -> std::path::PathBuf {
 /// Get the backup directory: `~/.linthis/projects/<slug>/backup/`.
 pub fn get_backup_dir() -> std::path::PathBuf {
     get_global_project_dir().join("backup")
+}
+
+/// Get the cache directory: `~/.linthis/projects/<slug>/cache/`.
+pub fn get_cache_dir() -> std::path::PathBuf {
+    get_global_project_dir().join("cache")
 }
 
 /// Migrate legacy project-local data directories to global path.
@@ -275,6 +278,27 @@ pub fn migrate_legacy_data_dirs() {
                     new_dir.display()
                 );
             }
+        }
+    }
+
+    // Migrate cache files
+    let cache_dir = get_cache_dir();
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let cache_files: &[(&str, &str)] = &[
+        ("cache.json", "lint-cache.json"),
+        ("complexity-cache.json", "complexity-cache.json"),
+        ("security-cache.json", "security-cache.json"),
+    ];
+    for (old_name, new_name) in cache_files {
+        let old_file = project_root.join(".linthis").join(old_name);
+        let new_file = cache_dir.join(new_name);
+        if old_file.exists() && !new_file.exists() && std::fs::rename(&old_file, &new_file).is_ok()
+        {
+            eprintln!(
+                "Note: Migrated .linthis/{} → {}",
+                old_name,
+                new_file.display()
+            );
         }
     }
 }
