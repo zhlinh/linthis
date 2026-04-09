@@ -5,12 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Directory for review artifacts relative to project root.
-const REVIEW_DIR: &str = ".linthis/review/result";
-
 /// Get the review artifacts directory, creating it if needed.
 pub fn review_dir() -> Result<PathBuf, String> {
-    let dir = PathBuf::from(REVIEW_DIR);
+    let dir = crate::utils::get_review_dir();
     if !dir.exists() {
         fs::create_dir_all(&dir).map_err(|e| format!("Failed to create review dir: {}", e))?;
     }

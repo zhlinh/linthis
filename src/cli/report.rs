@@ -68,8 +68,8 @@ fn load_result_from_source(source: &str) -> Option<RunResult> {
             if path.exists() {
                 load_result_from_file(path)
             } else {
-                // Try relative to .linthis/result/
-                let result_path = project_root.join(".linthis").join("result").join(path);
+                // Try relative to global check/result/
+                let result_path = linthis::utils::get_result_dir().join(path);
                 if result_path.exists() {
                     load_result_from_file(&result_path)
                 } else {
@@ -419,7 +419,7 @@ fn handle_trends_report(count: usize, format: &str) -> ExitCode {
 
     if trends.data_points.is_empty() {
         eprintln!(
-            "{}: No historical results found in .linthis/result/",
+            "{}: No historical results found in check/result/",
             "Warning".yellow()
         );
         eprintln!("  Run 'linthis -c' multiple times to generate trend data.");

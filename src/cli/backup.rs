@@ -39,8 +39,7 @@ pub struct BackupManifest {
 
 /// Get the backup directory path
 pub fn get_backup_dir() -> PathBuf {
-    let project_root = linthis::utils::get_project_root();
-    project_root.join(".linthis").join("backup")
+    linthis::utils::get_backup_dir()
 }
 
 /// Create a backup of files that will be modified

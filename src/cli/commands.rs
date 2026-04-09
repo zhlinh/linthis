@@ -114,11 +114,11 @@ pub struct Cli {
     #[arg(short, long, default_value = "human")]
     pub output: String,
 
-    /// Disable auto-saving results to .linthis/result/
+    /// Disable auto-saving results
     #[arg(long)]
     pub no_save_result: bool,
 
-    /// Save results to custom file path (instead of default .linthis/result/)
+    /// Save results to custom file path (instead of default global check/result/)
     #[arg(long, value_name = "FILE")]
     pub output_file: Option<PathBuf>,
 
