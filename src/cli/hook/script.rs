@@ -189,11 +189,22 @@ pub(crate) fn build_global_hook_script_for_event(
         resolve_global_hook_blocks(hook_event, fix_provider);
     let event_name = hook_event.hook_filename();
 
+    let fix_commit_mode_section = if matches!(hook_event, HookEvent::PreCommit) {
+        shell_read_fix_commit_mode("pre_commit")
+    } else if matches!(hook_event, HookEvent::PrePush) {
+        shell_read_fix_commit_mode("pre_push")
+    } else {
+        String::new()
+    };
+
+    let git_fix_commit_mode_handler = shell_git_fix_commit_mode_handler(hook_event);
+
     format!(
         "#!/bin/sh\n\
          # linthis-hook\n\
          {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
+         {fix_commit_mode}\
          {pre_push_preamble}\
          # Locate the local project hook (git-dir aware)\n\
          GIT_DIR=\"$(git rev-parse --git-dir 2>/dev/null)\"\n\
@@ -210,6 +221,7 @@ pub(crate) fn build_global_hook_script_for_event(
          \x20\x20\x20 # Local hook exists but has no linthis — run linthis first, then delegate\n\
          \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
          \x20\x20\x20 LINTHIS_EXIT=$?\n\
+         {git_fix_handler}\
          {fix_local}\
          \x20\x20\x20 \"$LOCAL_HOOK\" {local_hook_orig_args}\n\
          \x20\x20\x20 LOCAL_EXIT=$?\n\
@@ -221,15 +233,18 @@ pub(crate) fn build_global_hook_script_for_event(
          \x20 # No local hook — run linthis directly\n\
          \x20 $LINTHIS_CMD \"$@\"\n\
          \x20 LINTHIS_EXIT=$?\n\
+         {git_fix_handler}\
          {fix_direct}\
          {review}\
          \x20 exit $LINTHIS_EXIT\n\
          fi\n",
         timer = timer_block,
         linthis = linthis_cmd_var,
+        fix_commit_mode = fix_commit_mode_section,
         pre_push_preamble = pre_push_preamble,
         event = event_name,
         local_hook_orig_args = local_hook_orig_args,
+        git_fix_handler = git_fix_commit_mode_handler,
         fix_local = fix_block,
         fix_direct = fix_block_direct,
         review = review_block,
@@ -821,6 +836,36 @@ fn shell_agent_review_fix_commit_handler() -> String {
     .to_string()
 }
 
+/// Generate shell snippet for `git` type fix_commit_mode handling.
+/// For pre-commit: re-stage formatted files based on mode.
+/// For pre-push: handle format changes based on mode.
+fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
+    if matches!(hook_event, HookEvent::PreCommit) {
+        // Pre-commit: handle staged files after format
+        "\x20\x20\x20 _STAGED_FILES=$(git diff --cached --name-only)\n\
+         \x20\x20\x20 if [ \"$_FIX_MODE\" = \"squash\" ] && [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"dirty\" ]; then\n\
+         \x20\x20\x20\x20\x20 _DIRTY=$(git diff --name-only)\n\
+         \x20\x20\x20\x20\x20 if [ -n \"$_DIRTY\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Files formatted but not staged (dirty mode).\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"  Review: git diff\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"  Stage and retry: git add -u && git commit\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 exit 1\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
+         \x20\x20\x20\x20\x20 # fixup for git type: check only, no format (post-commit handles it)\n\
+         \x20\x20\x20\x20\x20 true\n\
+         \x20\x20\x20 fi\n"
+            .to_string()
+    } else if matches!(hook_event, HookEvent::PrePush) {
+        // Pre-push: same as git-with-agent's prepush handler
+        "".to_string() // Pre-push git type doesn't format, just checks
+    } else {
+        String::new()
+    }
+}
+
 /// Generate shell snippet to read fix_commit_mode from linthis config.
 /// `config_section` is "pre_commit" or "pre_push".
 fn shell_read_fix_commit_mode(config_section: &str) -> String {
@@ -853,8 +898,8 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          _FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)\n\
          [ -z \"$_FILES\" ] && exit 0\n\
          \n\
-         # Format committed files\n\
-         echo \"$_FILES\" | tr '\\n' '\\0' | xargs -0 -I{{}} {linthis} -i {{}} -f --hook-event=post-commit\n\
+         # Check + format committed files (includes lint fix, not just formatting)\n\
+         echo \"$_FILES\" | tr '\\n' '\\0' | xargs -0 -I{{}} {linthis} -i {{}} --hook-event=post-commit\n\
          \n\
          # If any files changed, create fixup commit\n\
          _CHANGED=$(git diff --name-only)\n\
