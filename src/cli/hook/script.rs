@@ -758,8 +758,9 @@ pub(crate) fn build_git_with_agent_hook_script(
          \x20 _DIRTY=$(git diff --name-only)\n\
          \x20 if [ -n \"$_DIRTY\" ]; then\n\
          \x20\x20\x20 echo \"[linthis] Files formatted but not staged (dirty mode).\" >&2\n\
-         \x20\x20\x20 echo \"  Review changes: git diff\" >&2\n\
-         \x20\x20\x20 echo \"  Stage and retry: git add -u && git commit\" >&2\n\
+         \x20\x20\x20 echo \"  Review:  git diff\" >&2\n\
+         \x20\x20\x20 echo \"  Accept:  git add -u && git commit\" >&2\n\
+         \x20\x20\x20 echo \"  Revert:  linthis undo\" >&2\n\
          \x20\x20\x20 exit 1\n\
          \x20 fi\n\
          fi\n\
@@ -832,7 +833,7 @@ fn shell_agent_review_fix_commit_handler() -> String {
          \x20\x20\x20 echo \"[linthis] Created fixup commit with agent fixes. Review with 'git log --oneline -2', then 'git push' again.\" >&2\n\
          \x20\x20\x20 exit 1\n\
          \x20 else\n\
-         \x20\x20\x20 echo \"[linthis] Agent fixes left in working tree (dirty mode). Review with 'git diff'.\" >&2\n\
+         \x20\x20\x20 echo \"[linthis] Agent fixes left in working tree (dirty mode). Review: git diff, Revert: linthis undo\" >&2\n\
          \x20\x20\x20 exit 1\n\
          \x20 fi\n\
          fi\n\
@@ -860,8 +861,9 @@ fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
          \x20\x20\x20\x20\x20 _DIRTY=$(git diff --name-only)\n\
          \x20\x20\x20\x20\x20 if [ -n \"$_DIRTY\" ]; then\n\
          \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Files formatted but not staged (dirty mode).\" >&2\n\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"  Review: git diff\" >&2\n\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"  Stage and retry: git add -u && git commit\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"  Review:  git diff\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"  Accept:  git add -u && git commit\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"  Revert:  linthis undo\" >&2\n\
          \x20\x20\x20\x20\x20\x20\x20 exit 1\n\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
