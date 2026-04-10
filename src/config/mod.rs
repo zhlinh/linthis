@@ -713,6 +713,9 @@ pub struct RetentionConfig {
     /// Maximum age in days for lint cache entries
     #[serde(default = "default_retention_cache_days")]
     pub cache_days: u32,
+    /// Maximum number of diff patch files to keep (0 = unlimited)
+    #[serde(default = "default_retention_diffs")]
+    pub diffs: usize,
 }
 
 fn default_retention_results() -> usize {
@@ -727,6 +730,9 @@ fn default_retention_reviews() -> usize {
 fn default_retention_cache_days() -> u32 {
     30
 }
+fn default_retention_diffs() -> usize {
+    5
+}
 
 impl Default for RetentionConfig {
     fn default() -> Self {
@@ -735,6 +741,7 @@ impl Default for RetentionConfig {
             backups: default_retention_backups(),
             reviews: default_retention_reviews(),
             cache_days: default_retention_cache_days(),
+            diffs: default_retention_diffs(),
         }
     }
 }

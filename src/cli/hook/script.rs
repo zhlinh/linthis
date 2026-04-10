@@ -900,40 +900,54 @@ fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
 /// Generate shell snippet to save linthis changes as a git patch file.
 /// Must be called while changes are still unstaged (before `git add`).
 /// Uses `_SLUG` variable which must be set earlier in the script.
-fn shell_save_diff_patch() -> &'static str {
-    "# Save linthis changes as a git patch for review/revert\n\
-     _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
-     _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/backup/diff\"\n\
-     mkdir -p \"$_DIFF_DIR\"\n\
-     _DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
-     git diff > \"$_DIFF_FILE\" 2>/dev/null\n\
-     if [ -s \"$_DIFF_FILE\" ]; then\n\
-     \x20 echo \"[linthis] Patch saved: $_DIFF_FILE\" >&2\n\
-     \x20 echo \"  Revert: git apply -R $_DIFF_FILE\" >&2\n\
-     \x20 # Cleanup: keep only latest 5 diffs\n\
-     \x20 ls -t \"$_DIFF_DIR\"/diff-*.patch 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null\n\
-     else\n\
-     \x20 rm -f \"$_DIFF_FILE\"\n\
-     fi\n"
+fn shell_save_diff_patch() -> String {
+    let keep = load_retention_diffs();
+    format!(
+        "# Save linthis changes as a git patch for review/revert\n\
+         _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
+         _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/backup/diff\"\n\
+         mkdir -p \"$_DIFF_DIR\"\n\
+         _DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
+         git diff > \"$_DIFF_FILE\" 2>/dev/null\n\
+         if [ -s \"$_DIFF_FILE\" ]; then\n\
+         \x20 echo \"[linthis] Patch saved: $_DIFF_FILE\" >&2\n\
+         \x20 echo \"  Revert: git apply -R $_DIFF_FILE\" >&2\n\
+         \x20 ls -t \"$_DIFF_DIR\"/diff-*.patch 2>/dev/null | tail -n +{keep_plus_one} | xargs rm -f 2>/dev/null\n\
+         else\n\
+         \x20 rm -f \"$_DIFF_FILE\"\n\
+         fi\n",
+        keep_plus_one = keep + 1,
+    )
 }
 
 /// Same as `shell_save_diff_patch` but for staged changes (after `git add`).
 #[allow(dead_code)]
-fn shell_save_diff_patch_cached() -> &'static str {
-    "# Save linthis changes as a git patch for review/revert\n\
-     _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
-     _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/backup/diff\"\n\
-     mkdir -p \"$_DIFF_DIR\"\n\
-     _DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
-     git diff --cached > \"$_DIFF_FILE\" 2>/dev/null\n\
-     if [ -s \"$_DIFF_FILE\" ]; then\n\
-     \x20 echo \"[linthis] Patch saved: $_DIFF_FILE\" >&2\n\
-     \x20 echo \"  Revert: git apply -R $_DIFF_FILE\" >&2\n\
-     \x20 # Cleanup: keep only latest 5 diffs\n\
-     \x20 ls -t \"$_DIFF_DIR\"/diff-*.patch 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null\n\
-     else\n\
-     \x20 rm -f \"$_DIFF_FILE\"\n\
-     fi\n"
+fn shell_save_diff_patch_cached() -> String {
+    let keep = load_retention_diffs();
+    format!(
+        "# Save linthis changes as a git patch for review/revert\n\
+         _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
+         _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/backup/diff\"\n\
+         mkdir -p \"$_DIFF_DIR\"\n\
+         _DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
+         git diff --cached > \"$_DIFF_FILE\" 2>/dev/null\n\
+         if [ -s \"$_DIFF_FILE\" ]; then\n\
+         \x20 echo \"[linthis] Patch saved: $_DIFF_FILE\" >&2\n\
+         \x20 echo \"  Revert: git apply -R $_DIFF_FILE\" >&2\n\
+         \x20 ls -t \"$_DIFF_DIR\"/diff-*.patch 2>/dev/null | tail -n +{keep_plus_one} | xargs rm -f 2>/dev/null\n\
+         else\n\
+         \x20 rm -f \"$_DIFF_FILE\"\n\
+         fi\n",
+        keep_plus_one = keep + 1,
+    )
+}
+
+/// Load retention.diffs config value.
+fn load_retention_diffs() -> usize {
+    let project_root = linthis::utils::get_project_root();
+    linthis::config::Config::load_merged(&project_root)
+        .retention
+        .diffs
 }
 
 /// Generate shell snippet to read fix_commit_mode from linthis config.
