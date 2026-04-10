@@ -563,6 +563,7 @@ pub(crate) fn build_git_with_agent_prepush_script(
          REVIEW_EXIT=$?\n\
          stop_timer\n\
          \n\
+         {agent_fix_commit_handler}\
          # Find the latest review report and check for critical issues\n\
          _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
          _REVIEW_DIR=\"$HOME/.linthis/projects/$_SLUG/review/result\"\n\
@@ -585,6 +586,7 @@ pub(crate) fn build_git_with_agent_prepush_script(
         review_box = review_box,
         fix_commit_mode = fix_commit_mode_section,
         prepush_fix_commit_mode_handler = shell_prepush_fix_commit_mode_handler(linthis_cmd),
+        agent_fix_commit_handler = shell_agent_review_fix_commit_handler(),
         linthis = linthis_cmd,
         provider = fix_provider,
         agent = agent_cmd,
@@ -789,6 +791,29 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20 fi\n",
         linthis = linthis_cmd,
     )
+}
+
+/// Generate shell snippet to handle agent review fixes based on fix_commit_mode.
+fn shell_agent_review_fix_commit_handler() -> String {
+    "# Handle agent's file changes based on fix_commit_mode\n\
+         _AGENT_CHANGED=$(git diff --name-only)\n\
+         if [ -n \"$_AGENT_CHANGED\" ]; then\n\
+         \x20 if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
+         \x20\x20\x20 echo \"$_AGENT_CHANGED\" | xargs git add\n\
+         \x20\x20\x20 git commit --amend --no-verify --no-edit\n\
+         \x20\x20\x20 echo \"[linthis] Agent fixes amended into latest commit\" >&2\n\
+         \x20 elif [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
+         \x20\x20\x20 echo \"$_AGENT_CHANGED\" | xargs git add\n\
+         \x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\"\n\
+         \x20\x20\x20 echo \"[linthis] Created fixup commit with agent fixes. Review with 'git log --oneline -2', then 'git push' again.\" >&2\n\
+         \x20\x20\x20 exit 1\n\
+         \x20 else\n\
+         \x20\x20\x20 echo \"[linthis] Agent fixes left in working tree (dirty mode). Review with 'git diff'.\" >&2\n\
+         \x20\x20\x20 exit 1\n\
+         \x20 fi\n\
+         fi\n\
+         \n"
+    .to_string()
 }
 
 /// Generate shell snippet to read fix_commit_mode from linthis config.
