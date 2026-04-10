@@ -32,8 +32,8 @@ Query: `linthis config get hook.pre_commit.fix_commit_mode`
 
 | Event | Mode | New commits | Commit message | Working tree | Recover |
 |-------|------|-------------|----------------|-------------|---------|
-| pre-commit | squash | 0 | original unchanged | clean (re-staged) | `git stash pop` or `linthis undo` |
-| pre-commit | dirty | 0, blocked | — | dirty (format unstaged) | `linthis undo` |
+| pre-commit | squash | 0 | original unchanged | clean (re-staged) | `git stash pop` or `linthis backup undo` |
+| pre-commit | dirty | 0, blocked | — | dirty (format unstaged) | `linthis backup undo` |
 | pre-commit | fixup | 1 (post-commit) | `fix(linthis): auto-fix lint issues` | clean | `git reset HEAD~1` |
 | pre-push | * | 0 | — | unchanged (check only) | — |
 
@@ -43,13 +43,13 @@ Query: `linthis config get hook.pre_commit.fix_commit_mode`
 |-------|------|-------------|-------------|----------------|-------------|---------|
 | pre-commit | squash | format | 0 (fixup+squash) | original unchanged | clean | `git stash pop` or `git reset --hard HEAD@{1}` |
 | pre-commit | squash | agent lint fix | 0 (fixup+squash) | original unchanged | clean | same as above |
-| pre-commit | dirty | format | 0, blocked | — | dirty | `linthis undo` |
-| pre-commit | dirty | agent lint fix | 0, blocked | — | dirty | `linthis undo` |
+| pre-commit | dirty | format | 0, blocked | — | dirty | `linthis backup undo` |
+| pre-commit | dirty | agent lint fix | 0, blocked | — | dirty | `linthis backup undo` |
 | pre-commit | fixup | format + lint fix | 1 (post-commit) | `fix(linthis): auto-fix lint issues` | clean | `git reset HEAD~1` |
 | pre-push | squash | lint fix | 0 (fixup+squash) | original unchanged | clean, blocked | `git reset --hard HEAD@{1}` |
 | pre-push | squash | review fix | 0 (fixup+squash) | original unchanged | clean, blocked | `git reset --hard HEAD@{1}` |
 | pre-push | dirty | lint fix | 0, blocked | — | unchanged | — |
-| pre-push | dirty | review fix | 0, blocked | — | dirty | `linthis undo` |
+| pre-push | dirty | review fix | 0, blocked | — | dirty | `linthis backup undo` |
 | pre-push | fixup | lint fix | 1, blocked | `fix(linthis): auto-fix lint issues` | clean | `git reset HEAD~1` |
 | pre-push | fixup | review fix | 1, blocked | `fix(linthis): auto-fix review issues` | clean | `git reset HEAD~1` |
 
@@ -57,11 +57,11 @@ Query: `linthis config get hook.pre_commit.fix_commit_mode`
 
 | Event | Mode | New commits | Commit message | Working tree | Recover |
 |-------|------|-------------|----------------|-------------|---------|
-| pre-commit | squash | 0 | original (agent `git add` + approve) | clean | `linthis undo` |
-| pre-commit | dirty | 0, AskUser | — | dirty (agent fixes unstaged) | `linthis undo` |
+| pre-commit | squash | 0 | original (agent `git add` + approve) | clean | `linthis backup undo` |
+| pre-commit | dirty | 0, AskUser | — | dirty (agent fixes unstaged) | `linthis backup undo` |
 | pre-commit | fixup | 0 | — (agent check only, post-commit handles) | unchanged | — |
 | pre-push | squash | 0 | original (agent amend) | clean | `git reflog` + `git reset --hard` |
-| pre-push | dirty | 0, blocked | — | dirty | `linthis undo` |
+| pre-push | dirty | 0, blocked | — | dirty | `linthis backup undo` |
 | pre-push | fixup | 1, blocked | `fix(linthis): auto-fix review issues` | clean | `git reset HEAD~1` |
 
 ---
@@ -74,14 +74,14 @@ When dirty mode blocks a commit/push:
 [linthis] Files formatted but not staged (dirty mode).
   Review:  git diff
   Accept:  git add -u && git commit
-  Revert:  linthis undo
+  Revert:  linthis backup undo
 ```
 
 ## Recovery Priority
 
 | Method | When to use | Safety |
 |--------|-------------|--------|
-| `linthis undo` | Any mode — restores only linthis-modified files | Safest |
+| `linthis backup undo` | Any mode — restores only linthis-modified files | Safest |
 | `linthis backup diff` | Review what linthis changed before deciding | Read-only |
 | `git stash pop` | squash mode — restore pre-format stash snapshot | Safe |
 | `git reset HEAD~1` | fixup mode — remove the fixup commit | Safe |

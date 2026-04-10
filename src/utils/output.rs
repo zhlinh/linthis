@@ -29,7 +29,7 @@ pub fn fix_tip_lines() -> Vec<(&'static str, &'static str)> {
             "linthis backup diff",
             "show diff from last format/fix/hook-fix",
         ),
-        ("linthis undo", "undo last format/fix/hook-fix"),
+        ("linthis backup undo", "undo last format/fix/hook-fix"),
         ("linthis fix", "load last result and fix"),
         (
             "linthis fix --ai",

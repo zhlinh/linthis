@@ -496,7 +496,7 @@ pub fn handle_backup_show(id: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Handle `linthis undo [filter]` — restore from matching backup with redo support.
+/// Handle `linthis backup undo [filter]` — restore from matching backup with redo support.
 pub fn handle_undo_filtered(filter: &str) -> ExitCode {
     let backup_dir = get_backup_dir();
     if !backup_dir.exists() {
@@ -552,7 +552,7 @@ pub fn handle_undo_filtered(filter: &str) -> ExitCode {
             "✓".green(),
             restored,
             if restored == 1 { "" } else { "s" },
-            "linthis redo".cyan()
+            "linthis backup redo".cyan()
         );
         ExitCode::SUCCESS
     } else {
@@ -567,7 +567,7 @@ pub fn handle_undo_filtered(filter: &str) -> ExitCode {
     }
 }
 
-/// Handle `linthis redo` — re-apply changes that were undone.
+/// Handle `linthis backup redo` — re-apply changes that were undone.
 pub fn handle_redo() -> ExitCode {
     let redo_dir = get_redo_dir();
     if !redo_dir.exists() {
@@ -860,6 +860,14 @@ pub fn handle_backup_command(action: super::commands::BackupCommands) -> ExitCod
         BackupCommands::List => handle_list_backups("linthis backup list"),
         BackupCommands::Show { id } => handle_backup_show(&id),
         BackupCommands::Diff { id } => handle_backup_diff(&id),
+        BackupCommands::Undo { filter, list } => {
+            if list {
+                handle_list_backups("linthis backup list")
+            } else {
+                handle_undo_filtered(&filter)
+            }
+        }
+        BackupCommands::Redo => handle_redo(),
     }
 }
 
