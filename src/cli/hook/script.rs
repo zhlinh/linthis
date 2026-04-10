@@ -714,6 +714,7 @@ pub(crate) fn build_git_with_agent_hook_script(
     // For pre-commit (and post-commit), add fix_commit_mode branching
     let fix_commit_mode_section = shell_read_fix_commit_mode("pre_commit");
     let linthis_check_only = linthis_cmd.replace("-c -f", "-c");
+    let save_diff = shell_save_diff_patch();
 
     format!(
         "#!/bin/sh\n\
@@ -744,6 +745,7 @@ pub(crate) fn build_git_with_agent_hook_script(
          $LINTHIS_CMD\n\
          LINTHIS_EXIT=$?\n\
          \n\
+         {save_diff}\
          if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
          \x20 # Re-stage files modified by linthis -f (auto-format)\n\
          \x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
@@ -775,11 +777,13 @@ pub(crate) fn build_git_with_agent_hook_script(
         linthis_check_only = linthis_check_only,
         linthis = linthis_cmd,
         worktree_fix = worktree_fix,
+        save_diff = save_diff,
     )
 }
 
 /// Generate the pre-push fix_commit_mode handler shell snippet.
 fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
+    let save_diff = shell_save_diff_patch();
     format!(
         "\x20 # Handle fix_commit_mode for pre-push\n\
          \x20 if [ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_FIX_MODE\" = \"dirty\" ]; then\n\
@@ -791,6 +795,7 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20 {linthis} \"$@\" -f 2>&1\n\
          \x20\x20\x20 _CHANGED=$(git diff --name-only)\n\
          \x20\x20\x20 if [ -n \"$_CHANGED\" ]; then\n\
+         \x20\x20\x20\x20\x20 {save_diff}\
          \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
          \x20\x20\x20\x20\x20 # Create fixup commit (preserved in reflog), then squash into previous\n\
          \x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
@@ -806,6 +811,7 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20 {linthis} \"$@\" -f 2>&1\n\
          \x20\x20\x20 _CHANGED=$(git diff --name-only)\n\
          \x20\x20\x20 if [ -n \"$_CHANGED\" ]; then\n\
+         \x20\x20\x20\x20\x20 {save_diff}\
          \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
          \x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
          \x20\x20\x20\x20\x20 echo \"[linthis] Created fixup commit. Review with 'git log --oneline -2', then 'git push' again.\" >&2\n\
@@ -813,14 +819,18 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20 fi\n\
          \x20 fi\n",
         linthis = linthis_cmd,
+        save_diff = save_diff,
     )
 }
 
 /// Generate shell snippet to handle agent review fixes based on fix_commit_mode.
 fn shell_agent_review_fix_commit_handler() -> String {
+    let save_diff = shell_save_diff_patch();
+    format!(
     "# Handle agent's file changes based on fix_commit_mode\n\
          _AGENT_CHANGED=$(git diff --name-only)\n\
          if [ -n \"$_AGENT_CHANGED\" ]; then\n\
+         \x20 {save_diff}\
          \x20 if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
          \x20\x20\x20 echo \"$_AGENT_CHANGED\" | xargs git add\n\
          \x20\x20\x20 # Create fixup commit (preserved in reflog), then squash into previous\n\
@@ -839,8 +849,9 @@ fn shell_agent_review_fix_commit_handler() -> String {
          \x20\x20\x20 exit 1\n\
          \x20 fi\n\
          fi\n\
-         \n"
-    .to_string()
+         \n",
+    save_diff = save_diff,
+    )
 }
 
 /// Generate shell snippet for `git` type fix_commit_mode handling.
@@ -849,9 +860,12 @@ fn shell_agent_review_fix_commit_handler() -> String {
 fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
     if matches!(hook_event, HookEvent::PreCommit) {
         // Pre-commit: handle staged files after format
+        let save_diff = shell_save_diff_patch();
+        format!(
         "\x20\x20\x20 _STAGED_FILES=$(git diff --cached --name-only)\n\
          \x20\x20\x20 _DIRTY=$(git diff --name-only)\n\
          \x20\x20\x20 if [ \"$_FIX_MODE\" = \"squash\" ] && [ -n \"$_DIRTY\" ]; then\n\
+         \x20\x20\x20\x20\x20 {save_diff}\
          \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
          \x20\x20\x20\x20\x20 # Save stash snapshot\n\
          \x20\x20\x20\x20\x20 if [ -n \"$_STASH_REF\" ]; then\n\
@@ -862,6 +876,7 @@ fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
          \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"dirty\" ]; then\n\
          \x20\x20\x20\x20\x20 _DIRTY=$(git diff --name-only)\n\
          \x20\x20\x20\x20\x20 if [ -n \"$_DIRTY\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 {save_diff}\
          \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Files formatted but not staged (dirty mode).\" >&2\n\
          \x20\x20\x20\x20\x20\x20\x20 echo \"  Review:  git diff\" >&2\n\
          \x20\x20\x20\x20\x20\x20\x20 echo \"  Accept:  git add -u && git commit\" >&2\n\
@@ -871,14 +886,54 @@ fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
          \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
          \x20\x20\x20\x20\x20 # fixup for git type: check only, no format (post-commit handles it)\n\
          \x20\x20\x20\x20\x20 true\n\
-         \x20\x20\x20 fi\n"
-            .to_string()
+         \x20\x20\x20 fi\n",
+         save_diff = save_diff,
+        )
     } else if matches!(hook_event, HookEvent::PrePush) {
         // Pre-push: same as git-with-agent's prepush handler
         "".to_string() // Pre-push git type doesn't format, just checks
     } else {
         String::new()
     }
+}
+
+/// Generate shell snippet to save linthis changes as a git patch file.
+/// Must be called while changes are still unstaged (before `git add`).
+/// Uses `_SLUG` variable which must be set earlier in the script.
+fn shell_save_diff_patch() -> &'static str {
+    "# Save linthis changes as a git patch for review/revert\n\
+     _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
+     _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/backup/diff\"\n\
+     mkdir -p \"$_DIFF_DIR\"\n\
+     _DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
+     git diff > \"$_DIFF_FILE\" 2>/dev/null\n\
+     if [ -s \"$_DIFF_FILE\" ]; then\n\
+     \x20 echo \"[linthis] Patch saved: $_DIFF_FILE\" >&2\n\
+     \x20 echo \"  Revert: git apply -R $_DIFF_FILE\" >&2\n\
+     \x20 # Cleanup: keep only latest 5 diffs\n\
+     \x20 ls -t \"$_DIFF_DIR\"/diff-*.patch 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null\n\
+     else\n\
+     \x20 rm -f \"$_DIFF_FILE\"\n\
+     fi\n"
+}
+
+/// Same as `shell_save_diff_patch` but for staged changes (after `git add`).
+#[allow(dead_code)]
+fn shell_save_diff_patch_cached() -> &'static str {
+    "# Save linthis changes as a git patch for review/revert\n\
+     _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
+     _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/backup/diff\"\n\
+     mkdir -p \"$_DIFF_DIR\"\n\
+     _DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
+     git diff --cached > \"$_DIFF_FILE\" 2>/dev/null\n\
+     if [ -s \"$_DIFF_FILE\" ]; then\n\
+     \x20 echo \"[linthis] Patch saved: $_DIFF_FILE\" >&2\n\
+     \x20 echo \"  Revert: git apply -R $_DIFF_FILE\" >&2\n\
+     \x20 # Cleanup: keep only latest 5 diffs\n\
+     \x20 ls -t \"$_DIFF_DIR\"/diff-*.patch 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null\n\
+     else\n\
+     \x20 rm -f \"$_DIFF_FILE\"\n\
+     fi\n"
 }
 
 /// Generate shell snippet to read fix_commit_mode from linthis config.
