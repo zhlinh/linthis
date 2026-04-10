@@ -34,7 +34,7 @@ Query: `linthis config get hook.pre_commit.fix_commit_mode`
 |-------|------|-------------|----------------|-------------|---------|
 | pre-commit | squash | 0 | original unchanged | clean (re-staged) | `git stash pop` or `linthis undo` |
 | pre-commit | dirty | 0, blocked | — | dirty (format unstaged) | `linthis undo` |
-| pre-commit | fixup | 1 (post-commit) | `style(linthis): auto-format` | clean | `git reset HEAD~1` |
+| pre-commit | fixup | 1 (post-commit) | `fix(linthis): auto-fix lint issues` | clean | `git reset HEAD~1` |
 | pre-push | * | 0 | — | unchanged (check only) | — |
 
 ### git-with-agent type
@@ -45,12 +45,12 @@ Query: `linthis config get hook.pre_commit.fix_commit_mode`
 | pre-commit | squash | agent lint fix | 0 (fixup+squash) | original unchanged | clean | same as above |
 | pre-commit | dirty | format | 0, blocked | — | dirty | `linthis undo` |
 | pre-commit | dirty | agent lint fix | 0, blocked | — | dirty | `linthis undo` |
-| pre-commit | fixup | format + lint fix | 1 (post-commit) | `style(linthis): auto-format` | clean | `git reset HEAD~1` |
+| pre-commit | fixup | format + lint fix | 1 (post-commit) | `fix(linthis): auto-fix lint issues` | clean | `git reset HEAD~1` |
 | pre-push | squash | lint fix | 0 (fixup+squash) | original unchanged | clean, push continues | `git reset --hard HEAD@{1}` |
 | pre-push | squash | review fix | 0 (fixup+squash) | original unchanged | clean, push continues | `git reset --hard HEAD@{1}` |
 | pre-push | dirty | lint fix | 0, blocked | — | unchanged | — |
 | pre-push | dirty | review fix | 0, blocked | — | dirty | `linthis undo` |
-| pre-push | fixup | lint fix | 1, blocked | `style(linthis): auto-format` | clean | `git reset HEAD~1` |
+| pre-push | fixup | lint fix | 1, blocked | `fix(linthis): auto-fix lint issues` | clean | `git reset HEAD~1` |
 | pre-push | fixup | review fix | 1, blocked | `fix(linthis): auto-fix review issues` | clean | `git reset HEAD~1` |
 
 ### agent type (skill-based)
