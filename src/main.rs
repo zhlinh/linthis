@@ -36,6 +36,12 @@ use linthis::{run, Language, RunMode, RunOptions, ToolInstallMode};
 use std::sync::Arc;
 
 /// Inject dynamic help text showing detected AI/agent providers into clap commands.
+/// Check if help is being requested (--help, -h, or help subcommand).
+/// Used to skip expensive provider detection when help isn't needed.
+fn is_help_requested() -> bool {
+    std::env::args().any(|a| a == "--help" || a == "-h" || a == "help")
+}
+
 fn inject_dynamic_help(cmd: &mut clap::Command) {
     use linthis::ai::provider::{detect_available_providers, ALL_AI_PROVIDERS};
 
@@ -1599,7 +1605,9 @@ fn main() -> ExitCode {
     env_logger::init();
 
     let mut cmd = Cli::command();
-    inject_dynamic_help(&mut cmd);
+    if is_help_requested() {
+        inject_dynamic_help(&mut cmd);
+    }
     let matches = cmd.get_matches();
     let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 

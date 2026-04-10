@@ -951,7 +951,6 @@ fn load_retention_diffs() -> usize {
 }
 
 /// Generate shell snippet to read fix_commit_mode from linthis config.
-/// `config_section` is "pre_commit" or "pre_push".
 fn shell_read_fix_commit_mode(config_section: &str) -> String {
     let default = if config_section == "pre_commit" {
         "squash"
