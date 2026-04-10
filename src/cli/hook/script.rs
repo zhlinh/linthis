@@ -643,8 +643,7 @@ fn build_git_with_agent_commitmsg_script(
     let error_msg = agent_fix_error_msg(&HookEvent::CommitMsg);
     let timer_fns = shell_timer_functions();
     let new_msg_print = agent_fix_show_fixed_cmsg("  ");
-    let worktree_fix =
-        shell_worktree_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg);
+    let worktree_fix = shell_worktree_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg);
     format!(
         "#!/bin/sh\n\
          {timer}\
@@ -773,9 +772,12 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20 _CHANGED=$(git diff --name-only)\n\
          \x20\x20\x20 if [ -n \"$_CHANGED\" ]; then\n\
          \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
-         \x20\x20\x20\x20\x20 git commit --amend --no-verify --no-edit\n\
+         \x20\x20\x20\x20\x20 # Create fixup commit (preserved in reflog), then squash into previous\n\
+         \x20\x20\x20\x20\x20 git commit --no-verify -m \"style(linthis): auto-format\"\n\
+         \x20\x20\x20\x20\x20 git reset --soft HEAD~2\n\
+         \x20\x20\x20\x20\x20 git commit --no-verify -C HEAD@{{2}}\n\
          \x20\x20\x20\x20\x20 [ -n \"$_STASH_REF\" ] && git stash store -m \"linthis: pre-format snapshot\" \"$_STASH_REF\" 2>/dev/null\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Format changes amended into latest commit\" >&2\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Format changes squashed into latest commit (reflog: HEAD@{{1}})\" >&2\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n\
          \x20 if [ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
@@ -800,8 +802,11 @@ fn shell_agent_review_fix_commit_handler() -> String {
          if [ -n \"$_AGENT_CHANGED\" ]; then\n\
          \x20 if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
          \x20\x20\x20 echo \"$_AGENT_CHANGED\" | xargs git add\n\
-         \x20\x20\x20 git commit --amend --no-verify --no-edit\n\
-         \x20\x20\x20 echo \"[linthis] Agent fixes amended into latest commit\" >&2\n\
+         \x20\x20\x20 # Create fixup commit (preserved in reflog), then squash into previous\n\
+         \x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\"\n\
+         \x20\x20\x20 git reset --soft HEAD~2\n\
+         \x20\x20\x20 git commit --no-verify -C HEAD@{{2}}\n\
+         \x20\x20\x20 echo \"[linthis] Agent fixes squashed into latest commit (reflog: HEAD@{{1}})\" >&2\n\
          \x20 elif [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
          \x20\x20\x20 echo \"$_AGENT_CHANGED\" | xargs git add\n\
          \x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\"\n\
