@@ -744,11 +744,7 @@ fn fix_commit_mode_suffix(hook_type: Option<&str>) -> String {
         Some("pre-push") => config.hook.pre_push.fix_commit_mode.clone(),
         _ => config.hook.pre_commit.fix_commit_mode.clone(),
     };
-    if mode != "squash" {
-        format!("--fix-commit-mode {}", mode)
-    } else {
-        String::new()
-    }
+    format!("--fix-commit-mode {}", mode)
 }
 
 /// Build a parenthesized suffix like " (--type git, --fix-commit-mode dirty)".
