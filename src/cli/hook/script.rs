@@ -777,13 +777,14 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20 fi\n\
          \x20 fi\n\
          \x20 if [ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
-         \x20\x20\x20 # Format + create fixup commit\n\
+         \x20\x20\x20 # Format + create fixup commit, then block push for review\n\
          \x20\x20\x20 {linthis} \"$@\" -f 2>&1\n\
          \x20\x20\x20 _CHANGED=$(git diff --name-only)\n\
          \x20\x20\x20 if [ -n \"$_CHANGED\" ]; then\n\
          \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
          \x20\x20\x20\x20\x20 git commit --no-verify -m \"style(linthis): auto-format\"\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Created fixup commit. Review with 'git log --oneline -2', then 'git push' again.\" >&2\n\
+         \x20\x20\x20\x20\x20 exit 1\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n",
         linthis = linthis_cmd,
