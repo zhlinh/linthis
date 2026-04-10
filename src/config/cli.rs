@@ -507,16 +507,84 @@ pub fn handle_config_list(verbose: bool, global: bool) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // Print configuration items
-    for (key, value) in doc.iter() {
-        if verbose {
-            println!("{} = {}", key.cyan().bold(), value);
-        } else {
-            println!("{} = {}", key, value);
-        }
-    }
+    // Print configuration items with nested table support
+    print_toml_items(&doc, "", verbose);
 
     ExitCode::SUCCESS
+}
+
+/// Recursively print TOML items with dotted key paths.
+fn print_toml_items(table: &DocumentMut, prefix: &str, verbose: bool) {
+    for (key, item) in table.iter() {
+        let full_key = if prefix.is_empty() {
+            key.to_string()
+        } else {
+            format!("{}.{}", prefix, key)
+        };
+
+        if let Some(tbl) = item.as_table_like() {
+            // Check if table has only scalar values (print inline) or nested tables
+            let has_nested = tbl.iter().any(|(_, v)| v.is_table_like());
+            if has_nested || tbl.is_empty() {
+                // Recurse into sub-tables
+                print_toml_item_table(tbl, &full_key, verbose);
+            } else {
+                // Print all scalars under this table
+                print_toml_item_table(tbl, &full_key, verbose);
+            }
+        } else if verbose {
+            println!("{} = {}", full_key.cyan().bold(), format_toml_value(item));
+        } else {
+            println!("{} = {}", full_key, format_toml_value(item));
+        }
+    }
+}
+
+/// Print items from a table-like TOML structure.
+fn print_toml_item_table(
+    tbl: &dyn toml_edit::TableLike,
+    prefix: &str,
+    verbose: bool,
+) {
+    for (key, item) in tbl.iter() {
+        let full_key = format!("{}.{}", prefix, key);
+        if let Some(sub) = item.as_table_like() {
+            print_toml_item_table(sub, &full_key, verbose);
+        } else if verbose {
+            println!("{} = {}", full_key.cyan().bold(), format_toml_value(item));
+        } else {
+            println!("{} = {}", full_key, format_toml_value(item));
+        }
+    }
+}
+
+/// Format a TOML value for display.
+fn format_toml_value(item: &toml_edit::Item) -> String {
+    if let Some(v) = item.as_value() {
+        match v {
+            toml_edit::Value::String(s) => format!("\"{}\"", s.value()),
+            toml_edit::Value::Array(arr) => {
+                let items: Vec<String> = arr
+                    .iter()
+                    .map(|v| match v {
+                        toml_edit::Value::String(s) => format!("\"{}\"", s.value()),
+                        other => other.to_string(),
+                    })
+                    .collect();
+                format!("[{}]", items.join(", "))
+            }
+            toml_edit::Value::InlineTable(t) => {
+                let items: Vec<String> = t
+                    .iter()
+                    .map(|(k, v)| format!("{} = {}", k, v))
+                    .collect();
+                format!("{{ {} }}", items.join(", "))
+            }
+            other => other.to_string(),
+        }
+    } else {
+        item.to_string().trim().to_string()
+    }
 }
 
 /// Fallback for home directory if dirs crate is not available
