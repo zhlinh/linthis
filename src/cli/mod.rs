@@ -33,9 +33,7 @@ mod runner;
 mod security;
 mod watch;
 
-pub use backup::{
-    create_backup, handle_backup_command, handle_list_backups, handle_redo, handle_undo_filtered,
-};
+pub use backup::{create_backup, handle_backup_command};
 pub use cache::handle_cache_command;
 pub use commands::{Cli, Commands};
 pub use complexity::{

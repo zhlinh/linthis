@@ -1059,28 +1059,6 @@ pub enum Commands {
         action: BackupCommands,
     },
 
-    /// Undo the last operation (format, fix, or hook fix)
-    ///
-    /// Restores files from the most recent matching backup.
-    /// Use a filter to target specific operation types:
-    ///   linthis undo          # undo last operation (any type)
-    ///   linthis undo format   # undo last format
-    ///   linthis undo fix      # undo last fix (including AI fix)
-    ///   linthis undo hook     # undo last hook-agent-fix
-    ///   linthis undo <id>     # undo specific backup by timestamp
-    Undo {
-        /// Filter: "last" (default), "format", "fix", "hook", or a backup timestamp
-        #[arg(default_value = "last")]
-        filter: String,
-
-        /// List available backups instead of restoring
-        #[arg(long)]
-        list: bool,
-    },
-
-    /// Re-apply changes that were undone by `linthis undo`
-    Redo,
-
     /// Self-update linthis to the latest version
     ///
     /// Detects the installation method (cargo, uv tool, pipx, pip) and uses
@@ -1137,6 +1115,22 @@ pub enum BackupCommands {
         #[arg(default_value = "last")]
         id: String,
     },
+
+    /// Restore files from a backup (reverting linthis changes)
+    ///
+    /// Filter by type: "last" (default), "format", "fix", "hook", or a specific timestamp.
+    Undo {
+        /// Backup filter: "last", "format", "fix", "hook", or timestamp
+        #[arg(default_value = "last")]
+        filter: String,
+
+        /// List available backups instead of restoring
+        #[arg(long)]
+        list: bool,
+    },
+
+    /// Re-apply changes that were undone by `linthis backup undo`
+    Redo,
 }
 
 /// Hook subcommands

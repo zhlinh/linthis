@@ -627,7 +627,7 @@ fn shell_worktree_agent_fix(
          \x20 {agent_check}\
          \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
          \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
-         \x20\x20\x20 # Backup staged files (safety net for linthis undo hook)\n\
+         \x20\x20\x20 # Backup staged files (safety net for linthis backup undo hook)\n\
          \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
          \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | tr '\\n' '\\0' | xargs -0 {linthis} backup create -d \"hook-agent-fix\" 2>/dev/null\n\
          \x20\x20\x20 fi\n\
@@ -762,7 +762,7 @@ pub(crate) fn build_git_with_agent_hook_script(
          \x20\x20\x20 echo \"[linthis] Files formatted but not staged (dirty mode).\" >&2\n\
          \x20\x20\x20 echo \"  Review:  git diff\" >&2\n\
          \x20\x20\x20 echo \"  Accept:  git add -u && git commit\" >&2\n\
-         \x20\x20\x20 echo \"  Revert:  linthis undo\" >&2\n\
+         \x20\x20\x20 echo \"  Revert:  linthis backup undo\" >&2\n\
          \x20\x20\x20 exit 1\n\
          \x20 fi\n\
          fi\n\
@@ -845,7 +845,7 @@ fn shell_agent_review_fix_commit_handler() -> String {
          \x20\x20\x20 echo \"[linthis] Created fixup commit with agent fixes. Review with 'git log --oneline -2', then 'git push' again.\" >&2\n\
          \x20\x20\x20 exit 1\n\
          \x20 else\n\
-         \x20\x20\x20 echo \"[linthis] Agent fixes left in working tree (dirty mode). Review: git diff, Revert: linthis undo\" >&2\n\
+         \x20\x20\x20 echo \"[linthis] Agent fixes left in working tree (dirty mode). Review: git diff, Revert: linthis backup undo\" >&2\n\
          \x20\x20\x20 exit 1\n\
          \x20 fi\n\
          fi\n\
@@ -880,7 +880,7 @@ fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
          \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Files formatted but not staged (dirty mode).\" >&2\n\
          \x20\x20\x20\x20\x20\x20\x20 echo \"  Review:  git diff\" >&2\n\
          \x20\x20\x20\x20\x20\x20\x20 echo \"  Accept:  git add -u && git commit\" >&2\n\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"  Revert:  linthis undo\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"  Revert:  linthis backup undo\" >&2\n\
          \x20\x20\x20\x20\x20\x20\x20 exit 1\n\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\

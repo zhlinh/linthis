@@ -32,8 +32,8 @@ CLI 设置：`linthis hook install --fix-commit-mode <mode>`
 
 | 事件 | 模式 | 新增 commit | Commit message | 工作区 | 恢复方式 |
 |------|------|------------|----------------|--------|---------|
-| pre-commit | squash | 0 | 原始 message 不变 | 干净（已 re-stage） | `git stash pop` 或 `linthis undo` |
-| pre-commit | dirty | 0，阻止 | — | dirty（格式化未 stage） | `linthis undo` |
+| pre-commit | squash | 0 | 原始 message 不变 | 干净（已 re-stage） | `git stash pop` 或 `linthis backup undo` |
+| pre-commit | dirty | 0，阻止 | — | dirty（格式化未 stage） | `linthis backup undo` |
 | pre-commit | fixup | 1（post-commit） | `fix(linthis): auto-fix lint issues` | 干净 | `git reset HEAD~1` |
 | pre-push | * | 0 | — | 不变（仅检查） | — |
 
@@ -43,13 +43,13 @@ CLI 设置：`linthis hook install --fix-commit-mode <mode>`
 |------|------|---------|------------|----------------|--------|---------|
 | pre-commit | squash | 格式化 | 0（fixup→squash） | 原始 message 不变 | 干净 | `git stash pop` 或 `git reset --hard HEAD@{1}` |
 | pre-commit | squash | agent lint 修复 | 0（fixup→squash） | 原始 message 不变 | 干净 | 同上 |
-| pre-commit | dirty | 格式化 | 0，阻止 | — | dirty | `linthis undo` |
-| pre-commit | dirty | agent lint 修复 | 0，阻止 | — | dirty | `linthis undo` |
+| pre-commit | dirty | 格式化 | 0，阻止 | — | dirty | `linthis backup undo` |
+| pre-commit | dirty | agent lint 修复 | 0，阻止 | — | dirty | `linthis backup undo` |
 | pre-commit | fixup | 格式化 + lint 修复 | 1（post-commit） | `fix(linthis): auto-fix lint issues` | 干净 | `git reset HEAD~1` |
 | pre-push | squash | lint 修复 | 0（fixup→squash） | 原始 message 不变 | 干净，阻止 push | `git reset --hard HEAD@{1}` |
 | pre-push | squash | review 修复 | 0（fixup→squash） | 原始 message 不变 | 干净，阻止 push | `git reset --hard HEAD@{1}` |
 | pre-push | dirty | lint 修复 | 0，阻止 | — | 不变 | — |
-| pre-push | dirty | review 修复 | 0，阻止 | — | dirty | `linthis undo` |
+| pre-push | dirty | review 修复 | 0，阻止 | — | dirty | `linthis backup undo` |
 | pre-push | fixup | lint 修复 | 1，阻止 | `fix(linthis): auto-fix lint issues` | 干净 | `git reset HEAD~1` |
 | pre-push | fixup | review 修复 | 1，阻止 | `fix(linthis): auto-fix review issues` | 干净 | `git reset HEAD~1` |
 
@@ -57,11 +57,11 @@ CLI 设置：`linthis hook install --fix-commit-mode <mode>`
 
 | 事件 | 模式 | 新增 commit | Commit message | 工作区 | 恢复方式 |
 |------|------|------------|----------------|--------|---------|
-| pre-commit | squash | 0 | 原始 message（agent `git add` + approve） | 干净 | `linthis undo` |
-| pre-commit | dirty | 0，AskUser 询问 | — | dirty（agent 修改未 stage） | `linthis undo` |
+| pre-commit | squash | 0 | 原始 message（agent `git add` + approve） | 干净 | `linthis backup undo` |
+| pre-commit | dirty | 0，AskUser 询问 | — | dirty（agent 修改未 stage） | `linthis backup undo` |
 | pre-commit | fixup | 0 | —（agent 仅检查，post-commit 处理） | 不变 | — |
 | pre-push | squash | 0 | 原始 message（agent amend） | 干净 | `git reflog` + `git reset --hard` |
-| pre-push | dirty | 0，阻止 | — | dirty | `linthis undo` |
+| pre-push | dirty | 0，阻止 | — | dirty | `linthis backup undo` |
 | pre-push | fixup | 1，阻止 | `fix(linthis): auto-fix review issues` | 干净 | `git reset HEAD~1` |
 
 ---
@@ -74,14 +74,14 @@ CLI 设置：`linthis hook install --fix-commit-mode <mode>`
 [linthis] Files formatted but not staged (dirty mode).
   Review:  git diff
   Accept:  git add -u && git commit
-  Revert:  linthis undo
+  Revert:  linthis backup undo
 ```
 
 ## 恢复方式优先级
 
 | 方法 | 使用场景 | 安全性 |
 |------|---------|--------|
-| `linthis undo` | 任何模式 — 仅恢复 linthis 修改过的文件 | 最安全 |
+| `linthis backup undo` | 任何模式 — 仅恢复 linthis 修改过的文件 | 最安全 |
 | `linthis backup diff` | 先查看 linthis 改了什么再决定 | 只读 |
 | `git stash pop` | squash 模式 — 恢复格式化前的 stash 快照 | 安全 |
 | `git reset HEAD~1` | fixup 模式 — 移除 fixup commit | 安全 |

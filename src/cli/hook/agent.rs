@@ -105,7 +105,7 @@ If your agent supports worktree (e.g. Claude Code), **prefer working in a worktr
 2. Your changes are copied back to the main tree only after verification passes
 3. If interrupted (Ctrl+C), the main working tree is untouched
 
-If worktree is not available, changes are made directly with a backup safety net (`linthis undo hook` to revert).
+If worktree is not available, changes are made directly with a backup safety net (`linthis backup undo hook` to revert).
 
 ## Steps
 
