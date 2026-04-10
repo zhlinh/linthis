@@ -252,6 +252,11 @@ pub fn get_cache_dir() -> std::path::PathBuf {
     get_global_project_dir().join("cache")
 }
 
+/// Get the diff patch directory: `~/.linthis/projects/<slug>/backup/diff/`.
+pub fn get_diff_dir() -> std::path::PathBuf {
+    get_global_project_dir().join("backup").join("diff")
+}
+
 /// Migrate legacy project-local data directories to global path.
 /// Called once on first access; silently moves old dirs if they exist.
 pub fn migrate_legacy_data_dirs() {
