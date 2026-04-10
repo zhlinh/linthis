@@ -905,7 +905,7 @@ fn shell_save_diff_patch() -> String {
     format!(
         "# Save linthis changes as a git patch for review/revert\n\
          _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
-         _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/backup/diff\"\n\
+         _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/diff\"\n\
          mkdir -p \"$_DIFF_DIR\"\n\
          _DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
          git diff > \"$_DIFF_FILE\" 2>/dev/null\n\
@@ -927,7 +927,7 @@ fn shell_save_diff_patch_cached() -> String {
     format!(
         "# Save linthis changes as a git patch for review/revert\n\
          _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
-         _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/backup/diff\"\n\
+         _DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/diff\"\n\
          mkdir -p \"$_DIFF_DIR\"\n\
          _DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
          git diff --cached > \"$_DIFF_FILE\" 2>/dev/null\n\
