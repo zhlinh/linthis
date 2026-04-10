@@ -46,8 +46,8 @@ CLI 设置：`linthis hook install --fix-commit-mode <mode>`
 | pre-commit | dirty | 格式化 | 0，阻止 | — | dirty | `linthis undo` |
 | pre-commit | dirty | agent lint 修复 | 0，阻止 | — | dirty | `linthis undo` |
 | pre-commit | fixup | 格式化 + lint 修复 | 1（post-commit） | `fix(linthis): auto-fix lint issues` | 干净 | `git reset HEAD~1` |
-| pre-push | squash | lint 修复 | 0（fixup→squash） | 原始 message 不变 | 干净，继续 push | `git reset --hard HEAD@{1}` |
-| pre-push | squash | review 修复 | 0（fixup→squash） | 原始 message 不变 | 干净，继续 push | `git reset --hard HEAD@{1}` |
+| pre-push | squash | lint 修复 | 0（fixup→squash） | 原始 message 不变 | 干净，阻止 push | `git reset --hard HEAD@{1}` |
+| pre-push | squash | review 修复 | 0（fixup→squash） | 原始 message 不变 | 干净，阻止 push | `git reset --hard HEAD@{1}` |
 | pre-push | dirty | lint 修复 | 0，阻止 | — | 不变 | — |
 | pre-push | dirty | review 修复 | 0，阻止 | — | dirty | `linthis undo` |
 | pre-push | fixup | lint 修复 | 1，阻止 | `fix(linthis): auto-fix lint issues` | 干净 | `git reset HEAD~1` |

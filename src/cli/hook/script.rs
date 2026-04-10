@@ -797,7 +797,8 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20\x20\x20 git reset --soft HEAD~2\n\
          \x20\x20\x20\x20\x20 git commit --no-verify -C HEAD@{{2}}\n\
          \x20\x20\x20\x20\x20 [ -n \"$_STASH_REF\" ] && git stash store -m \"linthis: pre-format snapshot\" \"$_STASH_REF\" 2>/dev/null\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Format changes squashed into latest commit (reflog: HEAD@{{1}})\" >&2\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Lint fixes squashed into latest commit. Review with 'git diff HEAD~1', then 'git push' again.\" >&2\n\
+         \x20\x20\x20\x20\x20 exit 1\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n\
          \x20 if [ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
@@ -826,7 +827,8 @@ fn shell_agent_review_fix_commit_handler() -> String {
          \x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\"\n\
          \x20\x20\x20 git reset --soft HEAD~2\n\
          \x20\x20\x20 git commit --no-verify -C HEAD@{{2}}\n\
-         \x20\x20\x20 echo \"[linthis] Agent fixes squashed into latest commit (reflog: HEAD@{{1}})\" >&2\n\
+         \x20\x20\x20 echo \"[linthis] Agent fixes squashed into latest commit. Review with 'git diff HEAD~1', then 'git push' again.\" >&2\n\
+         \x20\x20\x20 exit 1\n\
          \x20 elif [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
          \x20\x20\x20 echo \"$_AGENT_CHANGED\" | xargs git add\n\
          \x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\"\n\
