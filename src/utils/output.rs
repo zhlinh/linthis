@@ -735,12 +735,46 @@ fn extract_hook_script_type(path: &std::path::Path) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Get the fix_commit_mode suffix for hook footer display.
+/// Returns empty string for default mode (squash), otherwise ", --fix-commit-mode <mode>".
+fn fix_commit_mode_suffix(hook_type: Option<&str>) -> String {
+    let project_root = crate::utils::get_project_root();
+    let config = crate::config::Config::load_merged(&project_root);
+    let mode = match hook_type {
+        Some("pre-push") => config.hook.pre_push.fix_commit_mode.clone(),
+        _ => config.hook.pre_commit.fix_commit_mode.clone(),
+    };
+    if mode != "squash" {
+        format!("--fix-commit-mode {}", mode)
+    } else {
+        String::new()
+    }
+}
+
+/// Build a parenthesized suffix like " (--type git, --fix-commit-mode dirty)".
+fn build_hook_suffix(hook_path: &std::path::Path, mode_suffix: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(t) = extract_hook_script_type(hook_path) {
+        parts.push(format!("--type {}", t));
+    }
+    if !mode_suffix.is_empty() {
+        parts.push(mode_suffix.to_string());
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", parts.join(", "))
+    }
+}
+
 fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
     let hook_filename = match hook_type {
         Some("pre-push") => "pre-push",
         Some("commit-msg") => "commit-msg",
         _ => "pre-commit",
     };
+
+    let mode_suffix = fix_commit_mode_suffix(hook_type);
 
     let mut lines = Vec::new();
 
@@ -768,14 +802,8 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
             }
         })
     {
-        let type_suffix = extract_hook_script_type(&p)
-            .map(|t| format!(" (--type {})", t))
-            .unwrap_or_default();
-        lines.push(
-            format!("  Global: {}{}", p.display(), type_suffix)
-                .dimmed()
-                .to_string(),
-        );
+        let suffix = build_hook_suffix(&p, &mode_suffix);
+        lines.push(format!("  Global: {}{}", p.display(), suffix).dimmed().to_string());
     }
 
     // Local: check .git/hooks/{event}
@@ -804,14 +832,8 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
             }
         })
     {
-        let type_suffix = extract_hook_script_type(&p)
-            .map(|t| format!(" (--type {})", t))
-            .unwrap_or_default();
-        lines.push(
-            format!("  Local:  {}{}", p.display(), type_suffix)
-                .dimmed()
-                .to_string(),
-        );
+        let suffix = build_hook_suffix(&p, &mode_suffix);
+        lines.push(format!("  Local:  {}{}", p.display(), suffix).dimmed().to_string());
     }
 
     if lines.is_empty() {

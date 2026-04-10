@@ -1207,6 +1207,16 @@ impl Config {
         if other.hook.timeout != default_hook_timeout() {
             self.hook.timeout = other.hook.timeout;
         }
+
+        // Merge per-event fix_commit_mode
+        if other.hook.pre_commit.fix_commit_mode != default_fix_commit_mode_one_commit() {
+            self.hook.pre_commit.fix_commit_mode =
+                other.hook.pre_commit.fix_commit_mode;
+        }
+        if other.hook.pre_push.fix_commit_mode != default_fix_commit_mode_one_commit() {
+            self.hook.pre_push.fix_commit_mode =
+                other.hook.pre_push.fix_commit_mode;
+        }
     }
 
     /// Get plugin sources from config, converting to PluginSource type
