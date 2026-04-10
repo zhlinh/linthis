@@ -104,6 +104,11 @@ pub(crate) fn handle_hook_run(
         }
     };
 
+    // Skip hook entirely during rebase/merge/cherry-pick
+    if is_rebase_in_progress() {
+        return 0;
+    }
+
     {
         let description = describe_hook_source(hook_type, event);
         eprintln!("{}", format!("📄 Config: {}", description).dimmed());
@@ -131,4 +136,25 @@ pub(crate) fn handle_hook_run(
             1
         }
     }
+}
+
+/// Check if a rebase, merge, or cherry-pick is in progress.
+/// Used to skip hooks during these operations to avoid noise.
+fn is_rebase_in_progress() -> bool {
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        if output.status.success() {
+            let git_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let git_path = std::path::Path::new(&git_dir);
+            return git_path.join("rebase-merge").exists()
+                || git_path.join("rebase-apply").exists()
+                || git_path.join("MERGE_HEAD").exists()
+                || git_path.join("CHERRY_PICK_HEAD").exists();
+        }
+    }
+    false
 }
