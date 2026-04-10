@@ -205,6 +205,10 @@ pub(crate) fn build_global_hook_script_for_event(
          {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
          {fix_commit_mode}\
+         # Snapshot pre-format state for stash (squash mode)\n\
+         if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
+         \x20 _STASH_REF=$(git stash create 2>/dev/null)\n\
+         fi\n\
          {pre_push_preamble}\
          # Locate the local project hook (git-dir aware)\n\
          GIT_DIR=\"$(git rev-parse --git-dir 2>/dev/null)\"\n\
@@ -843,7 +847,14 @@ fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
     if matches!(hook_event, HookEvent::PreCommit) {
         // Pre-commit: handle staged files after format
         "\x20\x20\x20 _STAGED_FILES=$(git diff --cached --name-only)\n\
-         \x20\x20\x20 if [ \"$_FIX_MODE\" = \"squash\" ] && [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20\x20\x20 _DIRTY=$(git diff --name-only)\n\
+         \x20\x20\x20 if [ \"$_FIX_MODE\" = \"squash\" ] && [ -n \"$_DIRTY\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20\x20\x20 # Save stash snapshot\n\
+         \x20\x20\x20\x20\x20 if [ -n \"$_STASH_REF\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 git stash store -m \"linthis: pre-format snapshot\" \"$_STASH_REF\" 2>/dev/null\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"squash\" ] && [ -n \"$_STAGED_FILES\" ]; then\n\
          \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
          \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"dirty\" ]; then\n\
          \x20\x20\x20\x20\x20 _DIRTY=$(git diff --name-only)\n\
