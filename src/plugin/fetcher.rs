@@ -201,6 +201,34 @@ impl PluginFetcher {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+
+            // If HTTPS fails, try SSH fallback
+            if url.starts_with("https://") {
+                let ssh_url = https_to_ssh_url(url);
+                log_plugin_operation(
+                    "git",
+                    &format!("HTTPS clone failed, trying SSH: {}", ssh_url),
+                    true,
+                );
+                // Clean up failed clone attempt
+                let _ = std::fs::remove_dir_all(target_path);
+                match self.clone_plugin(&ssh_url, target_path, git_ref) {
+                    Ok(()) => return Ok(()),
+                    Err(_ssh_err) => {
+                        // Both failed — report both URLs
+                        return Err(PluginError::CloneFailed {
+                            url: url.to_string(),
+                            message: format!(
+                                "HTTPS failed: {}\nSSH ({}) also failed: {}",
+                                stderr.trim(),
+                                ssh_url,
+                                _ssh_err
+                            ),
+                        });
+                    }
+                }
+            }
+
             return Err(PluginError::CloneFailed {
                 url: url.to_string(),
                 message: stderr.to_string(),
@@ -441,4 +469,34 @@ mod tests {
         // Just check it doesn't panic; availability depends on system
         let _ = result;
     }
+
+    #[test]
+    fn test_https_to_ssh_url() {
+        assert_eq!(
+            super::https_to_ssh_url("https://github.com/user/repo.git"),
+            "git@github.com:user/repo.git"
+        );
+        assert_eq!(
+            super::https_to_ssh_url("https://gitlab.example.com/team/config.git"),
+            "git@gitlab.example.com:team/config.git"
+        );
+        // Non-HTTPS URL returned as-is
+        assert_eq!(
+            super::https_to_ssh_url("git@github.com:user/repo.git"),
+            "git@github.com:user/repo.git"
+        );
+    }
+}
+
+/// Convert an HTTPS git URL to SSH format.
+/// `https://github.com/user/repo.git` → `git@github.com:user/repo.git`
+fn https_to_ssh_url(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("https://") {
+        if let Some(slash_pos) = rest.find('/') {
+            let host = &rest[..slash_pos];
+            let path = &rest[slash_pos + 1..];
+            return format!("git@{}:{}", host, path);
+        }
+    }
+    url.to_string()
 }
