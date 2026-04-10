@@ -793,7 +793,7 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20 if [ -n \"$_CHANGED\" ]; then\n\
          \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
          \x20\x20\x20\x20\x20 # Create fixup commit (preserved in reflog), then squash into previous\n\
-         \x20\x20\x20\x20\x20 git commit --no-verify -m \"style(linthis): auto-format\"\n\
+         \x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
          \x20\x20\x20\x20\x20 git reset --soft HEAD~2\n\
          \x20\x20\x20\x20\x20 git commit --no-verify -C HEAD@{{2}}\n\
          \x20\x20\x20\x20\x20 [ -n \"$_STASH_REF\" ] && git stash store -m \"linthis: pre-format snapshot\" \"$_STASH_REF\" 2>/dev/null\n\
@@ -806,7 +806,7 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20 _CHANGED=$(git diff --name-only)\n\
          \x20\x20\x20 if [ -n \"$_CHANGED\" ]; then\n\
          \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
-         \x20\x20\x20\x20\x20 git commit --no-verify -m \"style(linthis): auto-format\"\n\
+         \x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
          \x20\x20\x20\x20\x20 echo \"[linthis] Created fixup commit. Review with 'git log --oneline -2', then 'git push' again.\" >&2\n\
          \x20\x20\x20\x20\x20 exit 1\n\
          \x20\x20\x20 fi\n\
@@ -918,7 +918,7 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          _CHANGED=$(git diff --name-only)\n\
          if [ -n \"$_CHANGED\" ]; then\n\
          \x20 echo \"$_CHANGED\" | xargs git add\n\
-         \x20 git commit --no-verify -m \"style(linthis): auto-format\"\n\
+         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
          \x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
          fi\n",
         timer = timer_fns,

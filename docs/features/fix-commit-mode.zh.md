@@ -34,7 +34,7 @@ CLI 设置：`linthis hook install --fix-commit-mode <mode>`
 |------|------|------------|----------------|--------|---------|
 | pre-commit | squash | 0 | 原始 message 不变 | 干净（已 re-stage） | `git stash pop` 或 `linthis undo` |
 | pre-commit | dirty | 0，阻止 | — | dirty（格式化未 stage） | `linthis undo` |
-| pre-commit | fixup | 1（post-commit） | `style(linthis): auto-format` | 干净 | `git reset HEAD~1` |
+| pre-commit | fixup | 1（post-commit） | `fix(linthis): auto-fix lint issues` | 干净 | `git reset HEAD~1` |
 | pre-push | * | 0 | — | 不变（仅检查） | — |
 
 ### git-with-agent 类型
@@ -45,12 +45,12 @@ CLI 设置：`linthis hook install --fix-commit-mode <mode>`
 | pre-commit | squash | agent lint 修复 | 0（fixup→squash） | 原始 message 不变 | 干净 | 同上 |
 | pre-commit | dirty | 格式化 | 0，阻止 | — | dirty | `linthis undo` |
 | pre-commit | dirty | agent lint 修复 | 0，阻止 | — | dirty | `linthis undo` |
-| pre-commit | fixup | 格式化 + lint 修复 | 1（post-commit） | `style(linthis): auto-format` | 干净 | `git reset HEAD~1` |
+| pre-commit | fixup | 格式化 + lint 修复 | 1（post-commit） | `fix(linthis): auto-fix lint issues` | 干净 | `git reset HEAD~1` |
 | pre-push | squash | lint 修复 | 0（fixup→squash） | 原始 message 不变 | 干净，继续 push | `git reset --hard HEAD@{1}` |
 | pre-push | squash | review 修复 | 0（fixup→squash） | 原始 message 不变 | 干净，继续 push | `git reset --hard HEAD@{1}` |
 | pre-push | dirty | lint 修复 | 0，阻止 | — | 不变 | — |
 | pre-push | dirty | review 修复 | 0，阻止 | — | dirty | `linthis undo` |
-| pre-push | fixup | lint 修复 | 1，阻止 | `style(linthis): auto-format` | 干净 | `git reset HEAD~1` |
+| pre-push | fixup | lint 修复 | 1，阻止 | `fix(linthis): auto-fix lint issues` | 干净 | `git reset HEAD~1` |
 | pre-push | fixup | review 修复 | 1，阻止 | `fix(linthis): auto-fix review issues` | 干净 | `git reset HEAD~1` |
 
 ### agent 类型（skill 控制）
