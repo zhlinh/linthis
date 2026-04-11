@@ -273,7 +273,7 @@ mod tests {
         let cache = LintCache::new();
         cache.save(project_root).unwrap();
 
-        let cache_path = project_root.join(CACHE_DIR).join(CACHE_FILE);
+        let cache_path = crate::utils::get_cache_dir().join(CACHE_FILE);
         assert!(cache_path.exists());
 
         LintCache::clear(project_root).unwrap();
