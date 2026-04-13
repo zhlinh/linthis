@@ -109,6 +109,11 @@ pub(crate) fn handle_hook_run(
         return 0;
     }
 
+    // For pre-push: if nothing to push, skip silently (avoid noisy "Config:" line)
+    if matches!(event, HookEvent::PrePush) && is_pre_push_empty() {
+        return 0;
+    }
+
     {
         let description = describe_hook_source(hook_type, event);
         eprintln!("{}", format!("📄 Config: {}", description).dimmed());
@@ -136,6 +141,27 @@ pub(crate) fn handle_hook_run(
             1
         }
     }
+}
+
+/// Check if there's nothing to push (local is up-to-date with remote).
+/// Uses `git rev-list @{u}..HEAD` to count outgoing commits.
+fn is_pre_push_empty() -> bool {
+    let output = match std::process::Command::new("git")
+        .args(["rev-list", "--count", "@{u}..HEAD"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let count_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    count_str == "0"
 }
 
 /// Check if a rebase, merge, or cherry-pick is in progress.

@@ -4,8 +4,22 @@
 
 linthis 支持自动自更新功能，灵感来源于 oh-my-zsh 的自动更新机制。该功能会在运行时自动检查并更新 linthis 本身，确保您始终使用最新版本。
 
+## 手动更新命令
+
+```bash
+linthis update                  # 检查并升级到最新版本
+linthis update --check          # 仅检查，不安装
+linthis update --force          # 强制重新安装
+linthis update -v 0.18.0       # 安装指定版本
+linthis upgrade                 # update 的别名
+```
+
+自动检测安装方式（cargo、pip、uv tool、pipx）并使用对应的升级命令。cargo 安装检查 crates.io，pip 安装检查 PyPI。
+
 ## 功能特性
 
+- **手动更新命令**：`linthis update` / `linthis upgrade`，自动检测安装方式
+- **指定版本安装**：`linthis update -v <VERSION>`，附带 auto-update 冲突提示
 - **可配置的检查间隔**：自定义更新检查频率（默认：7 天）
 - **多种更新模式**：
   - `auto`：无需确认自动更新
@@ -13,7 +27,7 @@ linthis 支持自动自更新功能，灵感来源于 oh-my-zsh 的自动更新�
   - `disabled`：禁用自动更新
 - **智能更新检测**：仅在有新版本时才提示；无更新时静默更新时间戳
 - **智能时间追踪**：使用 Unix 时间戳避免时区问题
-- **PyPI 版本检测**：通过 pip 检查最新版本
+- **多源版本检测**：pip 安装检查 PyPI，cargo 安装通过 crates.io API 检查
 - **友好的用户交互**：清晰的进度指示器和错误处理
 
 ## 配置

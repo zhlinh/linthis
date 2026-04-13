@@ -453,8 +453,31 @@ If this returns nothing, no global `core.hooksPath` is set and Git is using `.gi
 
 ---
 
+## Fix Commit Mode
+
+Controls how auto-format and agent fix changes are committed. Configure per event:
+
+```toml
+[hook.pre_commit]
+fix_commit_mode = "squash"    # squash | dirty | fixup
+
+[hook.pre_push]
+fix_commit_mode = "dirty"     # squash | dirty | fixup
+```
+
+Or set via CLI: `linthis hook install --fix-commit-mode <mode>`
+
+| Mode | Behavior |
+|------|----------|
+| **squash** | Fix + create fixup commit + squash into original. Stash snapshot preserved. |
+| **dirty** | Fix + leave in working tree + block commit/push. User reviews first. |
+| **fixup** | Let original commit through. Post-commit creates a separate fixup commit. |
+
+See [Fix Commit Mode](./fix-commit-mode.md) for the full behavior matrix.
+
 ## See Also
 
+- [Fix Commit Mode](./fix-commit-mode.md) — Detailed behavior matrix for squash/dirty/fixup
 - [AI-Powered Fix](./ai-fix.md) — AI provider details
 - [AI Coding Agent Integration](./agent-hooks.md) — Rules-based agent integration
 - [CLI Reference](../reference/cli.md) — Complete command reference

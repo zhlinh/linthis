@@ -4,8 +4,22 @@
 
 linthis supports automatic self-update functionality, inspired by oh-my-zsh's auto-update mechanism. This feature automatically checks and updates linthis itself when running, ensuring you always use the latest version.
 
+## Manual Update Command
+
+```bash
+linthis update                  # Check and upgrade to latest
+linthis update --check          # Only check, don't install
+linthis update --force          # Force reinstall
+linthis update -v 0.18.0       # Install specific version
+linthis upgrade                 # Alias for update
+```
+
+Detects installation method automatically (cargo, pip, uv tool, pipx) and uses the correct upgrade command. For cargo installs, checks crates.io; for pip-based installs, checks PyPI.
+
 ## Features
 
+- **Manual update command**: `linthis update` / `linthis upgrade` with install method detection
+- **Specific version install**: `linthis update -v <VERSION>` with auto-update conflict warning
 - **Configurable check interval**: Customize how often to check for updates (default: 7 days)
 - **Multiple update modes**:
   - `auto`: Update automatically without confirmation
@@ -13,7 +27,7 @@ linthis supports automatic self-update functionality, inspired by oh-my-zsh's au
   - `disabled`: Disable auto-update
 - **Smart update detection**: Only prompts when new version is available; silently updates timestamp when no update exists
 - **Smart time tracking**: Uses Unix timestamps to avoid timezone issues
-- **PyPI version detection**: Checks latest version via pip
+- **Multi-source version detection**: PyPI for pip installs, crates.io API for cargo installs
 - **Graceful user interaction**: Clear progress indicators and error handling
 
 ## Configuration

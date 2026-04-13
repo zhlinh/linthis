@@ -13,10 +13,13 @@
 - **自动检测**：自动检测项目中使用的编程语言
 - **安全扫描（SAST）**：内置 secrets 检测 + OpenGrep/Semgrep、Bandit、Gosec、Flawfinder 集成
 - **复杂度分析**：函数级圈复杂度/认知复杂度分析，支持阈值拦截
-- **灵活配置**：支持项目配置、全局配置和 CLI 参数
-- **插件系统**：通过 Git 仓库共享和复用配置
+- **灵活配置**：支持项目配置、全局配置和 CLI 参数，支持点号路径（如 `hook.pre_commit.fix_commit_mode`）
+- **插件系统**：通过 Git 仓库共享和复用配置（HTTPS 失败自动回退 SSH）
 - **格式化预设**：支持 Google、Airbnb、Standard 等流行代码风格
 - **并行处理**：利用多核 CPU 加速文件处理，per-file 缓存
+- **修复提交模式**：三种自动修复处理方式 — squash / dirty / fixup
+- **自更新**：`linthis update` 自动检测安装方式（cargo、pip、uv、pipx）
+- **全局数据存储**：运行时数据存放在 `~/.linthis/projects/` — 保持项目目录干净
 
 ## 快速链接
 

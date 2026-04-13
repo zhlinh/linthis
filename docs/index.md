@@ -13,10 +13,13 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 - **Auto-Detection**: Automatically detect programming languages used in your project
 - **Security Scanning (SAST)**: Built-in secrets detection + OpenGrep/Semgrep, Bandit, Gosec, Flawfinder
 - **Complexity Analysis**: Cyclomatic/cognitive complexity per function with threshold enforcement
-- **Flexible Configuration**: Support for project config, global config, and CLI parameters
-- **Plugin System**: Share and reuse configurations via Git repositories
+- **Flexible Configuration**: Support for project config, global config, and CLI parameters with dotted key paths
+- **Plugin System**: Share and reuse configurations via Git repositories (HTTPS with SSH auto-fallback)
 - **Format Presets**: Support for popular code styles like Google, Airbnb, Standard
 - **Parallel Processing**: Leverage multi-core CPU for faster file processing with per-file caching
+- **Fix Commit Mode**: Three modes for auto-fix handling — squash / dirty / fixup
+- **Self-Update**: `linthis update` with install method detection (cargo, pip, uv, pipx)
+- **Global Data Storage**: Runtime data stored in `~/.linthis/projects/` — keeps project directory clean
 
 ## Quick Links
 

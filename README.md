@@ -13,14 +13,17 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 - 🎯 **Auto-Detection**: Automatically detect programming languages used in your project
 - 🔒 **Security Scanning (SAST)**: Built-in secrets detection + OpenGrep/Semgrep, Bandit, Gosec, Flawfinder integration
 - 📊 **Complexity Analysis**: Cyclomatic/cognitive complexity per function with threshold enforcement
-- ⚙️ **Flexible Configuration**: Support for project config, global config, and CLI parameters
-- 📦 **Plugin System**: Share and reuse configurations via Git repositories
+- ⚙️ **Flexible Configuration**: Support for project config, global config, and CLI parameters with dotted key paths
+- 📦 **Plugin System**: Share and reuse configurations via Git repositories (HTTPS with SSH auto-fallback)
 - 🎨 **Format Presets**: Support for popular code styles like Google, Airbnb, Standard
 - ⚡ **Parallel Processing**: Leverage multi-core CPU for faster file processing with per-file caching
 - 🤖 **AI Code Review**: `linthis review` analyzes diffs with AI and creates PR/MR automatically
-- 💾 **Format with Backup**: `linthis format` creates backups before formatting, supports `--undo`
-- 🔄 **Auto Re-stage**: When running in staged mode (`-s`), formatted files are automatically re-staged
+- 💾 **Backup & Undo**: `linthis backup undo` / `linthis backup redo` to restore changes, with git patch files for review
+- 🔄 **Fix Commit Mode**: Three modes for handling auto-fixes — `squash` (merge into commit), `dirty` (leave for review), `fixup` (separate commit)
 - 🔌 **Plugin Hook Bundling**: Plugins can ship custom git and agent hook scripts — auto-installed when the plugin is added
+- 🆙 **Self-Update**: `linthis update` with install method detection (cargo, pip, uv, pipx)
+- 📝 **Auto .gitignore**: Generates .gitignore when missing, blocks commits with files that should be ignored
+- 🗂️ **Global Data Storage**: Runtime data (results, backups, cache) stored in `~/.linthis/projects/` — keeps project directory clean
 
 ## Installation
 
