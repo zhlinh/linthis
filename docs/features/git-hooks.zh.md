@@ -444,8 +444,31 @@ git config --global --get core.hooksPath
 
 ---
 
+## 修复提交模式（Fix Commit Mode）
+
+控制自动格式化和 agent 修复的提交方式。按事件配置：
+
+```toml
+[hook.pre_commit]
+fix_commit_mode = "squash"    # squash | dirty | fixup
+
+[hook.pre_push]
+fix_commit_mode = "dirty"     # squash | dirty | fixup
+```
+
+或通过 CLI 设置：`linthis hook install --fix-commit-mode <mode>`
+
+| 模式 | 行为 |
+|------|------|
+| **squash** | 修复 → 创建 fixup commit → 压入原始 commit。保留 stash 快照。 |
+| **dirty** | 修复 → 留在工作区 → 阻止提交/推送。用户先审查。 |
+| **fixup** | 原始 commit 直接通过。post-commit 创建单独的 fixup commit。 |
+
+详见 [修复提交模式](./fix-commit-mode.zh.md) 完整行为矩阵。
+
 ## 参考资料
 
+- [修复提交模式](./fix-commit-mode.zh.md) — squash/dirty/fixup 完整行为矩阵
 - [AI 智能修复](./ai-fix.md) — AI provider 详情
 - [AI 编程助手集成](./agent-hooks.md) — 基于规则的 agent 集成
 - [CLI 参考](../reference/cli.md) — 完整命令参考
