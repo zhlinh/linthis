@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-04-13
+
+### Fixed
+
+- detect empty pre-push via stdin, not rev-list @{u}
+
+### Documentation
+
+- update README and feature docs with recent changes
+
 ## [0.19.1] - 2026-04-11
 
 ### Fixed
