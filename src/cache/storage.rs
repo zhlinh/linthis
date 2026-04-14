@@ -248,10 +248,44 @@ mod tests {
         assert!(cache.entries.is_empty());
     }
 
+    /// Serialize cache tests that mutate the global HOME env var.
+    static CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Guard that sets HOME to a temp dir and restores it on drop.
+    struct HomeGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        original: Option<String>,
+    }
+
+    impl HomeGuard {
+        fn new(new_home: &Path) -> Self {
+            // Recover from poisoned mutex — prior test panic shouldn't block us.
+            let lock = CACHE_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let original = std::env::var("HOME").ok();
+            std::env::set_var("HOME", new_home);
+            Self {
+                _lock: lock,
+                original,
+            }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
     #[test]
     fn test_cache_save_load() {
         let temp_dir = TempDir::new().unwrap();
         let project_root = temp_dir.path();
+        let _guard = HomeGuard::new(project_root);
 
         let mut cache = LintCache::new();
         cache
@@ -269,6 +303,7 @@ mod tests {
     fn test_cache_clear() {
         let temp_dir = TempDir::new().unwrap();
         let project_root = temp_dir.path();
+        let _guard = HomeGuard::new(project_root);
 
         let cache = LintCache::new();
         cache.save(project_root).unwrap();
