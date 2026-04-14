@@ -1209,6 +1209,23 @@ pub enum HookCommands {
         /// Sets the corresponding config value for the installed event(s).
         #[arg(long, value_name = "MODE")]
         fix_commit_mode: Option<String>,
+
+        /// Install all events (pre-commit, commit-msg, pre-push)
+        ///
+        /// Equivalent to `--event pre-commit,commit-msg,pre-push`.
+        #[arg(long)]
+        all_events: bool,
+
+        /// Install all hook types (agent plus git or git-with-agent)
+        ///
+        /// Adds `agent` plus the previously-installed hook type
+        /// (`git-with-agent` if present, otherwise `git`).
+        #[arg(long)]
+        all_types: bool,
+
+        /// Shortcut for --all-events --all-types
+        #[arg(long)]
+        all: bool,
     },
     /// Uninstall git hook
     Uninstall {
