@@ -139,9 +139,51 @@ pub(crate) fn resolve_install_types_events(
             deduplicate_hook_events(hook_events),
         ));
     }
-    let types = resolve_or_prompt_types(hook_types, false, "Installation cancelled")?;
-    let events = resolve_or_prompt_events(hook_events, false, "Installation cancelled")?;
+    let types = resolve_or_prompt_types(hook_types, true, "Installation cancelled")?;
+    let events = resolve_or_prompt_events(hook_events, true, "Installation cancelled")?;
     Ok((types, events))
+}
+
+/// Expand an event list to include all three hook events (pre-commit,
+/// commit-msg, pre-push) when `--all-events` or `--all` is passed.
+/// If the user also provided specific events, those are merged in.
+pub(crate) fn expand_all_events(existing: Vec<HookEvent>) -> Vec<HookEvent> {
+    let mut all = vec![
+        HookEvent::PreCommit,
+        HookEvent::CommitMsg,
+        HookEvent::PrePush,
+    ];
+    all.extend(existing);
+    deduplicate_hook_events(all)
+}
+
+/// Expand the type list to include `agent` plus the previously-installed
+/// shell hook type (git-with-agent if that was last used, otherwise git).
+/// Merges any explicitly-provided types.
+pub(crate) fn expand_all_types(existing: Vec<HookTool>, global: bool) -> Vec<HookTool> {
+    let scope = if global { "global" } else { "local" };
+    let project = if global {
+        String::new()
+    } else {
+        find_git_root()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default()
+    };
+
+    let has_git_with_agent = super::metadata::load_installed_hooks()
+        .hooks
+        .iter()
+        .any(|h| h.scope == scope && h.project == project && h.hook_type == "git-with-agent");
+
+    let default_shell = if has_git_with_agent {
+        HookTool::GitWithAgent
+    } else {
+        HookTool::Git
+    };
+
+    let mut types = vec![default_shell, HookTool::Agent];
+    types.extend(existing);
+    deduplicate_hook_types(types)
 }
 
 /// Dedup types and prompt interactively if empty.

@@ -28,7 +28,7 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use super::commands::HookCommands;
+use super::commands::{HookCommands, HookEvent, HookTool};
 
 // Re-exports: public API
 pub use agent::detect_agent_providers_lightweight;
@@ -60,29 +60,23 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             args,
             provider_args,
             fix_commit_mode,
-        } => {
-            if let Some(ref mode) = fix_commit_mode {
-                if let Err(code) = apply_fix_commit_mode(mode, global) {
-                    return code;
-                }
-            }
-
-            let (hook_types, hook_events) =
-                match install::resolve_install_types_events(hook_types, hook_events, yes) {
-                    Ok(r) => r,
-                    Err(code) => return code,
-                };
-            install::handle_hook_install(install::HookInstallParams {
-                hook_types,
-                hook_events,
-                force,
-                yes,
-                global,
-                provider,
-                args,
-                provider_args,
-            })
-        }
+            all_events,
+            all_types,
+            all,
+        } => dispatch_install(InstallArgs {
+            hook_types,
+            hook_events,
+            force,
+            yes,
+            global,
+            provider,
+            args,
+            provider_args,
+            fix_commit_mode,
+            all_events,
+            all_types,
+            all,
+        }),
         HookCommands::Uninstall {
             hook_types,
             hook_events,
@@ -152,6 +146,67 @@ pub fn find_git_root() -> Option<PathBuf> {
 }
 
 /// Validate and apply --fix-commit-mode to config.
+/// Bundled args for `linthis hook install` dispatch (keeps handler under the
+/// cyclomatic complexity threshold).
+struct InstallArgs {
+    hook_types: Vec<HookTool>,
+    hook_events: Vec<HookEvent>,
+    force: bool,
+    yes: bool,
+    global: bool,
+    provider: Option<String>,
+    args: Option<String>,
+    provider_args: Option<String>,
+    fix_commit_mode: Option<String>,
+    all_events: bool,
+    all_types: bool,
+    all: bool,
+}
+
+fn dispatch_install(a: InstallArgs) -> ExitCode {
+    if let Some(ref mode) = a.fix_commit_mode {
+        if let Err(code) = apply_fix_commit_mode(mode, a.global) {
+            return code;
+        }
+    }
+
+    let want_all_events = a.all || a.all_events;
+    let want_all_types = a.all || a.all_types;
+    let expanded_events = if want_all_events {
+        install::expand_all_events(a.hook_events)
+    } else {
+        a.hook_events
+    };
+    let expanded_types = if want_all_types {
+        install::expand_all_types(a.hook_types, a.global)
+    } else {
+        a.hook_types
+    };
+
+    // When --all-events, --all-types, or --all is used, we already have explicit
+    // selections from the flag, so skip the interactive prompt.
+    let skip_prompt = a.yes || want_all_events || want_all_types;
+
+    let (hook_types, hook_events) = match install::resolve_install_types_events(
+        expanded_types,
+        expanded_events,
+        skip_prompt,
+    ) {
+        Ok(r) => r,
+        Err(code) => return code,
+    };
+    install::handle_hook_install(install::HookInstallParams {
+        hook_types,
+        hook_events,
+        force: a.force,
+        yes: a.yes,
+        global: a.global,
+        provider: a.provider,
+        args: a.args,
+        provider_args: a.provider_args,
+    })
+}
+
 fn apply_fix_commit_mode(mode: &str, global: bool) -> Result<(), ExitCode> {
     let valid_modes = ["squash", "dirty", "fixup"];
     if !valid_modes.contains(&mode) {
