@@ -481,8 +481,11 @@ function M.test()
   print("=== end test ===")
 end
 
--- Restore the current file from the most recent linthis backup.
--- Useful if format-on-save ever produces unwanted changes.
+-- Restore the current file. Tries recovery sources in order:
+--   1. Neovim undo history (most recent in-memory edits)
+--   2. Neovim swap file (background edits)
+--   3. Git HEAD (last committed version)
+--   4. linthis backup (last format/fix snapshot)
 function M.restore()
   local bufnr = vim.api.nvim_get_current_buf()
   local filepath = vim.api.nvim_buf_get_name(bufnr)
@@ -492,33 +495,94 @@ function M.restore()
     return
   end
 
+  -- Source 1: Neovim's own undo history (works if buffer was edited in this session)
+  local undotree = vim.fn.undotree()
+  if undotree.seq_last and undotree.seq_last > 0 then
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("silent earlier 1f") -- jump to before any modification this session
+    end)
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local non_empty = false
+    for _, l in ipairs(lines) do
+      if l ~= "" then
+        non_empty = true
+        break
+      end
+    end
+    if non_empty then
+      if config.get().notifications then
+        vim.notify(
+          "linthis: restored from Neovim undo history (use :w to save)",
+          vim.log.levels.INFO
+        )
+      end
+      return
+    end
+  end
+
+  -- Source 2: Neovim swap file
+  local dir = vim.fn.fnamemodify(filepath, ":h")
+  local name = vim.fn.fnamemodify(filepath, ":t")
+  local swapfile = dir .. "/." .. name .. ".swp"
+  if vim.fn.filereadable(swapfile) == 1 then
+    vim.notify(
+      string.format(
+        "linthis: swap file found at %s — recover with `:recover %s`",
+        swapfile,
+        vim.fn.fnameescape(filepath)
+      ),
+      vim.log.levels.INFO
+    )
+  end
+
+  -- Source 3: Git HEAD
+  if vim.fn.executable("git") == 1 then
+    local rel = vim.fn.system({ "git", "-C", dir, "ls-files", "--full-name", filepath })
+    if vim.v.shell_error == 0 and vim.trim(rel) ~= "" then
+      local content = vim.fn.system({ "git", "-C", dir, "show", "HEAD:" .. vim.trim(rel) })
+      if vim.v.shell_error == 0 and content ~= "" then
+        local new_lines = vim.split(content, "\n", { plain = true })
+        if #new_lines > 0 and new_lines[#new_lines] == "" then
+          table.remove(new_lines, #new_lines)
+        end
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
+        if config.get().notifications then
+          vim.notify(
+            "linthis: restored from git HEAD (use :w to save)",
+            vim.log.levels.INFO
+          )
+        end
+        return
+      end
+    end
+  end
+
+  -- Source 4: linthis backup (last resort — only has post-format snapshot)
   local cmd = config.get().cmd[1]
   local args = { cmd, "backup", "undo", "last" }
   local use_plugin_args = get_use_plugin_args()
   for _, arg in ipairs(use_plugin_args) do
     table.insert(args, arg)
   end
-
   local result = vim.fn.system(args)
   local exit_code = vim.v.shell_error
-
   if exit_code ~= 0 then
     vim.notify(
-      "linthis: restore failed - " .. vim.trim(result),
+      "linthis: no recovery source worked. backup undo failed - " .. vim.trim(result),
       vim.log.levels.ERROR
     )
     return
   end
-
-  -- Reload buffer from the now-restored file.
   if vim.api.nvim_buf_is_valid(bufnr) then
     vim.api.nvim_buf_call(bufnr, function()
       vim.cmd("silent edit!")
     end)
   end
-
   if config.get().notifications then
-    vim.notify("linthis: restored from last backup", vim.log.levels.INFO)
+    vim.notify(
+      "linthis: restored from linthis backup (pre-format state)",
+      vim.log.levels.INFO
+    )
   end
 end
 
