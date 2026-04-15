@@ -623,10 +623,14 @@ fn is_placeholder_value(matched: &str) -> bool {
         }
     }
 
-    // Repeating pattern like "abcabc" or "xyzxyz"
-    if core.len() >= 6 {
-        let half = core.len() / 2;
-        if core[..half] == core[half..half * 2] {
+    // Repeating pattern like "abcabc" or "xyzxyz".
+    // Compare via the char vec rather than byte slicing — `core` may contain
+    // multi-byte chars (e.g. "<｜tool▁calls▁begin｜>"), and slicing at
+    // `core.len() / 2` would land mid-codepoint and panic.
+    let n = chars.len();
+    if n >= 6 {
+        let half = n / 2;
+        if chars[..half] == chars[half..half * 2] {
             return true;
         }
     }
@@ -689,3 +693,35 @@ fn extract_ignore_target(after_marker: &str) -> Option<String> {
 
     Some(target.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_placeholder_value;
+
+    #[test]
+    fn handles_multibyte_chars_in_repeating_pattern_check() {
+        // Regression: byte-index slicing at core.len() / 2 used to panic when
+        // the half-point fell inside a multi-byte codepoint (e.g. '▁').
+        let input = "TOKEN = \"<｜tool▁calls▁begin｜>\"";
+        // Must not panic; result is a bool either way.
+        let _ = is_placeholder_value(input);
+    }
+
+    #[test]
+    fn detects_ascii_repeating_pattern() {
+        assert!(is_placeholder_value("abcabc"));
+        assert!(is_placeholder_value("xyzxyz"));
+    }
+
+    #[test]
+    fn detects_multibyte_repeating_pattern() {
+        // Compare via chars, not bytes — two "▁▁" halves should be equal.
+        assert!(is_placeholder_value("▁▁▁▁▁▁"));
+    }
+
+    #[test]
+    fn rejects_nonrepeating_mixed_content() {
+        assert!(!is_placeholder_value("sk-9aK3p7Qz"));
+    }
+}
+
