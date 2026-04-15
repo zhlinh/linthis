@@ -148,6 +148,60 @@ linthis config migrate --backup
 | Black | `pyproject.toml[tool.black]` |
 | isort | `pyproject.toml[tool.isort]` |
 
+## 环境变量
+
+### `LINTHIS_SKIP` — 跳过指定 hook
+
+`git commit --no-verify` 会一次跳过所有 hook。`LINTHIS_SKIP` 可以只跳过某个，其余照常运行。值以逗号分隔，大小写不敏感。
+
+| 值 | 跳过的 hook |
+|----|------------|
+| `check` 或 `pc` | pre-commit + post-commit（两者配对，一起跳） |
+| `pre-commit` | 只跳 pre-commit |
+| `post-commit` | 只跳 post-commit |
+| `cmsg`、`cm` 或 `commit-msg` | commit-msg |
+| `pp` 或 `pre-push` | pre-push |
+| `all` | 全部 hook |
+
+```bash
+# 只跳过 commit-msg 正则校验，lint 仍然跑
+LINTHIS_SKIP=cm git commit -m "WIP: 临时消息"
+
+# 跳过 pre-commit 的 lint/security/complexity 以及 post-commit，但保留 commit-msg
+LINTHIS_SKIP=check git commit -m "feat: 快速保存"
+
+# 同时跳过多个
+LINTHIS_SKIP=cm,pp git push
+```
+
+未知 token 会报错且不跳过 —— 避免"以为跳了但其实没跳"。
+
+### `LINTHIS_SKIP_CHECKS` — 跳过具体的 check
+
+用于在 hook（pre-commit / pre-push）内部跳过具体的 check。支持全名，也支持**不少于 3 个字符**的前缀（大小写不敏感）。
+
+| 值 | 效果 |
+|----|-----|
+| `lin` 或 `lint` | 跳过 lint 检查 |
+| `sec` 或 `security` | 跳过 security (SAST) 检查 |
+| `com` 或 `complexity` | 跳过 complexity 检查 |
+
+```bash
+# 跳过较慢的 complexity 检查
+LINTHIS_SKIP_CHECKS=com git commit -m "fix: bug"
+
+# 只跑 security（跳过 lint 和 complexity）
+LINTHIS_SKIP_CHECKS=lin,com git commit -m "fix: bug"
+```
+
+少于 3 字符或无法匹配的 token 会打印警告并被忽略，其余依旧生效。
+
+两个变量互相正交，可以同时用：
+
+```bash
+LINTHIS_SKIP=cm LINTHIS_SKIP_CHECKS=com git commit -m "WIP"
+```
+
 ## 下一步
 
 - [插件系统](../features/plugins.md) - 共享配置

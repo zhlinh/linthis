@@ -148,6 +148,60 @@ linthis config migrate --backup
 | Black | `pyproject.toml[tool.black]` |
 | isort | `pyproject.toml[tool.isort]` |
 
+## Environment Variables
+
+### `LINTHIS_SKIP` — bypass a specific hook
+
+Git's `--no-verify` skips every hook at once. `LINTHIS_SKIP` lets you bypass only one while keeping the others active. Values are comma-separated and case-insensitive.
+
+| Token | Hooks skipped |
+|-------|---------------|
+| `check` or `pc` | pre-commit + post-commit (they always run as a pair) |
+| `pre-commit` | only pre-commit |
+| `post-commit` | only post-commit |
+| `cmsg`, `cm`, or `commit-msg` | commit-msg |
+| `pp` or `pre-push` | pre-push |
+| `all` | every hook |
+
+```bash
+# Skip commit-msg regex check but keep lint running
+LINTHIS_SKIP=cm git commit -m "WIP: non-conventional message"
+
+# Skip lint + complexity + security (pre-commit) but keep commit-msg
+LINTHIS_SKIP=check git commit -m "feat: quick save"
+
+# Combine multiple
+LINTHIS_SKIP=cm,pp git push
+```
+
+Unknown tokens print an error and are not skipped — fail-safe by design.
+
+### `LINTHIS_SKIP_CHECKS` — filter individual checks
+
+Skips specific checks inside a hook (pre-commit / pre-push). Accepts full names or any **≥ 3-character prefix** (case-insensitive).
+
+| Token | Effect |
+|-------|--------|
+| `lin` or `lint` | skip the lint check |
+| `sec` or `security` | skip the security (SAST) check |
+| `com` or `complexity` | skip the complexity check |
+
+```bash
+# Skip slow complexity check
+LINTHIS_SKIP_CHECKS=com git commit -m "fix: bug"
+
+# Only run security (skip lint and complexity)
+LINTHIS_SKIP_CHECKS=lin,com git commit -m "fix: bug"
+```
+
+Shorter-than-3-char or unknown tokens print a warning and are ignored; the rest still apply.
+
+Both variables are orthogonal and can be combined:
+
+```bash
+LINTHIS_SKIP=cm LINTHIS_SKIP_CHECKS=com git commit -m "WIP"
+```
+
 ## Next Steps
 
 - [Plugin System](../features/plugins.md) - Share configurations

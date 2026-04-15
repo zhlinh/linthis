@@ -115,6 +115,30 @@ linthis init --force
 linthis hook install --force
 ```
 
+### Selectively Skipping Hooks
+
+`git commit --no-verify` kills every hook at once. Use these env vars to bypass only what you need:
+
+```bash
+# Skip a specific hook. Supported tokens (comma-separated, case-insensitive):
+#   check | pc        →  pre-commit + post-commit (the pair)
+#   pre-commit        →  only pre-commit
+#   post-commit       →  only post-commit
+#   cmsg | cm         →  commit-msg
+#   pp                →  pre-push
+#   all               →  everything
+LINTHIS_SKIP=cm       git commit -m "temp: skip commit-msg regex"
+LINTHIS_SKIP=pc       git commit -m "WIP: skip lint/security/complexity"
+LINTHIS_SKIP=cm,pc    git commit -m "skip both"
+
+# Skip specific checks inside pre-commit (prefix of ≥3 chars works):
+#   lint | lin        →  skip lint
+#   security | sec    →  skip security/SAST
+#   complexity | com  →  skip complexity
+LINTHIS_SKIP_CHECKS=com  git commit -m "fix: skip slow complexity"
+LINTHIS_SKIP_CHECKS=lin,com  git commit -m "fix: only run security"
+```
+
 ### Basic Usage
 
 ```bash

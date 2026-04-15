@@ -54,6 +54,12 @@ pub(crate) fn handle_hook_run(
     _global: bool,
     hook_args: &[String],
 ) -> i32 {
+    // LINTHIS_SKIP=<event|alias> lets users bypass a specific hook without
+    // using git --no-verify (which kills every hook at once).
+    if super::skip::should_skip(event) {
+        return 0;
+    }
+
     let (provider_name, merged_pa) = if let Some(raw) = raw_provider {
         let (name, model) = parse_provider_with_model(raw);
         (
