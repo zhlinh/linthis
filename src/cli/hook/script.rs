@@ -122,18 +122,23 @@ fn shell_agent_invoke_block(
     // Thresholds: 0 disables the cap. Default picked to protect against
     // runaway sessions on huge error sets while still covering the common
     // case (a handful to a few dozen issues).
+    // Important: parse `linthis report count` output without touching $@.
+    // `set -- $counts` would clobber positional params, and the commit-msg
+    // agent command relies on $1 to locate $_MSG_FILE — losing that made
+    // Claude write its fix to a file literally named "0". Use parameter
+    // expansion instead, which is POSIX-portable and side-effect-free.
     format!(
         "{i}_AGENT_RAN=0\n\
          {i}_AGENT_MAX=\"${{LINTHIS_AGENT_MAX_AUTO_FIX:-100}}\"\n\
          {i}_AGENT_COUNTS=$(linthis report count 2>/dev/null || echo \"0 0 0 0\")\n\
-         {i}set -- $_AGENT_COUNTS\n\
-         {i}_AGENT_ERR=${{1:-0}}\n\
-         {i}_AGENT_WARN=${{2:-0}}\n\
-         {i}_AGENT_FILES=${{4:-0}}\n\
+         {i}_AGENT_ERR=${{_AGENT_COUNTS%% *}}\n\
+         {i}_AGENT_REM=${{_AGENT_COUNTS#* }}\n\
+         {i}_AGENT_WARN=${{_AGENT_REM%% *}}\n\
+         {i}_AGENT_FILES=${{_AGENT_COUNTS##* }}\n\
          {i}_AGENT_TOTAL=$((_AGENT_ERR + _AGENT_WARN))\n\
          {i}if [ \"$_AGENT_MAX\" != \"0\" ] && [ \"$_AGENT_TOTAL\" -gt \"$_AGENT_MAX\" ]; then\n\
          {i}  echo \"[linthis] ⚠ Too many issues ($_AGENT_TOTAL in $_AGENT_FILES files) — auto-fix skipped to avoid long blocking run\" >&2\n\
-         {i}  echo \"[linthis]   Fix interactively to see streaming progress: linthis fix --ai --provider {provider_cli}\" >&2\n\
+         {i}  echo \"[linthis]   Fix interactively (live progress): linthis fix --ai --provider {provider_cli}\" >&2\n\
          {i}  echo \"[linthis]   Raise the threshold: LINTHIS_AGENT_MAX_AUTO_FIX=$((_AGENT_TOTAL + 10)) git ...\" >&2\n\
          {i}  echo \"[linthis]   Disable the cap:    LINTHIS_AGENT_MAX_AUTO_FIX=0 git ...\" >&2\n\
          {i}else\n\
@@ -341,13 +346,16 @@ pub(crate) fn agent_fix_headless_cmd(
         .filter(|a| !a.is_empty())
         .map(|a| format!(" {a}"))
         .unwrap_or_default();
-    // --verbose / equivalent flags stream per-step progress (tool calls, file
-    // edits) to stderr so users see what's happening during large fix runs.
-    // Previously `-p` alone buffered until the final response, which was
-    // indistinguishable from a hang when fixing 100+ issues.
+    // Streaming strategy per provider:
+    //   claude / codebuddy: `-p` buffers text output; use `--output-format
+    //     stream-json --verbose` and pipe through `linthis agent-stream`
+    //     to pretty-print events (text, tool_use) as they arrive.
+    //   codex / cursor / droid: already stream by default.
+    //   gemini / auggie / openclaw: no official streaming flag known — kept
+    //     as-is; output appears when the call completes.
     match provider {
         AgentFixProvider::Claude => format!(
-            "claude -p{extra} --verbose --dangerously-skip-permissions '{}'",
+            "claude -p{extra} --verbose --output-format stream-json --dangerously-skip-permissions '{}' | linthis agent-stream",
             escaped
         ),
         AgentFixProvider::Codex => {
@@ -360,7 +368,7 @@ pub(crate) fn agent_fix_headless_cmd(
         AgentFixProvider::Droid => format!("droid exec{extra} --auto high '{}'", escaped),
         AgentFixProvider::Auggie => format!("auggie{extra} --print '{}'", escaped),
         AgentFixProvider::Codebuddy => format!(
-            "codebuddy -p{extra} --verbose --dangerously-skip-permissions '{}'",
+            "codebuddy -p{extra} --verbose --output-format stream-json --dangerously-skip-permissions '{}' | linthis agent-stream",
             escaped
         ),
         AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message '{}'", escaped),
@@ -415,10 +423,13 @@ pub(crate) fn agent_fix_prompt_for_event(_hook_event: &HookEvent) -> String {
 /// Shell snippet printed after a successful agent commit-msg fix.
 /// Shows the fixed message in green so it's visible in the terminal.
 /// `indent` is the per-line prefix (spaces) matching the surrounding if-block depth.
+///
+/// Reads `$_REAL_MSG` (the actual `.git/COMMIT_EDITMSG`), not `$_MSG_FILE`,
+/// because the latter points at a temp file the agent_cmd already deleted.
 pub(crate) fn agent_fix_show_fixed_cmsg(indent: &str) -> String {
     format!(
-        "{i}if [ $LINTHIS_EXIT -eq 0 ] && [ -n \"$_MSG_FILE\" ]; then\n\
-         {i}  printf '\\033[0;32m[linthis] ✓ New message: %s\\033[0m\\n' \"$(cat \"$_MSG_FILE\")\" >&2\n\
+        "{i}if [ $LINTHIS_EXIT -eq 0 ] && [ -n \"$_REAL_MSG\" ] && [ -f \"$_REAL_MSG\" ]; then\n\
+         {i}  printf '\\033[0;32m[linthis] ✓ New message: %s\\033[0m\\n' \"$(cat \"$_REAL_MSG\")\" >&2\n\
          {i}fi\n",
         i = indent,
     )
@@ -430,15 +441,24 @@ pub(crate) fn agent_fix_headless_cmd_commit_msg(
     provider: &AgentFixProvider,
     provider_args: Option<&str>,
 ) -> String {
+    // We can't have the agent write directly to .git/COMMIT_EDITMSG: Claude
+    // Code (and similar tools) flag .git/ as a sensitive path and refuse the
+    // write even with --dangerously-skip-permissions. Workaround: stage the
+    // current message into a temp file, point the agent at the temp file,
+    // and copy the temp file back to .git/COMMIT_EDITMSG when the agent
+    // returns. The agent never touches .git/ directly.
     let prompt = "Commit message validation failed (not in Conventional Commits format). \
-        Fix the commit message file at $_MSG_FILE: \
-        (1) run 'git diff --cached --stat' to understand what actually changed, \
-        (2) run 'git log -n 5 --oneline' to check recent commit style AND the language used \
+        Fix the commit message in $_MSG_FILE (this is a TEMP FILE outside .git/ — \
+        do NOT try to write to .git/COMMIT_EDITMSG, that path is blocked; \
+        write to $_MSG_FILE only): \
+        (1) read $_MSG_FILE for the current message, \
+        (2) run 'git diff --cached --stat' to understand what actually changed, \
+        (3) run 'git log -n 5 --oneline' to check recent commit style AND the language used \
         (Chinese or English) — match that language for the description, \
-        (3) choose the correct type (feat/fix/refactor/perf/docs/style/test/build/ci/chore/revert) \
+        (4) choose the correct type (feat/fix/refactor/perf/docs/style/test/build/ci/chore/revert) \
         based on the diff, \
-        (4) rewrite to: type(scope)?: description — lowercase type, ≤72 chars, no trailing period. \
-        Overwrite $_MSG_FILE directly without asking. \
+        (5) rewrite to: type(scope)?: description — lowercase type, ≤72 chars, no trailing period. \
+        Overwrite $_MSG_FILE in place. \
         Verify with 'linthis cmsg $_MSG_FILE' until it passes.";
     // Escape backslashes and double quotes for use in double-quoted shell string
     let escaped = prompt.replace('\\', "\\\\").replace('"', "\\\"");
@@ -448,7 +468,7 @@ pub(crate) fn agent_fix_headless_cmd_commit_msg(
         .unwrap_or_default();
     let bin_cmd = match provider {
         AgentFixProvider::Claude => format!(
-            "claude -p{extra} --verbose --dangerously-skip-permissions \"{}\"",
+            "claude -p{extra} --verbose --output-format stream-json --dangerously-skip-permissions \"{}\" | linthis agent-stream",
             escaped
         ),
         AgentFixProvider::Codex => {
@@ -461,13 +481,25 @@ pub(crate) fn agent_fix_headless_cmd_commit_msg(
         AgentFixProvider::Droid => format!("droid exec{extra} --auto high \"{}\"", escaped),
         AgentFixProvider::Auggie => format!("auggie{extra} --print \"{}\"", escaped),
         AgentFixProvider::Codebuddy => format!(
-            "codebuddy -p{extra} --verbose --dangerously-skip-permissions \"{}\"",
+            "codebuddy -p{extra} --verbose --output-format stream-json --dangerously-skip-permissions \"{}\" | linthis agent-stream",
             escaped
         ),
         AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message \"{}\"", escaped),
     };
-    // Prepend variable capture so $_MSG_FILE is available in the double-quoted prompt
-    format!("_MSG_FILE=\"$1\"; {}", bin_cmd)
+    // Capture the real .git/COMMIT_EDITMSG path in $_REAL_MSG, point
+    // $_MSG_FILE at a writable temp file (the agent can't touch .git/),
+    // and copy back when the agent finishes if it actually changed anything.
+    format!(
+        "_REAL_MSG=\"$1\"; \
+         _MSG_FILE=$(mktemp -t linthis-cmsg.XXXXXX 2>/dev/null || echo \"/tmp/linthis-cmsg.$$\"); \
+         cp \"$_REAL_MSG\" \"$_MSG_FILE\" 2>/dev/null; \
+         {bin_cmd}; \
+         if [ -s \"$_MSG_FILE\" ] && ! cmp -s \"$_REAL_MSG\" \"$_MSG_FILE\" 2>/dev/null; then \
+           cp \"$_MSG_FILE\" \"$_REAL_MSG\"; \
+         fi; \
+         rm -f \"$_MSG_FILE\"",
+        bin_cmd = bin_cmd
+    )
 }
 
 /// Error message for agent fix echo based on hook event type.
@@ -1240,24 +1272,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_headless_includes_verbose_for_streaming() {
-        // --verbose makes `claude -p` stream tool_use / assistant events,
-        // which is the whole point of the fix-visibility change.
+    fn claude_headless_pipes_through_agent_stream() {
+        // `claude -p` alone buffers output; real streaming requires
+        // --output-format stream-json piped through `linthis agent-stream`
+        // for human-readable rendering.
         let cmd = agent_fix_headless_cmd(&AgentFixProvider::Claude, "hi", None);
         assert!(cmd.contains("--verbose"), "got: {cmd}");
-        assert!(cmd.contains("-p"));
+        assert!(cmd.contains("--output-format stream-json"), "got: {cmd}");
+        assert!(cmd.contains("linthis agent-stream"), "got: {cmd}");
+        assert!(cmd.contains(" | "), "must pipe; got: {cmd}");
     }
 
     #[test]
-    fn codebuddy_headless_includes_verbose() {
+    fn codebuddy_headless_pipes_through_agent_stream() {
         let cmd = agent_fix_headless_cmd(&AgentFixProvider::Codebuddy, "hi", None);
-        assert!(cmd.contains("--verbose"), "got: {cmd}");
+        assert!(cmd.contains("--output-format stream-json"), "got: {cmd}");
+        assert!(cmd.contains("linthis agent-stream"), "got: {cmd}");
     }
 
     #[test]
-    fn commit_msg_claude_includes_verbose() {
+    fn commit_msg_claude_pipes_through_agent_stream() {
         let cmd = agent_fix_headless_cmd_commit_msg(&AgentFixProvider::Claude, None);
-        assert!(cmd.contains("--verbose"), "got: {cmd}");
+        assert!(cmd.contains("--output-format stream-json"), "got: {cmd}");
+        assert!(cmd.contains("linthis agent-stream"), "got: {cmd}");
     }
 
     #[test]
@@ -1265,7 +1302,7 @@ mod tests {
         let block = build_agent_fix_block(&AgentFixProvider::Claude, &HookEvent::PreCommit);
         // Threshold guard present and references the env var
         assert!(block.contains("LINTHIS_AGENT_MAX_AUTO_FIX"), "got: {block}");
-        // Streaming header present
+        // Streaming banner restored now that we actually stream via agent-stream.
         assert!(block.contains("streaming"), "got: {block}");
         // Spinner removed around the agent invocation — start_timer and
         // stop_timer must no longer wrap the agent call in this block.
@@ -1284,5 +1321,69 @@ mod tests {
         // just re-print the same failure.
         assert!(block.contains("_AGENT_RAN"), "got: {block}");
         assert!(block.contains("Re-verifying"), "got: {block}");
+    }
+
+    #[test]
+    fn threshold_parser_does_not_clobber_positional_params() {
+        // Regression: `set -- $counts` used to overwrite $@, which broke the
+        // commit-msg flow because its agent command depends on $1 holding
+        // the commit-message file path. Claude ended up writing its fix
+        // to a file literally named "0" (the zero-error count).
+        let block = build_agent_fix_block(&AgentFixProvider::Claude, &HookEvent::PreCommit);
+        assert!(
+            !block.contains("set -- $_AGENT_COUNTS"),
+            "parser must not clobber positional params; got: {block}"
+        );
+        // Positive: uses parameter expansion (%%, ##, #) to split the count string.
+        assert!(block.contains("_AGENT_ERR=${_AGENT_COUNTS%% *}"), "got: {block}");
+        assert!(block.contains("_AGENT_FILES=${_AGENT_COUNTS##* }"), "got: {block}");
+    }
+
+    #[test]
+    fn commit_msg_block_preserves_msg_file_through_agent_fix() {
+        // The cmsg agent command must capture $1 (the real .git/COMMIT_EDITMSG
+        // path) before anything else — otherwise the threshold guard's
+        // command substitution or $@-mutating shell idioms would clobber it.
+        let agent_cmd = agent_fix_headless_cmd_commit_msg(&AgentFixProvider::Claude, None);
+        assert!(
+            agent_cmd.starts_with("_REAL_MSG=\"$1\";"),
+            "cmsg agent command must capture $1 first; got: {agent_cmd}"
+        );
+        // And the outer fix block must not `set --` or otherwise reassign $@.
+        let outer = build_agent_fix_block(&AgentFixProvider::Claude, &HookEvent::CommitMsg);
+        assert!(
+            !outer.contains("set --"),
+            "no positional-param mutation allowed around cmsg agent; got: {outer}"
+        );
+    }
+
+    #[test]
+    fn commit_msg_uses_temp_file_to_bypass_dotgit_block() {
+        // Claude (and similar tools) refuse writes to .git/ even with
+        // --dangerously-skip-permissions. Workaround: agent edits a temp
+        // file, the shell copies it back to $_REAL_MSG. Verify that
+        // structure is in place so a future refactor can't quietly break it.
+        let cmd = agent_fix_headless_cmd_commit_msg(&AgentFixProvider::Claude, None);
+
+        // Temp file allocation
+        assert!(cmd.contains("mktemp"), "must allocate temp file; got: {cmd}");
+        // Seed temp with current message so the agent can read it
+        assert!(
+            cmd.contains("cp \"$_REAL_MSG\" \"$_MSG_FILE\""),
+            "must seed temp file with current message; got: {cmd}"
+        );
+        // Copy-back conditional on actual change
+        assert!(
+            cmd.contains("cp \"$_MSG_FILE\" \"$_REAL_MSG\""),
+            "must copy fixed message back to .git/; got: {cmd}"
+        );
+        assert!(cmd.contains("cmp -s"), "must check for changes; got: {cmd}");
+        // Cleanup
+        assert!(cmd.contains("rm -f \"$_MSG_FILE\""), "must clean temp; got: {cmd}");
+        // Prompt warns the agent off .git/
+        assert!(
+            cmd.contains("TEMP FILE outside .git/"),
+            "prompt must steer agent away from .git/; got: {cmd}"
+        );
     }
 }

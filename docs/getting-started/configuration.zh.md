@@ -219,7 +219,9 @@ LINTHIS_AGENT_MAX_AUTO_FIX=500 git commit -m "..."
 LINTHIS_AGENT_MAX_AUTO_FIX=0 git commit -m "..."
 ```
 
-当 hook 判定调 agent 时，agent 的输出（tool calls、文件编辑等）会直接流式打到终端 —— 不再是只有 spinner 的"假死"。随时 Ctrl-C 取消。
+当 hook 判定调 agent 时，agent 的输出会直接流式打到终端 —— 不再是只有 spinner 的"假死"。随时 Ctrl-C 取消。
+
+对 Claude Code 和 CodeBuddy，`linthis` 会用 `--output-format stream-json` 启动它们，然后把事件流通过管道喂给 `linthis agent-stream`，逐行把每个 assistant 消息、工具调用（`Edit /path/to/file`、`Bash cargo check` 等）渲染成人类可读的输出。其他 provider（`codex exec`、`cursor-agent chat`、`droid exec`）本身就是流式的。
 
 ## 下一步
 

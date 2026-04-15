@@ -124,6 +124,7 @@ pub mod cli {
     #[path = "commands.rs"]
     pub mod commands;
 }
+pub mod agent_stream;
 pub mod ai;
 pub mod complexity;
 pub mod fixers;

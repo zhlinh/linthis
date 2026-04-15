@@ -753,6 +753,16 @@ pub enum Commands {
         #[command(subcommand)]
         action: ReportCommands,
     },
+    /// Pretty-print an AI agent's stream-json output as it arrives.
+    ///
+    /// Reads newline-delimited JSON events from stdin (as emitted by
+    /// `claude -p --verbose --output-format stream-json`) and writes
+    /// human-readable text events to stdout in real time. Used by the
+    /// git-with-agent hook to give live progress visibility during fixes
+    /// instead of a spinner that hides 100s of silent output.
+    ///
+    /// Non-JSON lines pass through unchanged so provider errors remain visible.
+    AgentStream,
     /// Validate commit message format (Conventional Commits)
     ///
     /// Accepts either a path to the commit message file (as used by git's
