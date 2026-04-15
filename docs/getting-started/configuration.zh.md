@@ -202,6 +202,25 @@ LINTHIS_SKIP_CHECKS=lin,com git commit -m "fix: bug"
 LINTHIS_SKIP=cm LINTHIS_SKIP_CHECKS=com git commit -m "WIP"
 ```
 
+### `LINTHIS_AGENT_MAX_AUTO_FIX` — 限制大规模 auto-fix
+
+`git-with-agent` 类型的 hook 在 lint 失败时会调 AI agent（Claude / Codex / Gemini ...）自动修复。但当错误有成百上千个时，调用会阻塞几分钟并且看不到进度。
+
+`LINTHIS_AGENT_MAX_AUTO_FIX` 给 `errors + warnings` 设置上限 —— 超过阈值则跳过 auto-fix，commit 快速失败并提示用交互式修复（agent 输出会实时流式打印）：
+
+```bash
+# 默认：errors+warnings > 100 时跳过 auto-fix
+git commit -m "..."
+
+# 临时提高阈值
+LINTHIS_AGENT_MAX_AUTO_FIX=500 git commit -m "..."
+
+# 完全关闭限制（不推荐 —— commit 可能长时间卡住）
+LINTHIS_AGENT_MAX_AUTO_FIX=0 git commit -m "..."
+```
+
+当 hook 判定调 agent 时，agent 的输出（tool calls、文件编辑等）会直接流式打到终端 —— 不再是只有 spinner 的"假死"。随时 Ctrl-C 取消。
+
 ## 下一步
 
 - [插件系统](../features/plugins.md) - 共享配置

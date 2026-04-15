@@ -41,6 +41,7 @@ pub fn handle_report_command(action: ReportCommands) -> ExitCode {
             _ => handle_show_report(&source, limit, compact, &severity, &format),
         },
         ReportCommands::Stats { source, format } => handle_stats_report(&source, &format),
+        ReportCommands::Count { source } => handle_count_report(&source),
         ReportCommands::Trends { count, format } => handle_trends_report(count, &format),
         ReportCommands::Consistency { source, format } => {
             handle_consistency_report(&source, &format)
@@ -408,6 +409,31 @@ fn handle_stats_report(source: &str, format: &str) -> ExitCode {
             println!("{}", stats.format_human());
         }
     }
+
+    ExitCode::SUCCESS
+}
+
+/// Print issue counts on a single whitespace-separated line:
+/// `<errors> <warnings> <info> <files_with_issues>`
+/// Shell-friendly format for `read` in hook scripts (no jq needed).
+/// Returns exit 0 with "0 0 0 0" if no results found (fail-safe default).
+fn handle_count_report(source: &str) -> ExitCode {
+    let result = match load_result_from_source(source) {
+        Some(r) => r,
+        None => {
+            println!("0 0 0 0");
+            return ExitCode::SUCCESS;
+        }
+    };
+
+    let stats = ReportStatistics::from_run_result(&result);
+    println!(
+        "{} {} {} {}",
+        stats.severity_counts.errors,
+        stats.severity_counts.warnings,
+        stats.severity_counts.info,
+        stats.summary.files_with_issues,
+    );
 
     ExitCode::SUCCESS
 }

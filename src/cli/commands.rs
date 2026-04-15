@@ -1590,6 +1590,19 @@ pub enum ReportCommands {
         #[arg(short, long, default_value = "human")]
         format: String,
     },
+    /// Print issue counts on a single line (for shell consumption)
+    ///
+    /// Emits: <errors> <warnings> <info> <files_with_issues>
+    /// Used by git hooks to decide whether auto-fix is feasible.
+    ///
+    /// Example usage:
+    ///   linthis report count
+    ///   # → 42 5 0 8
+    Count {
+        /// Source of lint results: "last" (default) or a file path
+        #[arg(default_value = "last")]
+        source: String,
+    },
     /// Analyze code quality trends over time
     Trends {
         /// Number of historical runs to analyze (default: 10)

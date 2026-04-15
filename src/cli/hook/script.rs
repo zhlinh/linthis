@@ -101,6 +101,58 @@ pub(crate) fn agent_fix_cmd_for_event(
     }
 }
 
+/// Shell snippet that gates an agent invocation behind the
+/// `LINTHIS_AGENT_MAX_AUTO_FIX` threshold, prints a streaming header +
+/// elapsed-time footer, and lets the agent's output flow straight to
+/// stderr (no spinner — the spinner's `\033[1A\r\033[K` overwrites would
+/// clobber the agent's per-tool-call output).
+///
+/// Exports `_AGENT_RAN=1` iff the agent actually ran (not skipped by
+/// threshold), so callers can decide whether to re-verify.
+///
+/// - `indent` is the per-line prefix (spaces) matching the surrounding
+///   if-block depth; pass `"     "` for two-nested, `"   "` for one.
+/// - `error_msg` is the short verb used in the header ("Fix errors", etc.).
+fn shell_agent_invoke_block(
+    provider: &AgentFixProvider,
+    agent_cmd: &str,
+    error_msg: &str,
+    indent: &str,
+) -> String {
+    // Thresholds: 0 disables the cap. Default picked to protect against
+    // runaway sessions on huge error sets while still covering the common
+    // case (a handful to a few dozen issues).
+    format!(
+        "{i}_AGENT_RAN=0\n\
+         {i}_AGENT_MAX=\"${{LINTHIS_AGENT_MAX_AUTO_FIX:-100}}\"\n\
+         {i}_AGENT_COUNTS=$(linthis report count 2>/dev/null || echo \"0 0 0 0\")\n\
+         {i}set -- $_AGENT_COUNTS\n\
+         {i}_AGENT_ERR=${{1:-0}}\n\
+         {i}_AGENT_WARN=${{2:-0}}\n\
+         {i}_AGENT_FILES=${{4:-0}}\n\
+         {i}_AGENT_TOTAL=$((_AGENT_ERR + _AGENT_WARN))\n\
+         {i}if [ \"$_AGENT_MAX\" != \"0\" ] && [ \"$_AGENT_TOTAL\" -gt \"$_AGENT_MAX\" ]; then\n\
+         {i}  echo \"[linthis] ⚠ Too many issues ($_AGENT_TOTAL in $_AGENT_FILES files) — auto-fix skipped to avoid long blocking run\" >&2\n\
+         {i}  echo \"[linthis]   Fix interactively to see streaming progress: linthis fix --ai --provider {provider_cli}\" >&2\n\
+         {i}  echo \"[linthis]   Raise the threshold: LINTHIS_AGENT_MAX_AUTO_FIX=$((_AGENT_TOTAL + 10)) git ...\" >&2\n\
+         {i}  echo \"[linthis]   Disable the cap:    LINTHIS_AGENT_MAX_AUTO_FIX=0 git ...\" >&2\n\
+         {i}else\n\
+         {i}  echo \"[linthis] {error_msg}. Found $_AGENT_TOTAL issues in $_AGENT_FILES files — invoking {provider}...\" >&2\n\
+         {i}  echo \"[linthis] ─── {provider} output (streaming; Ctrl-C to cancel) ───\" >&2\n\
+         {i}  _AGENT_START=$(date +%s)\n\
+         {i}  {agent}\n\
+         {i}  _AGENT_ELAPSED=$(($(date +%s) - _AGENT_START))\n\
+         {i}  echo \"[linthis] ─── {provider} done in ${{_AGENT_ELAPSED}}s ───\" >&2\n\
+         {i}  _AGENT_RAN=1\n\
+         {i}fi\n",
+        i = indent,
+        provider = provider,
+        provider_cli = provider.as_str(),
+        agent = agent_cmd,
+        error_msg = error_msg,
+    )
+}
+
 /// Build the shell fix block that invokes an agent on lint failure.
 pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
     let agent_cmd = agent_fix_cmd_for_event(provider, hook_event);
@@ -111,24 +163,22 @@ pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &Ho
     } else {
         String::new()
     };
+    let agent_block = shell_agent_invoke_block(provider, &agent_cmd, error_msg, "     ");
     format!(
         "  if [ $LINTHIS_EXIT -ne 0 ]; then\n\
          \x20\x20\x20 {agent_check}\
          \x20\x20\x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
-         \x20\x20\x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
-         \x20\x20\x20\x20\x20 {agent}\n\
-         \x20\x20\x20\x20\x20 stop_timer\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-         \x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
-         \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
+         {agent_block}\
+         \x20\x20\x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
+         \x20\x20\x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
+         \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20 fi\n\
          {new_msg_print}\
          \x20 fi\n",
-        provider = provider,
-        agent = agent_cmd,
+        agent_block = agent_block,
         agent_check = agent_check,
-        error_msg = error_msg,
         new_msg_print = new_msg_print,
     )
 }
@@ -291,9 +341,13 @@ pub(crate) fn agent_fix_headless_cmd(
         .filter(|a| !a.is_empty())
         .map(|a| format!(" {a}"))
         .unwrap_or_default();
+    // --verbose / equivalent flags stream per-step progress (tool calls, file
+    // edits) to stderr so users see what's happening during large fix runs.
+    // Previously `-p` alone buffered until the final response, which was
+    // indistinguishable from a hang when fixing 100+ issues.
     match provider {
         AgentFixProvider::Claude => format!(
-            "claude -p{extra} --dangerously-skip-permissions '{}'",
+            "claude -p{extra} --verbose --dangerously-skip-permissions '{}'",
             escaped
         ),
         AgentFixProvider::Codex => {
@@ -306,7 +360,7 @@ pub(crate) fn agent_fix_headless_cmd(
         AgentFixProvider::Droid => format!("droid exec{extra} --auto high '{}'", escaped),
         AgentFixProvider::Auggie => format!("auggie{extra} --print '{}'", escaped),
         AgentFixProvider::Codebuddy => format!(
-            "codebuddy -p{extra} --dangerously-skip-permissions '{}'",
+            "codebuddy -p{extra} --verbose --dangerously-skip-permissions '{}'",
             escaped
         ),
         AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message '{}'", escaped),
@@ -394,7 +448,7 @@ pub(crate) fn agent_fix_headless_cmd_commit_msg(
         .unwrap_or_default();
     let bin_cmd = match provider {
         AgentFixProvider::Claude => format!(
-            "claude -p{extra} --dangerously-skip-permissions \"{}\"",
+            "claude -p{extra} --verbose --dangerously-skip-permissions \"{}\"",
             escaped
         ),
         AgentFixProvider::Codex => {
@@ -407,7 +461,7 @@ pub(crate) fn agent_fix_headless_cmd_commit_msg(
         AgentFixProvider::Droid => format!("droid exec{extra} --auto high \"{}\"", escaped),
         AgentFixProvider::Auggie => format!("auggie{extra} --print \"{}\"", escaped),
         AgentFixProvider::Codebuddy => format!(
-            "codebuddy -p{extra} --dangerously-skip-permissions \"{}\"",
+            "codebuddy -p{extra} --verbose --dangerously-skip-permissions \"{}\"",
             escaped
         ),
         AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message \"{}\"", escaped),
@@ -622,33 +676,31 @@ fn shell_worktree_agent_fix(
     error_msg: &str,
 ) -> String {
     let agent_check = shell_agent_availability_check(fix_provider);
+    let agent_block = shell_agent_invoke_block(fix_provider, agent_cmd, error_msg, "   ");
     format!(
         "\x20 # Check if agent provider is available before attempting fix\n\
          \x20 {agent_check}\
          \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
-         \x20\x20\x20 echo \"[linthis] {error_msg}. Invoking {provider} to fix...\" >&2\n\
          \x20\x20\x20 # Backup staged files (safety net for linthis backup undo hook)\n\
          \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
          \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | tr '\\n' '\\0' | xargs -0 {linthis} backup create -d \"hook-agent-fix\" 2>/dev/null\n\
          \x20\x20\x20 fi\n\
          \x20\x20\x20 # Agent fixes directly in main working tree (backup provides safety net)\n\
-         \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
-         \x20\x20\x20 {agent}\n\
-         \x20\x20\x20 stop_timer\n\
-         \x20\x20\x20 # Re-stage files modified by agent\n\
-         \x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         {agent_block}\
+         \x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
+         \x20\x20\x20\x20\x20 # Re-stage files modified by agent\n\
+         \x20\x20\x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20\x20\x20 # Re-verify after agent fix\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+         \x20\x20\x20\x20\x20 $LINTHIS_CMD\n\
+         \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20\x20\x20 fi\n\
-         \x20\x20\x20 # Re-verify after agent fix\n\
-         \x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-         \x20\x20\x20 $LINTHIS_CMD\n\
-         \x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20 fi\n",
         agent_check = agent_check,
+        agent_block = agent_block,
         linthis = linthis_cmd,
-        provider = fix_provider,
-        agent = agent_cmd,
-        error_msg = error_msg,
     )
 }
 
@@ -1180,5 +1232,57 @@ pub(crate) fn parse_agent_fix_provider_name(name: &str) -> Option<AgentFixProvid
         "codebuddy" => Some(AgentFixProvider::Codebuddy),
         "openclaw" => Some(AgentFixProvider::Openclaw),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_headless_includes_verbose_for_streaming() {
+        // --verbose makes `claude -p` stream tool_use / assistant events,
+        // which is the whole point of the fix-visibility change.
+        let cmd = agent_fix_headless_cmd(&AgentFixProvider::Claude, "hi", None);
+        assert!(cmd.contains("--verbose"), "got: {cmd}");
+        assert!(cmd.contains("-p"));
+    }
+
+    #[test]
+    fn codebuddy_headless_includes_verbose() {
+        let cmd = agent_fix_headless_cmd(&AgentFixProvider::Codebuddy, "hi", None);
+        assert!(cmd.contains("--verbose"), "got: {cmd}");
+    }
+
+    #[test]
+    fn commit_msg_claude_includes_verbose() {
+        let cmd = agent_fix_headless_cmd_commit_msg(&AgentFixProvider::Claude, None);
+        assert!(cmd.contains("--verbose"), "got: {cmd}");
+    }
+
+    #[test]
+    fn fix_block_has_threshold_guard_and_no_spinner() {
+        let block = build_agent_fix_block(&AgentFixProvider::Claude, &HookEvent::PreCommit);
+        // Threshold guard present and references the env var
+        assert!(block.contains("LINTHIS_AGENT_MAX_AUTO_FIX"), "got: {block}");
+        // Streaming header present
+        assert!(block.contains("streaming"), "got: {block}");
+        // Spinner removed around the agent invocation — start_timer and
+        // stop_timer must no longer wrap the agent call in this block.
+        assert!(
+            !block.contains("start_timer \"Fixing"),
+            "spinner should be gone; got: {block}"
+        );
+        assert!(block.contains("linthis report count"), "got: {block}");
+    }
+
+    #[test]
+    fn fix_block_reverifies_only_when_agent_actually_ran() {
+        let block = build_agent_fix_block(&AgentFixProvider::Claude, &HookEvent::PreCommit);
+        // Re-verify branch must be gated on _AGENT_RAN — when the threshold
+        // skips the agent, running linthis again is pointless and would
+        // just re-print the same failure.
+        assert!(block.contains("_AGENT_RAN"), "got: {block}");
+        assert!(block.contains("Re-verifying"), "got: {block}");
     }
 }
