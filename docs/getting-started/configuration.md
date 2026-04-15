@@ -202,6 +202,25 @@ Both variables are orthogonal and can be combined:
 LINTHIS_SKIP=cm LINTHIS_SKIP_CHECKS=com git commit -m "WIP"
 ```
 
+### `LINTHIS_AGENT_MAX_AUTO_FIX` — cap auto-fix on large error sets
+
+The `git-with-agent` hook type invokes an AI agent (Claude / Codex / Gemini / …) to auto-fix failing lint on commit. With hundreds or thousands of issues this can block the terminal for many minutes with no visible progress.
+
+`LINTHIS_AGENT_MAX_AUTO_FIX` sets a ceiling on `errors + warnings` — above it, auto-fix is skipped and the commit fails fast, pointing you at the interactive fix path where agent output streams live:
+
+```bash
+# Default: skip auto-fix if total errors+warnings > 100
+git commit -m "..."
+
+# Raise the cap for one commit
+LINTHIS_AGENT_MAX_AUTO_FIX=500 git commit -m "..."
+
+# Disable the cap entirely (not recommended — commit can hang for a long time)
+LINTHIS_AGENT_MAX_AUTO_FIX=0 git commit -m "..."
+```
+
+When the hook decides to invoke the agent, its output (tool calls, file edits, etc.) now streams directly to your terminal — no more silent spinner. Cancel with Ctrl-C at any time.
+
 ## Next Steps
 
 - [Plugin System](../features/plugins.md) - Share configurations
