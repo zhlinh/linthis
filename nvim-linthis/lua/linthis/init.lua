@@ -481,6 +481,47 @@ function M.test()
   print("=== end test ===")
 end
 
+-- Restore the current file from the most recent linthis backup.
+-- Useful if format-on-save ever produces unwanted changes.
+function M.restore()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+
+  if filepath == "" then
+    vim.notify("linthis: cannot restore unsaved buffer", vim.log.levels.WARN)
+    return
+  end
+
+  local cmd = config.get().cmd[1]
+  local args = { cmd, "backup", "undo", "last" }
+  local use_plugin_args = get_use_plugin_args()
+  for _, arg in ipairs(use_plugin_args) do
+    table.insert(args, arg)
+  end
+
+  local result = vim.fn.system(args)
+  local exit_code = vim.v.shell_error
+
+  if exit_code ~= 0 then
+    vim.notify(
+      "linthis: restore failed - " .. vim.trim(result),
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
+  -- Reload buffer from the now-restored file.
+  if vim.api.nvim_buf_is_valid(bufnr) then
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("silent edit!")
+    end)
+  end
+
+  if config.get().notifications then
+    vim.notify("linthis: restored from last backup", vim.log.levels.INFO)
+  end
+end
+
 -- Show all diagnostics for current line (useful when multiple sources)
 function M.show_line_diagnostics()
   local bufnr = vim.api.nvim_get_current_buf()
@@ -530,27 +571,92 @@ local function setup_autocmds()
   local group = vim.api.nvim_create_augroup("linthis", { clear = true })
 
   -- Format on save
+  --
+  -- NOTE: The earlier implementation ran `linthis -f -i <file>` in
+  -- BufWritePost, then reloaded the buffer via `silent edit!`. During
+  -- :x / :wq this caused a destructive race — Neovim could proceed to
+  -- exit before the reload completed, leaving the buffer empty (or
+  -- writing a stale buffer over the formatted file on disk).
+  --
+  -- The safer flow:
+  --   1. Write a copy of the buffer to a temp file
+  --   2. Run `linthis -f -i <tmp>` to format it
+  --   3. Read back and replace the buffer content (undoable)
+  --   4. Skip entirely when Neovim is exiting
   if opts.format_on_save then
-    vim.api.nvim_create_autocmd("BufWritePost", {
+    vim.api.nvim_create_autocmd("BufWritePre", {
       group = group,
       pattern = "*",
       callback = function(args)
-        local ft = vim.bo[args.buf].filetype
-        if vim.tbl_contains(opts.filetypes, ft) then
-          local filepath = vim.api.nvim_buf_get_name(args.buf)
-          local cmd = config.get().cmd[1]
-          local format_args = { cmd, "-f", "-i", filepath }
-          local use_plugin_args = get_use_plugin_args()
-          for _, arg in ipairs(use_plugin_args) do
-            table.insert(format_args, arg)
-          end
-          vim.fn.system(format_args)
-          if vim.v.shell_error == 0 then
-            vim.api.nvim_buf_call(args.buf, function()
-              vim.cmd("silent edit!")
-            end)
-          end
+        -- Skip when Neovim is shutting down — safer during :x/:wq/:q!.
+        if vim.v.dying ~= 0 or vim.v.exiting ~= vim.NIL then
+          return
         end
+        local ft = vim.bo[args.buf].filetype
+        if not vim.tbl_contains(opts.filetypes, ft) then
+          return
+        end
+        local bufnr = args.buf
+        if not vim.api.nvim_buf_is_valid(bufnr) then
+          return
+        end
+
+        local filepath = vim.api.nvim_buf_get_name(bufnr)
+        if filepath == "" then
+          return
+        end
+
+        local cmd = config.get().cmd[1]
+        local use_plugin_args = get_use_plugin_args()
+
+        -- Preserve the original extension so linthis detects the language.
+        local ext = vim.fn.fnamemodify(filepath, ":e")
+        local tmp = vim.fn.tempname()
+        if ext ~= "" then
+          tmp = tmp .. "." .. ext
+        end
+
+        local original_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        local write_ok, write_err = pcall(vim.fn.writefile, original_lines, tmp)
+        if not write_ok then
+          vim.notify(
+            "linthis: format-on-save: failed to write temp file: " .. tostring(write_err),
+            vim.log.levels.WARN
+          )
+          return
+        end
+
+        local format_args = { cmd, "-f", "-i", tmp }
+        for _, arg in ipairs(use_plugin_args) do
+          table.insert(format_args, arg)
+        end
+        vim.fn.system(format_args)
+        local exit_code = vim.v.shell_error
+
+        if exit_code ~= 0 then
+          pcall(os.remove, tmp)
+          return
+        end
+
+        -- Read formatted content back.
+        local new_lines = vim.fn.readfile(tmp)
+        pcall(os.remove, tmp)
+
+        -- Safety net: never blank out a non-empty buffer.
+        if #new_lines == 0 and #original_lines > 0 then
+          vim.notify(
+            "linthis: format produced empty output — skipping to protect buffer",
+            vim.log.levels.WARN
+          )
+          return
+        end
+
+        -- No change — don't touch the buffer (avoids undo churn).
+        if vim.deep_equal(new_lines, original_lines) then
+          return
+        end
+
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
       end,
     })
   end
@@ -626,6 +732,10 @@ local function setup_commands()
   vim.api.nvim_create_user_command("LinthisShowDiagnostics", function()
     M.show_line_diagnostics()
   end, { desc = "Show all diagnostics on current line from all sources" })
+
+  vim.api.nvim_create_user_command("LinthisRestore", function()
+    M.restore()
+  end, { desc = "Restore current file from last linthis backup" })
 end
 
 -- Main setup function

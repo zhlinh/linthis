@@ -209,6 +209,7 @@ Run `:LinthisInfo` to verify your current `use_plugin` configuration.
 | `:LinthisLint` | Lint current buffer |
 | `:LinthisRestart` | Restart LSP server |
 | `:LinthisInfo` | Show LSP info |
+| `:LinthisRestore` | Restore current file from last linthis backup |
 
 ## Lua API
 
