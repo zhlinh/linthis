@@ -104,7 +104,9 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
         Commands::Plugin { action } => Some(handle_plugin_command(action)),
         Commands::Config { action } => Some(handle_config_command(action)),
         Commands::Hook { action } => Some(handle_hook_command(action)),
-        Commands::Cmsg { .. } | Commands::Init { .. } => Some(dispatch_simple(command)),
+        Commands::Cmsg { .. } | Commands::Init { .. } | Commands::AgentStream => {
+            Some(dispatch_simple(command))
+        }
         Commands::Security { .. }
         | Commands::License { .. }
         | Commands::Complexity { .. } => Some(dispatch_analysis(command)),
@@ -151,6 +153,7 @@ fn dispatch_simple(command: Commands) -> ExitCode {
             with_hook,
             force,
         } => handle_init_command(global, with_hook, force),
+        Commands::AgentStream => linthis::agent_stream::handle_agent_stream(),
         _ => ExitCode::from(1),
     }
 }

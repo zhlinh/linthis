@@ -219,7 +219,9 @@ LINTHIS_AGENT_MAX_AUTO_FIX=500 git commit -m "..."
 LINTHIS_AGENT_MAX_AUTO_FIX=0 git commit -m "..."
 ```
 
-When the hook decides to invoke the agent, its output (tool calls, file edits, etc.) now streams directly to your terminal — no more silent spinner. Cancel with Ctrl-C at any time.
+When the hook decides to invoke the agent, its output streams directly to your terminal — no more silent spinner. Cancel with Ctrl-C at any time.
+
+For Claude Code and CodeBuddy, `linthis` runs them with `--output-format stream-json` and pipes the JSON event stream through `linthis agent-stream`, which pretty-prints each assistant message and tool call (`Edit /path/to/file`, `Bash cargo check`, etc.) as they happen. Other providers (`codex exec`, `cursor-agent chat`, `droid exec`) stream natively.
 
 ## Next Steps
 
