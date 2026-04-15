@@ -674,7 +674,7 @@ fn resolve_tool_install_mode(
 
 /// Resolve which checks to run from CLI flags and config.
 fn resolve_checks_list(cli_checks: &Option<Vec<String>>, config_checks: &[String]) -> Vec<String> {
-    if let Some(ref cli_checks) = cli_checks {
+    let base = if let Some(ref cli_checks) = cli_checks {
         if cli_checks.iter().any(|c| c == "all") {
             vec!["lint".into(), "security".into(), "complexity".into()]
         } else {
@@ -682,7 +682,79 @@ fn resolve_checks_list(cli_checks: &Option<Vec<String>>, config_checks: &[String
         }
     } else {
         config_checks.to_vec()
+    };
+    apply_skip_checks_env(base)
+}
+
+/// Names of the checks that `LINTHIS_SKIP_CHECKS` can filter out.
+/// Kept in sync with `ChecksConfig::default_checks`.
+const KNOWN_CHECKS: &[&str] = &["lint", "security", "complexity"];
+
+/// Resolve a `LINTHIS_SKIP_CHECKS` token (≥3-char case-insensitive prefix, or
+/// full name) to the canonical check name. Returns `None` on unknown tokens;
+/// `Err(&"ambiguous")` would mean more than one match, but today's three checks
+/// start with distinct letters so ambiguity is impossible.
+fn resolve_skip_token(tok: &str) -> Option<&'static str> {
+    let lower = tok.trim().to_lowercase();
+    if lower.len() < 3 {
+        return None;
     }
+    let matches: Vec<&&str> = KNOWN_CHECKS.iter().filter(|c| c.starts_with(&lower)).collect();
+    match matches.as_slice() {
+        [one] => Some(**one),
+        _ => None,
+    }
+}
+
+/// Apply `LINTHIS_SKIP_CHECKS=<names>` filtering to a resolved checks list.
+/// Unknown or too-short tokens are reported to stderr and ignored (fail-safe).
+fn apply_skip_checks_env(mut list: Vec<String>) -> Vec<String> {
+    use colored::Colorize;
+    let raw = match std::env::var("LINTHIS_SKIP_CHECKS") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => return list,
+    };
+
+    let mut to_skip: Vec<&'static str> = Vec::new();
+    let mut bad: Vec<String> = Vec::new();
+    for tok in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        match resolve_skip_token(tok) {
+            Some(name) => {
+                if !to_skip.contains(&name) {
+                    to_skip.push(name);
+                }
+            }
+            None => bad.push(tok.to_string()),
+        }
+    }
+
+    if !bad.is_empty() {
+        eprintln!(
+            "{}: LINTHIS_SKIP_CHECKS: ignoring unknown token(s) [{}]. \
+             Supported: lint, security, complexity (or any ≥3-char prefix).",
+            "Warning".yellow(),
+            bad.join(", ")
+        );
+    }
+
+    if to_skip.is_empty() {
+        return list;
+    }
+
+    let before = list.clone();
+    list.retain(|c| !to_skip.contains(&c.as_str()));
+    let removed: Vec<String> = before.into_iter().filter(|c| !list.contains(c)).collect();
+    if !removed.is_empty() {
+        eprintln!(
+            "{}",
+            format!(
+                "⏭  linthis checks filtered via LINTHIS_SKIP_CHECKS={raw}: skipping {}",
+                removed.join(", ")
+            )
+            .dimmed()
+        );
+    }
+    list
 }
 
 /// Run the security SAST check and merge results into the main result.
@@ -1694,3 +1766,107 @@ fn main() -> ExitCode {
 
 // PerFileCache is now in linthis::cache::checks_cache
 use linthis::cache::PerFileCache;
+
+#[cfg(test)]
+mod skip_checks_tests {
+    use super::{apply_skip_checks_env, resolve_skip_token};
+    use std::sync::Mutex;
+
+    // Env-var mutation is process-wide; serialize these tests.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_env<F: FnOnce() -> T, T>(value: Option<&str>, f: F) -> T {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("LINTHIS_SKIP_CHECKS").ok();
+        match value {
+            Some(v) => std::env::set_var("LINTHIS_SKIP_CHECKS", v),
+            None => std::env::remove_var("LINTHIS_SKIP_CHECKS"),
+        }
+        let out = f();
+        match prev {
+            Some(v) => std::env::set_var("LINTHIS_SKIP_CHECKS", v),
+            None => std::env::remove_var("LINTHIS_SKIP_CHECKS"),
+        }
+        out
+    }
+
+    fn base() -> Vec<String> {
+        vec!["lint".into(), "security".into(), "complexity".into()]
+    }
+
+    #[test]
+    fn resolves_full_names() {
+        assert_eq!(resolve_skip_token("lint"), Some("lint"));
+        assert_eq!(resolve_skip_token("security"), Some("security"));
+        assert_eq!(resolve_skip_token("complexity"), Some("complexity"));
+    }
+
+    #[test]
+    fn resolves_three_char_prefixes() {
+        assert_eq!(resolve_skip_token("lin"), Some("lint"));
+        assert_eq!(resolve_skip_token("sec"), Some("security"));
+        assert_eq!(resolve_skip_token("com"), Some("complexity"));
+    }
+
+    #[test]
+    fn resolves_case_insensitively() {
+        assert_eq!(resolve_skip_token("LIN"), Some("lint"));
+        assert_eq!(resolve_skip_token("Sec"), Some("security"));
+    }
+
+    #[test]
+    fn rejects_too_short() {
+        assert_eq!(resolve_skip_token("li"), None);
+        assert_eq!(resolve_skip_token("s"), None);
+        assert_eq!(resolve_skip_token(""), None);
+    }
+
+    #[test]
+    fn rejects_unknown() {
+        assert_eq!(resolve_skip_token("foo"), None);
+        assert_eq!(resolve_skip_token("formatting"), None);
+    }
+
+    #[test]
+    fn env_unset_is_noop() {
+        let out = with_env(None, || apply_skip_checks_env(base()));
+        assert_eq!(out, base());
+    }
+
+    #[test]
+    fn env_empty_is_noop() {
+        let out = with_env(Some(""), || apply_skip_checks_env(base()));
+        assert_eq!(out, base());
+    }
+
+    #[test]
+    fn env_filters_single_full_name() {
+        let out = with_env(Some("lint"), || apply_skip_checks_env(base()));
+        assert_eq!(out, vec!["security".to_string(), "complexity".to_string()]);
+    }
+
+    #[test]
+    fn env_filters_via_prefix() {
+        let out = with_env(Some("com"), || apply_skip_checks_env(base()));
+        assert_eq!(out, vec!["lint".to_string(), "security".to_string()]);
+    }
+
+    #[test]
+    fn env_filters_multiple() {
+        let out = with_env(Some("lin,com"), || apply_skip_checks_env(base()));
+        assert_eq!(out, vec!["security".to_string()]);
+    }
+
+    #[test]
+    fn env_unknown_token_ignored() {
+        // Unknown tokens are warned to stderr but do not filter anything.
+        let out = with_env(Some("foo"), || apply_skip_checks_env(base()));
+        assert_eq!(out, base());
+    }
+
+    #[test]
+    fn env_mixed_valid_and_invalid() {
+        let out = with_env(Some("lin,foo"), || apply_skip_checks_env(base()));
+        assert_eq!(out, vec!["security".to_string(), "complexity".to_string()]);
+    }
+}

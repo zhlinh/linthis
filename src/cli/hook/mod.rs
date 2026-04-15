@@ -20,6 +20,7 @@ mod install;
 mod metadata;
 mod run;
 mod script;
+mod skip;
 mod status;
 mod sync;
 mod uninstall;

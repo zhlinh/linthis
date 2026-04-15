@@ -108,7 +108,14 @@ pub fn handle_commit_msg_check(
     auto_fix: bool,
     provider: Option<&str>,
 ) -> ExitCode {
+    use crate::cli::commands::HookEvent;
     use linthis::config::Config;
+
+    // Honor LINTHIS_SKIP=cmsg|cm|commit-msg|all — the cmsg hook is usually
+    // invoked via `linthis cmsg`, not `linthis hook run`, so we gate here too.
+    if super::skip::should_skip(&HookEvent::CommitMsg) {
+        return ExitCode::SUCCESS;
+    }
 
     let project_root = linthis::utils::get_project_root();
     let config = Config::load_merged(&project_root);
