@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-04-15
+
+### Added
+
+- stream agent output with better format
+- stream agent output with LINTHIS_AGENT_MAX_AUTO_FIX cap
+- selectively skip hooks via LINTHIS_SKIP and LINTHIS_SKIP_CHECKS
+- publish to Homebrew tap on release
+- :LinthisRestore tries multiple recovery sources
+- add --all-events/--all-types/--all to linthis hook install
+
+### Fixed
+
+- handle multibyte chars in placeholder pattern check
+- format-on-save no longer blanks files on :x / :wq
+- isolate cache tests via HOME env var to avoid interference
+
 ## [0.19.2] - 2026-04-13
 
 ### Fixed
