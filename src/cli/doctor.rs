@@ -314,7 +314,13 @@ fn get_checker_install_hint(lang: Language) -> String {
         Language::Dart => "https://dart.dev/get-dart".to_string(),
         Language::Swift => platform_hint("brew install swiftlint", None, "https://github.com/realm/SwiftLint"),
         Language::Kotlin => platform_hint("brew install ktlint", None, "https://github.com/pinterest/ktlint"),
-        Language::Lua => "luarocks install luacheck".to_string(),
+        // macOS's Homebrew ships a ready-to-run luacheck; the luarocks
+        // path fails on Lua 5.5 default + missing argparse rockspec.
+        Language::Lua => platform_hint(
+            "brew install luacheck",
+            None,
+            "luarocks install luacheck",
+        ),
         Language::Shell => platform_hint("brew install shellcheck", Some("choco install shellcheck"), "apt install shellcheck"),
         Language::Ruby => "gem install rubocop".to_string(),
         Language::Php => "composer global require squizlabs/php_codesniffer".to_string(),

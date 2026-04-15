@@ -838,13 +838,35 @@ fn get_checker_install_hint(lang: Language) -> String {
     }
 }
 
-/// Lua checker install hint with luarocks detection.
+/// Lua checker install hint.
+///
+/// On macOS we lead with `brew install luacheck` because the LuaRocks route
+/// routinely fails on modern Lua versions: when Homebrew's default Lua is
+/// 5.5+, `luarocks install luacheck` bails on its `argparse` /
+/// `luafilesystem` dependencies whose rockspecs haven't been marked
+/// Lua-5.5 compatible (see https://github.com/lunarmodules/luacheck/issues).
+/// Homebrew ships a pre-built luacheck that sidesteps the whole problem.
+///
+/// On other platforms we keep the luarocks path as the primary install,
+/// since the Homebrew alternative doesn't apply.
 fn get_checker_install_hint_lua() -> String {
+    if cfg!(target_os = "macos") {
+        if is_command_available("brew") {
+            return "Install: brew install luacheck  \
+                    (preferred on macOS; luarocks + Lua 5.5 often fails on argparse)"
+                .to_string();
+        }
+        // No brew yet — tell them to get brew first.
+        return "Install: 1) Install Homebrew from https://brew.sh/\n         \
+                2) brew install luacheck"
+            .to_string();
+    }
+
     if is_command_available("luarocks") {
         "Install: luarocks install luacheck".to_string()
     } else {
         platform_hint(
-            "Install: brew install luarocks && luarocks install luacheck",
+            "Install: brew install luacheck",
             "Install: 1) Install Lua from https://www.lua.org/download.html\n         2) Install LuaRocks from https://luarocks.org/\n         3) luarocks install luacheck",
             "Install: sudo apt install luarocks && luarocks install luacheck (Ubuntu/Debian)",
         )
@@ -943,7 +965,7 @@ fn get_checker_install_commands(lang: Language) -> Vec<Vec<String>> {
         Language::Dart => vec![],
         Language::Swift => macos_only_brew("swiftlint"),
         Language::Kotlin => get_auto_install_kotlin(),
-        Language::Lua => vec![cmd!["luarocks", "install", "luacheck"]],
+        Language::Lua => get_auto_install_luacheck(),
         Language::Shell => platform_install_cmd("shellcheck", "shellcheck", "shellcheck"),
         Language::Ruby => vec![cmd!["gem", "install", "rubocop"]],
         Language::Php => vec![cmd![
@@ -1063,6 +1085,19 @@ fn get_auto_install_java_formatter() -> Vec<Vec<String>> {
         ]]
     } else {
         vec![]
+    }
+}
+
+/// luacheck auto-install commands.
+///
+/// macOS: `brew install luacheck` is reliable; LuaRocks' `argparse`
+/// dependency chain breaks under Homebrew's Lua 5.5. Other platforms
+/// fall back to luarocks.
+fn get_auto_install_luacheck() -> Vec<Vec<String>> {
+    if cfg!(target_os = "macos") {
+        vec![vec!["brew".into(), "install".into(), "luacheck".into()]]
+    } else {
+        vec![vec!["luarocks".into(), "install".into(), "luacheck".into()]]
     }
 }
 
