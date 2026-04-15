@@ -2,7 +2,21 @@
 
 根据您的环境，有多种方式安装 linthis。
 
-## 方式 1：通过 PyPI 安装（推荐 Python 用户）
+## 方式 1：通过 Homebrew 安装（推荐 macOS/Linux 用户）
+
+```bash
+brew tap zhlinh/linthis
+brew install linthis
+```
+
+升级到最新版本：
+
+```bash
+brew update
+brew upgrade linthis
+```
+
+## 方式 2：通过 PyPI 安装（推荐 Python 用户）
 
 ```bash
 # 使用 pip
@@ -13,13 +27,13 @@ pip install linthis
 uv pip install linthis
 ```
 
-## 方式 2：通过 Cargo 安装（推荐 Rust 用户）
+## 方式 3：通过 Cargo 安装（推荐 Rust 用户）
 
 ```bash
 cargo install linthis
 ```
 
-## 方式 3：从源码构建
+## 方式 4：从源码构建
 
 ```bash
 git clone https://github.com/zhlinh/linthis.git

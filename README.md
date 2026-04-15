@@ -27,7 +27,14 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 
 ## Installation
 
-### Method 1: Install via PyPI (Recommended for Python users)
+### Method 1: Install via Homebrew (Recommended for macOS/Linux users)
+
+```bash
+brew tap zhlinh/linthis
+brew install linthis
+```
+
+### Method 2: Install via PyPI (Recommended for Python users)
 
 ```bash
 # Using pip
@@ -38,13 +45,13 @@ pip install linthis
 uv pip install linthis
 ```
 
-### Method 2: Install via Cargo (Recommended for Rust users)
+### Method 3: Install via Cargo (Recommended for Rust users)
 
 ```bash
 cargo install linthis
 ```
 
-### Method 3: Build from Source
+### Method 4: Build from Source
 
 ```bash
 git clone https://github.com/zhlinh/linthis.git
