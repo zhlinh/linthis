@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.4] - 2026-04-16
+
+### Fixed
+
+- add color with stream display
+
 ## [0.19.3] - 2026-04-15
 
 ### Added
