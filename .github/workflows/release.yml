@@ -285,6 +285,50 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/zhlinh/homebrew-linthis.git" tap
+
+      - name: Initialize Formula if not exists
+        run: |
+          mkdir -p tap/Formula
+          if [ ! -f "tap/Formula/linthis.rb" ]; then
+            echo "Formula not found, creating a new one..."
+            cat << 'EOF' > tap/Formula/linthis.rb
+          class Linthis < Formula
+            desc "A fast linter and formatter"
+            homepage "https://github.com/zhlinh/linthis"
+            version "0.0.0"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/zhlinh/linthis/releases/download/v#{version}/linthis-aarch64-apple-darwin.tar.gz"
+                sha256 "0000000000000000000000000000000000000000000000000000000000000000" # darwin-arm64
+              end
+              if Hardware::CPU.intel?
+                url "https://github.com/zhlinh/linthis/releases/download/v#{version}/linthis-x86_64-apple-darwin.tar.gz"
+                sha256 "0000000000000000000000000000000000000000000000000000000000000000" # darwin-x86_64
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/zhlinh/linthis/releases/download/v#{version}/linthis-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "0000000000000000000000000000000000000000000000000000000000000000" # linux-arm64
+              end
+              if Hardware::CPU.intel?
+                url "https://github.com/zhlinh/linthis/releases/download/v#{version}/linthis-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "0000000000000000000000000000000000000000000000000000000000000000" # linux-x86_64
+              end
+            end
+
+            def install
+              bin.install "linthis"
+            end
+          end
+          EOF
+          else
+            echo "Formula already exists, skipping initialization."
+          fi
+
       - name: Update Formula
         env:
           VERSION: ${{ github.ref_name }}
@@ -307,15 +351,16 @@ jobs:
 
           echo "--- Updated Formula ---"
           cat "$FORMULA"
+
       - name: Commit and push
         working-directory: tap
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet Formula/linthis.rb; then
+          if git diff --quiet Formula/linthis.rb && git ls-files --error-unmatch Formula/linthis.rb > /dev/null 2>&1; then
             echo "No changes to Formula — skipping commit"
             exit 0
           fi
           git add Formula/linthis.rb
-          git commit -m "linthis ${GITHUB_REF_NAME#v}"
+          git commit -m "Update linthis to ${GITHUB_REF_NAME#v}"
           git push
