@@ -110,7 +110,7 @@ fn render_assistant<W: Write>(val: &Value, out: &mut W) {
             "text" => {
                 if let Some(text) = block.get("text").and_then(Value::as_str) {
                     if !text.is_empty() {
-                        let _ = writeln!(out, "{text}");
+                        write_text_with_diff_coloring(text, out);
                     }
                 }
             }
@@ -160,9 +160,7 @@ fn render_tool_use_block<W: Write>(block: &Value, out: &mut W) {
         // with no context — show the subject/ID so users know what changed.
         "TaskCreate" => render_task_create(input, out),
         "TaskUpdate" => render_task_update(input, out),
-        "TaskGet" | "TaskStop" | "TaskOutput" => {
-            render_single_arg(input, name, "taskId", out)
-        }
+        "TaskGet" | "TaskStop" | "TaskOutput" => render_single_arg(input, name, "taskId", out),
         "TaskList" => {
             let _ = writeln!(out, "{TOOL_MARKER} {name}");
         }
@@ -237,19 +235,10 @@ fn render_task_update<W: Write>(input: Option<&Value>, out: &mut W) {
         let _ = writeln!(out, "{TOOL_MARKER} TaskUpdate");
         return;
     };
-    let task_id = input
-        .get("taskId")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let status = input
-        .get("status")
-        .and_then(Value::as_str);
-    let owner = input
-        .get("owner")
-        .and_then(Value::as_str);
-    let subject = input
-        .get("subject")
-        .and_then(Value::as_str);
+    let task_id = input.get("taskId").and_then(Value::as_str).unwrap_or("");
+    let status = input.get("status").and_then(Value::as_str);
+    let owner = input.get("owner").and_then(Value::as_str);
+    let subject = input.get("subject").and_then(Value::as_str);
     let detail = match (status, owner, subject) {
         (Some(s), _, _) if !s.is_empty() => format!("{task_id} → {s}"),
         (_, Some(o), _) if !o.is_empty() => format!("{task_id} owner={o}"),
@@ -326,7 +315,7 @@ fn render_todowrite<W: Write>(input: Option<&Value>, out: &mut W) {
     }
 }
 
-/// `⏺ Update(path)` / `Create(path)` + stats + preview.
+/// `⏺ Update(path)` / `Create(path)` + stats + colored diff preview.
 /// "Create" when old_string is empty (FileEditTool UI.tsx convention).
 fn render_file_edit<W: Write>(input: Option<&Value>, out: &mut W) {
     let Some(input) = input else {
@@ -338,17 +327,34 @@ fn render_file_edit<W: Write>(input: Option<&Value>, out: &mut W) {
         .and_then(Value::as_str)
         .map(to_display_path)
         .unwrap_or_default();
-    let old_s = input.get("old_string").and_then(Value::as_str).unwrap_or("");
-    let new_s = input.get("new_string").and_then(Value::as_str).unwrap_or("");
+    let old_s = input
+        .get("old_string")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let new_s = input
+        .get("new_string")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let verb = if old_s.is_empty() { "Create" } else { "Update" };
     let added = line_count(new_s);
     let removed = line_count(old_s);
     write_header_path(verb, &path, out);
     write_diff_stats_line(added, removed, out);
-    write_preview_lines(new_s, 3, 80, out);
+    let shown = write_colored_diff(old_s, new_s, MAX_PREVIEW_LINES, out);
+    let total = added + removed;
+    if total > shown {
+        let remaining = total - shown;
+        let word = if remaining == 1 { "line" } else { "lines" };
+        let _ = writeln!(
+            out,
+            "{INDENT_CONTENT}{ANSI_DIM}… +{remaining} {word}{ANSI_RESET}"
+        );
+    }
 }
 
-/// MultiEdit: aggregate adds/removes across all edits, preview first new chunk.
+/// MultiEdit: aggregate adds/removes across ALL edits, then render diff
+/// from each edit sequentially (up to the combined MAX_PREVIEW_LINES cap)
+/// so the preview matches the stats.
 fn render_multi_edit<W: Write>(input: Option<&Value>, out: &mut W) {
     let Some(input) = input else {
         let _ = writeln!(out, "{TOOL_MARKER} Update");
@@ -359,11 +365,11 @@ fn render_multi_edit<W: Write>(input: Option<&Value>, out: &mut W) {
         .and_then(Value::as_str)
         .map(to_display_path)
         .unwrap_or_default();
+    let edits = input.get("edits").and_then(Value::as_array);
     let mut added = 0usize;
     let mut removed = 0usize;
     let mut all_creates = true;
-    let mut first_new: Option<String> = None;
-    if let Some(edits) = input.get("edits").and_then(Value::as_array) {
+    if let Some(edits) = edits {
         for edit in edits {
             let old_s = edit.get("old_string").and_then(Value::as_str).unwrap_or("");
             let new_s = edit.get("new_string").and_then(Value::as_str).unwrap_or("");
@@ -372,22 +378,39 @@ fn render_multi_edit<W: Write>(input: Option<&Value>, out: &mut W) {
             }
             added += line_count(new_s);
             removed += line_count(old_s);
-            if first_new.is_none() && !new_s.trim().is_empty() {
-                first_new = Some(new_s.to_string());
-            }
         }
     }
     let verb = if all_creates { "Create" } else { "Update" };
     write_header_path(verb, &path, out);
     write_diff_stats_line(added, removed, out);
-    if let Some(text) = first_new.as_deref() {
-        write_preview_lines(text, 2, 80, out);
+    // Render diffs from each edit, sharing one combined line budget.
+    if let Some(edits) = edits {
+        let mut budget = MAX_PREVIEW_LINES;
+        for edit in edits {
+            if budget == 0 {
+                break;
+            }
+            let old_s = edit.get("old_string").and_then(Value::as_str).unwrap_or("");
+            let new_s = edit.get("new_string").and_then(Value::as_str).unwrap_or("");
+            let used = write_colored_diff(old_s, new_s, budget, out);
+            budget = budget.saturating_sub(used);
+        }
+        // If we ran out of budget, show remaining from total.
+        let total = added + removed;
+        let shown = MAX_PREVIEW_LINES - budget;
+        if total > shown {
+            let remaining = total - shown;
+            let word = if remaining == 1 { "line" } else { "lines" };
+            let _ = writeln!(
+                out,
+                "{INDENT_CONTENT}{ANSI_DIM}… +{remaining} {word}{ANSI_RESET}"
+            );
+        }
     }
 }
 
-/// Write: claude-code's userFacingName is literally "Write". The result
-/// component says "Wrote N lines to <path>"; we surface the stat up-front
-/// since we don't wait for the result block.
+/// Write: claude-code says "Wrote N lines to <path>" (FileWriteToolCreatedMessage).
+/// Content preview: up to MAX_PREVIEW_LINES lines, then `… +N lines`.
 fn render_file_write<W: Write>(input: Option<&Value>, out: &mut W) {
     let Some(input) = input else {
         let _ = writeln!(out, "{TOOL_MARKER} Write");
@@ -399,14 +422,88 @@ fn render_file_write<W: Write>(input: Option<&Value>, out: &mut W) {
         .map(to_display_path)
         .unwrap_or_default();
     let content = input.get("content").and_then(Value::as_str).unwrap_or("");
-    let added = line_count(content);
+    let total = line_count(content);
     write_header_path("Write", &path, out);
-    if added > 0 {
-        let word = if added == 1 { "line" } else { "lines" };
-        let _ = writeln!(out, "{INDENT_CONTENT}Wrote {added} {word}");
+    if total > 0 {
+        let word = if total == 1 { "line" } else { "lines" };
+        let _ = writeln!(out, "{INDENT_CONTENT}Wrote {total} {word} to {path}");
     }
-    write_preview_lines(content, 3, 80, out);
+    write_content_preview(content, MAX_PREVIEW_LINES, out);
 }
+
+/// ANSI cyan for diff hunk headers (`@@ ... @@`).
+const ANSI_CYAN: &str = "\x1b[36m";
+/// ANSI bold for diff file headers (`diff --git`, `---`, `+++`).
+const ANSI_BOLD: &str = "\x1b[1m";
+
+/// Max content/diff lines before showing `… +N lines` (matches claude-code's
+/// MAX_LINES_TO_RENDER = 10 in FileWriteTool/UI.tsx).
+const MAX_PREVIEW_LINES: usize = 10;
+
+/// Write assistant text, colorizing unified-diff blocks inline.
+/// Detects `diff --git` or `@@` markers to enter diff mode; once inside
+/// a fenced code block (` ```diff ` ... ` ``` `), every `+`/`-` line gets
+/// colored green/red just like `git diff --color`.
+fn write_text_with_diff_coloring<W: Write>(text: &str, out: &mut W) {
+    let has_diff = text.contains("diff --git") || text.contains("@@") || text.contains("```diff");
+    if !has_diff {
+        let _ = writeln!(out, "{text}");
+        return;
+    }
+
+    let mut in_diff_block = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        // Track fenced code blocks with `diff` language hint.
+        if trimmed == "```diff" {
+            in_diff_block = true;
+            let _ = writeln!(out, "{line}");
+            continue;
+        }
+        if trimmed == "```" && in_diff_block {
+            in_diff_block = false;
+            let _ = writeln!(out, "{line}");
+            continue;
+        }
+        // Also treat bare `diff --git` outside fences as diff content.
+        if line.starts_with("diff --git") {
+            in_diff_block = true;
+        }
+
+        if in_diff_block {
+            write_colored_diff_line(line, out);
+        } else {
+            let _ = writeln!(out, "{line}");
+        }
+    }
+}
+
+/// Colorize a single unified-diff line based on its prefix character.
+fn write_colored_diff_line<W: Write>(line: &str, out: &mut W) {
+    if line.starts_with("diff --git")
+        || line.starts_with("index ")
+        || line.starts_with("--- ")
+        || line.starts_with("+++ ")
+    {
+        let _ = writeln!(out, "{ANSI_BOLD}{line}{ANSI_RESET}");
+    } else if line.starts_with("@@") {
+        let _ = writeln!(out, "{ANSI_CYAN}{line}{ANSI_RESET}");
+    } else if line.starts_with('+') {
+        let _ = writeln!(out, "{ANSI_GREEN}{line}{ANSI_RESET}");
+    } else if line.starts_with('-') {
+        let _ = writeln!(out, "{ANSI_RED}{line}{ANSI_RESET}");
+    } else {
+        // Context lines, "new file mode", etc. — no coloring.
+        let _ = writeln!(out, "{line}");
+    }
+}
+
+/// ANSI escape sequences for colored diff output — matches claude-code's
+/// StructuredDiff green/red/dim styling for +/- lines and line numbers.
+const ANSI_GREEN: &str = "\x1b[32m";
+const ANSI_RED: &str = "\x1b[31m";
+const ANSI_DIM: &str = "\x1b[2m";
+const ANSI_RESET: &str = "\x1b[0m";
 
 /// Claude-code: "Added N line(s), removed M line(s)" (note: "line" vs "lines").
 /// Silent when both are zero — no point announcing a no-op edit.
@@ -431,22 +528,92 @@ fn write_diff_stats_line<W: Write>(added: usize, removed: usize, out: &mut W) {
     }
 }
 
-/// Indented preview of what the agent wrote, capped at `max_lines` and
-/// each line truncated to `max_chars`. Leading blank lines are skipped.
-fn write_preview_lines<W: Write>(text: &str, max_lines: usize, max_chars: usize, out: &mut W) {
+/// Show content preview for Write / new-file Create — plain text (all additions),
+/// up to `max_lines`, then a dimmed `… +N lines` truncation indicator.
+fn write_content_preview<W: Write>(text: &str, max_lines: usize, out: &mut W) {
+    let lines: Vec<&str> = text.lines().collect();
+    let total = lines.len();
+    let visible = total.min(max_lines);
+    for line in &lines[..visible] {
+        let display = truncate_char_width(line.trim_end(), 120);
+        let _ = writeln!(out, "{INDENT_CONTENT}{display}");
+    }
+    if total > visible {
+        let remaining = total - visible;
+        let word = if remaining == 1 { "line" } else { "lines" };
+        let _ = writeln!(
+            out,
+            "{INDENT_CONTENT}{ANSI_DIM}… +{remaining} {word}{ANSI_RESET}"
+        );
+    }
+}
+
+/// Colored unified diff for Edit / MultiEdit — removed lines in red with `- `
+/// prefix, added lines in green with `+ ` prefix. Caps at `max_lines` total
+/// diff lines. Returns the number of lines actually rendered so the caller
+/// can track a shared budget (for MultiEdit with multiple edits).
+///
+/// For single Edit calls, the caller prints a truncation indicator when
+/// `returned < total_diff`. For MultiEdit, the outer loop handles it.
+fn write_colored_diff<W: Write>(old: &str, new: &str, max_lines: usize, out: &mut W) -> usize {
+    let old_lines: Vec<&str> = if old.is_empty() {
+        Vec::new()
+    } else {
+        old.lines().collect()
+    };
+    let new_lines: Vec<&str> = if new.is_empty() {
+        Vec::new()
+    } else {
+        new.lines().collect()
+    };
+    let total_diff = old_lines.len() + new_lines.len();
+    if total_diff == 0 {
+        return 0;
+    }
+
+    // Calculate gutter width based on max line number in the diff.
+    let max_lineno = old_lines.len().max(new_lines.len());
+    let gutter_width = if max_lineno >= 100 {
+        3
+    } else if max_lineno >= 10 {
+        2
+    } else {
+        1
+    };
+
     let mut shown = 0;
-    for line in text.lines() {
+
+    // Removed lines (old_string) — red
+    for (i, line) in old_lines.iter().enumerate() {
         if shown >= max_lines {
             break;
         }
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() && shown == 0 {
-            continue;
-        }
-        let display = truncate_char_width(trimmed, max_chars);
-        let _ = writeln!(out, "{INDENT_CONTENT}{display}");
+        let lineno = i + 1;
+        let display = truncate_char_width(line.trim_end(), 120);
+        let _ = writeln!(
+            out,
+            "{INDENT_CONTENT}{ANSI_DIM}{lineno:>gutter_width$}{ANSI_RESET} {ANSI_RED}- {display}{ANSI_RESET}",
+            gutter_width = gutter_width
+        );
         shown += 1;
     }
+
+    // Added lines (new_string) — green
+    for (i, line) in new_lines.iter().enumerate() {
+        if shown >= max_lines {
+            break;
+        }
+        let lineno = i + 1;
+        let display = truncate_char_width(line.trim_end(), 120);
+        let _ = writeln!(
+            out,
+            "{INDENT_CONTENT}{ANSI_DIM}{lineno:>gutter_width$}{ANSI_RESET} {ANSI_GREEN}+ {display}{ANSI_RESET}",
+            gutter_width = gutter_width
+        );
+        shown += 1;
+    }
+
+    shown
 }
 
 /// Truncate `s` to at most `max_chars` user-visible characters, appending `…`
@@ -466,24 +633,20 @@ fn truncate_one_line<S: AsRef<str>>(s: S) -> String {
     truncate_char_width(&first, 160)
 }
 
-/// BashTool's own truncation: up to 2 lines, else 160 chars, with an
-/// ellipsis when cut. Matches MAX_COMMAND_DISPLAY_LINES / CHARS.
+/// BashTool truncation: first line only (multi-line commands are common),
+/// capped at 100 chars so the `⏺ Bash(...)` wrapper fits within most
+/// terminal widths (~120 cols). Claude-code's TUI uses 160 chars but has
+/// horizontal scroll; our plain-text stream doesn't.
 fn truncate_bash_command(cmd: &str) -> String {
-    let max_lines = 2;
-    let max_chars = 160;
-    let lines: Vec<&str> = cmd.lines().collect();
-    let needs_line_cut = lines.len() > max_lines;
-    let joined = if needs_line_cut {
-        lines[..max_lines].join("\n")
+    let max_chars = 100;
+    let first = cmd.lines().next().unwrap_or("").trim();
+    if first.chars().count() > max_chars {
+        let cut: String = first.chars().take(max_chars.saturating_sub(1)).collect();
+        format!("{cut}…")
+    } else if cmd.lines().count() > 1 {
+        format!("{first}…")
     } else {
-        cmd.to_string()
-    };
-    let joined = joined.trim();
-    if joined.chars().count() > max_chars || needs_line_cut {
-        let cut: String = joined.chars().take(max_chars).collect();
-        format!("{}…", cut.trim())
-    } else {
-        joined.to_string()
+        first.to_string()
     }
 }
 
@@ -635,7 +798,8 @@ mod tests {
 
     #[test]
     fn renders_assistant_text_block() {
-        let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}"#;
+        let line =
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}"#;
         assert!(render_to_string(line).contains("Hello world"));
     }
 
@@ -662,7 +826,10 @@ mod tests {
         // content. Matches claude-code's FileEditToolUpdatedMessage output.
         let line = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/tmp/foo.rs","old_string":"fn bar() {}","new_string":"fn bar() {\n    println!(\"hi\");\n}"}}]}}"#;
         let out = render_to_string(line);
-        assert!(out.contains("Update(/tmp/foo.rs)"), "header missing; got: {out}");
+        assert!(
+            out.contains("Update(/tmp/foo.rs)"),
+            "header missing; got: {out}"
+        );
         assert!(
             out.contains("Added 3 lines, removed 1 line"),
             "native stats missing; got: {out}"
@@ -677,7 +844,10 @@ mod tests {
         let out = render_to_string(line);
         assert!(out.contains("Create(/tmp/new.rs)"), "got: {out}");
         assert!(out.contains("Added 1 line"), "got: {out}");
-        assert!(!out.contains("removed"), "no removed for create; got: {out}");
+        assert!(
+            !out.contains("removed"),
+            "no removed for create; got: {out}"
+        );
     }
 
     #[test]
@@ -800,7 +970,10 @@ mod tests {
         let line = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TaskList","input":{}}]}}"#;
         let out = render_to_string(line);
         assert!(out.contains("TaskList"), "got: {out}");
-        assert!(!out.contains("TaskList("), "no args for TaskList; got: {out}");
+        assert!(
+            !out.contains("TaskList("),
+            "no args for TaskList; got: {out}"
+        );
     }
 
     #[test]
@@ -893,8 +1066,7 @@ mod tests {
 
     #[test]
     fn stream_event_text_delta_is_appended_inline() {
-        let line =
-            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}}"#;
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}}"#;
         let out = render_to_string(line);
         // Delta events must NOT add a trailing newline — they get concatenated
         // to form streaming text.
