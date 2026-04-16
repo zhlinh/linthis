@@ -1330,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "linthis"
-version = "0.19.3"
+version = "0.19.4"
 dependencies = [
  "anyhow",
  "async-trait",
