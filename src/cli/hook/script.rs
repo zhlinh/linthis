@@ -158,6 +158,22 @@ fn shell_agent_invoke_block(
     )
 }
 
+/// Shell snippet showing how to review/undo the agent's changes.
+/// Printed after the agent finishes and before re-verify, so the user sees
+/// the hint even if re-verify fails (and they need to undo).
+///
+/// Uses `git diff --cached` for viewing because linthis's own backup tracks
+/// format changes (small), not the full agent rewrite. The staged diff
+/// against HEAD shows exactly what the agent changed.
+fn shell_agent_fix_hint(indent: &str) -> String {
+    format!(
+        "{i}echo \"[linthis] ✓ Agent fix applied\" >&2\n\
+         {i}echo \"[linthis]   View changes : git diff --cached\" >&2\n\
+         {i}echo \"[linthis]   Undo changes : linthis backup undo\" >&2\n",
+        i = indent
+    )
+}
+
 /// Build the shell fix block that invokes an agent on lint failure.
 pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
     let agent_cmd = agent_fix_cmd_for_event(provider, hook_event);
@@ -175,6 +191,7 @@ pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &Ho
          \x20\x20\x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
          {agent_block}\
          \x20\x20\x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
+         {agent_hint}\
          \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
          \x20\x20\x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
          \x20\x20\x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
@@ -184,6 +201,7 @@ pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &Ho
          \x20 fi\n",
         agent_block = agent_block,
         agent_check = agent_check,
+        agent_hint = shell_agent_fix_hint("       "),
         new_msg_print = new_msg_print,
     )
 }
@@ -720,6 +738,7 @@ fn shell_worktree_agent_fix(
          \x20\x20\x20 # Agent fixes directly in main working tree (backup provides safety net)\n\
          {agent_block}\
          \x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
+         {agent_hint}\
          \x20\x20\x20\x20\x20 # Re-stage files modified by agent\n\
          \x20\x20\x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
          \x20\x20\x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
@@ -732,6 +751,7 @@ fn shell_worktree_agent_fix(
          \x20 fi\n",
         agent_check = agent_check,
         agent_block = agent_block,
+        agent_hint = shell_agent_fix_hint("     "),
         linthis = linthis_cmd,
     )
 }
@@ -1041,8 +1061,14 @@ fn shell_read_fix_commit_mode(config_section: &str) -> String {
     } else {
         "dirty"
     };
+    // Try project config first, then global config, then built-in default.
+    // `linthis config get` without `--global` errors out when no project
+    // config exists (`.linthis/config.toml` missing), so we need to fall
+    // through to `--global` explicitly to honour user's global setting.
     format!(
-        "_FIX_MODE=$(linthis config get hook.{section}.fix_commit_mode 2>/dev/null || echo \"{default}\")\n",
+        "_FIX_MODE=$(linthis config get hook.{section}.fix_commit_mode 2>/dev/null || \
+         linthis config get hook.{section}.fix_commit_mode --global 2>/dev/null || \
+         echo \"{default}\")\n",
         section = config_section,
         default = default,
     )
@@ -1066,7 +1092,8 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          [ -z \"$_FILES\" ] && exit 0\n\
          \n\
          # Check + format committed files (includes lint fix, not just formatting)\n\
-         echo \"$_FILES\" | tr '\\n' '\\0' | xargs -0 -I{{}} {linthis} -i {{}} --hook-event=post-commit\n\
+         # {linthis} already contains --hook-event=post-commit from build_hook_command\n\
+         echo \"$_FILES\" | tr '\\n' '\\0' | xargs -0 -I{{}} {linthis} -i {{}}\n\
          \n\
          # If any files changed, create fixup commit\n\
          _CHANGED=$(git diff --name-only)\n\
