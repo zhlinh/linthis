@@ -295,6 +295,7 @@ pub fn handle_init_command(global: bool, with_hook: bool, force: bool) -> ExitCo
                 provider: None,                          // No provider specified
                 args: None,                              // Use default args (-c -f)
                 provider_args: None,                     // No extra agent CLI args
+                model: None,                             // No model specified
                 fix_commit_mode: None,                   // Use default fix mode
                 all_events: false,                       // Only pre-commit
                 all_types: false,                        // Only default type

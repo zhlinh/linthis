@@ -60,6 +60,7 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             provider,
             args,
             provider_args,
+            model,
             fix_commit_mode,
             all_events,
             all_types,
@@ -73,6 +74,7 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             provider,
             args,
             provider_args,
+            model,
             fix_commit_mode,
             all_events,
             all_types,
@@ -158,6 +160,7 @@ struct InstallArgs {
     provider: Option<String>,
     args: Option<String>,
     provider_args: Option<String>,
+    model: Option<String>,
     fix_commit_mode: Option<String>,
     all_events: bool,
     all_types: bool,
@@ -205,6 +208,7 @@ fn dispatch_install(a: InstallArgs) -> ExitCode {
         provider: a.provider,
         args: a.args,
         provider_args: a.provider_args,
+        model: a.model,
     })
 }
 

@@ -276,6 +276,7 @@ pub(crate) struct HookInstallParams {
     pub provider: Option<String>,
     pub args: Option<String>,
     pub provider_args: Option<String>,
+    pub model: Option<String>,
 }
 
 /// Install git hooks for all combinations of types x events (cartesian product).
@@ -290,16 +291,19 @@ pub(crate) fn handle_hook_install(params: HookInstallParams) -> ExitCode {
         provider,
         args,
         provider_args,
+        model,
     } = params;
 
     // Support provider/model syntax (e.g. "claude/opus" -> provider="claude", model="opus")
     let (provider, provider_args) = if let Some(ref raw) = provider {
-        let (name, model) = parse_provider_with_model(raw);
-        let merged = merge_model_into_provider_args(model, provider_args.as_deref());
+        let (name, model_from_provider) = parse_provider_with_model(raw);
+        let merged = merge_model_into_provider_args(model_from_provider, provider_args.as_deref());
         (Some(name.to_string()), merged)
     } else {
         (provider, provider_args)
     };
+    // Merge --model flag into provider_args (takes effect after provider/model syntax above)
+    let provider_args = merge_model_into_provider_args(model.as_deref(), provider_args.as_deref());
 
     // If any selected type needs an agent-fix provider, resolve it once upfront
     let preresolved_fix_provider: Option<AgentFixProvider> =

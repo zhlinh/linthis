@@ -1213,6 +1213,12 @@ pub enum HookCommands {
         #[arg(long, allow_hyphen_values = true)]
         provider_args: Option<String>,
 
+        /// AI model to use (shorthand for --provider-args "--model <MODEL>")
+        ///
+        /// Examples: opus, sonnet, haiku, glm-4-flash
+        #[arg(long, value_name = "MODEL")]
+        model: Option<String>,
+
         /// Set the hook fix mode (squash, dirty, fixup)
         ///
         /// Controls how auto-format and agent fix changes are applied.
