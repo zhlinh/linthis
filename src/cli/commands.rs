@@ -936,6 +936,12 @@ pub enum Commands {
         #[arg(long)]
         model: Option<String>,
 
+        /// Extra arguments passed to the AI provider CLI (e.g. "--model glm-4-flash")
+        ///
+        /// Only applies to CLI-based providers (claude-cli, codebuddy-cli, etc.).
+        #[arg(long, allow_hyphen_values = true)]
+        provider_args: Option<String>,
+
         /// Maximum suggestions per issue (default: 3)
         #[arg(long, default_value = "3")]
         max_suggestions: usize,

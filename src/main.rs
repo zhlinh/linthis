@@ -186,13 +186,13 @@ fn dispatch_format(command: Commands) -> ExitCode {
 
 fn dispatch_fix(command: Commands) -> ExitCode {
     if let Commands::Fix {
-        source, check, format_only, auto_fix, ai, provider, model,
+        source, check, format_only, auto_fix, ai, provider, model, provider_args,
         max_suggestions, accept_all, jobs, file, line, message, rule,
         output, with_context, verbose, quiet, undo, list_backups,
     } = command {
         let (ai, accept_all) = if auto_fix { (true, true) } else { (ai, accept_all) };
         handle_fix_command(FixCommandOptions {
-            source, check, format_only, ai, provider, model,
+            source, check, format_only, ai, provider, model, provider_args,
             max_suggestions, accept_all, jobs, file, line, message, rule,
             output, with_context, verbose, quiet, undo, list_backups,
         })

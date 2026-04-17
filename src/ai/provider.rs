@@ -420,6 +420,8 @@ pub struct AiProviderConfig {
     pub temperature: f32,
     /// Request timeout in seconds
     pub timeout_secs: u64,
+    /// Extra CLI arguments for CLI-based providers (e.g. ["--model", "glm-4-flash"])
+    pub extra_args: Vec<String>,
 }
 
 impl Default for AiProviderConfig {
@@ -432,6 +434,7 @@ impl Default for AiProviderConfig {
             max_tokens: 2048,
             temperature: 0.3,
             timeout_secs: 60,
+            extra_args: Vec::new(),
         }
     }
 }
@@ -773,6 +776,10 @@ impl AiProvider {
         // Build the command with optional system prompt
         let mut cmd = Command::new("claude");
         cmd.arg("-p").arg("--output-format").arg("text");
+
+        for arg in &self.config.extra_args {
+            cmd.arg(arg);
+        }
 
         // Add system prompt if provided
         if let Some(sys) = system_prompt {
@@ -1117,6 +1124,10 @@ If unsure about impact, use Grep extensively to find all references first."#,
         let mut cmd = Command::new("codebuddy");
         cmd.arg("-p").arg("--output-format").arg("text");
 
+        for arg in &self.config.extra_args {
+            cmd.arg(arg);
+        }
+
         // Add system prompt if provided
         if let Some(sys) = system_prompt {
             cmd.arg("--append-system-prompt").arg(sys);
@@ -1221,6 +1232,10 @@ If unsure about impact, use Grep extensively to find all references first."#,
         let mut cmd = Command::new("codex");
         cmd.arg("exec")
             .arg("--dangerously-bypass-approvals-and-sandbox");
+
+        for arg in &self.config.extra_args {
+            cmd.arg(arg);
+        }
 
         // Add the main prompt (with system prompt prepended if provided)
         let full_prompt = if let Some(sys) = system_prompt {
@@ -1330,6 +1345,10 @@ If unsure about impact, use Grep extensively to find all references first."#,
         use std::process::{Command, Stdio};
 
         let mut cmd = Command::new("gemini");
+
+        for arg in &self.config.extra_args {
+            cmd.arg(arg);
+        }
 
         // Gemini CLI uses positional prompt for non-interactive mode
         // Prepend system prompt if provided
