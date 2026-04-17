@@ -167,9 +167,9 @@ fn shell_agent_invoke_block(
 /// against HEAD shows exactly what the agent changed.
 fn shell_agent_fix_hint(indent: &str) -> String {
     format!(
-        "{i}echo \"[linthis] ✓ Agent fix applied\" >&2\n\
-         {i}echo \"[linthis]   View changes : git diff --cached\" >&2\n\
-         {i}echo \"[linthis]   Undo changes : linthis backup undo\" >&2\n",
+        "{i}printf \"[linthis] \\033[0;32m✓\\033[0m Agent fix applied\\n\" >&2\n\
+         {i}printf \"[linthis]   View changes : \\033[0;36mgit diff --cached\\033[0m\\n\" >&2\n\
+         {i}printf \"[linthis]   Undo changes : \\033[0;33mlinthis backup undo\\033[0m\\n\" >&2\n",
         i = indent
     )
 }
@@ -179,9 +179,9 @@ fn shell_agent_fix_hint(indent: &str) -> String {
 /// the fixup commit and `git diff HEAD~1` shows the agent's changes.
 fn shell_agent_fix_hint_post_commit(indent: &str) -> String {
     format!(
-        "{i}echo \"[linthis] ✓ Agent fix applied\" >&2\n\
-         {i}echo \"[linthis]   View changes : git diff HEAD~1\" >&2\n\
-         {i}echo \"[linthis]   Undo changes : git reset HEAD~1\" >&2\n",
+        "{i}printf \"[linthis] \\033[0;32m✓\\033[0m Agent fix applied\\n\" >&2\n\
+         {i}printf \"[linthis]   View changes : \\033[0;36mgit diff HEAD~1\\033[0m\\n\" >&2\n\
+         {i}printf \"[linthis]   Undo changes : \\033[0;33mgit reset HEAD~1\\033[0m\\n\" >&2\n",
         i = indent
     )
 }
@@ -1236,7 +1236,7 @@ pub(crate) fn build_post_commit_with_agent_script(
          \x20 # Show hint and diff path after fixup commit so HEAD~1 is correct\n\
          \x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
          {agent_hint}\
-         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && echo \"[linthis] Diff Patch created: $_DIFF_FILE\" >&2\n\
+         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && printf \"[linthis] \\033[0;32m✓\\033[0m Diff Patch created: $_DIFF_FILE\\n\" >&2\n\
          \x20 fi\n\
          fi\n",
         timer = timer_fns,
