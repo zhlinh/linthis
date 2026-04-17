@@ -1236,8 +1236,7 @@ pub(crate) fn build_post_commit_with_agent_script(
          \x20 # Show hint and diff path after fixup commit so HEAD~1 is correct\n\
          \x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
          {agent_hint}\
-         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && printf \"[linthis] \\033[0;32m✓\\033[0m Diff Patch created: $_DIFF_FILE\\n\" >&2\n\
-         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && printf \"[linthis]   Undo (patch) : \\033[0;33mgit apply -R $_DIFF_FILE\\033[0m\\n\" >&2\n\
+         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && printf \"[linthis]   Undo (by patch created) : \\033[0;33mgit apply -R $_DIFF_FILE\\033[0m\\n\" >&2\n\
          \x20 fi\n\
          fi\n",
         timer = timer_fns,
