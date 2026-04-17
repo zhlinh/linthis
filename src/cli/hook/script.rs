@@ -174,6 +174,42 @@ fn shell_agent_fix_hint(indent: &str) -> String {
     )
 }
 
+/// Shell snippet showing how to review/undo the agent's changes in post-commit fixup mode.
+/// Printed after the fixup commit is created, so `HEAD~1` correctly refers to
+/// the fixup commit and `git diff HEAD~1` shows the agent's changes.
+fn shell_agent_fix_hint_post_commit(indent: &str) -> String {
+    format!(
+        "{i}echo \"[linthis] ✓ Agent fix applied\" >&2\n\
+         {i}echo \"[linthis]   View changes : git diff HEAD~1\" >&2\n\
+         {i}echo \"[linthis]   Undo changes : git reset HEAD~1\" >&2\n",
+        i = indent
+    )
+}
+
+/// Save staged changes (format + agent) as a patch before the fixup commit.
+/// Sets `_DIFF_FILE` to the saved path, or empty string if nothing to save.
+/// Does NOT print anything — the caller prints `Diff Patch created:` after
+/// the fixup commit so the message appears in the right order.
+fn shell_save_diff_patch_for_post_commit(indent: &str) -> String {
+    let keep = load_retention_diffs();
+    format!(
+        "{i}# Save staged changes as a patch before fixup commit\n\
+         {i}_SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
+         {i}_DIFF_DIR=\"$HOME/.linthis/projects/$_SLUG/diff\"\n\
+         {i}mkdir -p \"$_DIFF_DIR\"\n\
+         {i}_DIFF_FILE=\"$_DIFF_DIR/diff-$(date +%Y%m%d-%H%M%S).patch\"\n\
+         {i}git diff --cached > \"$_DIFF_FILE\" 2>/dev/null\n\
+         {i}if [ -s \"$_DIFF_FILE\" ]; then\n\
+         {i}  ls -t \"$_DIFF_DIR\"/diff-*.patch 2>/dev/null | tail -n +{keep_plus_one} | xargs rm -f 2>/dev/null\n\
+         {i}else\n\
+         {i}  rm -f \"$_DIFF_FILE\"\n\
+         {i}  _DIFF_FILE=\"\"\n\
+         {i}fi\n",
+        i = indent,
+        keep_plus_one = keep + 1,
+    )
+}
+
 /// Build the shell fix block that invokes an agent on lint failure.
 pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &HookEvent) -> String {
     let agent_cmd = agent_fix_cmd_for_event(provider, hook_event);
@@ -412,6 +448,23 @@ pub(crate) fn shell_agent_availability_check(provider: &AgentFixProvider) -> Str
          fi\n",
         bin = bin,
     )
+}
+
+/// Agent fix prompt for post-commit: files are committed (not staged), use report show.
+fn agent_fix_prompt_for_post_commit() -> String {
+    "Lint issues remain in committed files after auto-formatting. A backup has been created. \
+     Follow these steps: \
+     (1) Run 'linthis report show' to inspect all remaining issues. \
+     (2) Group the issues by file. For files with independent errors (no cross-file dependencies), \
+     fix them in parallel using concurrent tool calls — each tool call fixes one file. \
+     For files with cross-file dependencies (e.g. shared type renames, API signature changes), \
+     fix them sequentially in dependency order. \
+     Fix by editing the code directly (do NOT use linthis --fix). \
+     (3) Re-run 'linthis report show' and verify remaining issues. \
+     If none remain, you are done. Otherwise keep fixing. \
+     (4) Display a Changes Summary showing each modified file, \
+     what was changed, and why (e.g. which lint rule). Then show the full diff output."
+        .to_string()
 }
 
 /// Build the agent fix prompt based on the hook event type.
@@ -1091,11 +1144,15 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          _FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)\n\
          [ -z \"$_FILES\" ] && exit 0\n\
          \n\
-         # Check + format committed files (includes lint fix, not just formatting)\n\
-         # {linthis} already contains --hook-event=post-commit from build_hook_command\n\
-         echo \"$_FILES\" | tr '\\n' '\\0' | xargs -0 -I{{}} {linthis} -i {{}}\n\
+         # Build -i <file> args and run linthis once for all committed files\n\
+         # (single invocation = single [Post-commit] output box)\n\
+         set --\n\
+         while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
+         $_FILES\n\
+         _EOF_\n\
+         {linthis} \"$@\"\n\
          \n\
-         # If any files changed, create fixup commit\n\
+         # If any files changed, create fixup commit and show what changed\n\
          _CHANGED=$(git diff --name-only)\n\
          if [ -n \"$_CHANGED\" ]; then\n\
          \x20 echo \"$_CHANGED\" | xargs git add\n\
@@ -1105,6 +1162,90 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
         timer = timer_fns,
         fix_commit_mode = fix_commit_mode_section,
         linthis = linthis_cmd,
+    )
+}
+
+/// Build a post-commit hook script for git-with-agent fixup mode.
+/// Formats committed files, then invokes the agent for any remaining issues,
+/// and creates a single fixup commit with all changes.
+pub(crate) fn build_post_commit_with_agent_script(
+    linthis_fmt_cmd: &str,
+    fix_provider: &AgentFixProvider,
+    provider_args: Option<&str>,
+) -> String {
+    let timer_fns = shell_timer_functions();
+    let fix_commit_mode_section = shell_read_fix_commit_mode("pre_commit");
+    let prompt = agent_fix_prompt_for_post_commit();
+    let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt, provider_args);
+    let error_msg = "Lint issues remain after formatting";
+    let agent_check = shell_agent_availability_check(fix_provider);
+    let agent_block = shell_agent_invoke_block(fix_provider, &agent_cmd, error_msg, "  ");
+    let save_diff = shell_save_diff_patch_for_post_commit("         ");
+    let agent_hint = shell_agent_fix_hint_post_commit("  ");
+    format!(
+        "#!/bin/sh\n\
+         {timer}\
+         # Read fix_commit_mode — only activate in fixup mode\n\
+         {fix_commit_mode}\
+         if [ \"$_FIX_MODE\" != \"fixup\" ]; then\n\
+         \x20 exit 0\n\
+         fi\n\
+         \n\
+         # Get files from the commit that was just created\n\
+         _FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)\n\
+         [ -z \"$_FILES\" ] && exit 0\n\
+         \n\
+         # Build -i <file> args and run formatter on all committed files\n\
+         set --\n\
+         while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
+         $_FILES\n\
+         _EOF_\n\
+         {linthis_fmt} \"$@\"\n\
+         _FMT_EXIT=$?\n\
+         \n\
+         # Stage formatting changes if any\n\
+         _FMT_CHANGED=$(git diff --name-only)\n\
+         [ -n \"$_FMT_CHANGED\" ] && echo \"$_FMT_CHANGED\" | xargs git add\n\
+         \n\
+         # If formatter didn't fully fix, try agent\n\
+         _DIFF_FILE=\"\"\n\
+         if [ \"$_FMT_EXIT\" -ne 0 ]; then\n\
+         \x20 {agent_check}\
+         \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
+         {agent_block}\
+         \x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
+         \x20\x20\x20\x20\x20 # Stage agent's changes\n\
+         \x20\x20\x20\x20\x20 _AGENT_CHANGED=$(git diff --name-only)\n\
+         \x20\x20\x20\x20\x20 [ -n \"$_AGENT_CHANGED\" ] && echo \"$_AGENT_CHANGED\" | xargs git add\n\
+         \x20\x20\x20\x20\x20 # Save staged diff patch (format + agent) before fixup commit\n\
+         {save_diff}\
+         \x20\x20\x20\x20\x20 # Re-verify using the same format command (not check-only) so the\n\
+         \x20\x20\x20\x20\x20 # result is consistent with the initial run and shows Passed when\n\
+         \x20\x20\x20\x20\x20 # the agent fixed the remaining format/security issues.\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+         \x20\x20\x20\x20\x20 {linthis_fmt} \"$@\"\n\
+         \x20\x20\x20 fi\n\
+         \x20 fi\n\
+         fi\n\
+         \n\
+         # Create fixup commit if anything was staged (format + agent changes)\n\
+         _STAGED=$(git diff --cached --name-only)\n\
+         if [ -n \"$_STAGED\" ]; then\n\
+         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
+         \x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
+         \x20 # Show hint and diff path after fixup commit so HEAD~1 is correct\n\
+         \x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
+         {agent_hint}\
+         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && echo \"[linthis] Diff Patch created: $_DIFF_FILE\" >&2\n\
+         \x20 fi\n\
+         fi\n",
+        timer = timer_fns,
+        fix_commit_mode = fix_commit_mode_section,
+        linthis_fmt = linthis_fmt_cmd,
+        agent_check = agent_check,
+        agent_block = agent_block,
+        save_diff = save_diff,
+        agent_hint = agent_hint,
     )
 }
 
@@ -1128,8 +1269,10 @@ pub(crate) fn build_hook_command(hook_event: &HookEvent, args: &Option<String>) 
             "linthis cmsg \"$1\"".to_string()
         }
         HookEvent::PostCommit => {
-            // For post-commit: format files from the last commit (fixup mode)
-            let extra = args.as_deref().unwrap_or("-f");
+            // For post-commit: check + format (same as pre-commit) so lint-only
+            // rules like line-too-long are caught and passed to the agent.
+            // Using only "-f" silently skips rules the formatter can't auto-fix.
+            let extra = args.as_deref().unwrap_or("-c -f");
             format!("linthis {} --hook-event=post-commit", extra)
         }
     }
