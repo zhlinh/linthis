@@ -366,16 +366,17 @@ pub(crate) fn build_global_hook_script_for_event(
 
 /// Return the binary name used to invoke the agent CLI headlessly.
 /// Used for PATH detection via `which`.
-pub(crate) fn agent_fix_bin(provider: &AgentFixProvider) -> &'static str {
+pub(crate) fn agent_fix_bin(provider: &AgentFixProvider) -> std::borrow::Cow<'static, str> {
     match provider {
-        AgentFixProvider::Claude => "claude",
-        AgentFixProvider::Codex => "codex",
-        AgentFixProvider::Gemini => "gemini",
-        AgentFixProvider::Cursor => "cursor-agent",
-        AgentFixProvider::Droid => "droid",
-        AgentFixProvider::Auggie => "auggie",
-        AgentFixProvider::Codebuddy => "codebuddy",
-        AgentFixProvider::Openclaw => "openclaw",
+        AgentFixProvider::Claude => "claude".into(),
+        AgentFixProvider::Codex => "codex".into(),
+        AgentFixProvider::Gemini => "gemini".into(),
+        AgentFixProvider::Cursor => "cursor-agent".into(),
+        AgentFixProvider::Droid => "droid".into(),
+        AgentFixProvider::Auggie => "auggie".into(),
+        AgentFixProvider::Codebuddy => "codebuddy".into(),
+        AgentFixProvider::Openclaw => "openclaw".into(),
+        AgentFixProvider::Custom { bin, .. } => bin.clone().into(),
     }
 }
 
@@ -426,6 +427,19 @@ pub(crate) fn agent_fix_headless_cmd(
             escaped
         ),
         AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message '{}'", escaped),
+        AgentFixProvider::Custom { bin, style } => match style.as_str() {
+            "claude" | "claude-cli" | "codebuddy" | "codebuddy-cli" => format!(
+                "{bin} -p{extra} --verbose --output-format stream-json --dangerously-skip-permissions '{}' | linthis agent-stream",
+                escaped
+            ),
+            "codex" | "codex-cli" => format!("{bin} exec{extra} --ask-for-approval never '{}'", escaped),
+            "gemini" | "gemini-cli" => format!("{bin} -p{extra} --approval-mode=auto_edit '{}'", escaped),
+            "cursor" => format!("{bin} chat{extra} --force '{}'", escaped),
+            "droid" => format!("{bin} exec{extra} --auto high '{}'", escaped),
+            "auggie" => format!("{bin}{extra} --print '{}'", escaped),
+            "openclaw" => format!("{bin} agent{extra} --message '{}'", escaped),
+            _ => format!("{bin}{extra} '{}'", escaped),
+        },
     }
 }
 
@@ -533,11 +547,35 @@ pub(crate) fn agent_fix_headless_cmd_commit_msg(
         Verify with 'linthis cmsg $_MSG_FILE' until it passes.";
     // Escape backslashes and double quotes for use in double-quoted shell string
     let escaped = prompt.replace('\\', "\\\\").replace('"', "\\\"");
+    let bin_cmd = build_commit_msg_agent_bin_cmd(provider, &escaped, provider_args);
+    // Capture the real .git/COMMIT_EDITMSG path in $_REAL_MSG, point
+    // $_MSG_FILE at a writable temp file (the agent can't touch .git/),
+    // and copy back when the agent finishes if it actually changed anything.
+    format!(
+        "_REAL_MSG=\"$1\"; \
+         _MSG_FILE=$(mktemp -t linthis-cmsg.XXXXXX 2>/dev/null || echo \"/tmp/linthis-cmsg.$$\"); \
+         cp \"$_REAL_MSG\" \"$_MSG_FILE\" 2>/dev/null; \
+         {bin_cmd}; \
+         if [ -s \"$_MSG_FILE\" ] && ! cmp -s \"$_REAL_MSG\" \"$_MSG_FILE\" 2>/dev/null; then \
+           cp \"$_MSG_FILE\" \"$_REAL_MSG\"; \
+         fi; \
+         rm -f \"$_MSG_FILE\"",
+        bin_cmd = bin_cmd
+    )
+}
+
+/// Build the binary command portion for commit-msg agent fix.
+/// Extracted to reduce cyclomatic complexity of `agent_fix_headless_cmd_commit_msg`.
+fn build_commit_msg_agent_bin_cmd(
+    provider: &AgentFixProvider,
+    escaped: &str,
+    provider_args: Option<&str>,
+) -> String {
     let extra = provider_args
         .filter(|a| !a.is_empty())
         .map(|a| format!(" {a}"))
         .unwrap_or_default();
-    let bin_cmd = match provider {
+    match provider {
         AgentFixProvider::Claude => format!(
             "claude -p{extra} --verbose --output-format stream-json --dangerously-skip-permissions \"{}\" | linthis agent-stream",
             escaped
@@ -556,21 +594,27 @@ pub(crate) fn agent_fix_headless_cmd_commit_msg(
             escaped
         ),
         AgentFixProvider::Openclaw => format!("openclaw agent{extra} --message \"{}\"", escaped),
-    };
-    // Capture the real .git/COMMIT_EDITMSG path in $_REAL_MSG, point
-    // $_MSG_FILE at a writable temp file (the agent can't touch .git/),
-    // and copy back when the agent finishes if it actually changed anything.
-    format!(
-        "_REAL_MSG=\"$1\"; \
-         _MSG_FILE=$(mktemp -t linthis-cmsg.XXXXXX 2>/dev/null || echo \"/tmp/linthis-cmsg.$$\"); \
-         cp \"$_REAL_MSG\" \"$_MSG_FILE\" 2>/dev/null; \
-         {bin_cmd}; \
-         if [ -s \"$_MSG_FILE\" ] && ! cmp -s \"$_REAL_MSG\" \"$_MSG_FILE\" 2>/dev/null; then \
-           cp \"$_MSG_FILE\" \"$_REAL_MSG\"; \
-         fi; \
-         rm -f \"$_MSG_FILE\"",
-        bin_cmd = bin_cmd
-    )
+        AgentFixProvider::Custom { bin, style } => {
+            build_custom_commit_msg_cmd(bin, style, &extra, escaped)
+        }
+    }
+}
+
+/// Build commit-msg command for custom provider based on CLI style.
+fn build_custom_commit_msg_cmd(bin: &str, style: &str, extra: &str, escaped: &str) -> String {
+    match style {
+        "claude" | "claude-cli" | "codebuddy" | "codebuddy-cli" => format!(
+            "{bin} -p{extra} --verbose --output-format stream-json --dangerously-skip-permissions \"{}\" | linthis agent-stream",
+            escaped
+        ),
+        "codex" | "codex-cli" => format!("{bin} exec{extra} --ask-for-approval never \"{}\"", escaped),
+        "gemini" | "gemini-cli" => format!("{bin} -p{extra} --approval-mode=auto_edit \"{}\"", escaped),
+        "cursor" => format!("{bin} chat{extra} --force \"{}\"", escaped),
+        "droid" => format!("{bin} exec{extra} --auto high \"{}\"", escaped),
+        "auggie" => format!("{bin}{extra} --print \"{}\"", escaped),
+        "openclaw" => format!("{bin} agent{extra} --message \"{}\"", escaped),
+        _ => format!("{bin}{extra} \"{}\"", escaped),
+    }
 }
 
 /// Error message for agent fix echo based on hook event type.
@@ -1344,7 +1388,7 @@ pub(crate) fn merge_model_into_provider_args(
 pub(crate) fn detect_agent_fix_providers() -> Vec<AgentFixProvider> {
     ALL_AGENT_FIX_PROVIDERS
         .iter()
-        .filter(|p| super::is_command_available(agent_fix_bin(p)))
+        .filter(|p| super::is_command_available(agent_fix_bin(p).as_ref()))
         .cloned()
         .collect()
 }
@@ -1361,24 +1405,47 @@ pub(crate) fn resolve_agent_fix_provider(
     use std::process::ExitCode;
 
     if let Some(p) = provider {
-        let parsed = match p.to_lowercase().as_str() {
-            "claude" => Some(AgentFixProvider::Claude),
-            "codex" => Some(AgentFixProvider::Codex),
-            "gemini" => Some(AgentFixProvider::Gemini),
-            "cursor" => Some(AgentFixProvider::Cursor),
-            "droid" => Some(AgentFixProvider::Droid),
-            "auggie" | "aug" | "augment" => Some(AgentFixProvider::Auggie),
-            "codebuddy" => Some(AgentFixProvider::Codebuddy),
-            "openclaw" => Some(AgentFixProvider::Openclaw),
-            _ => None,
-        };
-        return parsed.ok_or_else(|| {
-            eprintln!(
-                "{}: Unknown agent fix provider '{}'. Valid: claude, codex, gemini, cursor, droid, auggie, codebuddy, openclaw",
-                "Error".red(), p
-            );
-            ExitCode::from(1)
-        });
+        if let Some(known) = parse_agent_fix_provider_name(p) {
+            return Ok(known);
+        }
+        // Not a built-in provider — look up in [ai.custom_providers] config
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let custom = linthis::config::Config::load_project_config(&cwd)
+            .as_ref()
+            .and_then(|c| c.ai.custom_providers.get(p).cloned())
+            .or_else(|| {
+                linthis::config::Config::load_user_config()
+                    .as_ref()
+                    .and_then(|c| c.ai.custom_providers.get(p).cloned())
+            });
+        if let Some(custom) = custom {
+            let bin = match &custom.command {
+                Some(c) => c.to_string(),
+                None => {
+                    eprintln!(
+                        "{}: custom provider '{}' requires a 'command' field in [ai.custom_providers.{}]",
+                        "Error".red(), p, p
+                    );
+                    return Err(ExitCode::from(1));
+                }
+            };
+            let style = match &custom.cli_style {
+                Some(s) => s.to_string(),
+                None => {
+                    eprintln!(
+                        "{}: custom provider '{}' requires 'cli_style' in [ai.custom_providers.{}]\n  Valid styles: claude, codex, gemini, cursor, droid, auggie, codebuddy, openclaw",
+                        "Error".red(), p, p
+                    );
+                    return Err(ExitCode::from(1));
+                }
+            };
+            return Ok(AgentFixProvider::Custom { bin, style });
+        }
+        eprintln!(
+            "{}: Unknown provider '{}'. Add it to config:\n  [ai.custom_providers.{}]\n  command = \"{}\"\n  cli_style = \"claude\"  # or codex, gemini, cursor, droid, auggie, codebuddy, openclaw",
+            "Error".red(), p, p, p
+        );
+        return Err(ExitCode::from(1));
     }
 
     let detected = detect_agent_fix_providers();
@@ -1398,7 +1465,7 @@ pub(crate) fn resolve_agent_fix_provider(
     println!();
 
     for (i, p) in ALL_AGENT_FIX_PROVIDERS.iter().enumerate() {
-        let available = super::is_command_available(agent_fix_bin(p));
+        let available = super::is_command_available(agent_fix_bin(p).as_ref());
         let tag = if available {
             format!(" {}", "(detected)".cyan())
         } else {

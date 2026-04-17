@@ -784,7 +784,8 @@ pub(crate) fn handle_global_hook_install(
     }
 
     let effective_hook_type = hook_type.clone().unwrap_or(HookTool::Git);
-    let provider_str = fix_provider.as_ref().map(|p| p.as_str());
+    let provider_cow = fix_provider.as_ref().map(|p| p.as_str());
+    let provider_str = provider_cow.as_deref();
     let content = build_thin_wrapper_script(
         hook_event,
         &effective_hook_type,
@@ -872,10 +873,11 @@ fn handle_git_with_agent_install(
         return ExitCode::SUCCESS;
     }
 
+    let provider_name = fix_provider.as_str();
     let content = build_thin_wrapper_script(
         hook_event,
         &HookTool::GitWithAgent,
-        Some(fix_provider.as_str()),
+        Some(provider_name.as_ref()),
         global,
         provider_args,
     );
@@ -926,12 +928,13 @@ fn handle_git_with_agent_install(
         }
     }
 
+    let provider_name = fix_provider.as_str();
     save_installed_hook(
         scope,
         &project,
         hook_event,
         &HookTool::GitWithAgent,
-        Some(fix_provider.as_str()),
+        Some(provider_name.as_ref()),
         provider_args,
     );
     ExitCode::SUCCESS

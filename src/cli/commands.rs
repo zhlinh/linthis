@@ -241,8 +241,7 @@ impl HookTool {
 }
 
 /// AI agent CLI providers for automatic fix on hook failure (--type *-with-agent)
-#[derive(Clone, Debug, clap::ValueEnum)]
-#[value(rename_all = "kebab-case")]
+#[derive(Clone, Debug)]
 pub enum AgentFixProvider {
     /// Anthropic Claude Code CLI (claude -p "prompt")
     Claude,
@@ -260,20 +259,24 @@ pub enum AgentFixProvider {
     Codebuddy,
     /// OpenClaw agent CLI (openclaw agent --message "prompt")
     Openclaw,
+    /// Custom CLI provider defined in [ai.custom_providers] config.
+    /// `bin` is the command name; `style` is the cli_style (e.g. "claude", "codex").
+    Custom { bin: String, style: String },
 }
 
 impl AgentFixProvider {
-    /// Get the CLI string representation (matches clap ValueEnum, parseable by resolve_agent_fix_provider)
-    pub fn as_str(&self) -> &'static str {
+    /// Get the provider name for use in CLI hints and config keys.
+    pub fn as_str(&self) -> std::borrow::Cow<'static, str> {
         match self {
-            AgentFixProvider::Claude => "claude",
-            AgentFixProvider::Codex => "codex",
-            AgentFixProvider::Gemini => "gemini",
-            AgentFixProvider::Cursor => "cursor",
-            AgentFixProvider::Droid => "droid",
-            AgentFixProvider::Auggie => "auggie",
-            AgentFixProvider::Codebuddy => "codebuddy",
-            AgentFixProvider::Openclaw => "openclaw",
+            AgentFixProvider::Claude => "claude".into(),
+            AgentFixProvider::Codex => "codex".into(),
+            AgentFixProvider::Gemini => "gemini".into(),
+            AgentFixProvider::Cursor => "cursor".into(),
+            AgentFixProvider::Droid => "droid".into(),
+            AgentFixProvider::Auggie => "auggie".into(),
+            AgentFixProvider::Codebuddy => "codebuddy".into(),
+            AgentFixProvider::Openclaw => "openclaw".into(),
+            AgentFixProvider::Custom { bin, .. } => bin.clone().into(),
         }
     }
 }
@@ -289,6 +292,7 @@ impl std::fmt::Display for AgentFixProvider {
             AgentFixProvider::Auggie => write!(f, "Auggie"),
             AgentFixProvider::Codebuddy => write!(f, "CodeBuddy"),
             AgentFixProvider::Openclaw => write!(f, "OpenClaw"),
+            AgentFixProvider::Custom { bin, style } => write!(f, "{} ({})", bin, style),
         }
     }
 }
