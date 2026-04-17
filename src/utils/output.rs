@@ -767,6 +767,7 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
     let hook_filename = match hook_type {
         Some("pre-push") => "pre-push",
         Some("commit-msg") => "commit-msg",
+        Some("post-commit") => "post-commit",
         _ => "pre-commit",
     };
 
@@ -873,6 +874,7 @@ fn hook_display_name(hook_type: Option<&str>) -> &'static str {
     match hook_type {
         Some("pre-push") => "📤 [Pre-push]",
         Some("commit-msg") => "📝 [Commit-msg]",
+        Some("post-commit") => "🔧 [Post-commit]",
         _ => "🔍 [Pre-commit]",
     }
 }

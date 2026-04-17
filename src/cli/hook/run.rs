@@ -15,8 +15,8 @@ use colored::Colorize;
 use super::config::describe_hook_source;
 use super::script::{
     build_git_with_agent_hook_script, build_global_hook_script_for_event, build_hook_command,
-    build_post_commit_script, merge_model_into_provider_args, parse_agent_fix_provider_name,
-    parse_provider_with_model,
+    build_post_commit_script, build_post_commit_with_agent_script, merge_model_into_provider_args,
+    parse_agent_fix_provider_name, parse_provider_with_model,
 };
 use crate::cli::commands::{AgentFixProvider, HookEvent, HookTool};
 
@@ -74,10 +74,24 @@ pub(crate) fn handle_hook_run(
 
     let already_running = std::env::vars().any(|(k, _)| k.starts_with(LINTHIS_HOOK_RUNNING_PREFIX));
 
-    // PostCommit uses a dedicated script regardless of hook type
+    // PostCommit uses a dedicated script.
+    // Guard against recursion: the fixup commit inside the post-commit script
+    // uses `git commit --no-verify`, but git still fires the post-commit hook.
+    // The LINTHIS_HOOK_RUNNING_* env var is inherited by child processes, so
+    // `already_running` is true for the second invocation — skip it.
     let script = if matches!(event, HookEvent::PostCommit) {
-        let linthis_cmd = build_hook_command(event, &None);
-        build_post_commit_script(&linthis_cmd)
+        if already_running {
+            return 0;
+        }
+        let linthis_fmt_cmd = build_hook_command(event, &None);
+        if matches!(hook_type, HookTool::GitWithAgent) {
+            let fix_provider = provider
+                .and_then(parse_agent_fix_provider_name)
+                .unwrap_or(AgentFixProvider::Claude);
+            build_post_commit_with_agent_script(&linthis_fmt_cmd, &fix_provider, provider_args)
+        } else {
+            build_post_commit_script(&linthis_fmt_cmd)
+        }
     } else {
         match hook_type {
             HookTool::Git => {
