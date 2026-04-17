@@ -47,6 +47,8 @@ pub struct FixCommandOptions {
     pub provider: Option<String>,
     /// AI model name
     pub model: Option<String>,
+    /// Extra arguments passed to the AI provider CLI
+    pub provider_args: Option<String>,
     /// Max suggestions per issue
     pub max_suggestions: usize,
     /// Auto-apply suggestions
@@ -718,6 +720,9 @@ fn create_suggester(
     let mut prov_config = build_provider_config(&provider_kind);
     if let Some(ref model) = options.model {
         prov_config.model = model.clone();
+    }
+    if let Some(ref pa) = options.provider_args {
+        prov_config.extra_args = pa.split_whitespace().map(|s| s.to_string()).collect();
     }
     prov_config.api_key = resolve_api_key(&provider_kind);
     prov_config.endpoint = resolve_endpoint(&provider_kind);
