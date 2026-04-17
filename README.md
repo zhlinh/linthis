@@ -27,22 +27,22 @@ A fast, cross-platform multi-language linter and formatter written in Rust.
 
 ## Installation
 
-### Method 1: Install via Homebrew (Recommended for macOS/Linux users)
+### Method 1: Install via PyPI (Recommended)
+
+```bash
+# Using uv (recommended)
+pip install uv
+uv tool install linthis
+
+# Using pip
+pip install linthis
+```
+
+### Method 2: Install via Homebrew (Recommended for macOS/Linux users)
 
 ```bash
 brew tap zhlinh/linthis
 brew install linthis
-```
-
-### Method 2: Install via PyPI (Recommended for Python users)
-
-```bash
-# Using pip
-pip install linthis
-
-# Using uv (recommended)
-# pip install uv
-uv pip install linthis
 ```
 
 ### Method 3: Install via Cargo (Recommended for Rust users)
@@ -65,7 +65,7 @@ Install linthis, add a plugin, set up hooks, and run your first check — all in
 
 ```bash
 # 1. Install
-pip install linthis
+uv tool install linthis
 
 # 2. Add team plugin (-g is user scope, use your team's plugin URL)
 linthis plugin add -g sample https://github.com/zhlinh/linthis-plugin-template
@@ -629,25 +629,25 @@ All modifications preserve TOML file format and comments.
 
 <video src="docs/assets/videos/GitHooks-en.mp4" controls width="100%"></video>
 
-| Command          | Short | Long            | Description                                                                                                                                             |
-| ---------------- | ----- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hook install`   |       | `--type`        | Hook type (git/git-with-agent/agent/prek/prek-with-agent)                                                                                               |
-|                  |       | `--event`       | Hook event (pre-commit/pre-push/commit-msg)                                                                                                             |
-|                  | `-g`  | `--global`      | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath`                                                        |
-|                  |       | `--provider`    | AI provider: `claude`/`codex`/`gemini`/`cursor`/`droid`/`auggie`/`codebuddy`. Supports `provider/model` shorthand (e.g. `claude/opus`). For `--type agent`: installs rules files. For `*-with-agent`: uses headless CLI to auto-fix. |
-|                  |       | `--provider-args` | Extra arguments passed to the AI agent CLI (e.g. `"--model opus"`)                                                                                    |
-|                  | `-c`  | `--check-only`  | Hook only runs check                                                                                                                                    |
-|                  | `-f`  | `--format-only` | Hook only runs format                                                                                                                                   |
-|                  |       | `--force`       | Force overwrite existing hook                                                                                                                           |
-|                  | `-y`  | `--yes`         | Non-interactive mode                                                                                                                                    |
-| `hook uninstall` |       | `--event`       | Hook event to uninstall                                                                                                                                 |
-|                  | `-g`  | `--global`      | Uninstall global hook                                                                                                                                   |
-|                  |       | `--all`         | Uninstall all hooks                                                                                                                                     |
-|                  | `-y`  | `--yes`         | Non-interactive mode                                                                                                                                    |
-| `hook status`    |       |                 | Show git hook status (Project Hooks and Global Hooks sections)                                                                                          |
-| `hook check`     |       |                 | Check for hook conflicts                                                                                                                                |
-| `hook sync`      |       |                 | Re-sync all installed hooks and agent skills                                                                                                            |
-|                  | `-g`  | `--global`      | Sync global hooks                                                                                                                                       |
+| Command          | Short | Long              | Description                                                                                                                                                                                                                          |
+| ---------------- | ----- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `hook install`   |       | `--type`          | Hook type (git/git-with-agent/agent/prek/prek-with-agent)                                                                                                                                                                            |
+|                  |       | `--event`         | Hook event (pre-commit/pre-push/commit-msg)                                                                                                                                                                                          |
+|                  | `-g`  | `--global`        | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath`                                                                                                                                     |
+|                  |       | `--provider`      | AI provider: `claude`/`codex`/`gemini`/`cursor`/`droid`/`auggie`/`codebuddy`. Supports `provider/model` shorthand (e.g. `claude/opus`). For `--type agent`: installs rules files. For `*-with-agent`: uses headless CLI to auto-fix. |
+|                  |       | `--provider-args` | Extra arguments passed to the AI agent CLI (e.g. `"--model opus"`)                                                                                                                                                                   |
+|                  | `-c`  | `--check-only`    | Hook only runs check                                                                                                                                                                                                                 |
+|                  | `-f`  | `--format-only`   | Hook only runs format                                                                                                                                                                                                                |
+|                  |       | `--force`         | Force overwrite existing hook                                                                                                                                                                                                        |
+|                  | `-y`  | `--yes`           | Non-interactive mode                                                                                                                                                                                                                 |
+| `hook uninstall` |       | `--event`         | Hook event to uninstall                                                                                                                                                                                                              |
+|                  | `-g`  | `--global`        | Uninstall global hook                                                                                                                                                                                                                |
+|                  |       | `--all`           | Uninstall all hooks                                                                                                                                                                                                                  |
+|                  | `-y`  | `--yes`           | Non-interactive mode                                                                                                                                                                                                                 |
+| `hook status`    |       |                   | Show git hook status (Project Hooks and Global Hooks sections)                                                                                                                                                                       |
+| `hook check`     |       |                   | Check for hook conflicts                                                                                                                                                                                                             |
+| `hook sync`      |       |                   | Re-sync all installed hooks and agent skills                                                                                                                                                                                         |
+|                  | `-g`  | `--global`        | Sync global hooks                                                                                                                                                                                                                    |
 
 **Hook types**:
 
@@ -673,9 +673,9 @@ Each hook event generates a separate per-event skill file for agent integrations
 
 Validate commit message format directly — without going through a hook.
 
-| Command | Description |
-| ------- | ----------- |
-| `cmsg <msg-or-file>` | Validate a commit message string or file path |
+| Command                  | Description                                        |
+| ------------------------ | -------------------------------------------------- |
+| `cmsg <msg-or-file>`     | Validate a commit message string or file path      |
 | `cmsg <file> --auto-fix` | AI rewrite on failure (writes result back to file) |
 
 ```bash
