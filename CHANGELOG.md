@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.5] - 2026-04-17
+
+### Added
+
+- support custom hook providers via [ai.custom_providers] config
+- add --provider-args to linthis fix
+- add --model flag to hook install
+- add git-with-agent post-commit fixup support
+
 ## [0.19.4] - 2026-04-16
 
 ### Fixed
