@@ -806,14 +806,11 @@ fn get_checker_install_hint(lang: Language) -> String {
             "Install: choco install checkstyle\n         Or download from: https://checkstyle.org/",
             "Install: sudo apt install checkstyle (Ubuntu/Debian)\n         Or download from: https://checkstyle.org/",
         ),
-        Language::Cpp | Language::ObjectiveC => {
-            let cpplint_hint = python_tool_install_hint("cpplint");
-            platform_hint(
-                &format!("Install: brew install llvm (for clang-tidy)\n         Or: {}", cpplint_hint),
-                &format!("Install: choco install llvm (for clang-tidy)\n         Or: {}", cpplint_hint),
-                &format!("Install: sudo apt install clang-tidy (Ubuntu/Debian)\n         Or: {}", cpplint_hint),
-            )
-        }
+        Language::Cpp | Language::ObjectiveC => platform_hint(
+            "Install: brew install llvm  (clang-tidy)\n         Or: brew install cpplint\n         Or: uv tool install cpplint  /  pipx install cpplint",
+            "Install: choco install llvm  (clang-tidy)\n         Or: uv tool install cpplint  /  pipx install cpplint",
+            "Install: sudo apt install clang-tidy  (Ubuntu/Debian)\n         Or: sudo dnf install clang-tools-extra  (Fedora)\n         Or: uv tool install cpplint  /  pipx install cpplint",
+        ),
         Language::Dart => "Install: Dart SDK (includes dart analyze)\n         https://dart.dev/get-dart".to_string(),
         Language::Swift => platform_hint_macos_or(
             "Install: brew install swiftlint",
@@ -919,7 +916,11 @@ fn get_formatter_install_hint(lang: Language) -> String {
             "Install: brew install ktlint",
             "Install: https://github.com/pinterest/ktlint",
         ),
-        Language::Lua => "Install: cargo install stylua".to_string(),
+        Language::Lua => platform_hint(
+            "Install: brew install stylua\n         Or: cargo install stylua",
+            "Install: scoop install stylua\n         Or: choco install stylua\n         Or: cargo install stylua",
+            "Install: cargo install stylua",
+        ),
         Language::Shell => platform_hint(
             "Install: brew install shfmt",
             "Install: choco install shfmt\n         Or: scoop install shfmt",
@@ -954,15 +955,11 @@ fn get_checker_install_commands(lang: Language) -> Vec<Vec<String>> {
 
     match lang {
         Language::Rust => vec![cmd!["rustup", "component", "add", "clippy"]],
-        Language::Python => pip_install_cmd("ruff"),
+        Language::Python => get_auto_install_ruff(),
         Language::Go => get_auto_install_go_checker(),
         Language::TypeScript | Language::JavaScript => vec![cmd!["npm", "install", "-g", "eslint"]],
         Language::Java => platform_install_cmd("checkstyle", "checkstyle", "checkstyle"),
-        Language::Cpp | Language::ObjectiveC => {
-            let mut cmds = platform_install_cmd("llvm", "llvm", "clang-tidy");
-            cmds.extend(pip_install_cmd("cpplint"));
-            cmds
-        }
+        Language::Cpp | Language::ObjectiveC => get_auto_install_cpp_checker(),
         Language::Dart => vec![],
         Language::Swift => macos_only_brew("swiftlint"),
         Language::Kotlin => get_auto_install_kotlin(),
@@ -994,7 +991,7 @@ fn get_formatter_install_commands(lang: Language) -> Vec<Vec<String>> {
 
     match lang {
         Language::Rust => vec![cmd!["rustup", "component", "add", "rustfmt"]],
-        Language::Python => pip_install_cmd("ruff"),
+        Language::Python => get_auto_install_ruff(),
         Language::Go => vec![],
         Language::TypeScript | Language::JavaScript => {
             vec![cmd!["npm", "install", "-g", "prettier"]]
@@ -1006,7 +1003,7 @@ fn get_formatter_install_commands(lang: Language) -> Vec<Vec<String>> {
         Language::Dart => vec![],
         Language::Swift => macos_only_brew("swift-format"),
         Language::Kotlin => get_auto_install_kotlin(),
-        Language::Lua => vec![cmd!["cargo", "install", "stylua"]],
+        Language::Lua => get_auto_install_stylua(),
         Language::Shell => get_auto_install_shfmt(),
         Language::Ruby => vec![cmd!["gem", "install", "rubocop"]],
         Language::Php => vec![cmd![
@@ -1026,10 +1023,13 @@ fn get_formatter_install_commands(lang: Language) -> Vec<Vec<String>> {
     }
 }
 
-/// Resolve the best pip command: uv pip --system > pip3 > pip
-fn pip_install_cmd(package: &str) -> Vec<Vec<String>> {
+/// Install a Python CLI tool in an isolated venv, falling back to system pip.
+/// Order: uv tool install > pipx install > uv pip --system > pip3 > pip
+fn python_tool_install_cmds(package: &str) -> Vec<Vec<String>> {
     let p = package.to_string();
     vec![
+        vec!["uv".into(), "tool".into(), "install".into(), p.clone()],
+        vec!["pipx".into(), "install".into(), p.clone()],
         vec![
             "uv".into(),
             "pip".into(),
@@ -1134,6 +1134,78 @@ fn get_auto_install_shfmt() -> Vec<Vec<String>> {
                 "mvdan.cc/sh/v3/cmd/shfmt@latest".into(),
             ],
         ]
+    }
+}
+
+/// ruff auto-install: brew (macOS) > uv tool > pipx > pip fallbacks
+fn get_auto_install_ruff() -> Vec<Vec<String>> {
+    macro_rules! cmd {
+        ($($s:expr),+) => { vec![$($s.to_string()),+] }
+    }
+    if cfg!(target_os = "macos") {
+        let mut cmds = vec![cmd!["brew", "install", "ruff"]];
+        cmds.extend(python_tool_install_cmds("ruff"));
+        cmds
+    } else {
+        python_tool_install_cmds("ruff")
+    }
+}
+
+/// C++ checker auto-install.
+///
+/// Tries clang-tidy (bundled in llvm/clang) first as the preferred linter,
+/// then cpplint as a lightweight fallback.
+/// cpplint is a Python tool — prefer isolated installs (uv tool / pipx) over
+/// system pip to avoid environment conflicts.
+fn get_auto_install_cpp_checker() -> Vec<Vec<String>> {
+    macro_rules! cmd {
+        ($($s:expr),+) => { vec![$($s.to_string()),+] }
+    }
+    if cfg!(target_os = "macos") {
+        let mut cmds = vec![
+            cmd!["brew", "install", "llvm"],    // brings clang-tidy
+            cmd!["brew", "install", "cpplint"], // Homebrew has a cpplint formula
+        ];
+        cmds.extend(python_tool_install_cmds("cpplint"));
+        cmds
+    } else if cfg!(target_os = "windows") {
+        let mut cmds = vec![cmd!["choco", "install", "llvm"]];
+        cmds.extend(python_tool_install_cmds("cpplint"));
+        cmds
+    } else {
+        // Linux: apt clang-tidy is the most reliable; cpplint via isolated Python as fallback
+        let mut cmds = vec![
+            cmd!["sudo", "apt-get", "install", "-y", "clang-tidy"],
+            cmd!["sudo", "dnf", "install", "-y", "clang-tools-extra"],
+            cmd!["sudo", "pacman", "-S", "--noconfirm", "clang"],
+        ];
+        cmds.extend(python_tool_install_cmds("cpplint"));
+        cmds
+    }
+}
+
+/// stylua auto-install: brew (macOS) > cargo; scoop/choco/cargo (Windows); cargo (Linux).
+///
+/// `brew install stylua` and package-manager installs use pre-built binaries,
+/// avoiding the 2–5 min compile time of `cargo install stylua`.
+fn get_auto_install_stylua() -> Vec<Vec<String>> {
+    macro_rules! cmd {
+        ($($s:expr),+) => { vec![$($s.to_string()),+] }
+    }
+    if cfg!(target_os = "macos") {
+        vec![
+            cmd!["brew", "install", "stylua"],
+            cmd!["cargo", "install", "stylua"],
+        ]
+    } else if cfg!(target_os = "windows") {
+        vec![
+            cmd!["scoop", "install", "stylua"],
+            cmd!["choco", "install", "stylua"],
+            cmd!["cargo", "install", "stylua"],
+        ]
+    } else {
+        // Linux: no standard package manager formula; cargo is the universal fallback
+        vec![cmd!["cargo", "install", "stylua"]]
     }
 }
 
