@@ -115,14 +115,24 @@ mod tests {
 
     #[test]
     fn check_expands_to_pre_and_post_commit() {
-        assert_eq!(parse("check").unwrap(), set(&[HookEvent::PreCommit, HookEvent::PostCommit]));
-        assert_eq!(parse("pc").unwrap(), set(&[HookEvent::PreCommit, HookEvent::PostCommit]));
+        assert_eq!(
+            parse("check").unwrap(),
+            set(&[HookEvent::PreCommit, HookEvent::PostCommit])
+        );
+        assert_eq!(
+            parse("pc").unwrap(),
+            set(&[HookEvent::PreCommit, HookEvent::PostCommit])
+        );
     }
 
     #[test]
     fn cmsg_aliases() {
         for tok in ["cmsg", "cm", "commit-msg", "CMSG"] {
-            assert_eq!(parse(tok).unwrap(), set(&[HookEvent::CommitMsg]), "tok={tok}");
+            assert_eq!(
+                parse(tok).unwrap(),
+                set(&[HookEvent::CommitMsg]),
+                "tok={tok}"
+            );
         }
     }
 

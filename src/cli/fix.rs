@@ -21,9 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use crate::cli::backup::{
-    collect_files_from_issues, create_backup, handle_list_backups,
-};
+use crate::cli::backup::{collect_files_from_issues, create_backup, handle_list_backups};
 use crate::cli::helpers::{find_latest_result_file, resolve_ai_provider};
 use crate::cli::recheck::{
     print_recheck_footer, print_recheck_header, print_recheck_summary, recheck_modified_files,

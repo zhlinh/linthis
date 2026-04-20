@@ -17,7 +17,12 @@ fn test_hook_install_multi_type_parses() {
     ])
     .expect("parse failed");
     if let Some(Commands::Hook {
-        action: HookCommands::Install { hook_types, hook_events, .. },
+        action:
+            HookCommands::Install {
+                hook_types,
+                hook_events,
+                ..
+            },
     }) = cli.command
     {
         assert_eq!(hook_types.len(), 2);

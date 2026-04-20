@@ -193,9 +193,7 @@ fn run_tui_watch(
         let should_lint = !ready.is_empty() || app.take_force_rerun();
 
         if should_lint && last_lint.elapsed() >= min_lint_interval {
-            if let Some(new_time) =
-                process_tui_lint(&mut app, &config, &ready, &mut terminal)
-            {
+            if let Some(new_time) = process_tui_lint(&mut app, &config, &ready, &mut terminal) {
                 last_lint = new_time;
             }
         }

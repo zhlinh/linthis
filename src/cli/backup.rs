@@ -734,10 +734,7 @@ pub fn handle_backup_diff(id: &str) -> ExitCode {
         match find_latest_backup_with_diff(&backup_dir, &project_root) {
             Some(p) => p,
             None => {
-                println!(
-                    "  {}",
-                    "No backups with differences found.".green()
-                );
+                println!("  {}", "No backups with differences found.".green());
                 return ExitCode::SUCCESS;
             }
         }

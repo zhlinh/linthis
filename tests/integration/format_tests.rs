@@ -78,10 +78,7 @@ fn test_format_quiet_mode() {
     assert_exit_code(&output, 0);
     // Quiet mode should have minimal output
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.len() < 500,
-        "Quiet mode should have minimal output"
-    );
+    assert!(stdout.len() < 500, "Quiet mode should have minimal output");
 }
 
 /// Test formatting multiple files
@@ -154,5 +151,8 @@ fn test_format_already_formatted() {
 
     // File should remain unchanged
     let content = std::fs::read_to_string(temp.path().join("test.py")).unwrap();
-    assert_eq!(content, PYTHON_GOOD, "Already formatted file should remain unchanged");
+    assert_eq!(
+        content, PYTHON_GOOD,
+        "Already formatted file should remain unchanged"
+    );
 }

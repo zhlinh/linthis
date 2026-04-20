@@ -165,9 +165,7 @@ fn fetch_plugin_for_config(
 }
 
 /// Load or create the target user config document.
-fn load_target_config(
-    global: bool,
-) -> Result<(PathBuf, toml_edit::DocumentMut), String> {
+fn load_target_config(global: bool) -> Result<(PathBuf, toml_edit::DocumentMut), String> {
     let target_manager = if global {
         linthis::plugin::PluginConfigManager::global()
     } else {
@@ -294,7 +292,6 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
 
         PluginCommands::Validate { path } => handle_plugin_validate(&path),
 
-
         PluginCommands::Add {
             alias,
             url,
@@ -313,11 +310,7 @@ pub fn handle_plugin_command(action: PluginCommands) -> ExitCode {
 }
 
 /// Handle `plugin new` subcommand.
-fn handle_plugin_new(
-    name: &str,
-    languages: Option<&Vec<String>>,
-    force: bool,
-) -> ExitCode {
+fn handle_plugin_new(name: &str, languages: Option<&Vec<String>>, force: bool) -> ExitCode {
     let plugin_dir = PathBuf::from(name);
     if plugin_dir.exists() {
         if force {
@@ -437,7 +430,8 @@ fn write_plugin_template_files(
     let readme_content = generate_plugin_readme(name);
     let _ = std::fs::write(plugin_dir.join("README.md"), readme_content);
 
-    let gitignore_content = "# Editor files\n*.swp\n*.swo\n*~\n.idea/\n.vscode/\n\n# OS files\n.DS_Store\nThumbs.db\n";
+    let gitignore_content =
+        "# Editor files\n*.swp\n*.swo\n*~\n.idea/\n.vscode/\n\n# OS files\n.DS_Store\nThumbs.db\n";
     let _ = std::fs::write(plugin_dir.join(".gitignore"), gitignore_content);
 
     Ok(())
@@ -511,17 +505,9 @@ fn handle_plugin_list_cached(verbose: bool) -> ExitCode {
             println!("{}", "Cached plugins:".bold());
             for plugin in &plugins {
                 if verbose {
-                    println!(
-                        "  {} {} ({})",
-                        "•".cyan(),
-                        plugin.name.bold(),
-                        plugin.url
-                    );
+                    println!("  {} {} ({})", "•".cyan(), plugin.name.bold(), plugin.url);
                     println!("    Path: {}", plugin.cache_path.display());
-                    println!(
-                        "    Cached: {}",
-                        plugin.cached_at.format("%Y-%m-%d %H:%M")
-                    );
+                    println!("    Cached: {}", plugin.cached_at.format("%Y-%m-%d %H:%M"));
                     println!(
                         "    Updated: {}",
                         plugin.last_updated.format("%Y-%m-%d %H:%M")
@@ -730,9 +716,7 @@ fn print_sync_empty_hints(
 }
 
 /// Sync plugins and print progress/summary. Returns exit code.
-fn sync_and_report_plugins(
-    plugins: &[(String, String, Option<String>)],
-) -> ExitCode {
+fn sync_and_report_plugins(plugins: &[(String, String, Option<String>)]) -> ExitCode {
     use linthis::plugin::{cache::PluginCache, fetcher::PluginFetcher, PluginSource};
 
     let cache = match PluginCache::new() {
@@ -855,12 +839,7 @@ fn handle_plugin_validate(path: &std::path::Path) -> ExitCode {
 }
 
 /// Handle `plugin add` subcommand.
-fn handle_plugin_add(
-    alias: &str,
-    url: &str,
-    git_ref: Option<&str>,
-    global: bool,
-) -> ExitCode {
+fn handle_plugin_add(alias: &str, url: &str, git_ref: Option<&str>, global: bool) -> ExitCode {
     let manager = match resolve_plugin_manager(global) {
         Ok(m) => m,
         Err(code) => return code,
@@ -886,9 +865,7 @@ fn handle_plugin_add(
             println!();
             println!("Plugin will be automatically loaded when running linthis.");
 
-            if let Err(e) =
-                merge_plugin_linthis_config(alias, url, git_ref, global)
-            {
+            if let Err(e) = merge_plugin_linthis_config(alias, url, git_ref, global) {
                 eprintln!("{}: {}", "Warning".yellow(), e);
             }
 
@@ -1118,9 +1095,7 @@ fn apply_plugin_configs(
 }
 
 /// Resolve the plugin config manager for project or global scope.
-fn resolve_plugin_manager(
-    global: bool,
-) -> Result<linthis::plugin::PluginConfigManager, ExitCode> {
+fn resolve_plugin_manager(global: bool) -> Result<linthis::plugin::PluginConfigManager, ExitCode> {
     use linthis::plugin::PluginConfigManager;
 
     let manager = if global {

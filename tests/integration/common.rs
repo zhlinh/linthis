@@ -32,7 +32,8 @@ pub fn write_fixture(dir: &Path, name: &str, content: &str) {
 pub fn assert_exit_code(output: &Output, expected: i32) {
     let actual = output.status.code().unwrap_or(-1);
     assert_eq!(
-        actual, expected,
+        actual,
+        expected,
         "Expected exit code {}, got {}.\nstdout: {}\nstderr: {}",
         expected,
         actual,

@@ -163,12 +163,7 @@ fn test_plugin_add_duplicate() {
 
     // Add a plugin first
     let first_add = linthis_cmd()
-        .args([
-            "plugin",
-            "add",
-            "dup-test",
-            "https://example.com/dup.git",
-        ])
+        .args(["plugin", "add", "dup-test", "https://example.com/dup.git"])
         .current_dir(temp.path())
         .output()
         .expect("Failed to run linthis");
@@ -177,12 +172,7 @@ fn test_plugin_add_duplicate() {
 
     // Try to add the same plugin again
     let second_add = linthis_cmd()
-        .args([
-            "plugin",
-            "add",
-            "dup-test",
-            "https://example.com/dup.git",
-        ])
+        .args(["plugin", "add", "dup-test", "https://example.com/dup.git"])
         .current_dir(temp.path())
         .output()
         .expect("Failed to run linthis");
@@ -209,8 +199,7 @@ description = "Test plugin"
 
 [linters]
 "#;
-    fs::write(plugin_dir.join("plugin.toml"), plugin_toml)
-        .expect("Failed to write plugin.toml");
+    fs::write(plugin_dir.join("plugin.toml"), plugin_toml).expect("Failed to write plugin.toml");
 
     let output = linthis_cmd()
         .args(["plugin", "validate", "test-validate"])

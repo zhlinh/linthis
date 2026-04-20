@@ -173,9 +173,7 @@ where
             }
             PathCollectionResult::Success(filtered, exclude_patterns.to_vec())
         }
-        Err(e) => {
-            PathCollectionResult::Error(format!("{}: {}", msgs.error_label.red(), e), 2)
-        }
+        Err(e) => PathCollectionResult::Error(format!("{}: {}", msgs.error_label.red(), e), 2),
     }
 }
 
@@ -203,10 +201,7 @@ pub fn collect_paths(options: &PathCollectionOptions) -> PathCollectionResult {
     } else if let Some(ref base_ref) = options.since {
         let br = base_ref.clone();
         let empty = format!("No files changed since '{}'", base_ref);
-        let empty_after = format!(
-            "No files to check after exclusions (since '{}')",
-            base_ref
-        );
+        let empty_after = format!("No files to check after exclusions (since '{}')", base_ref);
         let verbose_prefix = format!(
             "Checking file(s) changed since '{}' after exclusions: ",
             base_ref

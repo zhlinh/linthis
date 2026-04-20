@@ -219,8 +219,7 @@ fn handle_show_report(
     // Merge security/complexity findings into unified issues list
     result.merge_all_check_issues();
 
-    let (display_issues, total_filtered) =
-        filter_and_limit_issues(&result.issues, severity, limit);
+    let (display_issues, total_filtered) = filter_and_limit_issues(&result.issues, severity, limit);
     let displayed_count = display_issues.len();
 
     // Handle JSON format
