@@ -46,6 +46,81 @@ pub(crate) fn build_reentrant_git_script(event: &HookEvent) -> String {
     }
 }
 
+/// Parse provider and provider args, returning (provider_name, merged_provider_args).
+fn parse_provider_args(
+    raw_provider: Option<&str>,
+    raw_provider_args: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    if let Some(raw) = raw_provider {
+        let (name, model) = parse_provider_with_model(raw);
+        (
+            Some(name.to_string()),
+            merge_model_into_provider_args(model, raw_provider_args),
+        )
+    } else {
+        (None, raw_provider_args.map(|s| s.to_string()))
+    }
+}
+
+/// Build the hook script based on event, hook type, and provider settings.
+fn build_hook_script_for_run(
+    event: &HookEvent,
+    hook_type: &HookTool,
+    provider: Option<&str>,
+    provider_args: Option<&str>,
+    already_running: bool,
+) -> Result<String, i32> {
+    // PostCommit uses a dedicated script.
+    // Guard against recursion: the fixup commit inside the post-commit script
+    // uses `git commit --no-verify`, but git still fires the post-commit hook.
+    // The LINTHIS_HOOK_RUNNING_* env var is inherited by child processes, so
+    // `already_running` is true for the second invocation — skip it.
+    if matches!(event, HookEvent::PostCommit) {
+        if already_running {
+            return Err(0);
+        }
+        let linthis_fmt_cmd = build_hook_command(event, &None);
+        return Ok(if matches!(hook_type, HookTool::GitWithAgent) {
+            let fix_provider = provider
+                .and_then(parse_agent_fix_provider_name)
+                .unwrap_or(AgentFixProvider::Claude);
+            build_post_commit_with_agent_script(&linthis_fmt_cmd, &fix_provider, provider_args)
+        } else {
+            build_post_commit_script(&linthis_fmt_cmd)
+        });
+    }
+
+    match hook_type {
+        HookTool::Git => {
+            if already_running {
+                Ok(build_reentrant_git_script(event))
+            } else {
+                Ok(build_global_hook_script_for_event(event, &None, None))
+            }
+        }
+        HookTool::GitWithAgent => {
+            let fix_provider = provider
+                .and_then(parse_agent_fix_provider_name)
+                .unwrap_or(AgentFixProvider::Claude);
+            let linthis_cmd = build_hook_command(event, &None);
+            Ok(build_git_with_agent_hook_script(
+                &linthis_cmd,
+                &fix_provider,
+                event,
+                provider_args,
+            ))
+        }
+        _ => {
+            eprintln!(
+                "{}: hook run: unsupported hook type '{}' (supported: git, git-with-agent)",
+                "Error".red(),
+                hook_type.as_str()
+            );
+            Err(1)
+        }
+    }
+}
+
 pub(crate) fn handle_hook_run(
     event: &HookEvent,
     hook_type: &HookTool,
@@ -60,68 +135,15 @@ pub(crate) fn handle_hook_run(
         return 0;
     }
 
-    let (provider_name, merged_pa) = if let Some(raw) = raw_provider {
-        let (name, model) = parse_provider_with_model(raw);
-        (
-            Some(name),
-            merge_model_into_provider_args(model, raw_provider_args),
-        )
-    } else {
-        (None, raw_provider_args.map(|s| s.to_string()))
-    };
-    let provider: Option<&str> = provider_name;
+    let (provider_name, merged_pa) = parse_provider_args(raw_provider, raw_provider_args);
+    let provider: Option<&str> = provider_name.as_deref();
     let provider_args: Option<&str> = merged_pa.as_deref();
 
     let already_running = std::env::vars().any(|(k, _)| k.starts_with(LINTHIS_HOOK_RUNNING_PREFIX));
 
-    // PostCommit uses a dedicated script.
-    // Guard against recursion: the fixup commit inside the post-commit script
-    // uses `git commit --no-verify`, but git still fires the post-commit hook.
-    // The LINTHIS_HOOK_RUNNING_* env var is inherited by child processes, so
-    // `already_running` is true for the second invocation — skip it.
-    let script = if matches!(event, HookEvent::PostCommit) {
-        if already_running {
-            return 0;
-        }
-        let linthis_fmt_cmd = build_hook_command(event, &None);
-        if matches!(hook_type, HookTool::GitWithAgent) {
-            let fix_provider = provider
-                .and_then(parse_agent_fix_provider_name)
-                .unwrap_or(AgentFixProvider::Claude);
-            build_post_commit_with_agent_script(&linthis_fmt_cmd, &fix_provider, provider_args)
-        } else {
-            build_post_commit_script(&linthis_fmt_cmd)
-        }
-    } else {
-        match hook_type {
-            HookTool::Git => {
-                if already_running {
-                    build_reentrant_git_script(event)
-                } else {
-                    build_global_hook_script_for_event(event, &None, None)
-                }
-            }
-            HookTool::GitWithAgent => {
-                let fix_provider = provider
-                    .and_then(parse_agent_fix_provider_name)
-                    .unwrap_or(AgentFixProvider::Claude);
-                let linthis_cmd = build_hook_command(event, &None);
-                build_git_with_agent_hook_script(
-                    &linthis_cmd,
-                    &fix_provider,
-                    event,
-                    provider_args,
-                )
-            }
-            _ => {
-                eprintln!(
-                    "{}: hook run: unsupported hook type '{}' (supported: git, git-with-agent)",
-                    "Error".red(),
-                    hook_type.as_str()
-                );
-                return 1;
-            }
-        }
+    let script = match build_hook_script_for_run(event, hook_type, provider, provider_args, already_running) {
+        Ok(s) => s,
+        Err(code) => return code,
     };
 
     // Skip hook entirely during rebase/merge/cherry-pick

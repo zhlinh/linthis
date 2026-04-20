@@ -21,13 +21,11 @@ use cli::{
     collect_paths, handle_backup_command, handle_cache_command, handle_commit_msg_check,
     handle_complexity_command, handle_config_command, handle_doctor_command, handle_fix_command,
     handle_format_command, handle_hook_command, handle_init_command, handle_license_command,
-    handle_plugin_command, handle_report_command,
-    handle_review_command, handle_security_command, init_linter_configs,
-    handle_self_update_command, perform_auto_sync, perform_self_update, print_fix_hint,
-    run_benchmark, run_complexity_analysis,
-    run_sast_scan, run_watch, strip_ansi_codes, Cli, Commands, ComplexityCommandOptions,
-    FixCommandOptions, FormatCommandOptions, PathCollectionOptions, PathCollectionResult,
-    ReviewCommandOptions,
+    handle_plugin_command, handle_report_command, handle_review_command, handle_security_command,
+    handle_self_update_command, init_linter_configs, perform_auto_sync, perform_self_update,
+    print_fix_hint, run_benchmark, run_complexity_analysis, run_sast_scan, run_watch,
+    strip_ansi_codes, Cli, Commands, ComplexityCommandOptions, FixCommandOptions,
+    FormatCommandOptions, PathCollectionOptions, PathCollectionResult, ReviewCommandOptions,
 };
 use linthis::config::resolver::{ConfigResolver, ConfigSource, ResolvedConfig};
 use linthis::lsp::{run_lsp_server_with_config, LspMode};
@@ -107,9 +105,9 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
         Commands::Cmsg { .. } | Commands::Init { .. } | Commands::AgentStream => {
             Some(dispatch_simple(command))
         }
-        Commands::Security { .. }
-        | Commands::License { .. }
-        | Commands::Complexity { .. } => Some(dispatch_analysis(command)),
+        Commands::Security { .. } | Commands::License { .. } | Commands::Complexity { .. } => {
+            Some(dispatch_analysis(command))
+        }
         Commands::Format { .. } => Some(dispatch_format(command)),
         Commands::Fix { .. } => Some(dispatch_fix(command)),
         Commands::Review { .. } => Some(dispatch_review(command)),
@@ -160,12 +158,29 @@ fn dispatch_simple(command: Commands) -> ExitCode {
 
 fn dispatch_watch(command: Commands) -> ExitCode {
     if let Commands::Watch {
-        paths, check_only, format_only, debounce, notify,
-        no_tui, clear, lang, exclude, verbose,
-    } = command {
+        paths,
+        check_only,
+        format_only,
+        debounce,
+        notify,
+        no_tui,
+        clear,
+        lang,
+        exclude,
+        verbose,
+    } = command
+    {
         handle_watch_subcommand(WatchSubcommandArgs {
-            paths, check_only, format_only, debounce, notify,
-            no_tui, clear, lang, exclude, verbose,
+            paths,
+            check_only,
+            format_only,
+            debounce,
+            notify,
+            no_tui,
+            clear,
+            lang,
+            exclude,
+            verbose,
         })
     } else {
         ExitCode::from(1)
@@ -174,10 +189,27 @@ fn dispatch_watch(command: Commands) -> ExitCode {
 
 fn dispatch_format(command: Commands) -> ExitCode {
     if let Commands::Format {
-        paths, staged, modified, exclude, undo, source, list_backups, verbose, quiet,
-    } = command {
+        paths,
+        staged,
+        modified,
+        exclude,
+        undo,
+        source,
+        list_backups,
+        verbose,
+        quiet,
+    } = command
+    {
         handle_format_command(FormatCommandOptions {
-            paths, staged, modified, exclude, undo, source, list_backups, verbose, quiet,
+            paths,
+            staged,
+            modified,
+            exclude,
+            undo,
+            source,
+            list_backups,
+            verbose,
+            quiet,
         })
     } else {
         ExitCode::from(1)
@@ -186,15 +218,55 @@ fn dispatch_format(command: Commands) -> ExitCode {
 
 fn dispatch_fix(command: Commands) -> ExitCode {
     if let Commands::Fix {
-        source, check, format_only, auto_fix, ai, provider, model, provider_args,
-        max_suggestions, accept_all, jobs, file, line, message, rule,
-        output, with_context, verbose, quiet, undo, list_backups,
-    } = command {
-        let (ai, accept_all) = if auto_fix { (true, true) } else { (ai, accept_all) };
+        source,
+        check,
+        format_only,
+        auto_fix,
+        ai,
+        provider,
+        model,
+        provider_args,
+        max_suggestions,
+        accept_all,
+        jobs,
+        file,
+        line,
+        message,
+        rule,
+        output,
+        with_context,
+        verbose,
+        quiet,
+        undo,
+        list_backups,
+    } = command
+    {
+        let (ai, accept_all) = if auto_fix {
+            (true, true)
+        } else {
+            (ai, accept_all)
+        };
         handle_fix_command(FixCommandOptions {
-            source, check, format_only, ai, provider, model, provider_args,
-            max_suggestions, accept_all, jobs, file, line, message, rule,
-            output, with_context, verbose, quiet, undo, list_backups,
+            source,
+            check,
+            format_only,
+            ai,
+            provider,
+            model,
+            provider_args,
+            max_suggestions,
+            accept_all,
+            jobs,
+            file,
+            line,
+            message,
+            rule,
+            output,
+            with_context,
+            verbose,
+            quiet,
+            undo,
+            list_backups,
         })
     } else {
         ExitCode::from(1)
@@ -203,12 +275,35 @@ fn dispatch_fix(command: Commands) -> ExitCode {
 
 fn dispatch_review(command: Commands) -> ExitCode {
     if let Commands::Review {
-        background, auto_fix, auto_fix_mode, reviewers, provider,
-        base, head, no_pr, notify, status, dry_run, clean, output,
-    } = command {
+        background,
+        auto_fix,
+        auto_fix_mode,
+        reviewers,
+        provider,
+        base,
+        head,
+        no_pr,
+        notify,
+        status,
+        dry_run,
+        clean,
+        output,
+    } = command
+    {
         handle_review_command(ReviewCommandOptions {
-            background, auto_fix, auto_fix_mode, reviewers, provider,
-            base, head, no_pr, notify, status, dry_run, clean, output,
+            background,
+            auto_fix,
+            auto_fix_mode,
+            reviewers,
+            provider,
+            base,
+            head,
+            no_pr,
+            notify,
+            status,
+            dry_run,
+            clean,
+            output,
         })
     } else {
         ExitCode::from(1)
@@ -218,23 +313,79 @@ fn dispatch_review(command: Commands) -> ExitCode {
 fn dispatch_analysis(command: Commands) -> ExitCode {
     match command {
         Commands::Security {
-            path, scan_type, severity, include_dev, fix, ignore,
-            format, sbom, fail_on, sast_config, verbose,
+            path,
+            scan_type,
+            severity,
+            include_dev,
+            fix,
+            ignore,
+            format,
+            sbom,
+            fail_on,
+            sast_config,
+            verbose,
         } => handle_security_command(cli::SecurityCommandParams {
-            path, scan_type, severity, include_dev, fix, ignore,
-            format, sbom, fail_on, sast_config, verbose,
+            path,
+            scan_type,
+            severity,
+            include_dev,
+            fix,
+            ignore,
+            format,
+            sbom,
+            fail_on,
+            sast_config,
+            verbose,
         }),
         Commands::License {
-            path, policy, policy_file, include_dev, format, sbom, fail_on_violation, verbose,
+            path,
+            policy,
+            policy_file,
+            include_dev,
+            format,
+            sbom,
+            fail_on_violation,
+            verbose,
         } => handle_license_command(cli::LicenseCommandParams {
-            path, policy, policy_file, include_dev, format, sbom, fail_on_violation, verbose,
+            path,
+            policy,
+            policy_file,
+            include_dev,
+            format,
+            sbom,
+            fail_on_violation,
+            verbose,
         }),
         Commands::Complexity {
-            path, staged, modified, include, exclude, threshold, preset,
-            format, with_trends, trend_count, only_high, sort, no_parallel, verbose,
+            path,
+            staged,
+            modified,
+            include,
+            exclude,
+            threshold,
+            preset,
+            format,
+            with_trends,
+            trend_count,
+            only_high,
+            sort,
+            no_parallel,
+            verbose,
         } => handle_complexity_command(ComplexityCommandOptions {
-            path, staged, modified, include, exclude, threshold, preset,
-            format, with_trends, trend_count, only_high, sort, no_parallel, verbose,
+            path,
+            staged,
+            modified,
+            include,
+            exclude,
+            threshold,
+            preset,
+            format,
+            with_trends,
+            trend_count,
+            only_high,
+            sort,
+            no_parallel,
+            verbose,
         }),
         _ => ExitCode::from(1),
     }
@@ -325,7 +476,8 @@ struct WatchSubcommandArgs {
 
 /// Handle the `watch` subcommand.
 fn handle_watch_subcommand(args: WatchSubcommandArgs) -> ExitCode {
-    let languages: Vec<Language> = args.lang
+    let languages: Vec<Language> = args
+        .lang
         .unwrap_or_default()
         .iter()
         .filter_map(|s| Language::from_name(s))
@@ -702,7 +854,10 @@ fn resolve_skip_token(tok: &str) -> Option<&'static str> {
     if lower.len() < 3 {
         return None;
     }
-    let matches: Vec<&&str> = KNOWN_CHECKS.iter().filter(|c| c.starts_with(&lower)).collect();
+    let matches: Vec<&&str> = KNOWN_CHECKS
+        .iter()
+        .filter(|c| c.starts_with(&lower))
+        .collect();
     match matches.as_slice() {
         [one] => Some(**one),
         _ => None,
@@ -1444,7 +1599,13 @@ fn process_lint_result(
         .map(|p| p.to_string_lossy().to_string())
         .collect();
 
-    run_additional_checks(&mut result, cli, runtime_config, runtime_project_root, resolved_paths);
+    run_additional_checks(
+        &mut result,
+        cli,
+        runtime_config,
+        runtime_project_root,
+        resolved_paths,
+    );
 
     // Merge security/complexity issues into result.issues so all formatters
     // (including hook box output) can see them

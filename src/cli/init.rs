@@ -75,9 +75,7 @@ fn parse_tool_filter(
 }
 
 /// Print migration warnings and return whether any errors were found.
-fn print_migration_warnings(
-    warnings: &[linthis::config::migrate::MigrationWarning],
-) -> bool {
+fn print_migration_warnings(warnings: &[linthis::config::migrate::MigrationWarning]) -> bool {
     use linthis::config::migrate::WarningSeverity;
 
     let mut has_errors = false;
@@ -96,10 +94,7 @@ fn print_migration_warnings(
 }
 
 /// Print dry-run preview or actual migration results.
-fn print_migration_details(
-    result: &linthis::config::migrate::MigrationResult,
-    dry_run: bool,
-) {
+fn print_migration_details(result: &linthis::config::migrate::MigrationResult, dry_run: bool) {
     if dry_run {
         println!();
         println!("{}", "Changes that would be made:".bold());

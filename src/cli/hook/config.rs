@@ -275,11 +275,9 @@ fn print_prek_next_steps(tool: &HookTool, hook_event: &HookEvent, hook_filename:
                 format!("prek install --hook-type {}", hook_filename).cyan()
             );
         } else {
-            let precommit_cmd = linthis::python_tool_install_hint("pre-commit").replace("Install: ", "");
-            println!(
-                "  1. Install pre-commit: {}",
-                precommit_cmd.cyan()
-            );
+            let precommit_cmd =
+                linthis::python_tool_install_hint("pre-commit").replace("Install: ", "");
+            println!("  1. Install pre-commit: {}", precommit_cmd.cyan());
             println!(
                 "  2. Set up hooks: {}",
                 format!("pre-commit install --hook-type {}", hook_filename).cyan()

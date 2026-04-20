@@ -81,10 +81,7 @@ fn test_config_set_get_workflow() {
     assert_exit_code(&get_output, 0);
 
     let stdout = String::from_utf8_lossy(&get_output.stdout);
-    assert!(
-        stdout.contains("my_value"),
-        "Should retrieve the set value"
-    );
+    assert!(stdout.contains("my_value"), "Should retrieve the set value");
 }
 
 /// Test init command creates config

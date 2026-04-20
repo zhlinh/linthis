@@ -191,14 +191,11 @@ fn dispatch_install(a: InstallArgs) -> ExitCode {
     // selections from the flag, so skip the interactive prompt.
     let skip_prompt = a.yes || want_all_events || want_all_types;
 
-    let (hook_types, hook_events) = match install::resolve_install_types_events(
-        expanded_types,
-        expanded_events,
-        skip_prompt,
-    ) {
-        Ok(r) => r,
-        Err(code) => return code,
-    };
+    let (hook_types, hook_events) =
+        match install::resolve_install_types_events(expanded_types, expanded_events, skip_prompt) {
+            Ok(r) => r,
+            Err(code) => return code,
+        };
     install::handle_hook_install(install::HookInstallParams {
         hook_types,
         hook_events,
@@ -223,7 +220,8 @@ fn apply_fix_commit_mode(mode: &str, global: bool) -> Result<(), ExitCode> {
         );
         return Err(ExitCode::from(1));
     }
-    let _ = linthis::config::cli::handle_config_set("hook.pre_commit.fix_commit_mode", mode, global);
+    let _ =
+        linthis::config::cli::handle_config_set("hook.pre_commit.fix_commit_mode", mode, global);
     let _ = linthis::config::cli::handle_config_set("hook.pre_push.fix_commit_mode", mode, global);
     Ok(())
 }

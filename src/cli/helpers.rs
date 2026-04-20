@@ -176,10 +176,7 @@ pub fn print_fix_hint(issues: &[LintIssue]) {
     }
 
     eprintln!();
-    eprintln!(
-        "  {} To review and fix issues:",
-        "Tip:".cyan().bold()
-    );
+    eprintln!("  {} To review and fix issues:", "Tip:".cyan().bold());
     for (cmd, desc) in linthis::utils::output::fix_tip_lines() {
         eprintln!("       {:<36} : {}", cmd.cyan(), desc);
     }

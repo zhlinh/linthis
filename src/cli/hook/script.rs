@@ -1596,8 +1596,14 @@ mod tests {
             "parser must not clobber positional params; got: {block}"
         );
         // Positive: uses parameter expansion (%%, ##, #) to split the count string.
-        assert!(block.contains("_AGENT_ERR=${_AGENT_COUNTS%% *}"), "got: {block}");
-        assert!(block.contains("_AGENT_FILES=${_AGENT_COUNTS##* }"), "got: {block}");
+        assert!(
+            block.contains("_AGENT_ERR=${_AGENT_COUNTS%% *}"),
+            "got: {block}"
+        );
+        assert!(
+            block.contains("_AGENT_FILES=${_AGENT_COUNTS##* }"),
+            "got: {block}"
+        );
     }
 
     #[test]
@@ -1627,7 +1633,10 @@ mod tests {
         let cmd = agent_fix_headless_cmd_commit_msg(&AgentFixProvider::Claude, None);
 
         // Temp file allocation
-        assert!(cmd.contains("mktemp"), "must allocate temp file; got: {cmd}");
+        assert!(
+            cmd.contains("mktemp"),
+            "must allocate temp file; got: {cmd}"
+        );
         // Seed temp with current message so the agent can read it
         assert!(
             cmd.contains("cp \"$_REAL_MSG\" \"$_MSG_FILE\""),
@@ -1640,7 +1649,10 @@ mod tests {
         );
         assert!(cmd.contains("cmp -s"), "must check for changes; got: {cmd}");
         // Cleanup
-        assert!(cmd.contains("rm -f \"$_MSG_FILE\""), "must clean temp; got: {cmd}");
+        assert!(
+            cmd.contains("rm -f \"$_MSG_FILE\""),
+            "must clean temp; got: {cmd}"
+        );
         // Prompt warns the agent off .git/
         assert!(
             cmd.contains("TEMP FILE outside .git/"),
