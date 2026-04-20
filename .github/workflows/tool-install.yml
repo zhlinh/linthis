@@ -1,0 +1,64 @@
+name: Tool Install Matrix
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily at 17:23 UTC (~ 01:23 CST next day).
+    - cron: '23 17 * * *'
+
+concurrency:
+  group: tool-install-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tool-install:
+    name: tool-install (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux
+            bootstrap: ./scripts/ci/bootstrap-linux.sh
+            shell: bash
+          - os: macos-14
+            label: macos
+            bootstrap: ./scripts/ci/bootstrap-macos.sh
+            shell: bash
+          - os: windows-latest
+            label: windows
+            bootstrap: ./scripts/ci/bootstrap-windows.sh
+            shell: bash
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build linthis (release)
+        run: cargo build --release
+
+      - name: Bootstrap platform pre-reqs
+        run: ${{ matrix.bootstrap }}
+
+      - name: Run tool-install integration matrix
+        env:
+          LINTHIS_INSTALL_MODE: auto
+          CI_PLATFORM: ${{ matrix.label }}
+        run: cargo test --release --test cli_tests tool_install_tests -- --include-ignored --test-threads=1
+
+      - name: Upload install log (if present)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-log-${{ matrix.label }}
+          path: target/release/install-log.json
+          if-no-files-found: ignore
