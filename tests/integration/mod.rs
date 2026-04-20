@@ -14,6 +14,7 @@ mod error_tests;
 mod format_tests;
 mod language_tests;
 mod plugin_tests;
+mod tool_install_tests;
 
 use std::process::Command;
 
