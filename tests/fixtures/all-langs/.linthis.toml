@@ -1,0 +1,8 @@
+# Fixture used by tests/integration/tool_install_tests.rs.
+# `auto` mode lets the CI matrix trigger real installs.
+[tool_auto_install]
+mode = "auto"
+
+# Exclude this fixture from project-level lint runs — the files
+# here are intentionally "bad" and must not trip the main linthis hook.
+excludes = ["**/*"]
