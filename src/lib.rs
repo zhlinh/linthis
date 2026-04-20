@@ -1189,13 +1189,17 @@ fn prompt_tool_install(lang: Language, tool_name: &str) -> bool {
     use std::io::Write;
     eprint!("\r\x1b[K");
     eprint!(
-        "\x1b[33m?\x1b[0m Missing {} tool \x1b[1m{}\x1b[0m — install now? [y/N] ",
+        "\x1b[33m?\x1b[0m Missing {} tool \x1b[1m{}\x1b[0m — install now? [Y/n] ",
         lang.name(),
         tool_name
     );
     let _ = std::io::stderr().flush();
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input).is_ok() && input.trim().eq_ignore_ascii_case("y")
+    if std::io::stdin().read_line(&mut input).is_err() {
+        return false;
+    }
+    let trimmed = input.trim().to_ascii_lowercase();
+    trimmed.is_empty() || trimmed == "y" || trimmed == "yes"
 }
 
 /// Attempt to install a tool using candidate commands. Returns Ok on success, Err with last error.
