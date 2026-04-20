@@ -186,6 +186,22 @@ fn shell_agent_fix_hint_post_commit(indent: &str) -> String {
     )
 }
 
+/// Shell snippet hinting how to switch fix_commit_mode for pre-commit hooks.
+fn shell_fix_commit_mode_hint_pre_commit(indent: &str) -> String {
+    format!(
+        "{i}printf \"[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_commit.fix_commit_mode [dirty|squash|fixup] -g\\033[0m\\n\" >&2\n",
+        i = indent
+    )
+}
+
+/// Shell snippet hinting how to switch fix_commit_mode for pre-push hooks.
+fn shell_fix_commit_mode_hint_pre_push(indent: &str) -> String {
+    format!(
+        "{i}printf \"[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_push.fix_commit_mode [dirty|squash|fixup] -g\\033[0m\\n\" >&2\n",
+        i = indent
+    )
+}
+
 /// Save staged changes (format + agent) as a patch before the fixup commit.
 /// Sets `_DIFF_FILE` to the saved path, or empty string if nothing to save.
 /// Does NOT print anything — the caller prints `Diff Patch created:` after
@@ -1016,11 +1032,13 @@ fn shell_prepush_fix_commit_mode_handler(linthis_cmd: &str) -> String {
          \x20\x20\x20\x20\x20 echo \"$_CHANGED\" | xargs git add\n\
          \x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
          \x20\x20\x20\x20\x20 echo \"[linthis] Created fixup commit. Review with 'git log --oneline -2', then 'git push' again.\" >&2\n\
+         {mode_hint_pre_push}\
          \x20\x20\x20\x20\x20 exit 1\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n",
         linthis = linthis_cmd,
         save_diff = save_diff,
+        mode_hint_pre_push = shell_fix_commit_mode_hint_pre_push("     "),
     )
 }
 
@@ -1044,6 +1062,7 @@ fn shell_agent_review_fix_commit_handler() -> String {
          \x20\x20\x20 echo \"$_AGENT_CHANGED\" | xargs git add\n\
          \x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\"\n\
          \x20\x20\x20 echo \"[linthis] Created fixup commit with agent fixes. Review with 'git log --oneline -2', then 'git push' again.\" >&2\n\
+         \x20\x20\x20 {mode_hint_pre_push}\
          \x20\x20\x20 exit 1\n\
          \x20 else\n\
          \x20\x20\x20 echo \"[linthis] Agent fixes left in working tree (dirty mode). Review: git diff, Revert: linthis backup undo\" >&2\n\
@@ -1052,6 +1071,7 @@ fn shell_agent_review_fix_commit_handler() -> String {
          fi\n\
          \n",
     save_diff = save_diff,
+    mode_hint_pre_push = shell_fix_commit_mode_hint_pre_push("   "),
     )
 }
 
@@ -1202,10 +1222,12 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          \x20 echo \"$_CHANGED\" | xargs git add\n\
          \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
          \x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
+         {mode_hint}\
          fi\n",
         timer = timer_fns,
         fix_commit_mode = fix_commit_mode_section,
         linthis = linthis_cmd,
+        mode_hint = shell_fix_commit_mode_hint_pre_commit(" "),
     )
 }
 
@@ -1277,6 +1299,7 @@ pub(crate) fn build_post_commit_with_agent_script(
          if [ -n \"$_STAGED\" ]; then\n\
          \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
          \x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
+         {mode_hint_pre_commit}\
          \x20 # Show hint and diff path after fixup commit so HEAD~1 is correct\n\
          \x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
          {agent_hint}\
@@ -1290,6 +1313,7 @@ pub(crate) fn build_post_commit_with_agent_script(
         agent_block = agent_block,
         save_diff = save_diff,
         agent_hint = agent_hint,
+        mode_hint_pre_commit = shell_fix_commit_mode_hint_pre_commit(" "),
     )
 }
 
