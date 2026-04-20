@@ -755,17 +755,14 @@ fn platform_hint(macos: &str, windows: &str, linux: &str) -> String {
     }
 }
 
-/// Platform-aware install hint with only macos vs other.
-fn platform_hint_macos_or(macos: &str, other: &str) -> String {
-    if cfg!(target_os = "macos") {
-        macos.to_string()
-    } else {
-        other.to_string()
-    }
-}
-
-/// Generate a Python tool install hint, preferring uv > pipx > pip.
-/// Falls back to platform-specific uv install instructions if none are available.
+/// Generate an install hint for a standalone Python CLI tool (e.g. `bandit`,
+/// `flawfinder`, `cpplint`).
+///
+/// This helper is retained outside the `tools::install` module because it
+/// serves a different abstraction: callers identify the tool by its package
+/// name (not a `Language`/`ToolRole` pair). Security scanners, fixers, and
+/// similar call sites use this when they need a user-facing "install X"
+/// message without registering the tool in `TOOL_INSTALLS`.
 pub fn python_tool_install_hint(tool: &str) -> String {
     if is_command_available("uv") {
         format!("Install: uv tool install {}", tool)
@@ -793,430 +790,42 @@ pub fn python_tool_install_hint(tool: &str) -> String {
 
 /// Get installation instructions for a language's linter (platform-specific)
 fn get_checker_install_hint(lang: Language) -> String {
-    match lang {
-        Language::Rust => "Install: rustup component add clippy".to_string(),
-        Language::Python => python_tool_install_hint("ruff"),
-        Language::Go => platform_hint(
-            "Install: brew install golangci-lint\n         Or: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest",
-            "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: choco install golangci-lint",
-            "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest\n         Or: sudo apt install golangci-lint (Ubuntu/Debian)",
-        ),
-        Language::TypeScript | Language::JavaScript => "Install: npm install -g eslint".to_string(),
-        Language::Java => platform_hint(
-            "Install: brew install checkstyle",
-            "Install: choco install checkstyle\n         Or download from: https://checkstyle.org/",
-            "Install: sudo apt install checkstyle (Ubuntu/Debian)\n         Or download from: https://checkstyle.org/",
-        ),
-        Language::Cpp | Language::ObjectiveC => platform_hint(
-            "Install: brew install llvm  (clang-tidy)\n         Or: brew install cpplint\n         Or: uv tool install cpplint  /  pipx install cpplint",
-            "Install: choco install llvm  (clang-tidy)\n         Or: uv tool install cpplint  /  pipx install cpplint",
-            "Install: sudo apt install clang-tidy  (Ubuntu/Debian)\n         Or: sudo dnf install clang-tools-extra  (Fedora)\n         Or: uv tool install cpplint  /  pipx install cpplint",
-        ),
-        Language::Dart => "Install: Dart SDK (includes dart analyze)\n         https://dart.dev/get-dart".to_string(),
-        Language::Swift => platform_hint_macos_or(
-            "Install: brew install swiftlint",
-            "Install: https://github.com/realm/SwiftLint",
-        ),
-        Language::Kotlin => platform_hint_macos_or(
-            "Install: brew install ktlint",
-            "Install: https://github.com/pinterest/ktlint",
-        ),
-        Language::Lua => get_checker_install_hint_lua(),
-        Language::Shell => platform_hint(
-            "Install: brew install shellcheck",
-            "Install: choco install shellcheck\n         Or: scoop install shellcheck",
-            "Install: sudo apt install shellcheck (Ubuntu/Debian)",
-        ),
-        Language::Ruby => get_checker_install_hint_ruby(),
-        Language::Php => get_checker_install_hint_php(),
-        Language::Scala => platform_hint_macos_or(
-            "Install: brew install scalafix\n         Or: cs install scalafix",
-            "Install: cs install scalafix\n         https://scalacenter.github.io/scalafix/",
-        ),
-        Language::CSharp => "Install: dotnet tool install -g dotnet-format".to_string(),
-    }
-}
-
-/// Lua checker install hint.
-///
-/// On macOS we lead with `brew install luacheck` because the LuaRocks route
-/// routinely fails on modern Lua versions: when Homebrew's default Lua is
-/// 5.5+, `luarocks install luacheck` bails on its `argparse` /
-/// `luafilesystem` dependencies whose rockspecs haven't been marked
-/// Lua-5.5 compatible (see https://github.com/lunarmodules/luacheck/issues).
-/// Homebrew ships a pre-built luacheck that sidesteps the whole problem.
-///
-/// On other platforms we keep the luarocks path as the primary install,
-/// since the Homebrew alternative doesn't apply.
-fn get_checker_install_hint_lua() -> String {
-    if cfg!(target_os = "macos") {
-        if is_command_available("brew") {
-            return "Install: brew install luacheck  \
-                    (preferred on macOS; luarocks + Lua 5.5 often fails on argparse)"
-                .to_string();
-        }
-        // No brew yet — tell them to get brew first.
-        return "Install: 1) Install Homebrew from https://brew.sh/\n         \
-                2) brew install luacheck"
-            .to_string();
-    }
-
-    if is_command_available("luarocks") {
-        "Install: luarocks install luacheck".to_string()
-    } else {
-        platform_hint(
-            "Install: brew install luacheck",
-            "Install: 1) Install Lua from https://www.lua.org/download.html\n         2) Install LuaRocks from https://luarocks.org/\n         3) luarocks install luacheck",
-            "Install: sudo apt install luarocks && luarocks install luacheck (Ubuntu/Debian)",
-        )
-    }
-}
-
-/// Ruby checker install hint with gem detection.
-fn get_checker_install_hint_ruby() -> String {
-    if is_command_available("gem") {
-        "Install: gem install rubocop".to_string()
-    } else {
-        "Install: 1) Install Ruby from https://www.ruby-lang.org/\n         2) gem install rubocop"
-            .to_string()
-    }
-}
-
-/// PHP checker install hint with composer detection.
-fn get_checker_install_hint_php() -> String {
-    if is_command_available("composer") {
-        "Install: composer global require squizlabs/php_codesniffer".to_string()
-    } else {
-        "Install: 1) Install Composer from https://getcomposer.org/\n         2) composer global require squizlabs/php_codesniffer".to_string()
-    }
+    use crate::tools::install::{install_hint, ToolRole};
+    // ObjectiveC shares C++ tools in the spec table.
+    let lookup_lang = match lang {
+        Language::ObjectiveC => Language::Cpp,
+        other => other,
+    };
+    install_hint(lookup_lang, ToolRole::Checker)
 }
 
 /// Get installation instructions for a language's formatter (platform-specific)
 fn get_formatter_install_hint(lang: Language) -> String {
-    match lang {
-        Language::Rust => "Install: rustup component add rustfmt".to_string(),
-        Language::Python => python_tool_install_hint("ruff"),
-        Language::Go => "Install: Go formatter (gofmt) is included with Go".to_string(),
-        Language::TypeScript | Language::JavaScript => "Install: npm install -g prettier".to_string(),
-        Language::Java => platform_hint(
-            "Install: brew install google-java-format",
-            "Install: Download from https://github.com/google/google-java-format/releases",
-            "Install: Download from https://github.com/google/google-java-format/releases\n         Or use your package manager",
-        ),
-        Language::Cpp | Language::ObjectiveC => platform_hint(
-            "Install: brew install clang-format\n         Or: brew install llvm",
-            "Install: choco install llvm (includes clang-format)",
-            "Install: sudo apt install clang-format (Ubuntu/Debian)",
-        ),
-        Language::Dart => "Install: Dart SDK (includes dart format)\n         https://dart.dev/get-dart".to_string(),
-        Language::Swift => platform_hint_macos_or(
-            "Install: brew install swift-format",
-            "Install: https://github.com/apple/swift-format",
-        ),
-        Language::Kotlin => platform_hint_macos_or(
-            "Install: brew install ktlint",
-            "Install: https://github.com/pinterest/ktlint",
-        ),
-        Language::Lua => platform_hint(
-            "Install: brew install stylua\n         Or: cargo install stylua",
-            "Install: scoop install stylua\n         Or: choco install stylua\n         Or: cargo install stylua",
-            "Install: cargo install stylua",
-        ),
-        Language::Shell => platform_hint(
-            "Install: brew install shfmt",
-            "Install: choco install shfmt\n         Or: scoop install shfmt",
-            "Install: sudo apt install shfmt (Ubuntu/Debian)\n         Or: go install mvdan.cc/sh/v3/cmd/shfmt@latest",
-        ),
-        Language::Ruby => "Install: gem install rubocop".to_string(),
-        Language::Php => "Install: composer global require friendsofphp/php-cs-fixer".to_string(),
-        Language::Scala => platform_hint_macos_or(
-            "Install: brew install scalafmt\n         Or: cs install scalafmt",
-            "Install: cs install scalafmt\n         https://scalameta.org/scalafmt/",
-        ),
-        Language::CSharp => "Install: dotnet tool install -g dotnet-format".to_string(),
-    }
+    use crate::tools::install::{install_hint, ToolRole};
+    // ObjectiveC shares C++ tools in the spec table.
+    let lookup_lang = match lang {
+        Language::ObjectiveC => Language::Cpp,
+        other => other,
+    };
+    install_hint(lookup_lang, ToolRole::Formatter)
 }
 
 /// Get auto-install commands for a missing tool.
 /// Returns a list of candidate commands to try in order (first that succeeds wins).
 /// Each command is split into [program, arg1, arg2, ...].
 fn get_auto_install_commands(lang: Language, is_checker: bool) -> Vec<Vec<String>> {
-    if is_checker {
-        get_checker_install_commands(lang)
+    use crate::tools::install::{resolve_install_cmds, ToolRole};
+    // ObjectiveC shares C++ tools in the spec table.
+    let lookup_lang = match lang {
+        Language::ObjectiveC => Language::Cpp,
+        other => other,
+    };
+    let role = if is_checker {
+        ToolRole::Checker
     } else {
-        get_formatter_install_commands(lang)
-    }
-}
-
-/// Get auto-install commands for a checker tool.
-fn get_checker_install_commands(lang: Language) -> Vec<Vec<String>> {
-    macro_rules! cmd {
-        ($($s:expr),+) => { vec![$($s.to_string()),+] }
-    }
-
-    match lang {
-        Language::Rust => vec![cmd!["rustup", "component", "add", "clippy"]],
-        Language::Python => get_auto_install_ruff(),
-        Language::Go => get_auto_install_go_checker(),
-        Language::TypeScript | Language::JavaScript => vec![cmd!["npm", "install", "-g", "eslint"]],
-        Language::Java => platform_install_cmd("checkstyle", "checkstyle", "checkstyle"),
-        Language::Cpp | Language::ObjectiveC => get_auto_install_cpp_checker(),
-        Language::Dart => vec![],
-        Language::Swift => macos_only_brew("swiftlint"),
-        Language::Kotlin => get_auto_install_kotlin(),
-        Language::Lua => get_auto_install_luacheck(),
-        Language::Shell => platform_install_cmd("shellcheck", "shellcheck", "shellcheck"),
-        Language::Ruby => vec![cmd!["gem", "install", "rubocop"]],
-        Language::Php => vec![cmd![
-            "composer",
-            "global",
-            "require",
-            "squizlabs/php_codesniffer"
-        ]],
-        Language::Scala => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "scalafix"]]
-            } else {
-                vec![cmd!["cs", "install", "scalafix"]]
-            }
-        }
-        Language::CSharp => vec![cmd!["dotnet", "tool", "install", "-g", "dotnet-format"]],
-    }
-}
-
-/// Get auto-install commands for a formatter tool.
-fn get_formatter_install_commands(lang: Language) -> Vec<Vec<String>> {
-    macro_rules! cmd {
-        ($($s:expr),+) => { vec![$($s.to_string()),+] }
-    }
-
-    match lang {
-        Language::Rust => vec![cmd!["rustup", "component", "add", "rustfmt"]],
-        Language::Python => get_auto_install_ruff(),
-        Language::Go => vec![],
-        Language::TypeScript | Language::JavaScript => {
-            vec![cmd!["npm", "install", "-g", "prettier"]]
-        }
-        Language::Java => get_auto_install_java_formatter(),
-        Language::Cpp | Language::ObjectiveC => {
-            platform_install_cmd("clang-format", "llvm", "clang-format")
-        }
-        Language::Dart => vec![],
-        Language::Swift => macos_only_brew("swift-format"),
-        Language::Kotlin => get_auto_install_kotlin(),
-        Language::Lua => get_auto_install_stylua(),
-        Language::Shell => get_auto_install_shfmt(),
-        Language::Ruby => vec![cmd!["gem", "install", "rubocop"]],
-        Language::Php => vec![cmd![
-            "composer",
-            "global",
-            "require",
-            "friendsofphp/php-cs-fixer"
-        ]],
-        Language::Scala => {
-            if cfg!(target_os = "macos") {
-                vec![cmd!["brew", "install", "scalafmt"]]
-            } else {
-                vec![cmd!["cs", "install", "scalafmt"]]
-            }
-        }
-        Language::CSharp => vec![cmd!["dotnet", "tool", "install", "-g", "dotnet-format"]],
-    }
-}
-
-/// Install a Python CLI tool in an isolated venv, falling back to system pip.
-/// Order: uv tool install > pipx install > uv pip --system > pip3 > pip
-fn python_tool_install_cmds(package: &str) -> Vec<Vec<String>> {
-    let p = package.to_string();
-    vec![
-        vec!["uv".into(), "tool".into(), "install".into(), p.clone()],
-        vec!["pipx".into(), "install".into(), p.clone()],
-        vec![
-            "uv".into(),
-            "pip".into(),
-            "install".into(),
-            "--system".into(),
-            p.clone(),
-        ],
-        vec!["pip3".into(), "install".into(), p.clone()],
-        vec!["pip".into(), "install".into(), p],
-    ]
-}
-
-/// Platform-aware package manager install command.
-fn platform_install_cmd(brew_pkg: &str, choco_pkg: &str, apt_pkg: &str) -> Vec<Vec<String>> {
-    if cfg!(target_os = "macos") {
-        vec![vec!["brew".into(), "install".into(), brew_pkg.into()]]
-    } else if cfg!(target_os = "windows") {
-        vec![vec!["choco".into(), "install".into(), choco_pkg.into()]]
-    } else {
-        vec![vec![
-            "sudo".into(),
-            "apt-get".into(),
-            "install".into(),
-            "-y".into(),
-            apt_pkg.into(),
-        ]]
-    }
-}
-
-/// Go checker auto-install commands.
-fn get_auto_install_go_checker() -> Vec<Vec<String>> {
-    if cfg!(target_os = "macos") {
-        vec![vec![
-            "brew".into(),
-            "install".into(),
-            "golangci-lint".into(),
-        ]]
-    } else {
-        vec![vec![
-            "go".into(),
-            "install".into(),
-            "github.com/golangci/golangci-lint/cmd/golangci-lint@latest".into(),
-        ]]
-    }
-}
-
-/// Java formatter auto-install commands.
-fn get_auto_install_java_formatter() -> Vec<Vec<String>> {
-    if cfg!(target_os = "macos") {
-        vec![vec![
-            "brew".into(),
-            "install".into(),
-            "google-java-format".into(),
-        ]]
-    } else {
-        vec![]
-    }
-}
-
-/// luacheck auto-install commands.
-///
-/// macOS: `brew install luacheck` is reliable; LuaRocks' `argparse`
-/// dependency chain breaks under Homebrew's Lua 5.5. Other platforms
-/// fall back to luarocks.
-fn get_auto_install_luacheck() -> Vec<Vec<String>> {
-    if cfg!(target_os = "macos") {
-        vec![vec!["brew".into(), "install".into(), "luacheck".into()]]
-    } else {
-        vec![vec!["luarocks".into(), "install".into(), "luacheck".into()]]
-    }
-}
-
-/// Kotlin auto-install commands.
-fn get_auto_install_kotlin() -> Vec<Vec<String>> {
-    if cfg!(target_os = "macos") {
-        vec![vec!["brew".into(), "install".into(), "ktlint".into()]]
-    } else if cfg!(target_os = "windows") {
-        vec![vec!["choco".into(), "install".into(), "ktlint".into()]]
-    } else {
-        vec![]
-    }
-}
-
-/// shfmt auto-install commands.
-fn get_auto_install_shfmt() -> Vec<Vec<String>> {
-    if cfg!(target_os = "macos") {
-        vec![vec!["brew".into(), "install".into(), "shfmt".into()]]
-    } else if cfg!(target_os = "windows") {
-        vec![vec!["choco".into(), "install".into(), "shfmt".into()]]
-    } else {
-        vec![
-            vec![
-                "sudo".into(),
-                "apt-get".into(),
-                "install".into(),
-                "-y".into(),
-                "shfmt".into(),
-            ],
-            vec![
-                "go".into(),
-                "install".into(),
-                "mvdan.cc/sh/v3/cmd/shfmt@latest".into(),
-            ],
-        ]
-    }
-}
-
-/// ruff auto-install: brew (macOS) > uv tool > pipx > pip fallbacks
-fn get_auto_install_ruff() -> Vec<Vec<String>> {
-    macro_rules! cmd {
-        ($($s:expr),+) => { vec![$($s.to_string()),+] }
-    }
-    if cfg!(target_os = "macos") {
-        let mut cmds = vec![cmd!["brew", "install", "ruff"]];
-        cmds.extend(python_tool_install_cmds("ruff"));
-        cmds
-    } else {
-        python_tool_install_cmds("ruff")
-    }
-}
-
-/// C++ checker auto-install.
-///
-/// Tries clang-tidy (bundled in llvm/clang) first as the preferred linter,
-/// then cpplint as a lightweight fallback.
-/// cpplint is a Python tool — prefer isolated installs (uv tool / pipx) over
-/// system pip to avoid environment conflicts.
-fn get_auto_install_cpp_checker() -> Vec<Vec<String>> {
-    macro_rules! cmd {
-        ($($s:expr),+) => { vec![$($s.to_string()),+] }
-    }
-    if cfg!(target_os = "macos") {
-        let mut cmds = vec![
-            cmd!["brew", "install", "llvm"],    // brings clang-tidy
-            cmd!["brew", "install", "cpplint"], // Homebrew has a cpplint formula
-        ];
-        cmds.extend(python_tool_install_cmds("cpplint"));
-        cmds
-    } else if cfg!(target_os = "windows") {
-        let mut cmds = vec![cmd!["choco", "install", "llvm"]];
-        cmds.extend(python_tool_install_cmds("cpplint"));
-        cmds
-    } else {
-        // Linux: apt clang-tidy is the most reliable; cpplint via isolated Python as fallback
-        let mut cmds = vec![
-            cmd!["sudo", "apt-get", "install", "-y", "clang-tidy"],
-            cmd!["sudo", "dnf", "install", "-y", "clang-tools-extra"],
-            cmd!["sudo", "pacman", "-S", "--noconfirm", "clang"],
-        ];
-        cmds.extend(python_tool_install_cmds("cpplint"));
-        cmds
-    }
-}
-
-/// stylua auto-install: brew (macOS) > cargo; scoop/choco/cargo (Windows); cargo (Linux).
-///
-/// `brew install stylua` and package-manager installs use pre-built binaries,
-/// avoiding the 2–5 min compile time of `cargo install stylua`.
-fn get_auto_install_stylua() -> Vec<Vec<String>> {
-    macro_rules! cmd {
-        ($($s:expr),+) => { vec![$($s.to_string()),+] }
-    }
-    if cfg!(target_os = "macos") {
-        vec![
-            cmd!["brew", "install", "stylua"],
-            cmd!["cargo", "install", "stylua"],
-        ]
-    } else if cfg!(target_os = "windows") {
-        vec![
-            cmd!["scoop", "install", "stylua"],
-            cmd!["choco", "install", "stylua"],
-            cmd!["cargo", "install", "stylua"],
-        ]
-    } else {
-        // Linux: no standard package manager formula; cargo is the universal fallback
-        vec![cmd!["cargo", "install", "stylua"]]
-    }
-}
-
-/// Return brew install command on macOS, empty otherwise.
-fn macos_only_brew(package: &str) -> Vec<Vec<String>> {
-    if cfg!(target_os = "macos") {
-        vec![vec!["brew".into(), "install".into(), package.into()]]
-    } else {
-        vec![]
-    }
+        ToolRole::Formatter
+    };
+    resolve_install_cmds(lookup_lang, role)
 }
 
 /// Try to install a tool by running the given command.
