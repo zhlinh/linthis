@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use linthis::tools::install::{
-    is_tool_supported_on_current_platform, resolve_install_cmds, supported_platforms, Os,
-    ToolRole, TOOL_INSTALLS,
+    is_tool_supported_on_current_platform, resolve_install_cmds, supported_platforms, Os, ToolRole,
+    TOOL_INSTALLS,
 };
 use linthis::Language;
 
@@ -150,14 +150,9 @@ fn is_tool_supported_agrees_with_resolve() {
 
 /// Returns the path to the linthis binary built by `cargo build --release`.
 fn linthis_bin() -> PathBuf {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let candidate = manifest.join("target/release/linthis");
-    assert!(
-        candidate.exists(),
-        "linthis release binary not found at {}. Run `cargo build --release` first.",
-        candidate.display(),
-    );
-    candidate
+    // CARGO_BIN_EXE_linthis is set by Cargo at test-compile time and automatically
+    // appends `.exe` on Windows, so this works on all platforms without manual logic.
+    PathBuf::from(env!("CARGO_BIN_EXE_linthis"))
 }
 
 fn fixture_dir(lang_subdir: &str) -> PathBuf {
@@ -167,15 +162,32 @@ fn fixture_dir(lang_subdir: &str) -> PathBuf {
 }
 
 fn which(bin: &str) -> Option<PathBuf> {
-    let output = Command::new(if cfg!(target_os = "windows") { "where" } else { "which" })
-        .arg(bin)
-        .output()
-        .ok()?;
+    let output = Command::new(if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    })
+    .arg(bin)
+    .output()
+    .ok()?;
     if !output.status.success() {
         return None;
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     stdout.lines().next().map(|line| PathBuf::from(line.trim()))
+}
+
+/// Map a spec tool name to the actual binary name on PATH.
+///
+/// Most tools install a binary that matches the spec name exactly.
+/// Exceptions:
+///  - `clippy`: `rustup component add clippy` installs `cargo-clippy`, not a
+///    standalone `clippy` binary.
+fn path_binary_for(tool: &str) -> &str {
+    match tool {
+        "clippy" => "cargo-clippy",
+        other => other,
+    }
 }
 
 fn lang_subdir(lang: Language) -> &'static str {
@@ -221,8 +233,9 @@ fn auto_install_lint_cycle() {
         }
 
         // Pre-existing? Great — skip the install and trust PATH.
-        if which(spec.tool).is_some() {
-            eprintln!("pre-existing: {}", spec.tool);
+        let bin_name = path_binary_for(spec.tool);
+        if which(bin_name).is_some() {
+            eprintln!("pre-existing: {} (binary={})", spec.tool, bin_name);
             continue;
         }
 
@@ -232,14 +245,20 @@ fn auto_install_lint_cycle() {
             .status()
             .expect("failed to spawn linthis");
 
-        // linthis exits non-zero when fixtures have lint findings — that's expected.
-        // We only assert the tool is now on PATH.
-        let _ = status;
+        // linthis is expected to exit non-zero on fixtures with findings; just
+        // verify the process actually ran (not a spawn failure).
+        assert!(
+            status.code().is_some() || cfg!(target_os = "windows"),
+            "linthis did not exit normally for tool {} (status={:?})",
+            spec.tool,
+            status,
+        );
 
         assert!(
-            which(spec.tool).is_some(),
-            "{} not found on PATH after auto-install (language={:?})",
+            which(bin_name).is_some(),
+            "{} (binary={}) not found on PATH after auto-install (language={:?})",
             spec.tool,
+            bin_name,
             spec.language,
         );
     }

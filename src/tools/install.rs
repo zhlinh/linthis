@@ -591,6 +591,21 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
                 os: Os::MacOs,
                 cmds: &[&["brew", "install", "ktlint"]],
             },
+            // Linux: downloads the release binary into $HOME/.local/bin.
+            // $HOME/.local/bin is added to GITHUB_PATH by bootstrap-linux.sh (via uv install).
+            PlatformCmds {
+                os: Os::Linux,
+                cmds: &[
+                    &[
+                        "sh",
+                        "-c",
+                        "mkdir -p \"$HOME/.local/bin\" && \
+                         curl -sSLo \"$HOME/.local/bin/ktlint\" \
+                           https://github.com/pinterest/ktlint/releases/latest/download/ktlint && \
+                         chmod +x \"$HOME/.local/bin/ktlint\"",
+                    ],
+                ],
+            },
             PlatformCmds {
                 os: Os::Windows,
                 cmds: &[
@@ -598,8 +613,6 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
                     &["choco", "install", "ktlint"],
                 ],
             },
-            // Linux: no package-manager formula; downloading the binary
-            // is scripted separately. Leave empty so users get the hint.
         ],
         hint: "Install: brew install ktlint (macOS) / scoop install ktlint (Windows) / download from https://github.com/pinterest/ktlint/releases",
     },
@@ -611,6 +624,21 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
             PlatformCmds {
                 os: Os::MacOs,
                 cmds: &[&["brew", "install", "ktlint"]],
+            },
+            // Linux: downloads the release binary into $HOME/.local/bin.
+            // $HOME/.local/bin is added to GITHUB_PATH by bootstrap-linux.sh (via uv install).
+            PlatformCmds {
+                os: Os::Linux,
+                cmds: &[
+                    &[
+                        "sh",
+                        "-c",
+                        "mkdir -p \"$HOME/.local/bin\" && \
+                         curl -sSLo \"$HOME/.local/bin/ktlint\" \
+                           https://github.com/pinterest/ktlint/releases/latest/download/ktlint && \
+                         chmod +x \"$HOME/.local/bin/ktlint\"",
+                    ],
+                ],
             },
             PlatformCmds {
                 os: Os::Windows,

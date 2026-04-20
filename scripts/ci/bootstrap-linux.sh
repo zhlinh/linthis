@@ -21,6 +21,9 @@ sudo apt-get install -y --no-install-recommends \
   luarocks \
   unzip
 
+# Ensure Go's bin directory is on PATH for subsequently-installed Go tools.
+echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
 # uv (Python package + tool manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 echo "$HOME/.local/bin" >> "$GITHUB_PATH"
