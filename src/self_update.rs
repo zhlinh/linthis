@@ -26,6 +26,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum InstallMethod {
     /// Installed via `cargo install linthis` (or `cargo install --path .`)
     Cargo,
+    /// Installed via `brew install linthis`
+    Homebrew,
     /// Installed via `uv tool install linthis`
     UvTool,
     /// Installed via `pipx install linthis`
@@ -40,6 +42,7 @@ impl fmt::Display for InstallMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             InstallMethod::Cargo => write!(f, "cargo install"),
+            InstallMethod::Homebrew => write!(f, "brew install"),
             InstallMethod::UvTool => write!(f, "uv tool install"),
             InstallMethod::PipX => write!(f, "pipx install"),
             InstallMethod::Pip => write!(f, "pip install"),
@@ -60,6 +63,17 @@ pub fn detect_install_method() -> InstallMethod {
     // cargo install: ~/.cargo/bin/linthis
     if path_str.contains(".cargo/bin") || path_str.contains("\\.cargo\\bin") {
         return InstallMethod::Cargo;
+    }
+
+    // brew install:
+    //   macOS Apple Silicon: /opt/homebrew/Cellar/ or /opt/homebrew/bin/
+    //   macOS Intel:         /usr/local/Cellar/ or /usr/local/bin/
+    //   Linux (linuxbrew):   /home/linuxbrew/.linuxbrew/
+    if path_str.contains("/opt/homebrew/")
+        || path_str.contains("/usr/local/Cellar/")
+        || path_str.contains("/home/linuxbrew/")
+    {
+        return InstallMethod::Homebrew;
     }
 
     // uv tool install:
@@ -231,7 +245,9 @@ impl SelfUpdateManager {
     pub fn get_latest_version(&self) -> Option<String> {
         let method = detect_install_method();
         match method {
-            InstallMethod::Cargo => self.get_latest_version_crates_io(),
+            InstallMethod::Cargo | InstallMethod::Homebrew => {
+                self.get_latest_version_crates_io()
+            }
             _ => self.get_latest_version_pypi(),
         }
     }
@@ -360,6 +376,14 @@ impl SelfUpdateManager {
                 }
                 ("cargo", args, "cargo")
             }
+            InstallMethod::Homebrew => {
+                let args = if force {
+                    vec!["reinstall", "linthis"]
+                } else {
+                    vec!["upgrade", "linthis"]
+                };
+                ("brew", args, "brew")
+            }
             InstallMethod::UvTool => {
                 let args = if force {
                     vec!["tool", "install", "--force", "linthis"]
@@ -402,6 +426,16 @@ impl SelfUpdateManager {
     /// Install a specific version of linthis.
     pub fn install_version(&self, version: &str) -> io::Result<bool> {
         let method = detect_install_method();
+
+        if method == InstallMethod::Homebrew {
+            eprintln!(
+                "Homebrew does not support installing a specific version directly.\n\
+                 To pin a version, use: brew install linthis@{version}\n\
+                 Or switch to cargo: cargo install linthis@{version} --force"
+            );
+            return Ok(false);
+        }
+
         let version_spec = format!("linthis=={}", version);
         let cargo_version_spec = format!("linthis@{}", version);
 
@@ -417,6 +451,7 @@ impl SelfUpdateManager {
                 "uv tool",
             ),
             InstallMethod::PipX => ("pipx", vec!["install", &version_spec, "--force"], "pipx"),
+            InstallMethod::Homebrew => unreachable!(),
             InstallMethod::Pip | InstallMethod::Unknown => {
                 ("pip", vec!["install", &version_spec], "pip")
             }
