@@ -245,9 +245,7 @@ impl SelfUpdateManager {
     pub fn get_latest_version(&self) -> Option<String> {
         let method = detect_install_method();
         match method {
-            InstallMethod::Cargo | InstallMethod::Homebrew => {
-                self.get_latest_version_crates_io()
-            }
+            InstallMethod::Cargo | InstallMethod::Homebrew => self.get_latest_version_crates_io(),
             _ => self.get_latest_version_pypi(),
         }
     }

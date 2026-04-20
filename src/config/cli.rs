@@ -541,11 +541,7 @@ fn print_toml_items(table: &DocumentMut, prefix: &str, verbose: bool) {
 }
 
 /// Print items from a table-like TOML structure.
-fn print_toml_item_table(
-    tbl: &dyn toml_edit::TableLike,
-    prefix: &str,
-    verbose: bool,
-) {
+fn print_toml_item_table(tbl: &dyn toml_edit::TableLike, prefix: &str, verbose: bool) {
     for (key, item) in tbl.iter() {
         let full_key = format!("{}.{}", prefix, key);
         if let Some(sub) = item.as_table_like() {
@@ -574,10 +570,7 @@ fn format_toml_value(item: &toml_edit::Item) -> String {
                 format!("[{}]", items.join(", "))
             }
             toml_edit::Value::InlineTable(t) => {
-                let items: Vec<String> = t
-                    .iter()
-                    .map(|(k, v)| format!("{} = {}", k, v))
-                    .collect();
+                let items: Vec<String> = t.iter().map(|(k, v)| format!("{} = {}", k, v)).collect();
                 format!("{{ {} }}", items.join(", "))
             }
             other => other.to_string(),

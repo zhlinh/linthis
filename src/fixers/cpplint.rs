@@ -430,11 +430,7 @@ impl CpplintFixer {
 
     /// Dispatch a cpplint error to the appropriate fix handler by category.
     /// Returns `None` if the category is unsupported.
-    fn dispatch_fix(
-        &mut self,
-        lines: &mut Vec<String>,
-        error: &CpplintError,
-    ) -> Option<bool> {
+    fn dispatch_fix(&mut self, lines: &mut Vec<String>, error: &CpplintError) -> Option<bool> {
         Some(match error.category.as_str() {
             "build/header_guard" => self.fix_header_guard_by_mode(lines, error),
             "readability/todo" => self.fix_todo_from_error(lines, error),

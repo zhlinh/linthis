@@ -800,7 +800,11 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
         })
     {
         let suffix = build_hook_suffix(&p, &mode_suffix);
-        lines.push(format!("  Global: {}{}", p.display(), suffix).dimmed().to_string());
+        lines.push(
+            format!("  Global: {}{}", p.display(), suffix)
+                .dimmed()
+                .to_string(),
+        );
     }
 
     // Local: check .git/hooks/{event}
@@ -830,7 +834,11 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
         })
     {
         let suffix = build_hook_suffix(&p, &mode_suffix);
-        lines.push(format!("  Local:  {}{}", p.display(), suffix).dimmed().to_string());
+        lines.push(
+            format!("  Local:  {}{}", p.display(), suffix)
+                .dimmed()
+                .to_string(),
+        );
     }
 
     if lines.is_empty() {

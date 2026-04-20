@@ -724,4 +724,3 @@ mod tests {
         assert!(!is_placeholder_value("sk-9aK3p7Qz"));
     }
 }
-
