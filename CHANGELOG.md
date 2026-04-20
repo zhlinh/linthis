@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.6] - 2026-04-20
+
+### Added
+
+- populate TOOL_INSTALLS table for all 16 tools
+- introduce tools::install module with ToolInstallSpec scaffolding
+- improve tool auto-install with multi-method fallback chains
+- add Homebrew install method detection and update support
+- show fix_commit_mode switch tip after fixup commits
+
+### Fixed
+
+- address final-review issues in tool-install matrix
+- change missing tool install prompt default from N to Y
+
+### Changed
+
+- delegate lib.rs install helpers to tools::install
+
+### Documentation
+
+- format README table alignment and update Quick Start install command
+
 ## [0.19.5] - 2026-04-17
 
 ### Added
