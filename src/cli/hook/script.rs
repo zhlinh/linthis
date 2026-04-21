@@ -1171,6 +1171,29 @@ fn load_retention_diffs() -> usize {
         .diffs
 }
 
+/// Generate a POSIX shell snippet that re-stages ONLY working-tree changes to
+/// files listed in `$_FILES` (the set produced by the post-commit script from
+/// `git diff-tree ... HEAD`).
+///
+/// Without this restriction, `git diff --name-only | xargs git add` would also
+/// pick up unrelated, previously-unstaged modifications to other files, and
+/// they'd leak into the fixup commit. We iterate the committed scope instead
+/// so a file is only staged if it was part of the original commit AND was
+/// further modified by linthis/agent.
+fn shell_restage_committed_scope(indent: &str) -> String {
+    format!(
+        "{i}# Re-stage only files in the committed scope that were further modified.\n\
+         {i}# (Prevents unrelated unstaged working-tree changes from leaking into the fixup commit.)\n\
+         {i}while IFS= read -r _F; do\n\
+         {i}  [ -z \"$_F\" ] && continue\n\
+         {i}  git add -- \"$_F\" 2>/dev/null || true\n\
+         {i}done <<_RESTAGE_EOF_\n\
+         {i}$_FILES\n\
+         {i}_RESTAGE_EOF_\n",
+        i = indent,
+    )
+}
+
 /// Generate shell snippet to read fix_commit_mode from linthis config.
 fn shell_read_fix_commit_mode(config_section: &str) -> String {
     let default = if config_section == "pre_commit" {
@@ -1195,6 +1218,7 @@ fn shell_read_fix_commit_mode(config_section: &str) -> String {
 pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
     let timer_fns = shell_timer_functions();
     let fix_commit_mode_section = shell_read_fix_commit_mode("pre_commit");
+    let restage_scope = shell_restage_committed_scope(" ");
     format!(
         "#!/bin/sh\n\
          {timer}\
@@ -1216,10 +1240,11 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          _EOF_\n\
          {linthis} \"$@\"\n\
          \n\
-         # If any files changed, create fixup commit and show what changed\n\
-         _CHANGED=$(git diff --name-only)\n\
-         if [ -n \"$_CHANGED\" ]; then\n\
-         \x20 echo \"$_CHANGED\" | xargs git add\n\
+         # Restrict staging to the committed scope, then make the fixup commit\n\
+         # only if that scope actually changed.\n\
+         {restage}\
+         _STAGED=$(git diff --cached --name-only)\n\
+         if [ -n \"$_STAGED\" ]; then\n\
          \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
          \x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
          {mode_hint}\
@@ -1227,6 +1252,7 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
         timer = timer_fns,
         fix_commit_mode = fix_commit_mode_section,
         linthis = linthis_cmd,
+        restage = restage_scope,
         mode_hint = shell_fix_commit_mode_hint_pre_commit(" "),
     )
 }
@@ -1248,6 +1274,8 @@ pub(crate) fn build_post_commit_with_agent_script(
     let agent_block = shell_agent_invoke_block(fix_provider, &agent_cmd, error_msg, "  ");
     let save_diff = shell_save_diff_patch_for_post_commit("         ");
     let agent_hint = shell_agent_fix_hint_post_commit("  ");
+    let restage_scope_top = shell_restage_committed_scope("");
+    let restage_scope_agent = shell_restage_committed_scope("      ");
     format!(
         "#!/bin/sh\n\
          {timer}\
@@ -1269,9 +1297,8 @@ pub(crate) fn build_post_commit_with_agent_script(
          {linthis_fmt} \"$@\"\n\
          _FMT_EXIT=$?\n\
          \n\
-         # Stage formatting changes if any\n\
-         _FMT_CHANGED=$(git diff --name-only)\n\
-         [ -n \"$_FMT_CHANGED\" ] && echo \"$_FMT_CHANGED\" | xargs git add\n\
+         # Stage formatting changes (scoped to the committed-files set)\n\
+         {restage_top}\
          \n\
          # If formatter didn't fully fix, try agent\n\
          _DIFF_FILE=\"\"\n\
@@ -1280,9 +1307,8 @@ pub(crate) fn build_post_commit_with_agent_script(
          \x20 if [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
          {agent_block}\
          \x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
-         \x20\x20\x20\x20\x20 # Stage agent's changes\n\
-         \x20\x20\x20\x20\x20 _AGENT_CHANGED=$(git diff --name-only)\n\
-         \x20\x20\x20\x20\x20 [ -n \"$_AGENT_CHANGED\" ] && echo \"$_AGENT_CHANGED\" | xargs git add\n\
+         \x20\x20\x20\x20\x20 # Stage agent's changes (scoped to the committed-files set)\n\
+         {restage_agent}\
          \x20\x20\x20\x20\x20 # Save staged diff patch (format + agent) before fixup commit\n\
          {save_diff}\
          \x20\x20\x20\x20\x20 # Re-verify using the same format command (not check-only) so the\n\
@@ -1313,6 +1339,8 @@ pub(crate) fn build_post_commit_with_agent_script(
         agent_block = agent_block,
         save_diff = save_diff,
         agent_hint = agent_hint,
+        restage_top = restage_scope_top,
+        restage_agent = restage_scope_agent,
         mode_hint_pre_commit = shell_fix_commit_mode_hint_pre_commit(" "),
     )
 }
@@ -1657,6 +1685,54 @@ mod tests {
         assert!(
             cmd.contains("TEMP FILE outside .git/"),
             "prompt must steer agent away from .git/; got: {cmd}"
+        );
+    }
+
+    #[test]
+    fn post_commit_script_restages_only_committed_scope() {
+        let s = build_post_commit_script("linthis -c -f --hook-event=post-commit");
+        // Must iterate committed files instead of staging every dirty path.
+        assert!(
+            s.contains("while IFS= read -r _F; do"),
+            "restage loop missing: {s}"
+        );
+        assert!(
+            s.contains("git add -- \"$_F\""),
+            "per-file scoped add missing: {s}"
+        );
+        assert!(
+            s.contains("<<_RESTAGE_EOF_"),
+            "restage heredoc missing: {s}"
+        );
+        // Old unrestricted-scope staging must be gone so unstaged unrelated
+        // changes can no longer leak into the fixup commit.
+        assert!(
+            !s.contains("echo \"$_CHANGED\" | xargs git add"),
+            "unrestricted xargs git add should be removed: {s}"
+        );
+    }
+
+    #[test]
+    fn post_commit_with_agent_script_restages_only_committed_scope() {
+        let s = build_post_commit_with_agent_script(
+            "linthis -c -f --hook-event=post-commit",
+            &AgentFixProvider::Claude,
+            None,
+        );
+        // Two scoped restage blocks expected: after formatter, after agent.
+        let count = s.matches("<<_RESTAGE_EOF_").count();
+        assert_eq!(
+            count, 2,
+            "expected 2 scoped restage blocks (fmt + agent), got {count}: {s}"
+        );
+        // Neither phase may do the old unrestricted staging.
+        assert!(
+            !s.contains("echo \"$_FMT_CHANGED\" | xargs git add"),
+            "unrestricted FMT xargs git add should be removed: {s}"
+        );
+        assert!(
+            !s.contains("echo \"$_AGENT_CHANGED\" | xargs git add"),
+            "unrestricted AGENT xargs git add should be removed: {s}"
         );
     }
 }
