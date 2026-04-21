@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-04-21
+
+### Added
+
+- show provider/model and split hook footer into aligned lines
+
+### Fixed
+
+- always include timer/paint preamble in --type git scripts
+- tint content-row `│` to match the enclosing box colour
+- paint sub-linthis output white for IDE VCS consoles
+- wrap post-commit informational output for IDE VCS consoles
+- route the "📄 Config" header to stdout
+- redirect linthis/agent stderr to stdout in hook scripts
+- route post-commit informational output to stdout
+- keep restage heredoc terminator at column 0
+- scope post-commit fixup staging to the committed files only
+
+### Changed
+
+- simplify LINTHIS_HOOK_COLOR values to auto|off|white
+
 ## [0.19.6] - 2026-04-20
 
 ### Added
