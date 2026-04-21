@@ -142,12 +142,15 @@ fn shell_agent_invoke_block(
          {i}  echo \"[linthis]   Raise the threshold: LINTHIS_AGENT_MAX_AUTO_FIX=$((_AGENT_TOTAL + 10)) git ...\" >&2\n\
          {i}  echo \"[linthis]   Disable the cap:    LINTHIS_AGENT_MAX_AUTO_FIX=0 git ...\" >&2\n\
          {i}else\n\
-         {i}  echo \"[linthis] {error_msg}. Found $_AGENT_TOTAL issues in $_AGENT_FILES files — invoking {provider}...\" >&2\n\
-         {i}  echo \"[linthis] ─── {provider} output (streaming; Ctrl-C to cancel) ───\" >&2\n\
+         {i}  echo \"[linthis] {error_msg}. Found $_AGENT_TOTAL issues in $_AGENT_FILES files — invoking {provider}...\"\n\
+         {i}  echo \"[linthis] ─── {provider} output (streaming; Ctrl-C to cancel) ───\"\n\
          {i}  _AGENT_START=$(date +%s)\n\
-         {i}  {agent}\n\
+         {i}  # Wrap the agent pipeline so each command's stderr (claude/codebuddy progress,\n\
+         {i}  # agent-stream diagnostics) is merged into stdout. IDE terminals colour stderr\n\
+         {i}  # red, and none of this output signals failure.\n\
+         {i}  {{ {agent} ; }} 2>&1\n\
          {i}  _AGENT_ELAPSED=$(($(date +%s) - _AGENT_START))\n\
-         {i}  echo \"[linthis] ─── {provider} done in ${{_AGENT_ELAPSED}}s ───\" >&2\n\
+         {i}  echo \"[linthis] ─── {provider} done in ${{_AGENT_ELAPSED}}s ───\"\n\
          {i}  _AGENT_RAN=1\n\
          {i}fi\n",
         i = indent,
@@ -251,8 +254,8 @@ pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &Ho
          {agent_block}\
          \x20\x20\x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
          {agent_hint}\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-         \x20\x20\x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\"\n\
+         \x20\x20\x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\" 2>&1\n\
          \x20\x20\x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20 fi\n\
@@ -354,8 +357,10 @@ pub(crate) fn build_global_hook_script_for_event(
          \x20\x20\x20 # Local hook already calls linthis — delegate entirely\n\
          \x20\x20\x20 exec \"$LOCAL_HOOK\" {local_hook_orig_args}\n\
          \x20 else\n\
-         \x20\x20\x20 # Local hook exists but has no linthis — run linthis first, then delegate\n\
-         \x20\x20\x20 $LINTHIS_CMD \"$@\"\n\
+         \x20\x20\x20 # Local hook exists but has no linthis — run linthis first, then delegate.\n\
+         \x20\x20\x20 # 2>&1 keeps linthis's informational stderr (spinner, summary, tips) out of\n\
+         \x20\x20\x20 # the red-coloured stderr lane that many IDE terminals render.\n\
+         \x20\x20\x20 $LINTHIS_CMD \"$@\" 2>&1\n\
          \x20\x20\x20 LINTHIS_EXIT=$?\n\
          {git_fix_handler}\
          {fix_local}\
@@ -366,8 +371,8 @@ pub(crate) fn build_global_hook_script_for_event(
          \x20\x20\x20 exit $LOCAL_EXIT\n\
          \x20 fi\n\
          else\n\
-         \x20 # No local hook — run linthis directly\n\
-         \x20 $LINTHIS_CMD \"$@\"\n\
+         \x20 # No local hook — run linthis directly (see comment above re: 2>&1).\n\
+         \x20 $LINTHIS_CMD \"$@\" 2>&1\n\
          \x20 LINTHIS_EXIT=$?\n\
          {git_fix_handler}\
          {fix_direct}\
@@ -864,8 +869,8 @@ fn shell_worktree_agent_fix(
          \x20\x20\x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20\x20\x20 # Re-verify after agent fix\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
-         \x20\x20\x20\x20\x20 $LINTHIS_CMD\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\"\n\
+         \x20\x20\x20\x20\x20 $LINTHIS_CMD 2>&1\n\
          \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n",
@@ -897,7 +902,9 @@ fn build_git_with_agent_commitmsg_script(
          \x20 exit 0\n\
          fi\n\
          \n\
-         $LINTHIS_CMD\n\
+         # 2>&1: route linthis's informational stderr (spinner, summary, tips)\n\
+         # through stdout so IDE terminals don't red-colour it.\n\
+         $LINTHIS_CMD 2>&1\n\
          LINTHIS_EXIT=$?\n\
          if [ -n \"$_STAGED_FILES\" ]; then\n\
          \x20 echo \"$_STAGED_FILES\" | xargs git add\n\
@@ -955,7 +962,7 @@ pub(crate) fn build_git_with_agent_hook_script(
          \n\
          if [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
          \x20 # fixup: check only, let commit through, post-commit handles format\n\
-         \x20 {linthis_check_only}\n\
+         \x20 {linthis_check_only} 2>&1\n\
          \x20 exit 0\n\
          fi\n\
          \n\
@@ -966,7 +973,9 @@ pub(crate) fn build_git_with_agent_hook_script(
          fi\n\
          \n\
          LINTHIS_CMD=\"{linthis}\"\n\
-         $LINTHIS_CMD\n\
+         # 2>&1: merge linthis's stderr (spinner, summary, tips) into stdout\n\
+         # so IDE terminals don't render informational output in red.\n\
+         $LINTHIS_CMD 2>&1\n\
          LINTHIS_EXIT=$?\n\
          \n\
          {save_diff}\
@@ -1251,7 +1260,8 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
          $_FILES\n\
          _EOF_\n\
-         {linthis} \"$@\"\n\
+         # 2>&1: keep linthis's informational stderr out of the IDE's red lane.\n\
+         {linthis} \"$@\" 2>&1\n\
          \n\
          # Restrict staging to the committed scope, then make the fixup commit\n\
          # only if that scope actually changed.\n\
@@ -1308,7 +1318,8 @@ pub(crate) fn build_post_commit_with_agent_script(
          while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
          $_FILES\n\
          _EOF_\n\
-         {linthis_fmt} \"$@\"\n\
+         # 2>&1: keep linthis's informational stderr out of the IDE's red lane.\n\
+         {linthis_fmt} \"$@\" 2>&1\n\
          _FMT_EXIT=$?\n\
          \n\
          # Stage formatting changes (scoped to the committed-files set)\n\
@@ -1329,7 +1340,7 @@ pub(crate) fn build_post_commit_with_agent_script(
          \x20\x20\x20\x20\x20 # result is consistent with the initial run and shows Passed when\n\
          \x20\x20\x20\x20\x20 # the agent fixed the remaining format/security issues.\n\
          \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\"\n\
-         \x20\x20\x20\x20\x20 {linthis_fmt} \"$@\"\n\
+         \x20\x20\x20\x20\x20 {linthis_fmt} \"$@\" 2>&1\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n\
          fi\n\
@@ -1828,6 +1839,28 @@ mod tests {
                 .contains("[linthis]   Undo (by patch created) : \\033[0;33mgit apply -R $_DIFF_FILE\\033[0m\\n\" >&2"),
             "Undo-by-patch hint must be stdout"
         );
+
+        // Every linthis child-process invocation inside the post-commit scripts
+        // must redirect stderr to stdout. IDE terminals colour stderr red and
+        // linthis intentionally uses eprintln! for the spinner, the failure
+        // summary, and the tips — none of which are hard errors in a hook run.
+        for (name, script) in [("plain", &plain), ("agent", &agent)] {
+            let linthis_invocations = script.lines().filter(|l| {
+                let trimmed = l.trim_start();
+                (trimmed.starts_with("linthis ")
+                    || trimmed.starts_with("$LINTHIS_CMD")
+                    || trimmed.contains("hook-event=post-commit"))
+                    && !trimmed.starts_with("#")
+                    && !trimmed.starts_with("LINTHIS_CMD=")
+                    && trimmed.contains("\"$@\"")
+            });
+            for line in linthis_invocations {
+                assert!(
+                    line.contains("2>&1"),
+                    "{name}: linthis invocation missing 2>&1 (would leak red stderr to IDE):\n  {line}\n---script---\n{script}"
+                );
+            }
+        }
     }
 
     /// `sh -n` parse-check the generated post-commit scripts so any future
