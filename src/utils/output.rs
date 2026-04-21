@@ -735,6 +735,31 @@ fn extract_hook_script_type(path: &std::path::Path) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Extract `--provider <value>` from a thin-wrapper hook script, if present.
+/// The pattern `"--provider "` (trailing space) does not match `--provider-args`,
+/// so these two flags never collide.
+fn extract_hook_script_provider(path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    content
+        .split("--provider ")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .map(|s| s.to_string())
+}
+
+/// Extract `--model <value>` from the `--provider-args '...'` section of a
+/// thin-wrapper hook script, if present. The value may carry a trailing `'`
+/// when `--model` is the last arg inside the single-quoted block.
+fn extract_hook_script_model(path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    content
+        .split("--model ")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .map(|s| s.trim_end_matches('\'').to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Get the fix_commit_mode suffix for hook footer display.
 /// Returns empty string for default mode (squash), otherwise ", --fix-commit-mode <mode>".
 fn fix_commit_mode_suffix(hook_type: Option<&str>) -> String {
@@ -747,20 +772,51 @@ fn fix_commit_mode_suffix(hook_type: Option<&str>) -> String {
     format!("--fix-commit-mode {}", mode)
 }
 
-/// Build a parenthesized suffix like " (--type git, --fix-commit-mode dirty)".
-fn build_hook_suffix(hook_path: &std::path::Path, mode_suffix: &str) -> String {
-    let mut parts = Vec::new();
+/// Collect hook detail flags as (key, value) pairs in display order:
+/// --type, --provider, --model, --fix-commit-mode.
+fn collect_hook_details(
+    hook_path: &std::path::Path,
+    mode_suffix: &str,
+) -> Vec<(String, String)> {
+    let mut items = Vec::new();
     if let Some(t) = extract_hook_script_type(hook_path) {
-        parts.push(format!("--type {}", t));
+        items.push(("--type".to_string(), t));
     }
-    if !mode_suffix.is_empty() {
-        parts.push(mode_suffix.to_string());
+    if let Some(p) = extract_hook_script_provider(hook_path) {
+        items.push(("--provider".to_string(), p));
     }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(" ({})", parts.join(", "))
+    if let Some(m) = extract_hook_script_model(hook_path) {
+        items.push(("--model".to_string(), m));
     }
+    if let Some((k, v)) = mode_suffix.split_once(' ') {
+        if !v.is_empty() {
+            items.push((k.to_string(), v.to_string()));
+        }
+    }
+    items
+}
+
+/// Build indented, aligned, pre-dimmed lines like:
+/// ```text
+///     --type             git-with-agent
+///     --provider         claude
+///     --model            opus
+///     --fix-commit-mode  fixup
+/// ```
+fn build_hook_detail_lines(hook_path: &std::path::Path, mode_suffix: &str) -> Vec<String> {
+    let items = collect_hook_details(hook_path, mode_suffix);
+    if items.is_empty() {
+        return Vec::new();
+    }
+    let key_width = items.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
+    items
+        .into_iter()
+        .map(|(k, v)| {
+            format!("    {:<width$}  {}", k, v, width = key_width)
+                .dimmed()
+                .to_string()
+        })
+        .collect()
 }
 
 fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
@@ -799,12 +855,12 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
             }
         })
     {
-        let suffix = build_hook_suffix(&p, &mode_suffix);
         lines.push(
-            format!("  Global: {}{}", p.display(), suffix)
+            format!("  Global: {}", p.display())
                 .dimmed()
                 .to_string(),
         );
+        lines.extend(build_hook_detail_lines(&p, &mode_suffix));
     }
 
     // Local: check .git/hooks/{event}
@@ -833,12 +889,12 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
             }
         })
     {
-        let suffix = build_hook_suffix(&p, &mode_suffix);
         lines.push(
-            format!("  Local:  {}{}", p.display(), suffix)
+            format!("  Local:  {}", p.display())
                 .dimmed()
                 .to_string(),
         );
+        lines.extend(build_hook_detail_lines(&p, &mode_suffix));
     }
 
     if lines.is_empty() {
@@ -1446,5 +1502,69 @@ mod tests {
         assert!(output.contains("file=src/main.rs"));
         assert!(output.contains("line=42"));
         assert!(output.contains("col=10"));
+    }
+
+    #[test]
+    fn test_build_hook_detail_lines_includes_provider_and_model() {
+        let tmp = std::env::temp_dir().join("linthis-test-hook");
+        let script = "#!/bin/sh\n\
+            exec linthis hook run --event post-commit --type git-with-agent \
+             --provider codebuddy --provider-args '--model glm-5.0-ioa' --global \"$@\"\n";
+        std::fs::write(&tmp, script).unwrap();
+
+        let lines = build_hook_detail_lines(&tmp, "--fix-commit-mode fixup");
+        let joined = lines.join("\n");
+        // Strip ANSI color codes for assertion reliability.
+        let plain: String = joined
+            .chars()
+            .filter(|c| c.is_ascii_graphic() || c.is_ascii_whitespace())
+            .collect();
+        let _ = std::fs::remove_file(&tmp);
+
+        assert!(plain.contains("--type"), "missing --type line: {plain}");
+        assert!(plain.contains("git-with-agent"));
+        assert!(plain.contains("--provider"));
+        assert!(plain.contains("codebuddy"));
+        assert!(plain.contains("--model"));
+        assert!(plain.contains("glm-5.0-ioa"));
+        assert!(plain.contains("--fix-commit-mode"));
+        assert!(plain.contains("fixup"));
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn test_build_hook_detail_lines_only_type_when_no_provider() {
+        let tmp = std::env::temp_dir().join("linthis-test-hook-notypeonly");
+        let script = "#!/bin/sh\nexec linthis hook run --event pre-commit --type git \"$@\"\n";
+        std::fs::write(&tmp, script).unwrap();
+
+        let lines = build_hook_detail_lines(&tmp, "");
+        let _ = std::fs::remove_file(&tmp);
+
+        assert_eq!(lines.len(), 1);
+        let plain: String = lines[0]
+            .chars()
+            .filter(|c| c.is_ascii_graphic() || c.is_ascii_whitespace())
+            .collect();
+        assert!(plain.contains("--type"));
+        assert!(plain.contains("git"));
+        assert!(!plain.contains("--provider"));
+        assert!(!plain.contains("--model"));
+    }
+
+    #[test]
+    fn test_extract_hook_script_provider_ignores_provider_args() {
+        let tmp = std::env::temp_dir().join("linthis-test-hook-providerargs");
+        // Only --provider-args present, no standalone --provider.
+        let script = "#!/bin/sh\nexec linthis hook run --event pre-commit --type git \
+             --provider-args '--model glm' \"$@\"\n";
+        std::fs::write(&tmp, script).unwrap();
+
+        let provider = extract_hook_script_provider(&tmp);
+        let model = extract_hook_script_model(&tmp);
+        let _ = std::fs::remove_file(&tmp);
+
+        assert!(provider.is_none(), "should not confuse --provider-args with --provider");
+        assert_eq!(model.as_deref(), Some("glm"));
     }
 }
