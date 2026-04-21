@@ -165,8 +165,12 @@ pub(crate) fn handle_hook_run(
     };
 
     {
+        // stdout, not stderr: this is an informational header. IDE terminals
+        // colour stderr red and this line is the first thing printed per hook
+        // run, so writing it to stderr made every commit visually look like
+        // a failure.
         let description = describe_hook_source(hook_type, event);
-        eprintln!("{}", format!("📄 Config: {}", description).dimmed());
+        println!("{}", format!("📄 Config: {}", description).dimmed());
     }
 
     let pid = std::process::id().to_string();

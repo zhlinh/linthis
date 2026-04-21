@@ -1863,6 +1863,22 @@ mod tests {
         }
     }
 
+    #[test]
+    #[ignore = "diagnostic dump — run with: cargo test --release --bin linthis -- --ignored dump_pre_commit"]
+    fn dump_pre_commit() {
+        use crate::cli::commands::HookEvent;
+        let linthis_cmd = super::build_hook_command(&HookEvent::PreCommit, &None);
+        let script = build_git_with_agent_hook_script(
+            &linthis_cmd,
+            &AgentFixProvider::Codebuddy,
+            &HookEvent::PreCommit,
+            Some("--model glm-5.0-ioa"),
+        );
+        println!("---BEGIN PRE-COMMIT SCRIPT---");
+        println!("{script}");
+        println!("---END PRE-COMMIT SCRIPT---");
+    }
+
     /// `sh -n` parse-check the generated post-commit scripts so any future
     /// refactor that breaks heredoc termination fails CI, not production.
     #[test]
