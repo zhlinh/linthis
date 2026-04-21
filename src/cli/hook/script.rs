@@ -299,11 +299,12 @@ pub(crate) fn resolve_global_hook_blocks(
     } else {
         ""
     };
-    let timer_block = if fix_provider.is_some() {
-        shell_timer_functions()
-    } else {
-        ""
-    };
+    // Always include the timer/paint preamble — even without an agent the
+    // generated script calls `_linthis_run_painted` and `_linthis_paint`,
+    // which live in `shell_timer_functions`. Previously this was gated on
+    // `fix_provider.is_some()`, causing `--type git` (e.g. pre-push) to
+    // error with "_linthis_run_painted: command not found".
+    let timer_block = shell_timer_functions();
     (fix_block, fix_block_direct, review_block, timer_block)
 }
 
@@ -2032,6 +2033,33 @@ mod tests {
             !paint_line.contains("\x1b["),
             "off's _linthis_paint must not add ANSI; got: {paint_line:?}"
         );
+    }
+
+    /// `--type git` global hook scripts (used for e.g. pre-push) must still
+    /// carry `_linthis_run_painted` / `_linthis_paint` even though they have
+    /// no agent. Earlier the `timer_block` was gated on `fix_provider.is_some()`,
+    /// so pre-push aborted with `_linthis_run_painted: command not found`.
+    #[test]
+    fn git_type_global_hook_defines_paint_helpers() {
+        use crate::cli::commands::HookEvent;
+        for event in [HookEvent::PreCommit, HookEvent::PrePush] {
+            let script =
+                build_global_hook_script_for_event(&event, &None, None);
+            assert!(
+                script.contains("_linthis_run_painted()"),
+                "{event:?}: _linthis_run_painted definition missing — \
+                 pre-push without agent would break: {script}"
+            );
+            assert!(
+                script.contains("_linthis_paint()"),
+                "{event:?}: _linthis_paint definition missing: {script}"
+            );
+            // And the call sites must still refer to the helper, not bare 2>&1.
+            assert!(
+                script.contains("_linthis_run_painted $LINTHIS_CMD"),
+                "{event:?}: call site not wired to helper: {script}"
+            );
+        }
     }
 
     /// `sh -n` parse-check the generated post-commit scripts so any future
