@@ -931,6 +931,23 @@ impl HookBoxContext {
         let padding = self.content_width.saturating_sub(visual_len);
         format!("│ {}{} │", content, " ".repeat(padding))
     }
+
+    /// Like `pad_line`, but colours the `│` edges in the requested colour so
+    /// content rows visually continue the top/mid/bot border (red for
+    /// blocked, green for passed). The interior text is left in the default
+    /// terminal colour — upstream callers can still tint the whole line with
+    /// `.red()`/`.green()` when they want the content coloured too.
+    fn pad_line_bordered(
+        &self,
+        content: &str,
+        emoji_count: usize,
+        color: colored::Color,
+    ) -> String {
+        let visual_len = content.chars().count() + emoji_count;
+        let padding = self.content_width.saturating_sub(visual_len);
+        let bar = "│".color(color);
+        format!("{} {}{} {}", bar, content, " ".repeat(padding), bar)
+    }
 }
 
 /// Get the hook display name based on hook type.
@@ -969,16 +986,24 @@ fn format_hook_success_box(
         "All checks passed!"
     };
     output.push_str(&format!("{}\n", ctx.pad_line(checks_msg, 0).green()));
-    output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
     output.push_str(&format!(
         "{}\n",
-        ctx.pad_line(&format!("Files checked:   {:>3}", result.total_files), 0)
+        ctx.pad_line_bordered("", 0, colored::Color::Green)
     ));
     output.push_str(&format!(
         "{}\n",
-        ctx.pad_line(
+        ctx.pad_line_bordered(
+            &format!("Files checked:   {:>3}", result.total_files),
+            0,
+            colored::Color::Green,
+        )
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line_bordered(
             &format!("Files formatted: {:>3}", result.files_formatted),
-            0
+            0,
+            colored::Color::Green,
         )
     ));
 
@@ -1007,20 +1032,38 @@ fn format_hook_success_box(
             } else {
                 format!("  {}", filename)
             };
-            output.push_str(&format!("{}\n", ctx.pad_line(&detail, 0)));
+            output.push_str(&format!(
+                "{}\n",
+                ctx.pad_line_bordered(&detail, 0, colored::Color::Green)
+            ));
         }
-        output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
         output.push_str(&format!(
             "{}\n",
-            ctx.pad_line("Pre-change state saved in stash.", 0)
+            ctx.pad_line_bordered("", 0, colored::Color::Green)
         ));
         output.push_str(&format!(
             "{}\n",
-            ctx.pad_line("  git stash show -p  \u{2014} review format changes", 0)
+            ctx.pad_line_bordered(
+                "Pre-change state saved in stash.",
+                0,
+                colored::Color::Green,
+            )
         ));
         output.push_str(&format!(
             "{}\n",
-            ctx.pad_line("  git stash drop     \u{2014} discard snapshot", 0)
+            ctx.pad_line_bordered(
+                "  git stash show -p  \u{2014} review format changes",
+                0,
+                colored::Color::Green,
+            )
+        ));
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line_bordered(
+                "  git stash drop     \u{2014} discard snapshot",
+                0,
+                colored::Color::Green,
+            )
         ));
     }
 
@@ -1059,21 +1102,25 @@ fn format_hook_issue_line(issue: &LintIssue, content_width: usize) -> String {
 }
 
 /// Append the tip and skip hint sections for hook failure box.
+/// Content rows use a red-tinted `│` so the side bars keep their blocked
+/// colour even when a downstream viewer (IDE VCS console) tints uncoloured
+/// text differently.
 fn append_hook_tip_section(
     output: &mut String,
     result: &RunResult,
     hook_type: Option<&str>,
     ctx: &HookBoxContext,
 ) {
+    let border = colored::Color::Red;
     output.push_str(&format!(
         "{}\n",
-        ctx.pad_line("Tip: To review and fix issues:", 0)
+        ctx.pad_line_bordered("Tip: To review and fix issues:", 0, border)
     ));
     for (cmd, desc) in fix_tip_lines() {
         let line = format!("  {:<36} : {}", cmd, desc);
-        output.push_str(&format!("{}\n", ctx.pad_line(&line, 0)));
+        output.push_str(&format!("{}\n", ctx.pad_line_bordered(&line, 0, border)));
     }
-    output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
+    output.push_str(&format!("{}\n", ctx.pad_line_bordered("", 0, border)));
 
     let clang_tidy_count = result
         .issues
@@ -1083,26 +1130,30 @@ fn append_hook_tip_section(
     if clang_tidy_count >= 10 {
         output.push_str(&format!(
             "{}\n",
-            ctx.pad_line(
+            ctx.pad_line_bordered(
                 &format!(
                     "Too many clang-tidy issues ({})? Skip with:",
                     clang_tidy_count
                 ),
-                0
+                0,
+                border,
             )
         ));
         output.push_str(&format!(
             "{}\n",
-            ctx.pad_line("  LINTHIS_SKIP_CLANG_TIDY=1", 0)
+            ctx.pad_line_bordered("  LINTHIS_SKIP_CLANG_TIDY=1", 0, border)
         ));
-        output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
+        output.push_str(&format!("{}\n", ctx.pad_line_bordered("", 0, border)));
     }
 
     let skip_command = hook_skip_command(hook_type);
-    output.push_str(&format!("{}\n", ctx.pad_line("To skip this check:", 0)));
     output.push_str(&format!(
         "{}\n",
-        ctx.pad_line(&format!("  {}", skip_command), 0)
+        ctx.pad_line_bordered("To skip this check:", 0, border)
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line_bordered(&format!("  {}", skip_command), 0, border)
     ));
 }
 
@@ -1158,6 +1209,8 @@ fn filter_issues_by_exit_code(issues: &[LintIssue], exit_code: i32) -> Vec<&Lint
 }
 
 /// Append summary line (e.g. "2 errors, 1 warning in 3 files") to output.
+/// Failure-path helper — content rows carry a red-tinted `│` to match the
+/// enclosing box.
 fn append_issue_summary(output: &mut String, issues: &[&LintIssue], ctx: &HookBoxContext) {
     let error_count = issues
         .iter()
@@ -1203,16 +1256,25 @@ fn append_issue_summary(output: &mut String, issues: &[&LintIssue], ctx: &HookBo
         files_with_issues,
         if files_with_issues == 1 { "" } else { "s" },
     );
-    output.push_str(&format!("{}\n", ctx.pad_line(&summary, 0)));
-    output.push_str(&format!("{}\n", ctx.pad_line("", 0)));
+    let border = colored::Color::Red;
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line_bordered(&summary, 0, border)
+    ));
+    output.push_str(&format!("{}\n", ctx.pad_line_bordered("", 0, border)));
 }
 
 /// Append truncated issue list (max 8 items) to output.
+/// Failure-path helper — content rows carry a red-tinted `│`.
 fn append_issue_list(output: &mut String, issues: &[&LintIssue], ctx: &HookBoxContext) {
+    let border = colored::Color::Red;
     let max_issues = 8;
     for issue in issues.iter().take(max_issues) {
         let line_content = format_hook_issue_line(issue, ctx.content_width);
-        output.push_str(&format!("{}\n", ctx.pad_line(&line_content, 0)));
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line_bordered(&line_content, 0, border)
+        ));
     }
 
     if issues.len() > max_issues {
@@ -1222,7 +1284,10 @@ fn append_issue_list(output: &mut String, issues: &[&LintIssue], ctx: &HookBoxCo
             remaining,
             if remaining == 1 { "" } else { "s" }
         );
-        output.push_str(&format!("{}\n", ctx.pad_line(&more_line, 0)));
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line_bordered(&more_line, 0, border)
+        ));
     }
 }
 
@@ -1411,6 +1476,12 @@ pub fn format_cmsg_result(passed: bool, first_line: &str) -> String {
         ));
         out
     } else {
+        // Wrap each content-row's `│` in red so the side bars stay in the
+        // blocked colour even under IDE VCS consoles that paint uncoloured
+        // text differently.
+        let bar = "│".red().to_string();
+        let tint = |line: &str| -> String { line.replace('│', &bar) };
+
         let mut out = String::new();
         out.push_str(&format!(
             "{}\n",
@@ -1428,35 +1499,37 @@ pub fn format_cmsg_result(passed: bool, first_line: &str) -> String {
             "{}\n",
             "│ Validation Failed!                     │".red()
         ));
-        out.push_str("│                                        │\n");
-        out.push_str("│ Your message:                          │\n");
-        // Format: "│   {msg}{padding} │\n"
-        // Inner width = 40: prefix "   " (3) + msg + padding + " " (1) = 40 → padding = 36 - len
+        out.push_str(&tint("│                                        │\n"));
+        out.push_str(&tint("│ Your message:                          │\n"));
         let truncated = if first_line.chars().count() > 36 {
             format!("{}...", &first_line.chars().take(33).collect::<String>())
         } else {
             first_line.to_string()
         };
         let padding = 36usize.saturating_sub(truncated.chars().count());
-        out.push_str(&format!("│   {}{} │\n", truncated, " ".repeat(padding)));
-        out.push_str("│                                        │\n");
-        out.push_str("│ Expected format (Conventional Commits):│\n");
-        out.push_str("│   type(scope)?: description            │\n");
-        out.push_str("│                                        │\n");
-        out.push_str("│ Valid types:                           │\n");
-        out.push_str("│   feat, fix, docs, style, refactor,   │\n");
-        out.push_str("│   perf, test, build, ci, chore, revert │\n");
-        out.push_str("│                                        │\n");
-        out.push_str("│ Examples:                              │\n");
-        out.push_str("│   feat: add user authentication        │\n");
-        out.push_str("│   fix(api): handle null response       │\n");
-        out.push_str("│   docs: update README                  │\n");
+        out.push_str(&tint(&format!(
+            "│   {}{} │\n",
+            truncated,
+            " ".repeat(padding)
+        )));
+        out.push_str(&tint("│                                        │\n"));
+        out.push_str(&tint("│ Expected format (Conventional Commits):│\n"));
+        out.push_str(&tint("│   type(scope)?: description            │\n"));
+        out.push_str(&tint("│                                        │\n"));
+        out.push_str(&tint("│ Valid types:                           │\n"));
+        out.push_str(&tint("│   feat, fix, docs, style, refactor,   │\n"));
+        out.push_str(&tint("│   perf, test, build, ci, chore, revert │\n"));
+        out.push_str(&tint("│                                        │\n"));
+        out.push_str(&tint("│ Examples:                              │\n"));
+        out.push_str(&tint("│   feat: add user authentication        │\n"));
+        out.push_str(&tint("│   fix(api): handle null response       │\n"));
+        out.push_str(&tint("│   docs: update README                  │\n"));
         out.push_str(&format!(
             "{}\n",
             "├────────────────────────────────────────┤".red()
         ));
-        out.push_str("│ To skip this check:                    │\n");
-        out.push_str("│   git commit --no-verify               │\n");
+        out.push_str(&tint("│ To skip this check:                    │\n"));
+        out.push_str(&tint("│   git commit --no-verify               │\n"));
         out.push_str(&format!(
             "{}",
             "╰────────────────────────────────────────╯".red()
