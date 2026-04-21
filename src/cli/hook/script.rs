@@ -1181,6 +1181,12 @@ fn load_retention_diffs() -> usize {
 /// so a file is only staged if it was part of the original commit AND was
 /// further modified by linthis/agent.
 fn shell_restage_committed_scope(indent: &str) -> String {
+    // Heredoc body and terminator MUST start at column 0 (unquoted `<<EOF`
+    // form — `<<-` would only strip tabs, and shell syntax requires the
+    // closing marker to match verbatim at the beginning of a line). If we
+    // indented `$_FILES` or `_RESTAGE_EOF_`, the heredoc would never close
+    // and the shell would fail with "unexpected end of file", and the first
+    // filename would be prefixed with stray leading whitespace.
     format!(
         "{i}# Re-stage only files in the committed scope that were further modified.\n\
          {i}# (Prevents unrelated unstaged working-tree changes from leaking into the fixup commit.)\n\
@@ -1188,8 +1194,8 @@ fn shell_restage_committed_scope(indent: &str) -> String {
          {i}  [ -z \"$_F\" ] && continue\n\
          {i}  git add -- \"$_F\" 2>/dev/null || true\n\
          {i}done <<_RESTAGE_EOF_\n\
-         {i}$_FILES\n\
-         {i}_RESTAGE_EOF_\n",
+         $_FILES\n\
+         _RESTAGE_EOF_\n",
         i = indent,
     )
 }
@@ -1734,5 +1740,70 @@ mod tests {
             !s.contains("echo \"$_AGENT_CHANGED\" | xargs git add"),
             "unrestricted AGENT xargs git add should be removed: {s}"
         );
+    }
+
+    /// Heredoc terminator MUST live at column 0 (unquoted `<<EOF` form) or the
+    /// shell swallows the rest of the script and errors with "unexpected end
+    /// of file" — exactly the regression that hit the agent post-commit script
+    /// when the terminator was indented alongside the enclosing `if` block.
+    #[test]
+    fn restage_heredoc_terminator_is_at_column_zero() {
+        for indent in ["", " ", "      "] {
+            let snippet = shell_restage_committed_scope(indent);
+            for marker in ["$_FILES", "_RESTAGE_EOF_"] {
+                let expected = format!("\n{marker}\n");
+                assert!(
+                    snippet.contains(&expected),
+                    "`{marker}` must be on its own line with no leading whitespace \
+                     (indent={indent:?}); got:\n{snippet}"
+                );
+            }
+        }
+    }
+
+    /// `sh -n` parse-check the generated post-commit scripts so any future
+    /// refactor that breaks heredoc termination fails CI, not production.
+    #[test]
+    fn generated_post_commit_scripts_pass_sh_parse_check() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let scripts = [
+            (
+                "post_commit_script",
+                build_post_commit_script("linthis -c -f --hook-event=post-commit"),
+            ),
+            (
+                "post_commit_with_agent_script",
+                build_post_commit_with_agent_script(
+                    "linthis -c -f --hook-event=post-commit",
+                    &AgentFixProvider::Claude,
+                    None,
+                ),
+            ),
+        ];
+
+        for (name, body) in scripts {
+            let mut child = Command::new("sh")
+                .arg("-n")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn sh -n");
+            child
+                .stdin
+                .as_mut()
+                .expect("stdin")
+                .write_all(body.as_bytes())
+                .expect("write script");
+            let out = child.wait_with_output().expect("wait sh -n");
+            assert!(
+                out.status.success(),
+                "`sh -n` rejected generated {name}:\nstderr: {}\n---script---\n{}",
+                String::from_utf8_lossy(&out.stderr),
+                body,
+            );
+        }
     }
 }
