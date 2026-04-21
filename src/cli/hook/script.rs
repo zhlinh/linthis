@@ -142,15 +142,15 @@ fn shell_agent_invoke_block(
          {i}  echo \"[linthis]   Raise the threshold: LINTHIS_AGENT_MAX_AUTO_FIX=$((_AGENT_TOTAL + 10)) git ...\" >&2\n\
          {i}  echo \"[linthis]   Disable the cap:    LINTHIS_AGENT_MAX_AUTO_FIX=0 git ...\" >&2\n\
          {i}else\n\
-         {i}  echo \"[linthis] {error_msg}. Found $_AGENT_TOTAL issues in $_AGENT_FILES files — invoking {provider}...\"\n\
-         {i}  echo \"[linthis] ─── {provider} output (streaming; Ctrl-C to cancel) ───\"\n\
+         {i}  printf \"${{_LINTHIS_W}}[linthis] {error_msg}. Found $_AGENT_TOTAL issues in $_AGENT_FILES files — invoking {provider}...${{_LINTHIS_R}}\\n\"\n\
+         {i}  printf \"${{_LINTHIS_W}}[linthis] ─── {provider} output (streaming; Ctrl-C to cancel) ───${{_LINTHIS_R}}\\n\"\n\
          {i}  _AGENT_START=$(date +%s)\n\
          {i}  # Wrap the agent pipeline so each command's stderr (claude/codebuddy progress,\n\
          {i}  # agent-stream diagnostics) is merged into stdout. IDE terminals colour stderr\n\
          {i}  # red, and none of this output signals failure.\n\
          {i}  {{ {agent} ; }} 2>&1\n\
          {i}  _AGENT_ELAPSED=$(($(date +%s) - _AGENT_START))\n\
-         {i}  echo \"[linthis] ─── {provider} done in ${{_AGENT_ELAPSED}}s ───\"\n\
+         {i}  printf \"${{_LINTHIS_W}}[linthis] ─── {provider} done in ${{_AGENT_ELAPSED}}s ───${{_LINTHIS_R}}\\n\"\n\
          {i}  _AGENT_RAN=1\n\
          {i}fi\n",
         i = indent,
@@ -169,14 +169,12 @@ fn shell_agent_invoke_block(
 /// format changes (small), not the full agent rewrite. The staged diff
 /// against HEAD shows exactly what the agent changed.
 fn shell_agent_fix_hint(indent: &str) -> String {
-    // Emit to stdout: these are success-path informational hints, not errors.
-    // Many IDE terminals (VS Code, JetBrains) colour stderr red by default,
-    // so sending these to stderr made the whole post-fix summary look like a
-    // failure. Real errors/warnings in this file still use `>&2`.
+    // stdout + IDE-safe colour wrapping (see shell_timer_functions for the
+    // $_LINTHIS_W / $_LINTHIS_WR / $_LINTHIS_R convention).
     format!(
-        "{i}printf \"[linthis] \\033[0;32m✓\\033[0m Agent fix applied\\n\"\n\
-         {i}printf \"[linthis]   View changes : \\033[0;36mgit diff --cached\\033[0m\\n\"\n\
-         {i}printf \"[linthis]   Undo changes : \\033[0;33mlinthis backup undo\\033[0m\\n\"\n",
+        "{i}printf \"${{_LINTHIS_W}}[linthis] \\033[0;32m✓${{_LINTHIS_WR}} Agent fix applied${{_LINTHIS_R}}\\n\"\n\
+         {i}printf \"${{_LINTHIS_W}}[linthis]   View changes : \\033[0;36mgit diff --cached${{_LINTHIS_R}}\\n\"\n\
+         {i}printf \"${{_LINTHIS_W}}[linthis]   Undo changes : \\033[0;33mlinthis backup undo${{_LINTHIS_R}}\\n\"\n",
         i = indent
     )
 }
@@ -185,29 +183,26 @@ fn shell_agent_fix_hint(indent: &str) -> String {
 /// Printed after the fixup commit is created, so `HEAD~1` correctly refers to
 /// the fixup commit and `git diff HEAD~1` shows the agent's changes.
 fn shell_agent_fix_hint_post_commit(indent: &str) -> String {
-    // stdout: informational success hints (see note in shell_agent_fix_hint).
     format!(
-        "{i}printf \"[linthis] \\033[0;32m✓\\033[0m Agent fix applied\\n\"\n\
-         {i}printf \"[linthis]   View changes : \\033[0;36mgit diff HEAD~1\\033[0m\\n\"\n\
-         {i}printf \"[linthis]   Undo changes : \\033[0;33mgit reset HEAD~1\\033[0m\\n\"\n",
+        "{i}printf \"${{_LINTHIS_W}}[linthis] \\033[0;32m✓${{_LINTHIS_WR}} Agent fix applied${{_LINTHIS_R}}\\n\"\n\
+         {i}printf \"${{_LINTHIS_W}}[linthis]   View changes : \\033[0;36mgit diff HEAD~1${{_LINTHIS_R}}\\n\"\n\
+         {i}printf \"${{_LINTHIS_W}}[linthis]   Undo changes : \\033[0;33mgit reset HEAD~1${{_LINTHIS_R}}\\n\"\n",
         i = indent
     )
 }
 
 /// Shell snippet hinting how to switch fix_commit_mode for pre-commit hooks.
 fn shell_fix_commit_mode_hint_pre_commit(indent: &str) -> String {
-    // stdout: this is a tip, not an error.
     format!(
-        "{i}printf \"[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_commit.fix_commit_mode [dirty|squash|fixup] -g\\033[0m\\n\"\n",
+        "{i}printf \"${{_LINTHIS_W}}[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_commit.fix_commit_mode [dirty|squash|fixup] -g${{_LINTHIS_R}}\\n\"\n",
         i = indent
     )
 }
 
 /// Shell snippet hinting how to switch fix_commit_mode for pre-push hooks.
 fn shell_fix_commit_mode_hint_pre_push(indent: &str) -> String {
-    // stdout: this is a tip, not an error.
     format!(
-        "{i}printf \"[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_push.fix_commit_mode [dirty|squash|fixup] -g\\033[0m\\n\"\n",
+        "{i}printf \"${{_LINTHIS_W}}[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_push.fix_commit_mode [dirty|squash|fixup] -g${{_LINTHIS_R}}\\n\"\n",
         i = indent
     )
 }
@@ -254,7 +249,7 @@ pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &Ho
          {agent_block}\
          \x20\x20\x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
          {agent_hint}\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\"\n\
+         \x20\x20\x20\x20\x20\x20\x20 printf \"${{_LINTHIS_W}}[linthis] Re-verifying...${{_LINTHIS_R}}\\n\"\n\
          \x20\x20\x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\" 2>&1\n\
          \x20\x20\x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20\x20\x20\x20\x20 fi\n\
@@ -682,7 +677,22 @@ _print_review_box() {
 "#
 }
 
-/// Shell snippet: a background elapsed-time spinner.
+/// Shell snippet: a background elapsed-time spinner, plus "VCS console"
+/// colour wrapping. The latter guards against hosts (e.g. JetBrains' Git tool
+/// window) that render every unformatted line of hook output red. Detection:
+///
+///   * `LINTHIS_HOOK_COLOR=off|force-white|auto` overrides.
+///   * Default (`auto`) wraps only when stdout is **not a TTY** AND the common
+///     CI env vars are absent — i.e. IDE VCS consoles (pipe, interactive),
+///     never real terminals and never CI logs.
+///
+/// Three shell variables are exported:
+///   `$_LINTHIS_W`  — initial white ANSI prefix (or empty)
+///   `$_LINTHIS_WR` — "resume white after an inner colour" (or reset)
+///   `$_LINTHIS_R`  — trailing reset (always `\033[0m`)
+/// Plus `_linthis_paint`, a filter that wraps every line read on stdin. Used
+/// on `git commit` output so its `[master HASH] message` summary picks up the
+/// wrapping too.
 pub(crate) fn shell_timer_functions() -> &'static str {
     r#"
 _linthis_timer_pid=""
@@ -721,6 +731,41 @@ stop_timer() {
     wait "$_linthis_timer_pid" 2>/dev/null
     _linthis_timer_pid=""
     printf "\r\033[K" >&2
+  fi
+}
+
+# ---- IDE "VCS console" colour compensation ----
+_LINTHIS_W=""
+_LINTHIS_WR=$(printf '\033[0m')
+_LINTHIS_R=$(printf '\033[0m')
+case "${LINTHIS_HOOK_COLOR:-auto}" in
+  off|none|never)
+    ;;
+  force-white|dark|white|on)
+    _LINTHIS_W=$(printf '\033[0;37m')
+    _LINTHIS_WR=$(printf '\033[0;37m')
+    ;;
+  auto|*)
+    if [ ! -t 1 ] \
+        && [ -z "$CI" ] \
+        && [ -z "$GITHUB_ACTIONS" ] \
+        && [ -z "$GITLAB_CI" ] \
+        && [ -z "$CIRCLECI" ] \
+        && [ -z "$BUILDKITE" ] \
+        && [ -z "$CONTINUOUS_INTEGRATION" ]; then
+      _LINTHIS_W=$(printf '\033[0;37m')
+      _LINTHIS_WR=$(printf '\033[0;37m')
+    fi
+    ;;
+esac
+
+_linthis_paint() {
+  if [ -z "$_LINTHIS_W" ]; then
+    cat
+  else
+    while IFS= read -r _line; do
+      printf '%s%s%s\n' "$_LINTHIS_W" "$_line" "$_LINTHIS_R"
+    done
   fi
 }
 "#
@@ -869,7 +914,7 @@ fn shell_worktree_agent_fix(
          \x20\x20\x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20\x20\x20 # Re-verify after agent fix\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\"\n\
+         \x20\x20\x20\x20\x20 printf \"${{_LINTHIS_W}}[linthis] Re-verifying...${{_LINTHIS_R}}\\n\"\n\
          \x20\x20\x20\x20\x20 $LINTHIS_CMD 2>&1\n\
          \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20\x20\x20 fi\n\
@@ -1268,9 +1313,10 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          {restage}\
          _STAGED=$(git diff --cached --name-only)\n\
          if [ -n \"$_STAGED\" ]; then\n\
-         \x20 # Route git's commit summary to stdout so IDE terminals don't red-colour it.\n\
-         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1\n\
-         \x20 echo \"[linthis] Created fixup commit with format changes\"\n\
+         \x20 # Pipe git's commit summary through _linthis_paint so IDE VCS\n\
+         \x20 # consoles don't render it red.\n\
+         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1 | _linthis_paint\n\
+         \x20 printf \"${{_LINTHIS_W}}[linthis] Created fixup commit with format changes${{_LINTHIS_R}}\\n\"\n\
          {mode_hint}\
          fi\n",
         timer = timer_fns,
@@ -1339,7 +1385,7 @@ pub(crate) fn build_post_commit_with_agent_script(
          \x20\x20\x20\x20\x20 # Re-verify using the same format command (not check-only) so the\n\
          \x20\x20\x20\x20\x20 # result is consistent with the initial run and shows Passed when\n\
          \x20\x20\x20\x20\x20 # the agent fixed the remaining format/security issues.\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\"\n\
+         \x20\x20\x20\x20\x20 printf \"${{_LINTHIS_W}}[linthis] Re-verifying...${{_LINTHIS_R}}\\n\"\n\
          \x20\x20\x20\x20\x20 {linthis_fmt} \"$@\" 2>&1\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n\
@@ -1348,14 +1394,15 @@ pub(crate) fn build_post_commit_with_agent_script(
          # Create fixup commit if anything was staged (format + agent changes)\n\
          _STAGED=$(git diff --cached --name-only)\n\
          if [ -n \"$_STAGED\" ]; then\n\
-         \x20 # Route git's commit summary to stdout so IDE terminals don't red-colour it.\n\
-         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1\n\
-         \x20 echo \"[linthis] Created fixup commit with format changes\"\n\
+         \x20 # Pipe git's commit summary through _linthis_paint so IDE VCS\n\
+         \x20 # consoles don't render it red.\n\
+         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1 | _linthis_paint\n\
+         \x20 printf \"${{_LINTHIS_W}}[linthis] Created fixup commit with format changes${{_LINTHIS_R}}\\n\"\n\
          {mode_hint_pre_commit}\
          \x20 # Show hint and diff path after fixup commit so HEAD~1 is correct\n\
          \x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
          {agent_hint}\
-         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && printf \"[linthis]   Undo (by patch created) : \\033[0;33mgit apply -R $_DIFF_FILE\\033[0m\\n\"\n\
+         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && printf \"${{_LINTHIS_W}}[linthis]   Undo (by patch created) : \\033[0;33mgit apply -R $_DIFF_FILE${{_LINTHIS_R}}\\n\"\n\
          \x20 fi\n\
          fi\n",
         timer = timer_fns,
@@ -1877,6 +1924,87 @@ mod tests {
         println!("---BEGIN PRE-COMMIT SCRIPT---");
         println!("{script}");
         println!("---END PRE-COMMIT SCRIPT---");
+    }
+
+    /// The IDE-VCS-console colour compensation must:
+    ///   * wrap our own informational lines with `${_LINTHIS_W}…${_LINTHIS_R}`
+    ///   * pipe `git commit`'s summary through `_linthis_paint`
+    ///   * honour LINTHIS_HOOK_COLOR via the shell `case` so a real TTY gets
+    ///     empty wrap variables (i.e. no visible change).
+    /// Runtime behaviour is exercised by piping the script to `sh` with the
+    /// env var controlling the mode; we assert stdout is painted in
+    /// `force-white` mode and left plain in `off` mode.
+    #[test]
+    fn ide_color_wrapping_toggles_by_env() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        // Tiny standalone snippet: just the color setup + a sample printf.
+        let script = format!(
+            "{}\nprintf \"${{_LINTHIS_W}}[linthis] hello${{_LINTHIS_R}}\\n\"\n\
+             echo '[plain]' | _linthis_paint\n",
+            shell_timer_functions()
+        );
+
+        let run = |env_value: Option<&str>| -> String {
+            let mut cmd = Command::new("sh");
+            cmd.arg("-c")
+                .arg(&script)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                // Force "non-TTY, non-CI" so auto mode engages.
+                .env_remove("CI")
+                .env_remove("GITHUB_ACTIONS")
+                .env_remove("GITLAB_CI")
+                .env_remove("CIRCLECI")
+                .env_remove("BUILDKITE")
+                .env_remove("CONTINUOUS_INTEGRATION");
+            match env_value {
+                Some(v) => {
+                    cmd.env("LINTHIS_HOOK_COLOR", v);
+                }
+                None => {
+                    cmd.env_remove("LINTHIS_HOOK_COLOR");
+                }
+            }
+            let out = cmd.output().expect("spawn sh");
+            assert!(out.status.success(), "sh failed: {:?}", out);
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+
+        let forced = run(Some("force-white"));
+        assert!(
+            forced.contains("\x1b[0;37m[linthis] hello\x1b[0m"),
+            "force-white must wrap printf; got: {forced:?}"
+        );
+        assert!(
+            forced.contains("\x1b[0;37m[plain]\x1b[0m"),
+            "force-white must wrap _linthis_paint input; got: {forced:?}"
+        );
+
+        let off = run(Some("off"));
+        // In "off" mode, `_LINTHIS_W` is empty so no white prefix is emitted.
+        // `_LINTHIS_R` stays at `\033[0m` so an inner colour (e.g. green ✓)
+        // in a line like `printf "${_LINTHIS_W}[linthis] \033[0;32m✓…${_LINTHIS_R}"`
+        // still resets properly. A trailing bare reset is visually neutral.
+        assert!(
+            !off.contains("\x1b[0;37m"),
+            "off must not emit white ANSI; got: {off:?}"
+        );
+        assert!(
+            off.contains("[linthis] hello"),
+            "off must emit the line text; got: {off:?}"
+        );
+        // _linthis_paint in off mode is `cat`, no wrapping at all.
+        assert!(
+            off.contains("[plain]\n"),
+            "off must pass _linthis_paint through cat; got: {off:?}"
+        );
+        let paint_line = off.lines().find(|l| l.contains("[plain]")).unwrap();
+        assert!(
+            !paint_line.contains("\x1b["),
+            "off's _linthis_paint must not add ANSI; got: {paint_line:?}"
+        );
     }
 
     /// `sh -n` parse-check the generated post-commit scripts so any future
