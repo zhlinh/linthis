@@ -681,7 +681,7 @@ _print_review_box() {
 /// colour wrapping. The latter guards against hosts (e.g. JetBrains' Git tool
 /// window) that render every unformatted line of hook output red. Detection:
 ///
-///   * `LINTHIS_HOOK_COLOR=off|force-white|auto` overrides.
+///   * `LINTHIS_HOOK_COLOR=auto|off|white` overrides.
 ///   * Default (`auto`) wraps only when stdout is **not a TTY** AND the common
 ///     CI env vars are absent — i.e. IDE VCS consoles (pipe, interactive),
 ///     never real terminals and never CI logs.
@@ -739,9 +739,9 @@ _LINTHIS_W=""
 _LINTHIS_WR=$(printf '\033[0m')
 _LINTHIS_R=$(printf '\033[0m')
 case "${LINTHIS_HOOK_COLOR:-auto}" in
-  off|none|never)
+  off)
     ;;
-  force-white|dark|white|on)
+  white)
     _LINTHIS_W=$(printf '\033[0;37m')
     _LINTHIS_WR=$(printf '\033[0;37m')
     ;;
@@ -1972,14 +1972,14 @@ mod tests {
             String::from_utf8_lossy(&out.stdout).into_owned()
         };
 
-        let forced = run(Some("force-white"));
+        let forced = run(Some("white"));
         assert!(
             forced.contains("\x1b[0;37m[linthis] hello\x1b[0m"),
-            "force-white must wrap printf; got: {forced:?}"
+            "white must wrap printf; got: {forced:?}"
         );
         assert!(
             forced.contains("\x1b[0;37m[plain]\x1b[0m"),
-            "force-white must wrap _linthis_paint input; got: {forced:?}"
+            "white must wrap _linthis_paint input; got: {forced:?}"
         );
 
         let off = run(Some("off"));
