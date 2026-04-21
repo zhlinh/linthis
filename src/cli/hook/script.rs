@@ -166,10 +166,14 @@ fn shell_agent_invoke_block(
 /// format changes (small), not the full agent rewrite. The staged diff
 /// against HEAD shows exactly what the agent changed.
 fn shell_agent_fix_hint(indent: &str) -> String {
+    // Emit to stdout: these are success-path informational hints, not errors.
+    // Many IDE terminals (VS Code, JetBrains) colour stderr red by default,
+    // so sending these to stderr made the whole post-fix summary look like a
+    // failure. Real errors/warnings in this file still use `>&2`.
     format!(
-        "{i}printf \"[linthis] \\033[0;32m✓\\033[0m Agent fix applied\\n\" >&2\n\
-         {i}printf \"[linthis]   View changes : \\033[0;36mgit diff --cached\\033[0m\\n\" >&2\n\
-         {i}printf \"[linthis]   Undo changes : \\033[0;33mlinthis backup undo\\033[0m\\n\" >&2\n",
+        "{i}printf \"[linthis] \\033[0;32m✓\\033[0m Agent fix applied\\n\"\n\
+         {i}printf \"[linthis]   View changes : \\033[0;36mgit diff --cached\\033[0m\\n\"\n\
+         {i}printf \"[linthis]   Undo changes : \\033[0;33mlinthis backup undo\\033[0m\\n\"\n",
         i = indent
     )
 }
@@ -178,26 +182,29 @@ fn shell_agent_fix_hint(indent: &str) -> String {
 /// Printed after the fixup commit is created, so `HEAD~1` correctly refers to
 /// the fixup commit and `git diff HEAD~1` shows the agent's changes.
 fn shell_agent_fix_hint_post_commit(indent: &str) -> String {
+    // stdout: informational success hints (see note in shell_agent_fix_hint).
     format!(
-        "{i}printf \"[linthis] \\033[0;32m✓\\033[0m Agent fix applied\\n\" >&2\n\
-         {i}printf \"[linthis]   View changes : \\033[0;36mgit diff HEAD~1\\033[0m\\n\" >&2\n\
-         {i}printf \"[linthis]   Undo changes : \\033[0;33mgit reset HEAD~1\\033[0m\\n\" >&2\n",
+        "{i}printf \"[linthis] \\033[0;32m✓\\033[0m Agent fix applied\\n\"\n\
+         {i}printf \"[linthis]   View changes : \\033[0;36mgit diff HEAD~1\\033[0m\\n\"\n\
+         {i}printf \"[linthis]   Undo changes : \\033[0;33mgit reset HEAD~1\\033[0m\\n\"\n",
         i = indent
     )
 }
 
 /// Shell snippet hinting how to switch fix_commit_mode for pre-commit hooks.
 fn shell_fix_commit_mode_hint_pre_commit(indent: &str) -> String {
+    // stdout: this is a tip, not an error.
     format!(
-        "{i}printf \"[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_commit.fix_commit_mode [dirty|squash|fixup] -g\\033[0m\\n\" >&2\n",
+        "{i}printf \"[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_commit.fix_commit_mode [dirty|squash|fixup] -g\\033[0m\\n\"\n",
         i = indent
     )
 }
 
 /// Shell snippet hinting how to switch fix_commit_mode for pre-push hooks.
 fn shell_fix_commit_mode_hint_pre_push(indent: &str) -> String {
+    // stdout: this is a tip, not an error.
     format!(
-        "{i}printf \"[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_push.fix_commit_mode [dirty|squash|fixup] -g\\033[0m\\n\" >&2\n",
+        "{i}printf \"[linthis]   Tip : switch mode → \\033[0;36mlinthis config set hook.pre_push.fix_commit_mode [dirty|squash|fixup] -g\\033[0m\\n\"\n",
         i = indent
     )
 }
@@ -1251,8 +1258,9 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          {restage}\
          _STAGED=$(git diff --cached --name-only)\n\
          if [ -n \"$_STAGED\" ]; then\n\
-         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
-         \x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
+         \x20 # Route git's commit summary to stdout so IDE terminals don't red-colour it.\n\
+         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1\n\
+         \x20 echo \"[linthis] Created fixup commit with format changes\"\n\
          {mode_hint}\
          fi\n",
         timer = timer_fns,
@@ -1320,7 +1328,7 @@ pub(crate) fn build_post_commit_with_agent_script(
          \x20\x20\x20\x20\x20 # Re-verify using the same format command (not check-only) so the\n\
          \x20\x20\x20\x20\x20 # result is consistent with the initial run and shows Passed when\n\
          \x20\x20\x20\x20\x20 # the agent fixed the remaining format/security issues.\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\" >&2\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Re-verifying...\"\n\
          \x20\x20\x20\x20\x20 {linthis_fmt} \"$@\"\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n\
@@ -1329,13 +1337,14 @@ pub(crate) fn build_post_commit_with_agent_script(
          # Create fixup commit if anything was staged (format + agent changes)\n\
          _STAGED=$(git diff --cached --name-only)\n\
          if [ -n \"$_STAGED\" ]; then\n\
-         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\"\n\
-         \x20 echo \"[linthis] Created fixup commit with format changes\" >&2\n\
+         \x20 # Route git's commit summary to stdout so IDE terminals don't red-colour it.\n\
+         \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1\n\
+         \x20 echo \"[linthis] Created fixup commit with format changes\"\n\
          {mode_hint_pre_commit}\
          \x20 # Show hint and diff path after fixup commit so HEAD~1 is correct\n\
          \x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
          {agent_hint}\
-         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && printf \"[linthis]   Undo (by patch created) : \\033[0;33mgit apply -R $_DIFF_FILE\\033[0m\\n\" >&2\n\
+         \x20\x20\x20 [ -n \"$_DIFF_FILE\" ] && printf \"[linthis]   Undo (by patch created) : \\033[0;33mgit apply -R $_DIFF_FILE\\033[0m\\n\"\n\
          \x20 fi\n\
          fi\n",
         timer = timer_fns,
@@ -1759,6 +1768,66 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// IDE terminals (VS Code, JetBrains) colour stderr red. The post-commit
+    /// informational output — git's commit summary, "Created fixup commit…",
+    /// the Agent-fix-applied hint, the fix-commit-mode tip, and the "Undo (by
+    /// patch created)" line — must therefore go through stdout, not stderr.
+    /// Real errors/warnings in this file still use `>&2` and are not checked
+    /// here.
+    #[test]
+    fn post_commit_informational_output_is_stdout() {
+        let plain = build_post_commit_script("linthis -c -f --hook-event=post-commit");
+        let agent = build_post_commit_with_agent_script(
+            "linthis -c -f --hook-event=post-commit",
+            &AgentFixProvider::Claude,
+            None,
+        );
+
+        for (name, script) in [("plain", &plain), ("agent", &agent)] {
+            for offender in [
+                "Created fixup commit with format changes\" >&2",
+                "Agent fix applied\\n\" >&2",
+                "switch mode → \\033[0;36mlinthis config set hook.pre_commit.fix_commit_mode",
+            ] {
+                // The tip line is always present; assert the whole indented
+                // printf does not end with `>&2` by checking the contextual
+                // substring for its stderr variant.
+                if offender.starts_with("switch mode") {
+                    let stderr_form = format!(
+                        "{offender} [dirty|squash|fixup] -g\\033[0m\\n\" >&2"
+                    );
+                    assert!(
+                        !script.contains(&stderr_form),
+                        "{name}: fix-commit-mode tip must not end with >&2"
+                    );
+                } else {
+                    assert!(
+                        !script.contains(offender),
+                        "{name}: `{offender}` found — informational output must not be stderr"
+                    );
+                }
+            }
+            // git's own commit summary must be merged into stdout.
+            assert!(
+                script.contains(
+                    "git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1"
+                ),
+                "{name}: git commit summary must be redirected (2>&1): {script}"
+            );
+        }
+
+        // Agent-specific lines: Re-verifying + Undo-by-patch printf.
+        assert!(
+            !agent.contains("echo \"[linthis] Re-verifying...\" >&2"),
+            "Re-verifying must be stdout"
+        );
+        assert!(
+            !agent
+                .contains("[linthis]   Undo (by patch created) : \\033[0;33mgit apply -R $_DIFF_FILE\\033[0m\\n\" >&2"),
+            "Undo-by-patch hint must be stdout"
+        );
     }
 
     /// `sh -n` parse-check the generated post-commit scripts so any future
