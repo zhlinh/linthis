@@ -23,6 +23,35 @@ use crate::cli::commands::{AgentFixProvider, HookEvent, HookTool};
 /// Environment variable injected by `handle_hook_run` to detect re-entrant hook calls.
 const LINTHIS_HOOK_RUNNING_PREFIX: &str = "LINTHIS_HOOK_RUNNING_";
 
+/// Mirror of the shell-side `LINTHIS_HOOK_COLOR` detection (see
+/// `shell_timer_functions`). Used by `handle_hook_run` for the `📄 Config`
+/// line that runs in-process, before the generated shell script gets a
+/// chance to paint its own output. Keep the rules in sync between the two.
+fn should_paint_white() -> bool {
+    match std::env::var("LINTHIS_HOOK_COLOR").as_deref() {
+        Ok("white") => return true,
+        Ok("off") => return false,
+        _ => {}
+    }
+    use std::io::IsTerminal;
+    if std::io::stdout().is_terminal() {
+        return false;
+    }
+    for var in [
+        "CI",
+        "GITHUB_ACTIONS",
+        "GITLAB_CI",
+        "CIRCLECI",
+        "BUILDKITE",
+        "CONTINUOUS_INTEGRATION",
+    ] {
+        if std::env::var_os(var).is_some_and(|v| !v.is_empty()) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Build the re-entrant (direct) script for a git hook.
 pub(crate) fn build_reentrant_git_script(event: &HookEvent) -> String {
     let linthis_cmd = build_hook_command(event, &None);
@@ -168,9 +197,18 @@ pub(crate) fn handle_hook_run(
         // stdout, not stderr: this is an informational header. IDE terminals
         // colour stderr red and this line is the first thing printed per hook
         // run, so writing it to stderr made every commit visually look like
-        // a failure.
+        // a failure. Additionally, in "VCS console" hosts (JetBrains' Git
+        // tool window etc.) uncoloured stdout is rendered red too — wrap it
+        // explicitly in white when the shared auto-detection heuristic kicks
+        // in. Matches the shell-side logic in `shell_timer_functions`.
         let description = describe_hook_source(hook_type, event);
-        println!("{}", format!("📄 Config: {}", description).dimmed());
+        let base = format!("📄 Config: {}", description).dimmed().to_string();
+        let line = if should_paint_white() {
+            format!("\x1b[0;37m{base}\x1b[0m")
+        } else {
+            base
+        };
+        println!("{line}");
     }
 
     let pid = std::process::id().to_string();
