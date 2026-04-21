@@ -250,7 +250,7 @@ pub(crate) fn build_agent_fix_block(provider: &AgentFixProvider, hook_event: &Ho
          \x20\x20\x20\x20\x20 if [ \"$_AGENT_RAN\" = \"1\" ]; then\n\
          {agent_hint}\
          \x20\x20\x20\x20\x20\x20\x20 printf \"${{_LINTHIS_W}}[linthis] Re-verifying...${{_LINTHIS_R}}\\n\"\n\
-         \x20\x20\x20\x20\x20\x20\x20 $LINTHIS_CMD \"$@\" 2>&1\n\
+         \x20\x20\x20\x20\x20\x20\x20 _linthis_run_painted $LINTHIS_CMD \"$@\"\n\
          \x20\x20\x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20 fi\n\
@@ -353,9 +353,9 @@ pub(crate) fn build_global_hook_script_for_event(
          \x20\x20\x20 exec \"$LOCAL_HOOK\" {local_hook_orig_args}\n\
          \x20 else\n\
          \x20\x20\x20 # Local hook exists but has no linthis — run linthis first, then delegate.\n\
-         \x20\x20\x20 # 2>&1 keeps linthis's informational stderr (spinner, summary, tips) out of\n\
-         \x20\x20\x20 # the red-coloured stderr lane that many IDE terminals render.\n\
-         \x20\x20\x20 $LINTHIS_CMD \"$@\" 2>&1\n\
+         \x20\x20\x20 # _linthis_run_painted folds stderr into stdout and pipes through the\n\
+         \x20\x20\x20 # VCS-console white filter while preserving linthis's exit status.\n\
+         \x20\x20\x20 _linthis_run_painted $LINTHIS_CMD \"$@\"\n\
          \x20\x20\x20 LINTHIS_EXIT=$?\n\
          {git_fix_handler}\
          {fix_local}\
@@ -366,8 +366,8 @@ pub(crate) fn build_global_hook_script_for_event(
          \x20\x20\x20 exit $LOCAL_EXIT\n\
          \x20 fi\n\
          else\n\
-         \x20 # No local hook — run linthis directly (see comment above re: 2>&1).\n\
-         \x20 $LINTHIS_CMD \"$@\" 2>&1\n\
+         \x20 # No local hook — run linthis directly.\n\
+         \x20 _linthis_run_painted $LINTHIS_CMD \"$@\"\n\
          \x20 LINTHIS_EXIT=$?\n\
          {git_fix_handler}\
          {fix_direct}\
@@ -759,14 +759,45 @@ case "${LINTHIS_HOOK_COLOR:-auto}" in
     ;;
 esac
 
+# Expose paint state to child processes so the outer `linthis hook run`
+# (invoked by git, above this script) and any sub-linthis can align without
+# re-running the detection. CLICOLOR_FORCE makes `colored`-crate output still
+# emit codes under a pipe.
+if [ -n "$_LINTHIS_W" ]; then
+  export LINTHIS_HOOK_PAINT=white
+  export CLICOLOR_FORCE=1
+fi
+
 _linthis_paint() {
   if [ -z "$_LINTHIS_W" ]; then
     cat
   else
-    while IFS= read -r _line; do
-      printf '%s%s%s\n' "$_LINTHIS_W" "$_line" "$_LINTHIS_R"
-    done
+    # awk filter: replace every `ESC[0m` (reset) with `ESC[0;37m` so text
+    # after an inner colour block continues in white, then wrap the whole
+    # line with white + final reset. Existing coloured segments (cyan tips,
+    # green ✓, red ✗, box borders) keep their colour; only unformatted
+    # stretches gain the white tint that IDE VCS consoles need.
+    # gsub takes a regex, so escape the `[` in the RESET pattern.
+    awk 'BEGIN { ESC = sprintf("\033"); RESET = ESC "[0m"; RESET_RE = ESC "\\[0m"; WHITE = ESC "[0;37m" }
+         { gsub(RESET_RE, WHITE); print WHITE $0 RESET; fflush() }'
   fi
+}
+
+# Run "$@" with stderr folded into stdout, pipe the combined output through
+# _linthis_paint, and propagate the command's exit status. A bare pipe would
+# report awk's (always 0) exit, which silently broke the caller's
+# `if [ $LINTHIS_EXIT -ne 0 ]` flow. Tempfile path is POSIX-portable; no
+# PIPESTATUS or `set -o pipefail` (both non-POSIX) required.
+_linthis_run_painted() {
+  if [ -z "$_LINTHIS_W" ]; then
+    "$@" 2>&1
+    return $?
+  fi
+  _lrp_xf=$(mktemp 2>/dev/null || printf '/tmp/linthis-exit.%d' "$$")
+  { "$@" 2>&1; printf '%s\n' "$?" > "$_lrp_xf"; } | _linthis_paint
+  _lrp_rc=$(cat "$_lrp_xf" 2>/dev/null || echo 1)
+  rm -f "$_lrp_xf"
+  return "$_lrp_rc"
 }
 "#
 }
@@ -915,7 +946,7 @@ fn shell_worktree_agent_fix(
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20\x20\x20 # Re-verify after agent fix\n\
          \x20\x20\x20\x20\x20 printf \"${{_LINTHIS_W}}[linthis] Re-verifying...${{_LINTHIS_R}}\\n\"\n\
-         \x20\x20\x20\x20\x20 $LINTHIS_CMD 2>&1\n\
+         \x20\x20\x20\x20\x20 _linthis_run_painted $LINTHIS_CMD\n\
          \x20\x20\x20\x20\x20 LINTHIS_EXIT=$?\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n",
@@ -947,9 +978,7 @@ fn build_git_with_agent_commitmsg_script(
          \x20 exit 0\n\
          fi\n\
          \n\
-         # 2>&1: route linthis's informational stderr (spinner, summary, tips)\n\
-         # through stdout so IDE terminals don't red-colour it.\n\
-         $LINTHIS_CMD 2>&1\n\
+         _linthis_run_painted $LINTHIS_CMD\n\
          LINTHIS_EXIT=$?\n\
          if [ -n \"$_STAGED_FILES\" ]; then\n\
          \x20 echo \"$_STAGED_FILES\" | xargs git add\n\
@@ -1007,7 +1036,7 @@ pub(crate) fn build_git_with_agent_hook_script(
          \n\
          if [ \"$_FIX_MODE\" = \"fixup\" ]; then\n\
          \x20 # fixup: check only, let commit through, post-commit handles format\n\
-         \x20 {linthis_check_only} 2>&1\n\
+         \x20 _linthis_run_painted {linthis_check_only}\n\
          \x20 exit 0\n\
          fi\n\
          \n\
@@ -1018,9 +1047,7 @@ pub(crate) fn build_git_with_agent_hook_script(
          fi\n\
          \n\
          LINTHIS_CMD=\"{linthis}\"\n\
-         # 2>&1: merge linthis's stderr (spinner, summary, tips) into stdout\n\
-         # so IDE terminals don't render informational output in red.\n\
-         $LINTHIS_CMD 2>&1\n\
+         _linthis_run_painted $LINTHIS_CMD\n\
          LINTHIS_EXIT=$?\n\
          \n\
          {save_diff}\
@@ -1305,8 +1332,7 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
          $_FILES\n\
          _EOF_\n\
-         # 2>&1: keep linthis's informational stderr out of the IDE's red lane.\n\
-         {linthis} \"$@\" 2>&1\n\
+         _linthis_run_painted {linthis} \"$@\"\n\
          \n\
          # Restrict staging to the committed scope, then make the fixup commit\n\
          # only if that scope actually changed.\n\
@@ -1364,8 +1390,7 @@ pub(crate) fn build_post_commit_with_agent_script(
          while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
          $_FILES\n\
          _EOF_\n\
-         # 2>&1: keep linthis's informational stderr out of the IDE's red lane.\n\
-         {linthis_fmt} \"$@\" 2>&1\n\
+         _linthis_run_painted {linthis_fmt} \"$@\"\n\
          _FMT_EXIT=$?\n\
          \n\
          # Stage formatting changes (scoped to the committed-files set)\n\
@@ -1386,7 +1411,7 @@ pub(crate) fn build_post_commit_with_agent_script(
          \x20\x20\x20\x20\x20 # result is consistent with the initial run and shows Passed when\n\
          \x20\x20\x20\x20\x20 # the agent fixed the remaining format/security issues.\n\
          \x20\x20\x20\x20\x20 printf \"${{_LINTHIS_W}}[linthis] Re-verifying...${{_LINTHIS_R}}\\n\"\n\
-         \x20\x20\x20\x20\x20 {linthis_fmt} \"$@\" 2>&1\n\
+         \x20\x20\x20\x20\x20 _linthis_run_painted {linthis_fmt} \"$@\"\n\
          \x20\x20\x20 fi\n\
          \x20 fi\n\
          fi\n\
@@ -1867,12 +1892,13 @@ mod tests {
                     );
                 }
             }
-            // git's own commit summary must be merged into stdout.
+            // git's own commit summary must be merged into stdout AND piped
+            // through _linthis_paint for the IDE VCS-console white wrap.
             assert!(
                 script.contains(
-                    "git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1"
+                    "git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1 | _linthis_paint"
                 ),
-                "{name}: git commit summary must be redirected (2>&1): {script}"
+                "{name}: git commit summary must be merged + painted: {script}"
             );
         }
 
@@ -1887,24 +1913,25 @@ mod tests {
             "Undo-by-patch hint must be stdout"
         );
 
-        // Every linthis child-process invocation inside the post-commit scripts
-        // must redirect stderr to stdout. IDE terminals colour stderr red and
-        // linthis intentionally uses eprintln! for the spinner, the failure
-        // summary, and the tips — none of which are hard errors in a hook run.
+        // Every linthis child-process invocation in the post-commit scripts
+        // must route through _linthis_run_painted (which folds stderr in and
+        // pipes through the VCS-console white filter while preserving exit
+        // status) — or, if still inline, at least carry 2>&1.
         for (name, script) in [("plain", &plain), ("agent", &agent)] {
             let linthis_invocations = script.lines().filter(|l| {
                 let trimmed = l.trim_start();
-                (trimmed.starts_with("linthis ")
-                    || trimmed.starts_with("$LINTHIS_CMD")
+                (trimmed.contains("linthis ")
+                    || trimmed.contains("$LINTHIS_CMD")
                     || trimmed.contains("hook-event=post-commit"))
                     && !trimmed.starts_with("#")
                     && !trimmed.starts_with("LINTHIS_CMD=")
                     && trimmed.contains("\"$@\"")
             });
             for line in linthis_invocations {
+                let ok = line.contains("_linthis_run_painted") || line.contains("2>&1");
                 assert!(
-                    line.contains("2>&1"),
-                    "{name}: linthis invocation missing 2>&1 (would leak red stderr to IDE):\n  {line}\n---script---\n{script}"
+                    ok,
+                    "{name}: linthis invocation missing _linthis_run_painted/2>&1 (would leak red stderr to IDE):\n  {line}\n---script---\n{script}"
                 );
             }
         }
