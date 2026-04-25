@@ -107,7 +107,22 @@ pub(crate) fn shell_pre_push_worktree_setup() -> String {
      \x20\x20\x20 _PREPUSH_WT=\"\"\n\
      \x20\x20\x20 trap - EXIT HUP INT TERM\n\
      \x20 fi\n\
-     fi\n"
+     fi\n\
+     # Export a real-root-based review dir for the agent. The agent runs\n\
+     # INSIDE the worktree, where `git rev-parse --show-toplevel` returns\n\
+     # the worktree path — turning that into a slug yields a bizarre\n\
+     # `~/.linthis/projects/<wt-path-as-slug>/` directory that the script\n\
+     # (running outside the worktree) can't find later. Pre-computing the\n\
+     # path here from `_PREPUSH_REAL_ROOT` (or git toplevel as fallback)\n\
+     # keeps the agent's writes under the user's real project slug.\n\
+     if [ -n \"$_PREPUSH_STUB\" ]; then\n\
+     \x20 _LINTHIS_REVIEW_DIR=\"$HOME/.linthis/projects/$_PREPUSH_STUB/review/result\"\n\
+     else\n\
+     \x20 _FALLBACK_SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')\n\
+     \x20 _LINTHIS_REVIEW_DIR=\"$HOME/.linthis/projects/$_FALLBACK_SLUG/review/result\"\n\
+     fi\n\
+     mkdir -p \"$_LINTHIS_REVIEW_DIR\" 2>/dev/null\n\
+     export _LINTHIS_REVIEW_DIR\n"
         .to_string()
 }
 
@@ -1116,7 +1131,36 @@ fn agent_fix_prompt_for_post_commit() -> String {
 
 /// Build the agent fix prompt based on the hook event type.
 /// Note: CommitMsg uses agent_fix_headless_cmd_commit_msg() instead (needs $1 expansion).
-pub(crate) fn agent_fix_prompt_for_event(_hook_event: &HookEvent) -> String {
+pub(crate) fn agent_fix_prompt_for_event(hook_event: &HookEvent) -> String {
+    // Pre-push needs a different prompt: there are no STAGED files (HEAD is
+    // already committed), and the agent runs inside a temp git worktree of
+    // HEAD. So `linthis -s` (staged-files check) returns "no issues" and
+    // confuses the agent into reporting nothing to fix. Direct it at the
+    // saved result file via `linthis report show` instead.
+    if matches!(hook_event, HookEvent::PrePush) {
+        return "Lint issues were found in the commits about to be pushed (HEAD content). \
+                You are running inside a temporary git worktree of HEAD — there are NO staged \
+                files; do NOT run `linthis -s`. A backup has been created. \
+                Follow these steps: \
+                (1) Run `linthis report show` to see the latest lint result with file paths, \
+                line numbers, and rule names. \
+                (2) Group the issues by file. For files with independent errors (no cross-file \
+                dependencies), fix them in parallel using concurrent tool calls — each tool call \
+                fixes one file. For files with cross-file dependencies (e.g. shared type renames, \
+                API signature changes), fix them sequentially in dependency order. \
+                Fix by editing the code directly (do NOT use linthis --fix). \
+                (3) Re-check by running `linthis -i <file>` for each modified file (use one \
+                `-i` flag per file when checking multiple). Exit code 0 = all clean. \
+                Non-zero = issues remain — keep fixing until exit code is 0. \
+                (4) Run the project build/test to ensure fixes don't break anything \
+                (detect project type: cargo check && cargo test for Rust, \
+                go build ./... && go test ./... for Go, \
+                npx tsc --noEmit for TypeScript, python -m py_compile for Python). \
+                If build/tests fail, revert the problematic fix and try again. \
+                (5) Display a Changes Summary showing each modified file, \
+                what was changed, and why (e.g. which lint rule). Then show the full diff output."
+            .to_string();
+    }
     "Lint issues were found in staged files. A backup has been created. \
      Follow these steps: \
      (1) Run 'linthis -s' to inspect all issues. \
@@ -1420,9 +1464,10 @@ pub(crate) fn prepush_review_prompt() -> &'static str {
      git diff $BASE_SHA..HEAD --stat; git diff $BASE_SHA..HEAD --name-status; git diff $BASE_SHA..HEAD. \
      (2) Review for Critical (security, data loss, broken API, logic errors), \
      Important (missing error handling, performance), and Minor issues. \
-     (3) Get the review dir: _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//'); \
-     _REVIEW_DIR=\"$HOME/.linthis/projects/$_SLUG/review/result\"; mkdir -p \"$_REVIEW_DIR\". \
-     Write the review to $_REVIEW_DIR/review-$(date +%Y%m%d-%H%M%S).md. \
+     (3) The review directory is pre-set as $_LINTHIS_REVIEW_DIR (already created and \
+     resolves to the user's real project slug — DO NOT recompute it from `git rev-parse \
+     --show-toplevel`, which would return the temporary worktree path inside this hook). \
+     Write the review to \"$_LINTHIS_REVIEW_DIR/review-$(date +%Y%m%d-%H%M%S).md\". \
      (4) If Critical issues found: save a snapshot with 'git diff', auto-fix the issues, \
      then run build/test to verify fixes don't break anything \
      (detect project type: cargo check && cargo test for Rust, \
@@ -1441,10 +1486,11 @@ pub(crate) fn prepush_review_prompt() -> &'static str {
 /// Returns a shell snippet that sets _HAS_CRITICAL=1 if critical issues found.
 fn shell_review_report_check() -> String {
     r#"
-         # Find the latest review report and check for critical issues
-         _SLUG=$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '-' | sed 's/^-//')
-         _REVIEW_DIR="$HOME/.linthis/projects/$_SLUG/review/result"
-         REVIEW_REPORT=$(ls -t "$_REVIEW_DIR"/review-*.md 2>/dev/null | head -1)
+         # Find the latest review report and check for critical issues.
+         # Use $_LINTHIS_REVIEW_DIR (exported by worktree_setup) so we hit
+         # the same path the agent wrote to — single source of truth, and
+         # robust whether we're inside or outside the worktree.
+         REVIEW_REPORT=$(ls -t "${_LINTHIS_REVIEW_DIR:-/dev/null}"/review-*.md 2>/dev/null | head -1)
          if [ -n "$REVIEW_REPORT" ]; then
            # Check for actual critical issues (agent exit code is unreliable)
            _CRITICAL=$(awk '/^## Critical Issues/{{found=1;next}} found && /^## /{{found=0}} found && /^- \[/{{print}}' "$REVIEW_REPORT")
@@ -1460,6 +1506,51 @@ fn shell_review_report_check() -> String {
          fi
 "#
     .to_string()
+}
+
+/// Shell snippet that runs the agent FIX prompt inside the existing pre-push
+/// worktree and re-runs the lint check, updating `$LINTHIS_EXIT` and
+/// `$_LINT_OUT`. Sets `_AGENT_FIX_ATTEMPTED=1` so callers can distinguish
+/// "lint passed because agent fixed it" from "lint passed initially".
+///
+/// Mirrors pre-commit's `shell_sandbox_agent_fix` pattern (fix → re-check →
+/// update exit) but uses the real `git worktree` already set up by
+/// [`shell_pre_push_worktree_setup`] instead of a fake-worktree sandbox.
+///
+/// Caller must ensure `_LINTHIS_AGENT_OK` is set before this snippet runs
+/// (via [`shell_agent_availability_check`]).
+fn shell_prepush_agent_fix_in_wt(
+    linthis_cmd: &str,
+    fix_provider: &AgentFixProvider,
+    agent_fix_cmd: &str,
+) -> String {
+    format!(
+        "# Agent fix on lint failure — runs for ALL fix_commit_modes so the\n\
+         # agent gets a chance to repair issues before mode-specific handling\n\
+         # decides whether to block the push or fold fixes into a commit.\n\
+         # Runs inside the existing worktree so the user's real working tree\n\
+         # stays untouched while the agent (often minutes-long) is editing.\n\
+         \x20 _AGENT_FIX_ATTEMPTED=0\n\
+         \x20 if [ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]; then\n\
+         \x20\x20\x20 _AGENT_FIX_ATTEMPTED=1\n\
+         \x20\x20\x20 echo \"[linthis] Lint errors detected — invoking {provider} to fix...\" >&2\n\
+         {worktree_enter}\
+         \x20\x20\x20 start_timer \"Fixing with {provider}\"\n\
+         \x20\x20\x20 {agent_fix}\n\
+         \x20\x20\x20 stop_timer\n\
+         {worktree_exit_no_cleanup}\
+         \x20\x20\x20 echo \"[linthis] Re-checking after agent fix...\" >&2\n\
+         {worktree_enter}\
+         \x20\x20\x20 _LINT_OUT=$({linthis} \"$@\" 2>&1)\n\
+         \x20\x20\x20 LINTHIS_EXIT=$?\n\
+         {worktree_exit_no_cleanup}\
+         \x20 fi\n",
+        provider = fix_provider,
+        agent_fix = agent_fix_cmd,
+        linthis = linthis_cmd,
+        worktree_enter = shell_pre_push_worktree_enter(),
+        worktree_exit_no_cleanup = shell_pre_push_worktree_exit_no_cleanup(),
+    )
 }
 
 /// Build the pre-push hook script that ALWAYS triggers an agent code review.
@@ -1479,9 +1570,25 @@ pub(crate) fn build_git_with_agent_prepush_script(
     provider_args: Option<&str>,
 ) -> String {
     let agent_cmd = agent_fix_headless_cmd(fix_provider, prepush_review_prompt(), provider_args);
+    let agent_fix_cmd = agent_fix_headless_cmd(
+        fix_provider,
+        &agent_fix_prompt_for_event(&HookEvent::PrePush),
+        provider_args,
+    );
     let timer_fns = shell_timer_functions();
     let review_box = shell_review_box_fn();
     let fix_commit_mode_section = shell_read_fix_commit_mode("pre_push");
+    let agent_fix_in_wt =
+        shell_prepush_agent_fix_in_wt(linthis_cmd, fix_provider, &agent_fix_cmd);
+    let footer_dirty_post_fix = shell_hook_footer(&FooterCtx {
+        outcome: FooterOutcome::Applied,
+        hook_type: HookTypeLabel::GitWithAgent,
+        mode: FixCommitMode::Dirty,
+        event: &HookEvent::PrePush,
+        header: "Agent fixes applied to your working tree (dirty mode). \
+                 Push blocked — review the changes, commit, then 'git push' again.",
+        indent: "   ",
+    });
     format!(
         "#!/bin/sh\n\
          {timer}\
@@ -1497,9 +1604,13 @@ pub(crate) fn build_git_with_agent_prepush_script(
          _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
          \n\
          {worktree_setup}\
+         # Check agent provider availability up-front so both the fix path\n\
+         # (lint failure → auto-fix) and the review path can gate on it.\n\
+         {agent_check}\
          # Run lint check on pushed files only (skip if no file changes, e.g. empty commits)\n\
          # Build -i <file> args for each pushed file (linthis uses -i, not positional paths)\n\
          _LINTHIS_CHECKED=0\n\
+         _AGENT_FIX_ATTEMPTED=0\n\
          if [ -n \"$_PUSHED_FILES\" ]; then\n\
          \x20 set --\n\
          \x20 while IFS= read -r _F; do set -- \"$@\" -i \"$_F\"; done <<_EOF_\n\
@@ -1509,6 +1620,7 @@ pub(crate) fn build_git_with_agent_prepush_script(
          \x20 _LINT_OUT=$({linthis} \"$@\" 2>&1)\n\
          \x20 LINTHIS_EXIT=$?\n\
          {worktree_exit_no_cleanup}\
+         {agent_fix_in_wt}\
          \x20 printf \"%s\\n\" \"$_LINT_OUT\" >&2\n\
          \x20 # Extract actual number of files checked from linthis output\n\
          \x20 _LINTHIS_CHECKED=$(printf \"%s\" \"$_LINT_OUT\" | sed -n 's/.*Files checked:[[:space:]]*\\([0-9]*\\).*/\\1/p' | tail -1)\n\
@@ -1523,8 +1635,7 @@ pub(crate) fn build_git_with_agent_prepush_script(
          \x20 exit 0\n\
          fi\n\
          \n\
-         # Check if agent provider is available before review\n\
-         {agent_check}\
+         # Skip review if agent unavailable (already warned above).\n\
          if [ \"$_LINTHIS_AGENT_OK\" = \"0\" ]; then\n\
          {worktree_leave}\
          \x20 exit 0\n\
@@ -1553,6 +1664,16 @@ pub(crate) fn build_git_with_agent_prepush_script(
          # this is a no-op.\n\
          {apply_agent_patch}\
          \n\
+         # In dirty mode, an agent fix attempt produces unstaged WT changes\n\
+         # in the user's real project. The pushed HEAD content is unchanged,\n\
+         # so we MUST block the push — otherwise the user ships the unfixed\n\
+         # commit and the agent's fixes sit unstaged. The user commits\n\
+         # them (or amends HEAD), then re-runs `git push`.\n\
+         if [ \"$_FIX_MODE\" = \"dirty\" ] && [ \"${{_AGENT_FIX_ATTEMPTED:-0}}\" = \"1\" ]; then\n\
+         {footer_dirty_post_fix}\
+         \x20 exit 1\n\
+         fi\n\
+         \n\
          exit $REVIEW_EXIT\n",
         timer = timer_fns,
         review_box = review_box,
@@ -1565,6 +1686,8 @@ pub(crate) fn build_git_with_agent_prepush_script(
         provider = fix_provider,
         agent = agent_cmd,
         agent_check = shell_agent_availability_check(fix_provider),
+        agent_fix_in_wt = agent_fix_in_wt,
+        footer_dirty_post_fix = footer_dirty_post_fix,
         worktree_setup = shell_pre_push_worktree_setup(),
         worktree_enter = shell_pre_push_worktree_enter(),
         worktree_exit_no_cleanup = shell_pre_push_worktree_exit_no_cleanup(),
@@ -3835,6 +3958,205 @@ mod tests {
         assert!(
             s.contains("git reset --soft HEAD~2"),
             "squash fold dance missing after patch apply: {s}"
+        );
+    }
+
+    /// On lint failure the pre-push hook must invoke the agent FIX prompt
+    /// inside the existing worktree, re-run the lint check, and only then
+    /// fall through to the mode-specific handler / agent review. Locks in
+    /// the "fix → re-check → review" sequence the user requested so any
+    /// future refactor that re-orders these phases is caught here.
+    #[test]
+    fn pre_push_runs_agent_fix_then_relint_before_mode_handler() {
+        let s = build_git_with_agent_prepush_script(
+            "linthis -c --hook-event=pre-push",
+            &AgentFixProvider::Codebuddy,
+            None,
+        );
+
+        // Agent fix block exists, gated on lint failure AND agent availability.
+        assert!(
+            s.contains("[ \"$LINTHIS_EXIT\" -ne 0 ] && [ \"$_LINTHIS_AGENT_OK\" = \"1\" ]"),
+            "agent fix block must be gated on LINTHIS_EXIT and _LINTHIS_AGENT_OK: {s}"
+        );
+
+        // _AGENT_FIX_ATTEMPTED flag set inside the fix branch — used later
+        // by the dirty-mode post-fix block.
+        assert!(
+            s.contains("_AGENT_FIX_ATTEMPTED=1"),
+            "fix block must set _AGENT_FIX_ATTEMPTED=1: {s}"
+        );
+
+        // Re-check lint after the agent fixes. The pattern is a second
+        // `_LINT_OUT=$(... 2>&1)` capture inside the fix branch.
+        let relint_count = s.matches("_LINT_OUT=$(").count();
+        assert!(
+            relint_count >= 2,
+            "must re-run lint after agent fix (expected ≥ 2 captures of \
+             _LINT_OUT, got {relint_count}): {s}"
+        );
+
+        // The fix prompt must NOT use the review skill — that runs later in
+        // the review phase. The fix prompt mentions running 'linthis -s' to
+        // inspect issues; the review prompt mentions the lt.review skill.
+        let fix_idx = s
+            .find("Lint issues were found")
+            .expect("fix-prompt anchor missing");
+        let review_idx = s
+            .find("structured pre-push code review")
+            .expect("review-prompt anchor missing");
+        assert!(
+            fix_idx < review_idx,
+            "fix prompt must appear BEFORE review prompt (fix@{fix_idx}, \
+             review@{review_idx}): {s}"
+        );
+
+        // The mode-specific handler (which exits early in dirty mode) must
+        // appear AFTER the fix block — otherwise dirty short-circuits before
+        // the agent gets a chance.
+        let fix_block_idx = s
+            .find("_AGENT_FIX_ATTEMPTED=1")
+            .expect("fix block marker missing");
+        let dirty_handler_idx = s
+            .find("Handle fix_commit_mode for pre-push")
+            .expect("mode handler marker missing");
+        assert!(
+            fix_block_idx < dirty_handler_idx,
+            "agent fix block must appear BEFORE mode handler (fix@{fix_block_idx}, \
+             handler@{dirty_handler_idx}): {s}"
+        );
+    }
+
+    /// Pre-push worktree setup must export `_LINTHIS_REVIEW_DIR` based on
+    /// the user's REAL project root (`_PREPUSH_STUB`), NOT `git rev-parse
+    /// --show-toplevel` (which returns the worktree path when the agent
+    /// runs inside the worktree). Without this, agent-written review
+    /// reports land in `~/.linthis/projects/<wt-path-as-slug>/...` and
+    /// `shell_review_report_check` (running outside the wt) can't find
+    /// them — silently skipping the critical-issue gate.
+    #[test]
+    fn pre_push_exports_review_dir_from_real_project_slug() {
+        let s = build_git_with_agent_prepush_script(
+            "linthis -c --hook-event=pre-push",
+            &AgentFixProvider::Codebuddy,
+            None,
+        );
+
+        // Setup writes _LINTHIS_REVIEW_DIR rooted at $_PREPUSH_STUB
+        // (the real project slug), not via `git rev-parse --show-toplevel`.
+        assert!(
+            s.contains("_LINTHIS_REVIEW_DIR=\"$HOME/.linthis/projects/$_PREPUSH_STUB/review/result\""),
+            "review dir must be derived from $_PREPUSH_STUB (real project slug): {s}"
+        );
+
+        // Exported so the agent subprocess inherits it.
+        assert!(
+            s.contains("export _LINTHIS_REVIEW_DIR"),
+            "_LINTHIS_REVIEW_DIR must be exported for agent: {s}"
+        );
+
+        // Review prompt instructs agent to USE the env var, not recompute.
+        let review_prompt = super::prepush_review_prompt();
+        assert!(
+            review_prompt.contains("$_LINTHIS_REVIEW_DIR"),
+            "review prompt must reference $_LINTHIS_REVIEW_DIR: {review_prompt}"
+        );
+        assert!(
+            !review_prompt
+                .contains("_SLUG=$(git rev-parse --show-toplevel"),
+            "review prompt must NOT recompute slug from git toplevel \
+             (returns wt path inside the hook): {review_prompt}"
+        );
+
+        // Report check uses the same var so reads/writes line up.
+        assert!(
+            s.contains("${_LINTHIS_REVIEW_DIR:-/dev/null}"),
+            "review report check must read $_LINTHIS_REVIEW_DIR: {s}"
+        );
+    }
+
+    /// The pre-push agent FIX prompt must NOT instruct the agent to run
+    /// `linthis -s` — that's the staged-files check, which returns "no
+    /// issues" in pre-push (HEAD is already committed; nothing is staged).
+    /// Wrong tool here makes the agent report "nothing to fix" and exit,
+    /// which is exactly the bug that prompted this whole flow.
+    ///
+    /// The right tool is `linthis report show`, which reads the saved
+    /// result file — it works for any event (pre-commit, pre-push, etc.).
+    #[test]
+    fn pre_push_fix_prompt_uses_report_show_not_staged_check() {
+        let prompt =
+            super::agent_fix_prompt_for_event(&HookEvent::PrePush);
+        // Must point the agent at report show (works regardless of staging).
+        assert!(
+            prompt.contains("linthis report show"),
+            "pre-push fix prompt must instruct `linthis report show`: {prompt}"
+        );
+        // Must NOT instruct the agent to RUN `linthis -s` (staged-files
+        // check). The prompt is allowed to mention `linthis -s` in a
+        // negative ("do NOT run") context, so we look for the imperative
+        // patterns that would set the agent off in the wrong direction.
+        for forbidden in [
+            "Run 'linthis -s'",
+            "Run `linthis -s`",
+            "Re-run 'linthis -s'",
+            "Re-run `linthis -s`",
+        ] {
+            assert!(
+                !prompt.contains(forbidden),
+                "pre-push fix prompt must NOT instruct {forbidden:?} (returns \
+                 empty in pre-push because nothing is staged): {prompt}"
+            );
+        }
+        // Pre-commit prompt unchanged — sanity check.
+        let pre_commit_prompt =
+            super::agent_fix_prompt_for_event(&HookEvent::PreCommit);
+        assert!(
+            pre_commit_prompt.contains("linthis -s"),
+            "pre-commit prompt should still use `linthis -s` (staged files): \
+             {pre_commit_prompt}"
+        );
+    }
+
+    /// Dirty mode + agent fix attempt must block the push EVEN IF the
+    /// agent cleared the lint, because the fixes live in the user's
+    /// working tree (unstaged) — the pushed HEAD content is unchanged
+    /// and would ship the unfixed commit.
+    #[test]
+    fn pre_push_dirty_mode_blocks_after_agent_fix_attempt() {
+        let s = build_git_with_agent_prepush_script(
+            "linthis -c --hook-event=pre-push",
+            &AgentFixProvider::Codebuddy,
+            None,
+        );
+
+        // The dirty post-fix block must check the flag AND mode, then exit 1.
+        assert!(
+            s.contains("[ \"$_FIX_MODE\" = \"dirty\" ] && [ \"${_AGENT_FIX_ATTEMPTED:-0}\" = \"1\" ]"),
+            "dirty post-fix block must gate on $_FIX_MODE and $_AGENT_FIX_ATTEMPTED: {s}"
+        );
+
+        // The block must come AFTER apply_agent_patch — otherwise the
+        // agent's fixes don't make it to the user's WT before the block.
+        let apply_idx = s
+            .rfind("git apply --binary --whitespace=nowarn \"$_AGENT_PATCH\"")
+            .expect("patch apply marker missing");
+        let dirty_block_idx = s
+            .find("[ \"$_FIX_MODE\" = \"dirty\" ] && [ \"${_AGENT_FIX_ATTEMPTED:-0}\" = \"1\" ]")
+            .expect("dirty post-fix marker missing");
+        assert!(
+            apply_idx < dirty_block_idx,
+            "dirty block must come AFTER patch apply (apply@{apply_idx}, \
+             dirty_block@{dirty_block_idx}): {s}"
+        );
+
+        // The block must exit 1, not fall through to `exit $REVIEW_EXIT`.
+        let after_block = &s[dirty_block_idx..];
+        let exit1_idx = after_block.find("exit 1").expect("exit 1 missing in dirty block");
+        let next_fi_idx = after_block.find("\nfi").expect("closing fi missing");
+        assert!(
+            exit1_idx < next_fi_idx,
+            "dirty block must `exit 1` BEFORE its closing `fi`: {after_block}"
         );
     }
 
