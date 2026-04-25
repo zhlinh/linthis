@@ -545,6 +545,26 @@ fn default_fix_commit_mode_one_commit() -> String {
     "squash".to_string()
 }
 
+/// Expand short-form `fix_commit_mode` aliases to their canonical name.
+///
+/// Accepted inputs (case-sensitive — CLI flags and config values are ASCII):
+/// - `"s"` or `"squash"` → `"squash"`
+/// - `"d"` or `"dirty"`  → `"dirty"`
+/// - `"f"` or `"fixup"`  → `"fixup"`
+///
+/// Returns `None` for anything else — callers should surface this as a
+/// validation error. The canonical form is ALWAYS the full word so
+/// `config.toml` files stay self-documenting and downstream code can
+/// keep comparing against `"squash" | "dirty" | "fixup"`.
+pub fn expand_fix_commit_mode_alias(input: &str) -> Option<&'static str> {
+    match input {
+        "s" | "squash" => Some("squash"),
+        "d" | "dirty" => Some("dirty"),
+        "f" | "fixup" => Some("fixup"),
+        _ => None,
+    }
+}
+
 impl Default for HookEventFixConfig {
     fn default() -> Self {
         Self {
@@ -1639,6 +1659,26 @@ mod dirs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expand_fix_commit_mode_alias_accepts_short_and_full() {
+        // Short aliases normalise to the canonical full name.
+        assert_eq!(expand_fix_commit_mode_alias("s"), Some("squash"));
+        assert_eq!(expand_fix_commit_mode_alias("d"), Some("dirty"));
+        assert_eq!(expand_fix_commit_mode_alias("f"), Some("fixup"));
+        // Full names are passthrough.
+        assert_eq!(expand_fix_commit_mode_alias("squash"), Some("squash"));
+        assert_eq!(expand_fix_commit_mode_alias("dirty"), Some("dirty"));
+        assert_eq!(expand_fix_commit_mode_alias("fixup"), Some("fixup"));
+        // Case-sensitive: uppercase rejected so surprises don't silently
+        // parse differently than the documented `s/d/f` + full forms.
+        assert_eq!(expand_fix_commit_mode_alias("S"), None);
+        assert_eq!(expand_fix_commit_mode_alias("Squash"), None);
+        // Other garbage also rejected.
+        assert_eq!(expand_fix_commit_mode_alias(""), None);
+        assert_eq!(expand_fix_commit_mode_alias("x"), None);
+        assert_eq!(expand_fix_commit_mode_alias("commit"), None);
+    }
 
     #[test]
     fn test_config_merge() {

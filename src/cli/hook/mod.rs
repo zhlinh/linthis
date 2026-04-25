@@ -210,19 +210,32 @@ fn dispatch_install(a: InstallArgs) -> ExitCode {
 }
 
 fn apply_fix_commit_mode(mode: &str, global: bool) -> Result<(), ExitCode> {
-    let valid_modes = ["squash", "dirty", "fixup"];
-    if !valid_modes.contains(&mode) {
-        eprintln!(
-            "{}: Invalid fix_commit_mode '{}'. Must be one of: {}",
-            "Error".red(),
-            mode,
-            valid_modes.join(", ")
-        );
-        return Err(ExitCode::from(1));
-    }
-    let _ =
-        linthis::config::cli::handle_config_set("hook.pre_commit.fix_commit_mode", mode, global);
-    let _ = linthis::config::cli::handle_config_set("hook.pre_push.fix_commit_mode", mode, global);
+    // Accept both full names and short aliases (`s`/`d`/`f`). Whatever the
+    // user typed, we persist the CANONICAL full form to config.toml so the
+    // file stays self-documenting and downstream comparisons
+    // (`== "squash"` etc.) keep working.
+    let canonical = match linthis::config::expand_fix_commit_mode_alias(mode) {
+        Some(m) => m,
+        None => {
+            eprintln!(
+                "{}: Invalid fix_commit_mode '{}'. Must be one of: \
+                 squash (s), dirty (d), fixup (f)",
+                "Error".red(),
+                mode
+            );
+            return Err(ExitCode::from(1));
+        }
+    };
+    let _ = linthis::config::cli::handle_config_set(
+        "hook.pre_commit.fix_commit_mode",
+        canonical,
+        global,
+    );
+    let _ = linthis::config::cli::handle_config_set(
+        "hook.pre_push.fix_commit_mode",
+        canonical,
+        global,
+    );
     Ok(())
 }
 

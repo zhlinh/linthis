@@ -262,7 +262,25 @@ fn parse_scalar_value(field: &str, val: &str) -> crate::Result<toml_edit::Item> 
             })?;
             Ok(value(val))
         }
-        _ => Ok(value(val)),
+        _ => {
+            // `fix_commit_mode` keys (`hook.pre_commit.fix_commit_mode`,
+            // `hook.pre_push.fix_commit_mode`, or bare `fix_commit_mode`)
+            // accept short aliases `s`/`d`/`f`. We expand to the canonical
+            // full form before writing so the stored TOML stays
+            // self-documenting.
+            if field == "fix_commit_mode" || field.ends_with(".fix_commit_mode") {
+                let canonical = crate::config::expand_fix_commit_mode_alias(val).ok_or_else(
+                    || {
+                        crate::LintisError::Config(format!(
+                            "fix_commit_mode must be one of: squash (s), dirty (d), fixup (f); \
+                             got '{val}'"
+                        ))
+                    },
+                )?;
+                return Ok(value(canonical));
+            }
+            Ok(value(val))
+        }
     }
 }
 
