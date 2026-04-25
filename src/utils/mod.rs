@@ -216,11 +216,71 @@ pub fn get_project_root() -> std::path::PathBuf {
     crate::vcs::detect_vcs().project_root().to_path_buf()
 }
 
+/// Read `original_project_root` from `<root>/.linthis/.worktree-meta`.
+///
+/// Returns `Some(path)` only when the meta file exists, the key is present,
+/// AND the value is an existing directory. Anything else (missing file,
+/// malformed key, stale/deleted path) returns `None`, so callers can safely
+/// fall back to the cwd-based project root.
+///
+/// The meta file is a simple key=value text file (not full TOML) so the
+/// shell hook can write it with a heredoc and we don't pay a TOML parse
+/// dependency in this hot path.
+fn read_worktree_meta(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let meta_path = root.join(".linthis").join(".worktree-meta");
+    let content = std::fs::read_to_string(&meta_path).ok()?;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        let Some(rest) = trimmed.strip_prefix("original_project_root") else {
+            continue;
+        };
+        let value = rest.trim_start();
+        let Some(after_eq) = value.strip_prefix('=') else {
+            continue;
+        };
+        let raw = after_eq
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'');
+        if raw.is_empty() {
+            return None;
+        }
+        let path = std::path::PathBuf::from(raw);
+        if path.is_dir() {
+            return Some(path);
+        }
+        return None;
+    }
+    None
+}
+
+/// Return the "effective" project root — the path to use for slug-based
+/// storage under `~/.linthis/projects/<slug>/` (check results, patches,
+/// reports, caches).
+///
+/// In normal operation this equals `get_project_root()` (the git toplevel).
+/// When linthis runs inside a temporary worktree created by the pre-push
+/// hook, the `.worktree-meta` file records the user's real project root,
+/// and this function honors that — so results stay under the user's real
+/// project slug instead of a transient worktree slug.
+pub fn get_effective_project_root() -> std::path::PathBuf {
+    let cwd_root = get_project_root();
+    if let Some(original) = read_worktree_meta(&cwd_root) {
+        return original;
+    }
+    cwd_root
+}
+
 /// Get the global data directory for a project: `~/.linthis/projects/<slug>/`.
 /// The slug is the project root path with `/` replaced by `-`.
+/// Uses `get_effective_project_root()` so callers running inside a pre-push
+/// worktree still hit the user's real project slug.
 /// Creates the directory if it doesn't exist.
 pub fn get_global_project_dir() -> std::path::PathBuf {
-    let project_root = get_project_root();
+    let project_root = get_effective_project_root();
     let slug = project_root.to_string_lossy().replace(['/', '\\'], "-");
     let slug = slug.trim_start_matches('-');
     let home = std::env::var("HOME")
@@ -695,4 +755,86 @@ fn add_linthis_to_vscode_settings(settings_path: &Path) -> bool {
     serde_json::to_string_pretty(&json)
         .map(|formatted| std::fs::write(settings_path, format!("{}\n", formatted)).is_ok())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod worktree_meta_tests {
+    use super::read_worktree_meta;
+
+    fn write_meta(dir: &std::path::Path, body: &str) {
+        let meta_dir = dir.join(".linthis");
+        std::fs::create_dir_all(&meta_dir).unwrap();
+        std::fs::write(meta_dir.join(".worktree-meta"), body).unwrap();
+    }
+
+    #[test]
+    fn returns_none_when_meta_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(read_worktree_meta(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn parses_quoted_value_pointing_at_existing_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let body = format!(
+            "# header\noriginal_project_root = \"{}\"\npurpose = \"pre-push\"\n",
+            target.path().display()
+        );
+        write_meta(tmp.path(), &body);
+        assert_eq!(
+            read_worktree_meta(tmp.path()),
+            Some(target.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn parses_unquoted_value() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let body = format!(
+            "original_project_root={}\n",
+            target.path().display()
+        );
+        write_meta(tmp.path(), &body);
+        assert_eq!(
+            read_worktree_meta(tmp.path()),
+            Some(target.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn returns_none_when_path_does_not_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_meta(
+            tmp.path(),
+            "original_project_root = \"/nonexistent/path/that/should/never/exist-XYZ\"\n",
+        );
+        assert!(read_worktree_meta(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn skips_comments_and_blanks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let body = format!(
+            "# a comment\n\n   # indented comment\noriginal_project_root = \"{}\"\n",
+            target.path().display()
+        );
+        write_meta(tmp.path(), &body);
+        assert_eq!(
+            read_worktree_meta(tmp.path()),
+            Some(target.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn ignores_unrelated_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_meta(
+            tmp.path(),
+            "purpose = \"something\"\ncreated_at = \"2026-01-01\"\n",
+        );
+        assert!(read_worktree_meta(tmp.path()).is_none());
+    }
 }

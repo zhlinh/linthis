@@ -1543,6 +1543,129 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    /// Regression: the empty padding row must SURVIVE the `_linthis_paint`
+    /// awk filter (the IDE VCS-console white-wrap pipeline). An earlier
+    /// hypothesis was that awk's `gsub($0)` would trigger field splitting
+    /// and collapse multiple spaces via OFS — this test guards against
+    /// that and any similar shell-pipeline regression.
+    #[test]
+    fn hook_blocked_box_empty_line_survives_paint_filter() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let issue = LintIssue::new(
+            PathBuf::from("broken.py"),
+            27,
+            "Local variable `a` is assigned to but never used".to_string(),
+            Severity::Error,
+        );
+        let result = RunResult {
+            issues: vec![issue],
+            exit_code: 1,
+            ..Default::default()
+        };
+        let out = format_result_hook_with_width(&result, Some("post-commit"), Some(80));
+        // The awk filter lifted verbatim from shell_timer_functions' paint block.
+        let awk_script = r#"
+BEGIN { ESC = sprintf("\033"); RESET = ESC "[0m"; RESET_RE = ESC "\\[0m"; WHITE = ESC "[0;37m" }
+{ gsub(RESET_RE, WHITE); print WHITE $0 RESET; fflush() }
+"#;
+        let mut child = Command::new("awk")
+            .arg(awk_script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn awk");
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(out.as_bytes())
+            .expect("write awk input");
+        let painted = child.wait_with_output().expect("awk wait");
+        assert!(painted.status.success(), "awk failed");
+        let painted_s = String::from_utf8_lossy(&painted.stdout);
+        let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+        for (idx, line) in painted_s.lines().enumerate() {
+            let stripped = ansi_re.replace_all(line, "");
+            assert!(
+                !stripped.contains("││"),
+                "paint filter collapsed sidebars (line {idx}): stripped={stripped:?}"
+            );
+        }
+        // And the expected empty row specifically survives.
+        let content_width: usize = 76;
+        let expected_empty = format!("│ {} │", " ".repeat(content_width));
+        let full_stripped: String = painted_s
+            .lines()
+            .map(|l| ansi_re.replace_all(l, "").into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            full_stripped.contains(&expected_empty),
+            "paint filter altered the empty padding row. Expected {expected_empty:?} \
+             in painted output:\n{full_stripped}"
+        );
+    }
+
+    /// Regression: in the Blocked box, the blank line between the summary
+    /// and the issue list must render as `│ <content_width spaces> │` —
+    /// NOT `││` with the sidebars touching. Bug surfaces only via visual
+    /// inspection of live hook output, so encode it as an assertion.
+    ///
+    /// Scope: this test only checks the empty-padding row (which has no
+    /// emoji). Header/issue rows containing emoji aren't checked for
+    /// exact char-count-matches-width because `chars().count()` differs
+    /// from visual cell width for wide glyphs.
+    #[test]
+    fn hook_blocked_box_preserves_empty_line_padding() {
+        let issue = LintIssue::new(
+            PathBuf::from("broken.py"),
+            27,
+            "Local variable `a` is assigned to but never used".to_string(),
+            Severity::Error,
+        );
+        let result = RunResult {
+            issues: vec![issue],
+            exit_code: 1,
+            ..Default::default()
+        };
+        for width in [50_u32, 60, 80, 100, 120] {
+            let out = format_result_hook_with_width(
+                &result,
+                Some("post-commit"),
+                Some(width),
+            );
+            // No two vertical bars may touch in any line.
+            for (idx, line) in out.lines().enumerate() {
+                assert!(
+                    !line.contains("││"),
+                    "width={width} line {idx}: two `│` touching (no padding): {line:?}"
+                );
+            }
+            // The empty padding row between summary and issue list must have
+            // exactly `content_width` spaces between the two sidebars.
+            let content_width = (width as usize) - 4;
+            let expected_empty = format!(
+                "│ {}{} │",
+                "",
+                " ".repeat(content_width)
+            );
+            // Strip ANSI colour codes before matching.
+            let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+            let stripped: String = out
+                .lines()
+                .map(|l| ansi_re.replace_all(l, "").into_owned())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                stripped.contains(&expected_empty),
+                "width={width}: empty padding row missing. Expected {expected_empty:?} \
+                 in:\n{stripped}"
+            );
+        }
+    }
+
     #[test]
     fn test_format_issue_human() {
         let issue = LintIssue::new(
