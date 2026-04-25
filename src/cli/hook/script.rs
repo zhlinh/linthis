@@ -192,6 +192,173 @@ pub(crate) fn shell_capture_agent_patch_in_wt() -> String {
         .to_string()
 }
 
+/// Shell snippet for applying agent patch in "dirty" mode.
+/// Applies to working tree (NOT index), letting user re-stage manually.
+fn shell_apply_dirty_mode(footer_dirty_applied: &str, footer_conflict: &str) -> String {
+    format!(
+        "# Apply to working tree (NOT index). User re-stages manually.\n\
+         # We avoid `--3way` because it implies `--index`, which\n\
+         # rejects benign blob-hash mismatches (index stat drift vs.\n\
+         # patch's `a/` hash) with \"does not match index\".\n\
+         if git apply --binary --whitespace=nowarn \"$_AGENT_PATCH\" 2>\"$_APPLY_ERR\"; then\n\
+         \x20\x20\x20 rm -f \"$_APPLY_ERR\" 2>/dev/null\n\
+         {footer_dirty_applied}\
+         \x20\x20\x20 [ -f \"$_AGENT_PATCH\" ] && rm -f \"$_AGENT_PATCH\"\n\
+         \x20\x20\x20 exit 1\n\
+         \x20\x20\x20 else\n\
+         {footer_conflict}\
+         \x20\x20\x20 if [ -s \"$_APPLY_ERR\" ]; then\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] git apply error:\" >&2\n\
+         \x20\x20\x20\x20\x20 sed 's/^/[linthis]   /' \"$_APPLY_ERR\" >&2\n\
+         \x20\x20\x20 fi\n\
+         \x20\x20\x20 rm -f \"$_APPLY_ERR\" 2>/dev/null\n\
+         \x20\x20\x20 echo \"[linthis] Patch kept at: $_AGENT_PATCH\" >&2\n\
+         \x20\x20\x20 exit 1\n\
+         \x20\x20\x20 fi\n"
+    )
+}
+
+/// Shell snippet for the apply failure handling in squash/fixup mode.
+/// Restores stash and reports the error.
+fn shell_apply_failure_handler(footer_conflict: &str) -> String {
+    format!(
+        "# Apply failed (rare — patch was generated from same\n\
+         \x20\x20\x20\x20\x20 # HEAD that we just reset to). Restore stash and bail.\n\
+         \x20\x20\x20\x20\x20 _apply_cleanup_stash\n\
+         \x20\x20\x20\x20\x20 _APPLY_RESTORED=1\n\
+         \x20\x20\x20\x20\x20 trap - HUP INT TERM\n\
+         {footer_conflict}\
+         \x20\x20\x20\x20\x20 if [ -s \"$_APPLY_ERR\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] git apply error:\" >&2\n\
+         \x20\x20\x20\x20\x20\x20\x20 sed 's/^/[linthis]   /' \"$_APPLY_ERR\" >&2\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20\x20\x20 rm -f \"$_APPLY_ERR\" 2>/dev/null\n\
+         \x20\x20\x20\x20\x20 echo \"[linthis] Patch kept at: $_AGENT_PATCH\" >&2\n\
+         \x20\x20\x20\x20\x20 exit 1\n"
+    )
+}
+
+/// Shell snippet for committing the agent's fixes and restoring user state.
+/// Handles both squash and fixup modes.
+fn shell_commit_and_restore(
+    save_diff_cached: &str,
+    footer_restore_conflict: &str,
+    footer_squash_applied: &str,
+    footer_fixup_applied: &str,
+) -> String {
+    format!(
+        "{save_diff_cached}\
+         \x20\x20\x20\x20\x20 # Phase 4: commit. Squash folds into HEAD via the\n\
+         \x20\x20\x20\x20\x20 # `commit + reset --soft HEAD~2 + commit -C HEAD@{{2}}`\n\
+         \x20\x20\x20\x20\x20 # dance; fixup creates a separate commit.\n\
+         \x20\x20\x20\x20\x20 if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\" >/dev/null 2>&1\n\
+         \x20\x20\x20\x20\x20\x20\x20 git reset --soft HEAD~2 >/dev/null 2>&1\n\
+         \x20\x20\x20\x20\x20\x20\x20 git commit --no-verify -C HEAD@{{2}} >/dev/null 2>&1\n\
+         \x20\x20\x20\x20\x20 else\n\
+         \x20\x20\x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\" >/dev/null 2>&1\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20\x20\x20 # Phase 5: restore user state via 3-way merge so\n\
+         \x20\x20\x20\x20\x20 # their staged + unstaged work lands back on top of\n\
+         \x20\x20\x20\x20\x20 # the new HEAD. On overlap, conflict markers are\n\
+         \x20\x20\x20\x20\x20 # left in the WT and the stash is kept (recoverable\n\
+         \x20\x20\x20\x20\x20 # via `git stash list`).\n\
+         \x20\x20\x20\x20\x20 if [ -n \"$_USER_STASH\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 if ! git stash apply --index \"$_USER_STASH\" >/dev/null 2>&1; then\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20 git stash store -m \"linthis: uncommitted state before pre-push squash\" \"$_USER_STASH\" >/dev/null 2>&1 || true\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20 _APPLY_RESTORED=1\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20 trap - HUP INT TERM\n\
+         {footer_restore_conflict}\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20 [ -f \"$_AGENT_PATCH\" ] && rm -f \"$_AGENT_PATCH\"\n\
+         \x20\x20\x20\x20\x20\x20\x20\x20\x20 exit 1\n\
+         \x20\x20\x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20\x20\x20 _APPLY_RESTORED=1\n\
+         \x20\x20\x20\x20\x20 trap - HUP INT TERM\n\
+         \x20\x20\x20\x20\x20 if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
+         {footer_squash_applied}\
+         \x20\x20\x20\x20\x20 else\n\
+         {footer_fixup_applied}\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20\x20\x20 [ -f \"$_AGENT_PATCH\" ] && rm -f \"$_AGENT_PATCH\"\n\
+         \x20\x20\x20\x20\x20 exit 1\n"
+    )
+}
+
+/// Shell snippet for applying agent patch in "squash" or "fixup" mode.
+/// Isolates agent's patch from user's uncommitted state, commits, then restores.
+fn shell_apply_squash_fixup_mode(
+    save_diff_cached: &str,
+    footer_conflict: &str,
+    footer_restore_conflict: &str,
+    footer_squash_applied: &str,
+    footer_fixup_applied: &str,
+) -> String {
+    let failure_handler = shell_apply_failure_handler(footer_conflict);
+    let commit_restore = shell_commit_and_restore(
+        save_diff_cached,
+        footer_restore_conflict,
+        footer_squash_applied,
+        footer_fixup_applied,
+    );
+
+    format!(
+        "# squash / fixup: ISOLATE agent's patch from any\n\
+         \x20\x20\x20 # uncommitted user state in the user's WT/index, so the\n\
+         \x20\x20\x20 # auto-created commit contains ONLY agent fixes — never\n\
+         \x20\x20\x20 # the user's unrelated work-in-progress edits to the same\n\
+         \x20\x20\x20 # pushed files. Mirrors `shell_prepush_precise_flow`'s\n\
+         \x20\x20\x20 # snapshot/reset/apply/restore pattern, but the patch\n\
+         \x20\x20\x20 # source here is the agent's diff (already in $_AGENT_PATCH)\n\
+         \x20\x20\x20 # rather than `linthis -f`.\n\
+         \x20\x20\x20 # Phase 0: snapshot user's full WT + index state. Empty\n\
+         \x20\x20\x20 # string when there's nothing to stash (clean WT).\n\
+         \x20\x20\x20 _USER_STASH=$(git stash create 2>/dev/null || echo \"\")\n\
+         \x20\x20\x20 _APPLY_RESTORED=0\n\
+         \x20\x20\x20 _apply_cleanup_stash() {{\n\
+         \x20\x20\x20\x20\x20 if [ \"$_APPLY_RESTORED\" = \"0\" ] && [ -n \"$_USER_STASH\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 git stash apply --index \"$_USER_STASH\" >/dev/null 2>&1 || \\\n\
+         \x20\x20\x20\x20\x20\x20\x20   git stash store -m \"linthis: pre-push apply recovery\" \"$_USER_STASH\" >/dev/null 2>&1 || true\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20 }}\n\
+         \x20\x20\x20 trap '_apply_cleanup_stash' HUP INT TERM\n\
+         \x20\x20\x20 # Phase 1: clear WT + index for pushed files only — leaves\n\
+         \x20\x20\x20 # other working-tree state untouched.\n\
+         \x20\x20\x20 while IFS= read -r _F; do\n\
+         \x20\x20\x20\x20\x20 [ -z \"$_F\" ] && continue\n\
+         \x20\x20\x20\x20\x20 git reset HEAD -- \"$_F\" >/dev/null 2>&1 || true\n\
+         \x20\x20\x20\x20\x20 git checkout HEAD -- \"$_F\" >/dev/null 2>&1 || true\n\
+         \x20\x20\x20 done <<_APPLY_RESET_EOF_\n\
+         $_PUSHED_FILES\n\
+         _APPLY_RESET_EOF_\n\
+         \x20\x20\x20 # Phase 2: apply agent patch onto the clean (HEAD) version\n\
+         \x20\x20\x20 # of the pushed files. No user state in the way → patch\n\
+         \x20\x20\x20 # applies cleanly; no overlap surface.\n\
+         \x20\x20\x20 if ! git apply --binary --whitespace=nowarn \"$_AGENT_PATCH\" 2>\"$_APPLY_ERR\"; then\n\
+         {failure_handler}\
+         \x20\x20\x20 fi\n\
+         \x20\x20\x20 rm -f \"$_APPLY_ERR\" 2>/dev/null\n\
+         \x20\x20\x20 # Phase 3: stage the pushed files. Index now contains ONLY\n\
+         \x20\x20\x20 # the agent's diff — user's pre-existing staged/unstaged\n\
+         \x20\x20\x20 # work was stashed in Phase 0 and is not visible here.\n\
+         \x20\x20\x20 while IFS= read -r _F; do\n\
+         \x20\x20\x20\x20\x20 [ -z \"$_F\" ] && continue\n\
+         \x20\x20\x20\x20\x20 git add -- \"$_F\" 2>/dev/null || true\n\
+         \x20\x20\x20 done <<_APPLY_STAGE_EOF_\n\
+         $_PUSHED_FILES\n\
+         _APPLY_STAGE_EOF_\n\
+         \x20\x20\x20 _SCOPED_STAGED=$(git diff --cached --name-only)\n\
+         \x20\x20\x20 if [ -n \"$_SCOPED_STAGED\" ]; then\n\
+         {commit_restore}\
+         \x20\x20\x20 else\n\
+         \x20\x20\x20\x20\x20 # Nothing to commit — restore stash and continue.\n\
+         \x20\x20\x20\x20\x20 _apply_cleanup_stash\n\
+         \x20\x20\x20\x20\x20 _APPLY_RESTORED=1\n\
+         \x20\x20\x20\x20\x20 trap - HUP INT TERM\n\
+         \x20\x20\x20 fi\n"
+    )
+}
+
 /// Apply the captured agent patch to the user's real project root and
 /// commit per `$_FIX_MODE`. Run AFTER [`shell_pre_push_worktree_leave`]
 /// (patch is a tempfile, independent of the now-deleted worktree).
@@ -246,67 +413,33 @@ pub(crate) fn shell_apply_agent_patch_by_mode() -> String {
         header: "⚠ Your uncommitted changes overlap with agent fixes. Working tree has conflict markers — resolve, then 'git push' again.",
         indent: "     ",
     });
+    let footer_restore_conflict = shell_hook_footer(&FooterCtx {
+        outcome: FooterOutcome::Conflict,
+        hook_type: HookTypeLabel::GitWithAgent,
+        mode: FixCommitMode::Squash,
+        event: &HookEvent::PrePush,
+        header: "⚠ Squash succeeded, but restoring your uncommitted changes left conflict markers in the working tree. Recovery: 'git stash list' (find 'linthis: pre-push').",
+        indent: "     ",
+    });
+
+    let dirty_mode_script = shell_apply_dirty_mode(&footer_dirty_applied, &footer_conflict);
+    let squash_fixup_script = shell_apply_squash_fixup_mode(
+        &save_diff_cached,
+        &footer_conflict,
+        &footer_restore_conflict,
+        &footer_squash_applied,
+        &footer_fixup_applied,
+    );
+
     format!(
         "# Apply agent's captured patch to the real project root per mode.\n\
          # Empty patch = agent made no changes → nothing to do.\n\
          if [ -s \"$_AGENT_PATCH\" ]; then\n\
          \x20 _APPLY_ERR=$(mktemp \"${{TMPDIR:-/tmp}}/linthis-apply-err.XXXXXX\" 2>/dev/null || mktemp)\n\
          \x20 if [ \"$_FIX_MODE\" = \"dirty\" ]; then\n\
-         \x20\x20\x20 # Apply to working tree (NOT index). User re-stages manually.\n\
-         \x20\x20\x20 # We avoid `--3way` because it implies `--index`, which\n\
-         \x20\x20\x20 # rejects benign blob-hash mismatches (index stat drift vs.\n\
-         \x20\x20\x20 # patch's `a/` hash) with \"does not match index\".\n\
-         \x20\x20\x20 if git apply --binary --whitespace=nowarn \"$_AGENT_PATCH\" 2>\"$_APPLY_ERR\"; then\n\
-         \x20\x20\x20\x20\x20 rm -f \"$_APPLY_ERR\" 2>/dev/null\n\
-         {footer_dirty_applied}\
-         \x20\x20\x20\x20\x20 [ -f \"$_AGENT_PATCH\" ] && rm -f \"$_AGENT_PATCH\"\n\
-         \x20\x20\x20\x20\x20 exit 1\n\
-         \x20\x20\x20 else\n\
-         {footer_conflict}\
-         \x20\x20\x20\x20\x20 if [ -s \"$_APPLY_ERR\" ]; then\n\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] git apply error:\" >&2\n\
-         \x20\x20\x20\x20\x20\x20\x20 sed 's/^/[linthis]   /' \"$_APPLY_ERR\" >&2\n\
-         \x20\x20\x20\x20\x20 fi\n\
-         \x20\x20\x20\x20\x20 rm -f \"$_APPLY_ERR\" 2>/dev/null\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Patch kept at: $_AGENT_PATCH\" >&2\n\
-         \x20\x20\x20\x20\x20 exit 1\n\
-         \x20\x20\x20 fi\n\
+         {dirty_mode_script}\
          \x20 else\n\
-         \x20\x20\x20 # squash / fixup: apply to WT, then stage explicitly via\n\
-         \x20\x20\x20 # `git add` (avoiding the `--3way`/`--index` blob-hash check).\n\
-         \x20\x20\x20 if ! git apply --binary --whitespace=nowarn \"$_AGENT_PATCH\" 2>\"$_APPLY_ERR\"; then\n\
-         {footer_conflict}\
-         \x20\x20\x20\x20\x20 if [ -s \"$_APPLY_ERR\" ]; then\n\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"[linthis] git apply error:\" >&2\n\
-         \x20\x20\x20\x20\x20\x20\x20 sed 's/^/[linthis]   /' \"$_APPLY_ERR\" >&2\n\
-         \x20\x20\x20\x20\x20 fi\n\
-         \x20\x20\x20\x20\x20 rm -f \"$_APPLY_ERR\" 2>/dev/null\n\
-         \x20\x20\x20\x20\x20 echo \"[linthis] Patch kept at: $_AGENT_PATCH\" >&2\n\
-         \x20\x20\x20\x20\x20 exit 1\n\
-         \x20\x20\x20 fi\n\
-         \x20\x20\x20 rm -f \"$_APPLY_ERR\" 2>/dev/null\n\
-         \x20\x20\x20 # Stage only the pushed files (scope protection).\n\
-         \x20\x20\x20 while IFS= read -r _F; do\n\
-         \x20\x20\x20\x20\x20 [ -z \"$_F\" ] && continue\n\
-         \x20\x20\x20\x20\x20 git add -- \"$_F\" 2>/dev/null || true\n\
-         \x20\x20\x20 done <<_APPLY_STAGE_EOF_\n\
-         $_PUSHED_FILES\n\
-         _APPLY_STAGE_EOF_\n\
-         \x20\x20\x20 _SCOPED_STAGED=$(git diff --cached --name-only)\n\
-         \x20\x20\x20 if [ -n \"$_SCOPED_STAGED\" ]; then\n\
-         \x20\x20\x20\x20\x20 {save_diff_cached}\
-         \x20\x20\x20\x20\x20 if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
-         \x20\x20\x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\" >/dev/null 2>&1\n\
-         \x20\x20\x20\x20\x20\x20\x20 git reset --soft HEAD~2 >/dev/null 2>&1\n\
-         \x20\x20\x20\x20\x20\x20\x20 git commit --no-verify -C HEAD@{{2}} >/dev/null 2>&1\n\
-         {footer_squash_applied}\
-         \x20\x20\x20\x20\x20 else\n\
-         \x20\x20\x20\x20\x20\x20\x20 git commit --no-verify -m \"fix(linthis): auto-fix review issues\" >/dev/null 2>&1\n\
-         {footer_fixup_applied}\
-         \x20\x20\x20\x20\x20 fi\n\
-         \x20\x20\x20\x20\x20 [ -f \"$_AGENT_PATCH\" ] && rm -f \"$_AGENT_PATCH\"\n\
-         \x20\x20\x20\x20\x20 exit 1\n\
-         \x20\x20\x20 fi\n\
+         {squash_fixup_script}\
          \x20 fi\n\
          fi\n\
          [ -f \"$_AGENT_PATCH\" ] && rm -f \"$_AGENT_PATCH\"\n"
@@ -1141,6 +1274,12 @@ pub(crate) fn agent_fix_prompt_for_event(hook_event: &HookEvent) -> String {
         return "Lint issues were found in the commits about to be pushed (HEAD content). \
                 You are running inside a temporary git worktree of HEAD — there are NO staged \
                 files; do NOT run `linthis -s`. A backup has been created. \
+                CRITICAL: DO NOT run `git commit`, `git add`, or any git command that mutates \
+                history or the index. Leave your fixes as UNCOMMITTED edits in the working \
+                tree — the linthis hook will capture your diff with `git diff HEAD` and replay \
+                it onto the user's real project per their fix_commit_mode (squash / fixup / \
+                dirty). If you commit, the hook sees an empty diff and your fixes never reach \
+                the user. \
                 Follow these steps: \
                 (1) Run `linthis report show` to see the latest lint result with file paths, \
                 line numbers, and rule names. \
@@ -1158,7 +1297,8 @@ pub(crate) fn agent_fix_prompt_for_event(hook_event: &HookEvent) -> String {
                 npx tsc --noEmit for TypeScript, python -m py_compile for Python). \
                 If build/tests fail, revert the problematic fix and try again. \
                 (5) Display a Changes Summary showing each modified file, \
-                what was changed, and why (e.g. which lint rule). Then show the full diff output."
+                what was changed, and why (e.g. which lint rule). Then show the full diff \
+                output (read-only — no commit)."
             .to_string();
     }
     "Lint issues were found in staged files. A backup has been created. \
@@ -1468,17 +1608,26 @@ pub(crate) fn prepush_review_prompt() -> &'static str {
      resolves to the user's real project slug — DO NOT recompute it from `git rev-parse \
      --show-toplevel`, which would return the temporary worktree path inside this hook). \
      Write the review to \"$_LINTHIS_REVIEW_DIR/review-$(date +%Y%m%d-%H%M%S).md\". \
-     (4) If Critical issues found: save a snapshot with 'git diff', auto-fix the issues, \
-     then run build/test to verify fixes don't break anything \
+     (4) If Critical OR Important issues found: save a snapshot with 'git diff', \
+     auto-fix the issues, then run build/test to verify fixes don't break anything \
      (detect project type: cargo check && cargo test for Rust, \
      go build ./... && go test ./... for Go, \
      npx tsc --noEmit for TypeScript, python -m py_compile for Python). \
      If build/tests fail, revert and retry with a different approach. \
+     CRITICAL: DO NOT run `git commit`, `git add`, or any git command that mutates \
+     history or the index. Leave fixes as UNCOMMITTED edits in the working tree — \
+     the linthis hook will capture your diff with `git diff HEAD` and replay it onto \
+     the user's real project per their fix_commit_mode (squash / fixup / dirty). \
+     If you commit, the hook sees an empty diff and your fixes never reach the user. \
      After fixing, display a Changes Summary showing each file, what changed, and why, \
-     plus the full git diff. Then re-run the review. \
-     Print '❌ Push blocked — fix Critical issues first' and exit 1 if issues remain. \
-     If Important issues only: print '⚠️ Push with caution'. \
-     If Minor or none: print '✅ Review passed'. \
+     plus the full git diff (read-only — no commit). Then re-run the review. \
+     Minor issues are informational — DO NOT auto-fix them; just note them in the \
+     review report. \
+     Print '❌ Push blocked — fix Critical issues first' and exit 1 if Critical issues \
+     remain after auto-fix attempts. \
+     If only Important issues remain (couldn't fully auto-fix): print '⚠️ Push with \
+     caution — Important issues remain'. \
+     If only Minor or none: print '✅ Review passed'. \
      Exit 0 unless Critical issues were found."
 }
 
@@ -4024,6 +4173,135 @@ mod tests {
             fix_block_idx < dirty_handler_idx,
             "agent fix block must appear BEFORE mode handler (fix@{fix_block_idx}, \
              handler@{dirty_handler_idx}): {s}"
+        );
+    }
+
+    /// Squash/fixup apply must ISOLATE the agent patch from any
+    /// uncommitted user state in the user's WT/index. Old buggy flow
+    /// did `git apply <patch>` then `git add <pushed_files>`, which
+    /// staged the entire current state of the file (agent's diff +
+    /// user's WIP edits + their pre-existing staged changes) and
+    /// folded everything into the squash commit. Real-world hit:
+    /// user had `MM broken.py` (staged + unstaged WIP), pushed,
+    /// squash dance ate ALL their WIP into the rewritten commit.
+    ///
+    /// New flow mirrors `shell_prepush_precise_flow`:
+    ///   `git stash create` → `git checkout HEAD -- <pushed>` →
+    ///   `git apply <agent patch>` → `git add` → squash/fixup commit →
+    ///   `git stash apply --index` to restore user state.
+    #[test]
+    fn squash_apply_isolates_agent_patch_from_user_wip() {
+        let s = build_git_with_agent_prepush_script(
+            "linthis -c --hook-event=pre-push",
+            &AgentFixProvider::Codebuddy,
+            None,
+        );
+
+        // Phase 0 marker: snapshot user state before touching anything.
+        assert!(
+            s.contains("_USER_STASH=$(git stash create"),
+            "squash apply must snapshot user state via `git stash create`: {s}"
+        );
+
+        // Phase 1 marker: reset pushed files to HEAD before applying.
+        // This is what guarantees the apply target is clean.
+        assert!(
+            s.contains("_APPLY_RESET_EOF_"),
+            "squash apply must use the reset-to-HEAD heredoc: {s}"
+        );
+
+        // Trap installed for crash safety while we're holding the stash.
+        assert!(
+            s.contains("trap '_apply_cleanup_stash' HUP INT TERM"),
+            "squash apply must trap signals to recover stash: {s}"
+        );
+
+        // Phase 5 marker: 3-way stash restore after the commit lands.
+        assert!(
+            s.contains("git stash apply --index \"$_USER_STASH\""),
+            "squash apply must restore user state via 3-way merge: {s}"
+        );
+
+        // On stash-restore conflict, the stash is STORED so the user
+        // can recover via `git stash list` — never silently dropped.
+        assert!(
+            s.contains("git stash store -m \"linthis: uncommitted state before pre-push squash\""),
+            "stash-restore conflict path must store stash for recovery: {s}"
+        );
+
+        // The OLD bug pattern — staging the entire pushed file without
+        // first resetting — must be GONE. (`git add -- "$_F"` still
+        // appears, but only AFTER `git checkout HEAD -- "$_F"` cleared
+        // the file first; the dangerous ordering was add-without-reset.)
+        let reset_idx = s
+            .find("_APPLY_RESET_EOF_")
+            .expect("reset heredoc marker missing");
+        let stage_idx = s
+            .find("_APPLY_STAGE_EOF_")
+            .expect("stage heredoc marker missing");
+        assert!(
+            reset_idx < stage_idx,
+            "reset-to-HEAD must come BEFORE staging (got reset@{reset_idx}, stage@{stage_idx}): {s}"
+        );
+    }
+
+    /// Both fix and review prompts must explicitly forbid the agent from
+    /// running `git commit` or `git add` inside the worktree. If the
+    /// agent commits, `capture_agent_patch_in_wt`'s `git diff HEAD`
+    /// returns empty (HEAD already contains the changes), the apply
+    /// branch is skipped, and the script falls through to
+    /// `exit $REVIEW_EXIT = 0` — the hook silently approves the
+    /// UNFIXED user HEAD and the agent's fixes never reach anywhere.
+    #[test]
+    fn pre_push_prompts_forbid_agent_committing_in_worktree() {
+        let fix_prompt =
+            super::agent_fix_prompt_for_event(&HookEvent::PrePush);
+        let review_prompt = super::prepush_review_prompt();
+
+        for (label, prompt) in [
+            ("fix prompt", fix_prompt.as_str()),
+            ("review prompt", review_prompt),
+        ] {
+            assert!(
+                prompt.contains("DO NOT run `git commit`"),
+                "{label} must explicitly forbid `git commit`: {prompt}"
+            );
+            assert!(
+                prompt.contains("UNCOMMITTED edits in the working tree"),
+                "{label} must instruct agent to leave changes uncommitted: {prompt}"
+            );
+        }
+    }
+
+    /// The review prompt must instruct the agent to auto-fix BOTH Critical
+    /// AND Important issues. Restricting auto-fix to Critical only is what
+    /// users see as "agent ignored review issues" — Important issues
+    /// (unused vars, broken docstrings) are exactly what they expect the
+    /// agent to clean up. Minor stays informational.
+    #[test]
+    fn prepush_review_prompt_auto_fixes_important_and_critical() {
+        let prompt = super::prepush_review_prompt();
+
+        // The auto-fix gate must mention both severities.
+        assert!(
+            prompt.contains("Critical OR Important"),
+            "review prompt must auto-fix Critical OR Important issues: {prompt}"
+        );
+
+        // Minor must remain explicitly informational so the agent doesn't
+        // bikeshed style-only nits in a long auto-fix loop.
+        assert!(
+            prompt.contains("Minor issues are informational")
+                && prompt.contains("DO NOT auto-fix"),
+            "review prompt must keep Minor issues informational only: {prompt}"
+        );
+
+        // Push-block gate is still tied to Critical — Important issues
+        // shouldn't block the push if the agent couldn't fully clear them
+        // (the user gets a "Push with caution" warning instead).
+        assert!(
+            prompt.contains("Push blocked — fix Critical issues first"),
+            "push-block gate must still be Critical-only: {prompt}"
         );
     }
 
