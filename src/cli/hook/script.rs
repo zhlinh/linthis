@@ -281,6 +281,27 @@ fn shell_commit_and_restore(
          {footer_fixup_applied}\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20\x20\x20 [ -f \"$_AGENT_PATCH\" ] && rm -f \"$_AGENT_PATCH\"\n\
+         \x20\x20\x20\x20\x20 # Write the fast-path sentinel BEFORE exiting. The next\n\
+         \x20\x20\x20\x20\x20 # `git push` will see a HEAD SHA that matches what we\n\
+         \x20\x20\x20\x20\x20 # just verified clean and skip the entire fix+review\n\
+         \x20\x20\x20\x20\x20 # flow (which would otherwise re-run for 5+ minutes).\n\
+         \x20\x20\x20\x20\x20 _SENTINEL_SHA=$(git rev-parse HEAD 2>/dev/null)\n\
+         \x20\x20\x20\x20\x20 if [ -n \"$_SENTINEL_SHA\" ] && [ -n \"$_PREPUSH_STUB\" ]; then\n\
+         \x20\x20\x20\x20\x20\x20\x20 _SENTINEL_DIR=\"$HOME/.linthis/projects/$_PREPUSH_STUB\"\n\
+         \x20\x20\x20\x20\x20\x20\x20 mkdir -p \"$_SENTINEL_DIR\" 2>/dev/null\n\
+         \x20\x20\x20\x20\x20\x20\x20 printf '%s\\n' \"$_SENTINEL_SHA\" > \"$_SENTINEL_DIR/pre-push-sentinel\" 2>/dev/null\n\
+         \x20\x20\x20\x20\x20 fi\n\
+         \x20\x20\x20\x20\x20 # MUST exit 1 here even though we just landed a clean\n\
+         \x20\x20\x20\x20\x20 # squash/fixup commit. Reason: git pre-push collects the\n\
+         \x20\x20\x20\x20\x20 # to-be-pushed SHA BEFORE invoking this hook. The squash\n\
+         \x20\x20\x20\x20\x20 # dance just rewrote HEAD locally, but git push will still\n\
+         \x20\x20\x20\x20\x20 # try to push the OLD (pre-squash) SHA. Exiting 0 here\n\
+         \x20\x20\x20\x20\x20 # ships the unfixed commit to remote and leaves the local\n\
+         \x20\x20\x20\x20\x20 # squashed HEAD diverged. Exiting 1 aborts the push so\n\
+         \x20\x20\x20\x20\x20 # the user re-runs `git push` — that re-collects the SHA\n\
+         \x20\x20\x20\x20\x20 # (now the squashed one) and ships the fixed version. The\n\
+         \x20\x20\x20\x20\x20 # sentinel above lets the second push fast-skip the\n\
+         \x20\x20\x20\x20\x20 # 5+ minute fix+review flow.\n\
          \x20\x20\x20\x20\x20 exit 1\n"
     )
 }
@@ -394,7 +415,7 @@ pub(crate) fn shell_apply_agent_patch_by_mode() -> String {
         hook_type: HookTypeLabel::GitWithAgent,
         mode: FixCommitMode::Squash,
         event: &HookEvent::PrePush,
-        header: "Agent fixes squashed into latest commit. Review, then 'git push' again.",
+        header: "Agent fixes squashed into latest commit. Review, then 'git push' again to ship the squashed version.",
         indent: "     ",
     });
     let footer_fixup_applied = shell_hook_footer(&FooterCtx {
@@ -402,7 +423,7 @@ pub(crate) fn shell_apply_agent_patch_by_mode() -> String {
         hook_type: HookTypeLabel::GitWithAgent,
         mode: FixCommitMode::Fixup,
         event: &HookEvent::PrePush,
-        header: "Created fixup commit with agent fixes. Review, then 'git push' again.",
+        header: "Created fixup commit with agent fixes. Review, then 'git push' again to ship the fixup commit.",
         indent: "     ",
     });
     let footer_conflict = shell_hook_footer(&FooterCtx {
@@ -1702,6 +1723,37 @@ fn shell_prepush_agent_fix_in_wt(
     )
 }
 
+/// Shell snippet for fast-path sentinel check.
+///
+/// When the previous push squashed/fixed-up agent changes into HEAD,
+/// a sentinel containing the new HEAD SHA was written. If that SHA still
+/// matches HEAD, skip the expensive fix+review cycle.
+fn shell_fast_path_sentinel_check() -> String {
+    "\x20# Fast-path: when the previous push squashed/fixed-up agent\n\
+     \x20# changes into HEAD it wrote a sentinel containing the new HEAD\n\
+     \x20# SHA. If that SHA still matches HEAD, the content was just\n\
+     \x20# verified clean and reviewed — skip the 5+ minute fix+review\n\
+     \x20# cycle entirely. Sentinel is consumed (deleted) on use so a\n\
+     \x20# subsequent unrelated push runs the full flow.\n\
+     \x20_FAST_REAL_ROOT=\"$(git rev-parse --show-toplevel 2>/dev/null)\"\n\
+     \x20if [ -n \"$_FAST_REAL_ROOT\" ]; then\n\
+     \x20\x20 _FAST_STUB=$(printf '%s' \"$_FAST_REAL_ROOT\" | tr '/' '-' | sed 's/^-//')\n\
+     \x20\x20 _FAST_SENTINEL=\"$HOME/.linthis/projects/$_FAST_STUB/pre-push-sentinel\"\n\
+     \x20\x20 if [ -f \"$_FAST_SENTINEL\" ]; then\n\
+     \x20\x20\x20 _FAST_SAVED_SHA=$(cat \"$_FAST_SENTINEL\" 2>/dev/null | tr -d '[:space:]')\n\
+     \x20\x20\x20 _FAST_HEAD_SHA=$(git rev-parse HEAD 2>/dev/null)\n\
+     \x20\x20\x20 if [ -n \"$_FAST_SAVED_SHA\" ] && [ \"$_FAST_SAVED_SHA\" = \"$_FAST_HEAD_SHA\" ]; then\n\
+     \x20\x20\x20\x20 echo \"[linthis] Fast-path: HEAD ($_FAST_HEAD_SHA) matches the recent squash/fixup — skipping fix and review.\" >&2\n\
+     \x20\x20\x20\x20 rm -f \"$_FAST_SENTINEL\" 2>/dev/null\n\
+     \x20\x20\x20\x20 exit 0\n\
+     \x20\x20\x20 fi\n\
+     \x20\x20\x20 # Sentinel exists but HEAD has moved on — stale, drop it.\n\
+     \x20\x20\x20 rm -f \"$_FAST_SENTINEL\" 2>/dev/null\n\
+     \x20\x20 fi\n\
+     \x20 fi\n"
+        .to_string()
+}
+
 /// Build the pre-push hook script that ALWAYS triggers an agent code review.
 ///
 /// Isolation model (path A from the refactor plan): the same worktree that
@@ -1738,13 +1790,15 @@ pub(crate) fn build_git_with_agent_prepush_script(
                  Push blocked — review the changes, commit, then 'git push' again.",
         indent: "   ",
     });
+    let fast_path = shell_fast_path_sentinel_check();
     format!(
         "#!/bin/sh\n\
          {timer}\
          {review_box}\
+         {fast_path}\
          \n\
          # Read fix_commit_mode from config\n\
-         {fix_commit_mode}\
+         {fix_commit_mode}\n\
          \n\
          # Tree-delta semantics: net-no-change files don't need re-linting.\n\
          _BASE=$(git rev-parse '@{{u}}' 2>/dev/null || \\\n\
@@ -1826,6 +1880,7 @@ pub(crate) fn build_git_with_agent_prepush_script(
          exit $REVIEW_EXIT\n",
         timer = timer_fns,
         review_box = review_box,
+        fast_path = fast_path,
         fix_commit_mode = fix_commit_mode_section,
         prepush_fix_commit_mode_handler = shell_prepush_fix_commit_mode_handler(linthis_cmd),
         capture_agent_patch = shell_capture_agent_patch_in_wt(),
@@ -4176,7 +4231,148 @@ mod tests {
         );
     }
 
-    /// Squash/fixup apply must ISOLATE the agent patch from any
+    /// After squash/fixup commits land, write a sentinel containing the
+    /// new HEAD SHA so the next `git push` (which the user runs to ship
+    /// the squashed commit since git's pre-push uses the pre-hook SHA)
+    /// can fast-skip the fix+review flow. Without this, every successful
+    /// auto-fix forces the user through 5+ minutes of redundant agent
+    /// work on the second push.
+    #[test]
+    fn squash_apply_writes_sentinel_for_fastpath() {
+        let s = build_git_with_agent_prepush_script(
+            "linthis -c --hook-event=pre-push",
+            &AgentFixProvider::Codebuddy,
+            None,
+        );
+
+        // Sentinel write must happen INSIDE the success block (after the
+        // commit lands, before exit 1) so we don't write it on conflict
+        // or no-op paths.
+        assert!(
+            s.contains("_SENTINEL_SHA=$(git rev-parse HEAD"),
+            "squash apply success path must read post-commit HEAD SHA: {s}"
+        );
+        assert!(
+            s.contains("$_SENTINEL_DIR/pre-push-sentinel"),
+            "sentinel must be written under ~/.linthis/projects/<slug>/pre-push-sentinel: {s}"
+        );
+        // Sentinel write must use real-project slug ($_PREPUSH_STUB),
+        // not git toplevel from inside the worktree.
+        assert!(
+            s.contains("\"$HOME/.linthis/projects/$_PREPUSH_STUB\""),
+            "sentinel dir must derive from $_PREPUSH_STUB (real slug), \
+             not git-rev-parse from inside worktree: {s}"
+        );
+
+        // Sentinel write must come BEFORE the success-path `exit 1`
+        // (otherwise we lose it when the script exits).
+        let sentinel_idx = s
+            .find("printf '%s\\n' \"$_SENTINEL_SHA\"")
+            .expect("sentinel printf marker missing");
+        let success_marker = "Agent fixes squashed into latest commit";
+        let success_idx = s
+            .find(success_marker)
+            .expect("squash success header missing");
+        assert!(
+            success_idx < sentinel_idx,
+            "sentinel write must come AFTER success footer (success@{success_idx}, \
+             sentinel@{sentinel_idx})"
+        );
+    }
+
+    /// On the SECOND push (after squash) the hook must fast-path: read
+    /// the sentinel, compare its SHA against current HEAD, and exit 0
+    /// without running lint/fix/review when they match. Then delete
+    /// sentinel so an unrelated future push runs the full flow.
+    #[test]
+    fn pre_push_fastpath_skips_when_sentinel_matches_head() {
+        let s = build_git_with_agent_prepush_script(
+            "linthis -c --hook-event=pre-push",
+            &AgentFixProvider::Codebuddy,
+            None,
+        );
+
+        // Fast-path block reads the sentinel.
+        assert!(
+            s.contains("_FAST_SENTINEL=\"$HOME/.linthis/projects/$_FAST_STUB/pre-push-sentinel\""),
+            "fast-path must read $HOME/.linthis/projects/<slug>/pre-push-sentinel: {s}"
+        );
+
+        // Compares saved SHA to current HEAD before short-circuiting.
+        assert!(
+            s.contains("[ \"$_FAST_SAVED_SHA\" = \"$_FAST_HEAD_SHA\" ]"),
+            "fast-path must compare sentinel SHA to current HEAD SHA: {s}"
+        );
+
+        // Consumes (deletes) sentinel on use AND on stale.
+        let rm_count = s.matches("rm -f \"$_FAST_SENTINEL\"").count();
+        assert!(
+            rm_count >= 2,
+            "fast-path must delete sentinel both on match (consume) and on \
+             mismatch (stale) — found {rm_count} rm sites: {s}"
+        );
+
+        // Fast-path must come BEFORE the lint check (whole point is to
+        // skip it). Anchor: compare position of the fast-path marker
+        // and the lint check call.
+        let fast_idx = s
+            .find("Fast-path: HEAD")
+            .expect("fast-path marker missing");
+        let lint_idx = s
+            .find("_LINT_OUT=$(linthis")
+            .expect("lint check marker missing");
+        assert!(
+            fast_idx < lint_idx,
+            "fast-path must be evaluated BEFORE lint check (fast@{fast_idx}, \
+             lint@{lint_idx})"
+        );
+    }
+
+    /// Squash/fixup MUST `exit 1` after a successful apply, even though
+    /// it just landed a clean commit. Reason: git collects the to-be-
+    /// pushed SHA BEFORE invoking pre-push. Our squash dance rewrites
+    /// HEAD locally, but git push still tries to ship the OLD (pre-
+    /// squash) SHA. Exit 0 here would push the unfixed commit to the
+    /// remote and leave the local squashed HEAD diverged from origin —
+    /// the opposite of what the user asked for. Exit 1 aborts that
+    /// push so the user re-runs `git push`, which re-collects the SHA
+    /// (now the squashed one) and ships the fixed version.
+    ///
+    /// We tried `exit 0` once and it pushed unfixed code to remote —
+    /// keeping the test as a tripwire so nobody flips it back without
+    /// solving the SHA-snapshot problem first (e.g. via a sentinel that
+    /// lets the second push fast-skip review).
+    #[test]
+    fn squash_apply_success_must_exit_1_so_pushed_sha_matches_squashed_head() {
+        let s = build_git_with_agent_prepush_script(
+            "linthis -c --hook-event=pre-push",
+            &AgentFixProvider::Codebuddy,
+            None,
+        );
+
+        // Find the success-path footer header.
+        let success_marker = "Agent fixes squashed into latest commit";
+        let success_idx = s
+            .find(success_marker)
+            .expect("squash success footer missing");
+        // The next exit AFTER the success footer must be exit 1.
+        let after_success = &s[success_idx..];
+        let exit_one_idx = after_success.find("exit 1\n");
+        let exit_zero_idx = after_success.find("exit 0\n");
+        let exit_one_first = match (exit_one_idx, exit_zero_idx) {
+            (Some(o), Some(z)) => o < z,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        assert!(
+            exit_one_first,
+            "squash success path MUST exit 1 (git pushes pre-hook SHA; \
+             exit 0 ships the unfixed commit). \
+             exit_one_idx={exit_one_idx:?}, exit_zero_idx={exit_zero_idx:?}"
+        );
+    }
+
+/// Squash/fixup apply must ISOLATE the agent patch from any
     /// uncommitted user state in the user's WT/index. Old buggy flow
     /// did `git apply <patch>` then `git add <pushed_files>`, which
     /// staged the entire current state of the file (agent's diff +
