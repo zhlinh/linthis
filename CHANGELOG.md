@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-04-27
+
+### Added
+
+- pre-push squash/fixup sentinel fast-path skips redundant round-2 fix+review
+- pre-push squash/fixup isolates agent patch from user WIP
+- pre-push agent-fix-then-review flow + worktree-aware review dir
+- isolate pre-push lint check in temporary git worktree
+
 ## [0.20.0] - 2026-04-21
 
 ### Added
