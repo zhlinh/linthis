@@ -108,12 +108,25 @@ fn apply_shell(
 ) -> io::Result<rc::EnsureOutcome> {
     render_and_write_source(shell, flags, home)?;
     let rc_path = rc::rc_path_for(shell, home);
-    if flags.is_empty() {
+    let outcome = if flags.is_empty() {
         rc::remove_marker(&rc_path)?;
-        Ok(rc::EnsureOutcome::Idempotent)
+        rc::EnsureOutcome::Idempotent
     } else {
-        rc::ensure_marker(shell, &rc_path)
+        rc::ensure_marker(shell, &rc_path)?
+    };
+    // macOS bash login-shell shim: when bash is the target, also (un)wire
+    // .bash_profile so login shells pick up our changes.
+    if matches!(shell, Shell::Bash) {
+        let bp = rc::bash_profile_path(home);
+        if flags.is_empty() {
+            rc::remove_bash_profile_shim(&bp)?;
+        } else {
+            // Don't surface the shim outcome — it's auxiliary to the main
+            // marker block. Errors propagate.
+            let _ = rc::ensure_bash_profile_shim(&bp)?;
+        }
     }
+    Ok(outcome)
 }
 
 /// Common context for add/remove operations.

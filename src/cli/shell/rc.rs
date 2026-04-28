@@ -182,6 +182,109 @@ pub fn remove_marker(rc: &Path) -> std::io::Result<()> {
     atomic_write(rc, &new)
 }
 
+/// Markers wrapping the `.bash_profile` → `.bashrc` shim. Distinct from
+/// `MARKER_OPEN/CLOSE` so the two blocks can be managed independently.
+pub const BASH_PROFILE_SHIM_OPEN: &str = "# >>> linthis bash_profile shim >>>";
+pub const BASH_PROFILE_SHIM_CLOSE: &str = "# <<< linthis bash_profile shim <<<";
+
+/// Returns the path to `~/.bash_profile` under `home`. (Pure path computation;
+/// the file may or may not exist.)
+pub fn bash_profile_path(home: &Path) -> PathBuf {
+    home.join(".bash_profile")
+}
+
+/// Detect whether `.bash_profile` already sources `.bashrc` in any common form.
+/// Used to decide whether the shim is needed at all.
+pub fn bash_profile_already_sources_bashrc(bash_profile: &Path) -> bool {
+    let existing = match std::fs::read_to_string(bash_profile) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    // Already has our shim block — counts.
+    if existing.contains(BASH_PROFILE_SHIM_OPEN) {
+        return true;
+    }
+    // Common manual forms.
+    for needle in [
+        "source ~/.bashrc",
+        "source $HOME/.bashrc",
+        ". ~/.bashrc",
+        ". $HOME/.bashrc",
+        ". \"$HOME/.bashrc\"",
+        "source \"$HOME/.bashrc\"",
+    ] {
+        if existing.contains(needle) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Insert the shim block into `.bash_profile` (only if file exists and doesn't
+/// already source `.bashrc`). Returns whether a write occurred. Idempotent.
+pub fn ensure_bash_profile_shim(bash_profile: &Path) -> std::io::Result<bool> {
+    if !bash_profile.exists() {
+        return Ok(false);
+    }
+    if bash_profile_already_sources_bashrc(bash_profile) {
+        return Ok(false);
+    }
+    let existing = std::fs::read_to_string(bash_profile).unwrap_or_default();
+    let shim_body = "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"";
+    let mut new = existing.clone();
+    if !new.is_empty() && !new.ends_with('\n') {
+        new.push('\n');
+    }
+    if !new.is_empty() {
+        new.push('\n');
+    }
+    new.push_str(BASH_PROFILE_SHIM_OPEN);
+    new.push('\n');
+    new.push_str(shim_body);
+    new.push('\n');
+    new.push_str(BASH_PROFILE_SHIM_CLOSE);
+    new.push('\n');
+    atomic_write(bash_profile, &new)?;
+    Ok(true)
+}
+
+/// Remove the shim block from `.bash_profile` if we added one. Idempotent.
+/// Untouched if the file doesn't exist or has no shim marker.
+pub fn remove_bash_profile_shim(bash_profile: &Path) -> std::io::Result<()> {
+    let existing = match std::fs::read_to_string(bash_profile) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let Some((before, after)) = split_shim_marker(&existing) else {
+        return Ok(());
+    };
+    let mut new = String::with_capacity(before.len() + after.len());
+    new.push_str(before.trim_end_matches('\n'));
+    new.push_str(after);
+    let mut new = new.replace("\n\n\n", "\n\n");
+    while new.ends_with("\n\n") {
+        new.pop();
+    }
+    if !new.ends_with('\n') && !new.is_empty() {
+        new.push('\n');
+    }
+    atomic_write(bash_profile, &new)
+}
+
+/// Same shape as `split_marker` but for the bash_profile shim markers.
+fn split_shim_marker(s: &str) -> Option<(&str, &str)> {
+    let open = s.find(BASH_PROFILE_SHIM_OPEN)?;
+    let close_rel = s[open..].find(BASH_PROFILE_SHIM_CLOSE)?;
+    let close_end = open + close_rel + BASH_PROFILE_SHIM_CLOSE.len();
+    let after_start = if s.as_bytes().get(close_end).copied() == Some(b'\n') {
+        close_end + 1
+    } else {
+        close_end
+    };
+    Some((&s[..open], &s[after_start..]))
+}
+
 /// Split the file content into `(before_open_marker, after_close_marker)`.
 /// Returns `None` if either marker is absent.
 fn split_marker(s: &str) -> Option<(&str, &str)> {
@@ -439,6 +542,109 @@ mod tests {
         let after_second = std::fs::read_to_string(&rc).unwrap();
         assert_eq!(after_first, after_second);
         assert!(after_second.contains("Set-Alias ll Get-ChildItem"));
+    }
+
+    #[test]
+    fn bash_profile_shim_skips_when_bash_profile_missing() {
+        let dir = tempdir().unwrap();
+        let bp = dir.path().join(".bash_profile");
+        let written = ensure_bash_profile_shim(&bp).unwrap();
+        assert!(!written);
+        assert!(!bp.exists(), "must not create .bash_profile");
+    }
+
+    #[test]
+    fn bash_profile_shim_skips_when_already_sourced() {
+        let dir = tempdir().unwrap();
+        let bp = dir.path().join(".bash_profile");
+        std::fs::write(&bp, "# user wrote this\n[ -f ~/.bashrc ] && . ~/.bashrc\n").unwrap();
+        let written = ensure_bash_profile_shim(&bp).unwrap();
+        assert!(!written);
+        let content = std::fs::read_to_string(&bp).unwrap();
+        assert!(!content.contains(BASH_PROFILE_SHIM_OPEN));
+    }
+
+    #[test]
+    fn bash_profile_shim_inserts_when_present_and_unsourced() {
+        let dir = tempdir().unwrap();
+        let bp = dir.path().join(".bash_profile");
+        std::fs::write(&bp, "# user content\nexport PATH=$PATH:/usr/local/bin\n").unwrap();
+        let written = ensure_bash_profile_shim(&bp).unwrap();
+        assert!(written);
+        let content = std::fs::read_to_string(&bp).unwrap();
+        assert!(content.contains(BASH_PROFILE_SHIM_OPEN));
+        assert!(content.contains("[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\""));
+        assert!(content.contains(BASH_PROFILE_SHIM_CLOSE));
+        assert!(content.contains("export PATH=$PATH:/usr/local/bin"));
+    }
+
+    #[test]
+    fn bash_profile_shim_is_idempotent_after_insertion() {
+        let dir = tempdir().unwrap();
+        let bp = dir.path().join(".bash_profile");
+        std::fs::write(&bp, "# user content\n").unwrap();
+        let first = ensure_bash_profile_shim(&bp).unwrap();
+        assert!(first);
+        let after_first = std::fs::read_to_string(&bp).unwrap();
+        let second = ensure_bash_profile_shim(&bp).unwrap();
+        assert!(
+            !second,
+            "second call must be no-op (already has our marker)"
+        );
+        let after_second = std::fs::read_to_string(&bp).unwrap();
+        assert_eq!(after_first, after_second);
+    }
+
+    #[test]
+    fn remove_bash_profile_shim_drops_block_keeps_rest() {
+        let dir = tempdir().unwrap();
+        let bp = dir.path().join(".bash_profile");
+        std::fs::write(&bp, "# top\nexport FOO=bar\n").unwrap();
+        ensure_bash_profile_shim(&bp).unwrap();
+        remove_bash_profile_shim(&bp).unwrap();
+        let content = std::fs::read_to_string(&bp).unwrap();
+        assert!(!content.contains(BASH_PROFILE_SHIM_OPEN));
+        assert!(!content.contains("$HOME/.bashrc"));
+        assert!(content.contains("export FOO=bar"));
+        assert!(content.contains("# top"));
+    }
+
+    #[test]
+    fn remove_bash_profile_shim_idempotent_when_missing_or_no_marker() {
+        let dir = tempdir().unwrap();
+        let bp = dir.path().join(".bash_profile");
+        // Missing file
+        remove_bash_profile_shim(&bp).unwrap();
+        // No marker
+        std::fs::write(&bp, "# nothing here\n").unwrap();
+        remove_bash_profile_shim(&bp).unwrap();
+        let content = std::fs::read_to_string(&bp).unwrap();
+        assert_eq!(content, "# nothing here\n");
+    }
+
+    #[test]
+    fn bash_profile_already_sources_bashrc_detects_common_forms() {
+        let dir = tempdir().unwrap();
+        let bp = dir.path().join(".bash_profile");
+
+        for needle in [
+            "source ~/.bashrc\n",
+            "source $HOME/.bashrc\n",
+            ". ~/.bashrc\n",
+            ". $HOME/.bashrc\n",
+            ". \"$HOME/.bashrc\"\n",
+            "source \"$HOME/.bashrc\"\n",
+        ] {
+            std::fs::write(&bp, format!("# user\n{needle}export X=1\n")).unwrap();
+            assert!(
+                bash_profile_already_sources_bashrc(&bp),
+                "should detect {needle:?}"
+            );
+        }
+
+        // Negative case
+        std::fs::write(&bp, "# user\nexport X=1\n").unwrap();
+        assert!(!bash_profile_already_sources_bashrc(&bp));
     }
 
     #[test]

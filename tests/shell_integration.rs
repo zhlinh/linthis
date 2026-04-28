@@ -168,3 +168,82 @@ fn status_surfaces_unmanaged_source_line() {
         "zsh should not be tagged unmanaged: {zsh_line}"
     );
 }
+
+#[test]
+fn bash_add_writes_bash_profile_shim_when_bash_profile_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+
+    // Pre-seed an existing .bash_profile that doesn't source .bashrc.
+    std::fs::write(
+        home.join(".bash_profile"),
+        "# existing user content\nexport USER_VAR=1\n",
+    )
+    .unwrap();
+
+    let out = run(home, &["shell", "add", "ac", "--shell", "bash"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let bp = std::fs::read_to_string(home.join(".bash_profile")).unwrap();
+    assert!(
+        bp.contains("# >>> linthis bash_profile shim >>>"),
+        "expected shim marker in .bash_profile: {bp}"
+    );
+    assert!(
+        bp.contains("[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\""),
+        "expected source-bashrc shim line: {bp}"
+    );
+    // User content preserved.
+    assert!(bp.contains("export USER_VAR=1"));
+
+    // Remove all → shim should also be removed.
+    let out2 = run(home, &["shell", "remove", "all", "--shell", "bash"]);
+    assert!(out2.status.success());
+    let bp_after = std::fs::read_to_string(home.join(".bash_profile")).unwrap();
+    assert!(
+        !bp_after.contains("# >>> linthis bash_profile shim >>>"),
+        "shim should be gone after remove all: {bp_after}"
+    );
+    assert!(bp_after.contains("export USER_VAR=1"));
+}
+
+#[test]
+fn bash_add_skips_shim_when_bash_profile_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+
+    let out = run(home, &["shell", "add", "ac", "--shell", "bash"]);
+    assert!(out.status.success());
+
+    // .bash_profile must NOT have been created.
+    assert!(
+        !home.join(".bash_profile").exists(),
+        ".bash_profile should not be auto-created when missing"
+    );
+}
+
+#[test]
+fn bash_add_skips_shim_when_bash_profile_already_sources_bashrc() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    std::fs::write(
+        home.join(".bash_profile"),
+        "[ -f ~/.bashrc ] && . ~/.bashrc\n",
+    )
+    .unwrap();
+
+    let out = run(home, &["shell", "add", "ac", "--shell", "bash"]);
+    assert!(out.status.success());
+
+    let bp = std::fs::read_to_string(home.join(".bash_profile")).unwrap();
+    assert!(
+        !bp.contains("# >>> linthis bash_profile shim >>>"),
+        "shim should NOT be added when user already sources bashrc: {bp}"
+    );
+    // Original content preserved.
+    assert!(bp.contains("[ -f ~/.bashrc ] && . ~/.bashrc"));
+}
