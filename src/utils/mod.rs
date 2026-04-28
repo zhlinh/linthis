@@ -241,10 +241,7 @@ fn read_worktree_meta(root: &std::path::Path) -> Option<std::path::PathBuf> {
         let Some(after_eq) = value.strip_prefix('=') else {
             continue;
         };
-        let raw = after_eq
-            .trim()
-            .trim_matches('"')
-            .trim_matches('\'');
+        let raw = after_eq.trim().trim_matches('"').trim_matches('\'');
         if raw.is_empty() {
             return None;
         }
@@ -792,10 +789,7 @@ mod worktree_meta_tests {
     fn parses_unquoted_value() {
         let tmp = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
-        let body = format!(
-            "original_project_root={}\n",
-            target.path().display()
-        );
+        let body = format!("original_project_root={}\n", target.path().display());
         write_meta(tmp.path(), &body);
         assert_eq!(
             read_worktree_meta(tmp.path()),
