@@ -229,9 +229,13 @@ pub fn ensure_bash_profile_shim(bash_profile: &Path) -> std::io::Result<bool> {
     if bash_profile_already_sources_bashrc(bash_profile) {
         return Ok(false);
     }
-    let existing = std::fs::read_to_string(bash_profile).unwrap_or_default();
+    let existing = match std::fs::read_to_string(bash_profile) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
     let shim_body = "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"";
-    let mut new = existing.clone();
+    let mut new = existing;
     if !new.is_empty() && !new.ends_with('\n') {
         new.push('\n');
     }
