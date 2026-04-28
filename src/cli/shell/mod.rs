@@ -14,6 +14,7 @@
 //! that sources the per-shell file.
 
 mod detect;
+mod render;
 mod state;
 
 use std::process::ExitCode;
