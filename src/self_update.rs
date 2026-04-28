@@ -178,19 +178,11 @@ impl Default for SelfUpdateManager {
 impl SelfUpdateManager {
     /// Create a new self-update manager
     pub fn new() -> Self {
-        let home_dir = Self::get_home_dir().expect("Failed to get home directory");
+        let home_dir = crate::utils::home_dir().expect("Failed to get home directory");
         let linthis_dir = home_dir.join(".linthis");
         let timestamp_file = linthis_dir.join(".self_update_last_check");
 
         Self { timestamp_file }
-    }
-
-    /// Get home directory
-    fn get_home_dir() -> Option<PathBuf> {
-        std::env::var("HOME")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
     }
 
     /// Check if it's time to check for updates.

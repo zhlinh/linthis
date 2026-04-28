@@ -1139,7 +1139,7 @@ impl Config {
 
     /// Load user-level configuration from ~/.linthis/config.toml
     pub fn load_user_config() -> Option<Self> {
-        let home = dirs::home_dir()?;
+        let home = crate::utils::home_dir()?;
         let config_path = home.join(".linthis").join("config.toml");
         if config_path.exists() {
             Self::load(&config_path).ok()
@@ -1371,7 +1371,7 @@ impl Config {
             }
         }
 
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = crate::utils::home_dir() {
             let p = home.join(".linthis").join("config.toml");
             if p.exists() {
                 push_unique(&mut paths, p);
@@ -1638,21 +1638,6 @@ fn get_toml_hint(err_str: &str) -> &'static str {
         "Check spelling or remove the unrecognized field"
     } else {
         "Run 'linthis init' to generate a valid configuration file"
-    }
-}
-
-// Add dirs crate for home directory
-// Note: You'll need to add `dirs = "5.0"` to Cargo.toml
-
-/// Fallback for home directory if dirs crate is not available
-mod dirs {
-    use std::path::PathBuf;
-
-    pub fn home_dir() -> Option<PathBuf> {
-        std::env::var("HOME")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
     }
 }
 

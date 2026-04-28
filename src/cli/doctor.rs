@@ -22,18 +22,6 @@ use std::process::{Command, ExitCode};
 
 use linthis::{get_checker, Language};
 
-/// Helper module for getting home directory
-mod dirs {
-    use std::path::PathBuf;
-
-    pub fn home_dir() -> Option<PathBuf> {
-        std::env::var("HOME")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
-    }
-}
-
 /// Result of checking a single tool
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolStatus {
@@ -570,7 +558,7 @@ fn check_configs() -> Vec<ConfigStatus> {
     configs.push(project_status);
 
     // Check global config
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = linthis::utils::home_dir() {
         let global_config = home.join(".linthis").join("config.toml");
         let global_status = check_config_file(&global_config);
         configs.push(global_status);

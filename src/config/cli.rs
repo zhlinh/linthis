@@ -11,7 +11,7 @@ use super::Config;
 /// Get config file path based on global flag
 fn get_config_path(global: bool) -> crate::Result<PathBuf> {
     let config_dir = if global {
-        let home = dirs::home_dir()
+        let home = crate::utils::home_dir()
             .ok_or_else(|| crate::LintisError::Config("Cannot find home directory".to_string()))?;
         home.join(".linthis")
     } else {
@@ -594,18 +594,6 @@ fn format_toml_value(item: &toml_edit::Item) -> String {
         }
     } else {
         item.to_string().trim().to_string()
-    }
-}
-
-/// Fallback for home directory if dirs crate is not available
-mod dirs {
-    use std::path::PathBuf;
-
-    pub fn home_dir() -> Option<PathBuf> {
-        std::env::var("HOME")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
     }
 }
 

@@ -56,13 +56,6 @@ pub(crate) fn shells_for_target(value: &str) -> Result<Vec<Shell>, String> {
         .map_err(|e| e.to_string())
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
-}
-
 /// Resolve target shells from an optional `--shell` flag (None → auto-detect).
 fn resolve_shells(explicit: Option<&str>) -> Result<Vec<Shell>, String> {
     if let Some(v) = explicit {
@@ -143,7 +136,7 @@ fn prepare_context(
     feature_arg: &str,
     shell_arg: Option<&str>,
 ) -> Result<OperationContext, ExitCode> {
-    let Some(home) = home_dir() else {
+    let Some(home) = linthis::utils::home_dir() else {
         eprintln!("[linthis shell] $HOME / $USERPROFILE not set");
         return Err(ExitCode::from(1));
     };
@@ -257,7 +250,7 @@ fn handle_remove(feature_arg: &str, shell_arg: Option<&str>) -> ExitCode {
 }
 
 fn handle_status() -> ExitCode {
-    let Some(home) = home_dir() else {
+    let Some(home) = linthis::utils::home_dir() else {
         eprintln!("[linthis shell] $HOME / $USERPROFILE not set");
         return ExitCode::from(1);
     };
@@ -291,7 +284,7 @@ fn handle_status() -> ExitCode {
 }
 
 fn handle_init(shell_arg: Option<&str>) -> ExitCode {
-    let Some(home) = home_dir() else {
+    let Some(home) = linthis::utils::home_dir() else {
         eprintln!("[linthis shell] $HOME / $USERPROFILE not set");
         return ExitCode::from(1);
     };

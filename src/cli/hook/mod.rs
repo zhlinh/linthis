@@ -36,18 +36,6 @@ pub use agent::detect_agent_providers_lightweight;
 pub use cmsg::handle_commit_msg_check;
 pub use sync::{handle_hook_sync, handle_hook_sync_after_plugin_sync};
 
-/// Helper module for getting home directory (cross-platform, no external crate)
-mod dirs {
-    use std::path::PathBuf;
-
-    pub fn home_dir() -> Option<PathBuf> {
-        std::env::var("HOME")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| std::env::var("USERPROFILE").ok().map(PathBuf::from))
-    }
-}
-
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
@@ -247,7 +235,7 @@ fn is_command_available(command: &str) -> bool {
 
 /// Global hooks directory (XDG standard).
 fn global_hooks_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".config/git/hooks"))
+    linthis::utils::home_dir().map(|home| home.join(".config/git/hooks"))
 }
 
 /// Check if a hook file is a linthis-managed hook.
