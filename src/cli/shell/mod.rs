@@ -262,7 +262,7 @@ fn handle_status() -> ExitCode {
         let mark = |on: bool| if on { "on " } else { "off" };
         let rc_path = rc::rc_path_for(sh, &home);
         let tag = if rc::has_unmanaged_source_line(sh, &rc_path) {
-            "  (unmanaged source line in rc \u{2014} see warning)"
+            "  (unmanaged source line in rc \u{2014} run 'linthis shell add' to review)"
         } else {
             ""
         };
