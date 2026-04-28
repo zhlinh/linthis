@@ -394,6 +394,17 @@ pub enum Commands {
         #[command(subcommand)]
         action: HookCommands,
     },
+    /// Shell integration: tab-completion and built-in aliases.
+    ///
+    /// Examples:
+    ///   linthis shell add ac        # install completion for current shell
+    ///   linthis shell add alias     # install lt/lts/ltm/ltr
+    ///   linthis shell remove all
+    ///   linthis shell status
+    Shell {
+        #[command(subcommand)]
+        action: ShellCommands,
+    },
     /// Cache management commands
     Cache {
         #[command(subcommand)]
@@ -1346,6 +1357,48 @@ pub enum HookCommands {
         /// Non-interactive (skip confirmation prompts)
         #[arg(short = 'y', long)]
         yes: bool,
+    },
+}
+
+/// Subcommands for `linthis shell`.
+#[derive(clap::Subcommand, Debug)]
+pub enum ShellCommands {
+    /// Enable a shell feature (`ac`, `alias`, or `all`).
+    Add {
+        /// One of: ac, alias, all
+        feature: String,
+
+        /// Override auto-detected shell (bash, zsh, fish, powershell, all).
+        #[arg(long)]
+        shell: Option<String>,
+    },
+
+    /// Disable a shell feature (`ac`, `alias`, or `all`).
+    Remove {
+        /// One of: ac, alias, all
+        feature: String,
+
+        /// Override auto-detected shell (bash, zsh, fish, powershell, all).
+        #[arg(long)]
+        shell: Option<String>,
+    },
+
+    /// Show what's enabled in each shell.
+    Status,
+
+    /// Internal: rewrite the source file from current state.
+    #[command(hide = true)]
+    Init {
+        /// Shell name to (re)generate. Defaults to all.
+        #[arg(long)]
+        shell: Option<String>,
+    },
+
+    /// Internal: print clap-generated completion script for the given shell.
+    #[command(hide = true)]
+    Completion {
+        /// One of: bash, zsh, fish, powershell.
+        shell: String,
     },
 }
 

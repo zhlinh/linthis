@@ -15,6 +15,7 @@ readme = "README.md"
 [dependencies]
 # CLI
 clap = { version = "4.3", features = ["derive"] }
+clap_complete = "4"
 
 # Error handling
 anyhow = "1.0"
