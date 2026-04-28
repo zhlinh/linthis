@@ -146,22 +146,17 @@ fn print_agent_status_for_scope(
                     );
                 }
             }
-            // Stop hook paths are constructed relative to base (e.g. base/.claude/settings.json).
-            // Only check in the global scope to avoid showing duplicate project-relative paths
-            // that are unlikely to hold stop-hook config.
-            if global {
-                if let Some(settings_path) = agent_stop_hook_settings_path(base, p) {
-                    let has_stop_hook = settings_path.exists()
-                        && std::fs::read_to_string(&settings_path)
-                            .map(|c| c.contains("linthis"))
-                            .unwrap_or(false);
-                    if has_stop_hook {
-                        println!(
-                            "  {} Stop Hook ({})",
-                            "✓".green().dimmed(),
-                            settings_path.display()
-                        );
-                    }
+            if let Some(settings_path) = agent_stop_hook_settings_path(base, p) {
+                let has_stop_hook = settings_path.exists()
+                    && std::fs::read_to_string(&settings_path)
+                        .map(|c| c.contains("linthis"))
+                        .unwrap_or(false);
+                if has_stop_hook {
+                    println!(
+                        "  {} Stop Hook ({})",
+                        "✓".green().dimmed(),
+                        settings_path.display()
+                    );
                 }
             }
         } else {
@@ -220,8 +215,7 @@ pub(crate) fn handle_hook_status() -> ExitCode {
         .hook
         .agent
         .skill_names;
-    let any_agent_project =
-        print_agent_status_for_scope(&git_root, false, Some(&skill_names_cfg));
+    let any_agent_project = print_agent_status_for_scope(&git_root, false, Some(&skill_names_cfg));
     let any_agent_global = match linthis::utils::home_dir() {
         Some(ref home) => print_agent_status_for_scope(home, true, Some(&skill_names_cfg)),
         None => {
