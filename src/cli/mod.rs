@@ -31,6 +31,7 @@ mod report;
 mod review;
 mod runner;
 mod security;
+pub mod shell;
 mod watch;
 
 pub use backup::{create_backup, handle_backup_command};

@@ -27,6 +27,7 @@ use cli::{
     strip_ansi_codes, Cli, Commands, ComplexityCommandOptions, FixCommandOptions,
     FormatCommandOptions, PathCollectionOptions, PathCollectionResult, ReviewCommandOptions,
 };
+use cli::shell::handle_shell_command;
 use linthis::config::resolver::{ConfigResolver, ConfigSource, ResolvedConfig};
 use linthis::lsp::{run_lsp_server_with_config, LspMode};
 use linthis::utils::output::{format_result_with_hook_type, OutputFormat};
@@ -102,6 +103,7 @@ fn dispatch_subcommand(command: Commands) -> Option<ExitCode> {
         Commands::Plugin { action } => Some(handle_plugin_command(action)),
         Commands::Config { action } => Some(handle_config_command(action)),
         Commands::Hook { action } => Some(handle_hook_command(action)),
+        Commands::Shell { action } => Some(handle_shell_command(action)),
         Commands::Cmsg { .. } | Commands::Init { .. } | Commands::AgentStream => {
             Some(dispatch_simple(command))
         }
