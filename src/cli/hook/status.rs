@@ -18,7 +18,7 @@ use super::agent::{
     agent_is_installed, agent_skill_path, agent_stop_hook_settings_path, ALL_AGENT_PROVIDERS,
 };
 use super::metadata::{load_installed_hooks, InstalledHooksFile};
-use super::{dirs, find_git_root, global_hooks_dir, is_linthis_hook_file};
+use super::{find_git_root, global_hooks_dir, is_linthis_hook_file};
 use crate::cli::commands::HookEvent;
 
 /// Print project-level hook status for each event. Returns true if any hook is installed.
@@ -500,7 +500,7 @@ pub(crate) fn handle_hook_list(global: bool) -> ExitCode {
 
         println!();
         println!("{}", "Agent Skills (~/)".bold());
-        if let Some(ref home_dir) = dirs::home_dir() {
+        if let Some(ref home_dir) = linthis::utils::home_dir() {
             count += list_agent_skills(home_dir, true, &hook_events, skill_names);
         }
     } else {

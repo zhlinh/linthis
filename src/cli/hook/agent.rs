@@ -15,7 +15,6 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use super::dirs;
 use super::metadata::{add_skill_provider_to_hook, remove_skill_provider_from_hook};
 use super::{find_git_root, is_command_available};
 use crate::cli::commands::{AgentProvider, HookEvent};
@@ -1007,7 +1006,7 @@ fn resolve_and_install_agent_plugin_override(
 
 /// Resolve the OpenClaw global skills directory.
 fn resolve_openclaw_global_skills_dir() -> Option<PathBuf> {
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = linthis::utils::home_dir() {
         let candidate = home.join(".openclaw/skills");
         if candidate.is_dir() {
             return Some(candidate);
@@ -1565,7 +1564,7 @@ fn uninstall_agent_legacy(base: &std::path::Path, provider: &AgentProvider) {
 /// Resolve the base directory for agent hook installation.
 pub(crate) fn resolve_agent_base(global: bool) -> Result<PathBuf, ExitCode> {
     if global {
-        dirs::home_dir().ok_or_else(|| {
+        linthis::utils::home_dir().ok_or_else(|| {
             eprintln!("{}: Could not determine home directory", "Error".red());
             ExitCode::from(1)
         })

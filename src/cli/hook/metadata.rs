@@ -13,7 +13,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::dirs;
 use crate::cli::commands::{HookEvent, HookTool};
 
 /// Record of a single installed hook (stored in installed-hooks.toml).
@@ -47,7 +46,7 @@ pub(crate) struct InstalledHooksFile {
 
 /// Returns the path to the installed-hooks.toml file.
 fn installed_hooks_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".linthis").join("installed-hooks.toml"))
+    linthis::utils::home_dir().map(|h| h.join(".linthis").join("installed-hooks.toml"))
 }
 
 /// Load the installed-hooks.toml file (returns empty struct if missing or unreadable).

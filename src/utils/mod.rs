@@ -271,6 +271,23 @@ pub fn get_effective_project_root() -> std::path::PathBuf {
     cwd_root
 }
 
+/// Resolve the user's home directory across platforms.
+///
+/// Reads `$HOME` first (Unix-style), falls back to `$USERPROFILE` (Windows).
+/// Returns `None` only when neither is set, which on a normal system is
+/// effectively impossible. Callers that absolutely need a path can `unwrap_or_else`
+/// to a sensible default (e.g. `PathBuf::from(".")`).
+pub fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("USERPROFILE")
+                .ok()
+                .map(std::path::PathBuf::from)
+        })
+}
+
 /// Get the global data directory for a project: `~/.linthis/projects/<slug>/`.
 /// The slug is the project root path with `/` replaced by `-`.
 /// Uses `get_effective_project_root()` so callers running inside a pre-push
@@ -830,5 +847,20 @@ mod worktree_meta_tests {
             "purpose = \"something\"\ncreated_at = \"2026-01-01\"\n",
         );
         assert!(read_worktree_meta(tmp.path()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod home_dir_tests {
+    use super::home_dir;
+
+    #[test]
+    fn home_dir_returns_some_when_home_is_set() {
+        // The test process always has $HOME set in CI / dev — assert it.
+        std::env::set_var("HOME", "/nonexistent/test-home");
+        assert_eq!(
+            home_dir(),
+            Some(std::path::PathBuf::from("/nonexistent/test-home"))
+        );
     }
 }

@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use super::agent::{agent_skill_path, agent_stop_hook_settings_path, install_agent_skill};
 use super::metadata::{load_installed_hooks, save_installed_hook, InstalledHook};
 use super::script::build_thin_wrapper_script;
-use super::{dirs, find_git_root, global_hooks_dir, write_hook_script};
+use super::{find_git_root, global_hooks_dir, write_hook_script};
 use crate::cli::commands::{AgentProvider, HookEvent, HookTool};
 
 /// Detect hook type from thin wrapper content.
@@ -318,7 +318,7 @@ fn sync_agent_skills(
     skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> u32 {
     let base = if global {
-        dirs::home_dir().unwrap_or_default()
+        linthis::utils::home_dir().unwrap_or_default()
     } else {
         project_root.to_path_buf()
     };
@@ -637,7 +637,7 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
     }
 
     let base_for_scan = if global {
-        dirs::home_dir().unwrap_or_default()
+        linthis::utils::home_dir().unwrap_or_default()
     } else {
         project_root.clone()
     };

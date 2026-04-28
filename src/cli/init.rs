@@ -218,7 +218,7 @@ pub fn handle_init_command(global: bool, with_hook: bool, force: bool) -> ExitCo
 
     let config_path = if global {
         // Global config path: ~/.linthis/config.toml
-        let home = match home_dir() {
+        let home = match linthis::utils::home_dir() {
             Some(h) => h,
             None => {
                 eprintln!("{}: Cannot determine home directory", "Error".red());
@@ -303,18 +303,6 @@ pub fn handle_init_command(global: bool, with_hook: bool, force: bool) -> ExitCo
     }
 
     ExitCode::SUCCESS
-}
-
-/// Get the user's home directory
-fn home_dir() -> Option<std::path::PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var("USERPROFILE")
-                .ok()
-                .map(std::path::PathBuf::from)
-        })
 }
 
 /// Initialize default config files for all linters/formatters
