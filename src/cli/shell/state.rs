@@ -8,11 +8,19 @@
 //!
 //! Single source of truth for which features are enabled per shell.
 
+// Items here are forward-declared for later tasks in the shell-integration
+// pipeline; suppressing dead-code warnings at the file level keeps the public
+// surface readable while the consumers land.
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Supported shells. Stable across versions — used as TOML section names.
-#[allow(dead_code)]
+//
+// `PowerShell` ends with the enum name `Shell`, which trips
+// `clippy::enum_variant_names`. The product name is canonical and is referenced
+// across later tasks as `Shell::PowerShell`, so we suppress the lint locally.
 #[allow(clippy::enum_variant_names)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Shell {
@@ -22,7 +30,6 @@ pub enum Shell {
     PowerShell,
 }
 
-#[allow(dead_code)]
 impl Shell {
     /// Stable lowercase name used in the TOML section header.
     pub fn key(self) -> &'static str {
@@ -38,7 +45,6 @@ impl Shell {
 }
 
 /// Per-shell flags. Default = both off.
-#[allow(dead_code)]
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShellFlags {
     #[serde(default)]
@@ -47,7 +53,6 @@ pub struct ShellFlags {
     pub alias: bool,
 }
 
-#[allow(dead_code)]
 impl ShellFlags {
     pub fn is_empty(self) -> bool {
         !self.ac && !self.alias
@@ -55,7 +60,6 @@ impl ShellFlags {
 }
 
 /// Full state. Fields are public so callers can flip them and pass back to `save`.
-#[allow(dead_code)]
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShellState {
     #[serde(default)]
@@ -68,7 +72,6 @@ pub struct ShellState {
     pub powershell: ShellFlags,
 }
 
-#[allow(dead_code)]
 impl ShellState {
     pub fn flags(&self, shell: Shell) -> ShellFlags {
         match shell {
@@ -91,7 +94,6 @@ impl ShellState {
 
 /// Errors load/save can produce. `Corrupt` is distinct from `Io` so the caller
 /// can tell "the user's TOML is wrong" from "I couldn't read the file at all".
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum StateError {
     Io(std::io::Error),
@@ -109,14 +111,12 @@ impl std::fmt::Display for StateError {
 impl std::error::Error for StateError {}
 
 /// Default path resolution: `~/.linthis/shell-state.toml`.
-#[allow(dead_code)]
 pub fn default_state_path(home: &Path) -> PathBuf {
     home.join(".linthis").join("shell-state.toml")
 }
 
 /// Load state from `path`. Missing file → `Ok(default)`. Unreadable → `Err(Io)`.
 /// Malformed TOML → `Err(Corrupt)`.
-#[allow(dead_code)]
 pub fn load(path: &Path) -> Result<ShellState, StateError> {
     let raw = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -127,7 +127,6 @@ pub fn load(path: &Path) -> Result<ShellState, StateError> {
 }
 
 /// Save state to `path`. Creates parent dirs as needed. Atomic temp+rename.
-#[allow(dead_code)]
 pub fn save(path: &Path, state: &ShellState) -> Result<(), StateError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(StateError::Io)?;

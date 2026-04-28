@@ -13,7 +13,7 @@
 //! state on every `add`/`remove`. The user's rc file gets a marker block
 //! that sources the per-shell file.
 
-pub mod state;
+mod state;
 
 use std::process::ExitCode;
 
