@@ -271,6 +271,12 @@ pub fn get_effective_project_root() -> std::path::PathBuf {
     cwd_root
 }
 
+/// Resolve home from explicit env values (testable without global env mutation).
+fn home_dir_from_env(home: Option<&str>, userprofile: Option<&str>) -> Option<std::path::PathBuf> {
+    home.map(std::path::PathBuf::from)
+        .or_else(|| userprofile.map(std::path::PathBuf::from))
+}
+
 /// Resolve the user's home directory across platforms.
 ///
 /// Reads `$HOME` first (Unix-style), falls back to `$USERPROFILE` (Windows).
@@ -278,14 +284,9 @@ pub fn get_effective_project_root() -> std::path::PathBuf {
 /// effectively impossible. Callers that absolutely need a path can `unwrap_or_else`
 /// to a sensible default (e.g. `PathBuf::from(".")`).
 pub fn home_dir() -> Option<std::path::PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var("USERPROFILE")
-                .ok()
-                .map(std::path::PathBuf::from)
-        })
+    let home = std::env::var("HOME").ok();
+    let userprofile = std::env::var("USERPROFILE").ok();
+    home_dir_from_env(home.as_deref(), userprofile.as_deref())
 }
 
 /// Get the global data directory for a project: `~/.linthis/projects/<slug>/`.
@@ -852,15 +853,23 @@ mod worktree_meta_tests {
 
 #[cfg(test)]
 mod home_dir_tests {
-    use super::home_dir;
+    use super::home_dir_from_env;
+    use std::path::PathBuf;
 
     #[test]
-    fn home_dir_returns_some_when_home_is_set() {
-        // The test process always has $HOME set in CI / dev — assert it.
-        std::env::set_var("HOME", "/nonexistent/test-home");
-        assert_eq!(
-            home_dir(),
-            Some(std::path::PathBuf::from("/nonexistent/test-home"))
-        );
+    fn prefers_home_over_userprofile() {
+        let h = home_dir_from_env(Some("/h"), Some("/u"));
+        assert_eq!(h, Some(PathBuf::from("/h")));
+    }
+
+    #[test]
+    fn falls_back_to_userprofile() {
+        let h = home_dir_from_env(None, Some("/u"));
+        assert_eq!(h, Some(PathBuf::from("/u")));
+    }
+
+    #[test]
+    fn returns_none_when_neither_set() {
+        assert_eq!(home_dir_from_env(None, None), None);
     }
 }
