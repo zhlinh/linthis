@@ -133,3 +133,38 @@ fn unknown_shell_exits_nonzero() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("unrecognized") || err.contains("elvish"));
 }
+
+#[test]
+fn status_surfaces_unmanaged_source_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+
+    // Pre-seed a manually-edited .bashrc with a source line outside markers.
+    std::fs::write(
+        home.join(".bashrc"),
+        "# user content\nsource $HOME/.linthis/shell.bash\nexport FOO=1\n",
+    )
+    .unwrap();
+
+    let out = run(home, &["shell", "status"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("unmanaged"),
+        "status should surface unmanaged condition. Got:\n{stdout}"
+    );
+
+    // Sanity: zsh row should NOT have the tag (no unmanaged line for zsh).
+    let zsh_line = stdout
+        .lines()
+        .find(|l| l.contains("zsh"))
+        .expect("zsh row missing");
+    assert!(
+        !zsh_line.contains("unmanaged"),
+        "zsh should not be tagged unmanaged: {zsh_line}"
+    );
+}

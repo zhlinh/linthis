@@ -85,6 +85,23 @@ pub fn delete_if_exists(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Returns `true` when `rc` exists and contains a manual `source` line
+/// for this shell's source file outside any linthis marker block.
+///
+/// This is the same condition that makes `ensure_marker` return
+/// [`EnsureOutcome::UnmanagedSourceLine`]. Exposed separately so
+/// `linthis shell status` can surface the condition without writing.
+pub fn has_unmanaged_source_line(shell: Shell, rc: &Path) -> bool {
+    let unmanaged_substring = source_path_for(shell, Path::new("$HOME"))
+        .to_string_lossy()
+        .into_owned();
+    let existing = match std::fs::read_to_string(rc) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    existing.contains(&unmanaged_substring) && !existing.contains(MARKER_OPEN)
+}
+
 /// Ensure the rc file at `rc` contains a marker block sourcing the per-shell
 /// source file. Idempotent; preserves any content outside the marker.
 ///
@@ -273,6 +290,38 @@ mod tests {
         assert!(content.contains("# bottom"));
         assert!(!content.contains("# user mangled this"));
         assert!(content.contains(". \"$HOME/.linthis/shell.bash\""));
+    }
+
+    #[test]
+    fn has_unmanaged_source_line_returns_false_when_rc_missing() {
+        let dir = tempdir().unwrap();
+        let rc = dir.path().join("nonexistent.bashrc");
+        assert!(!has_unmanaged_source_line(Shell::Bash, &rc));
+    }
+
+    #[test]
+    fn has_unmanaged_source_line_returns_false_when_marker_block_present() {
+        let dir = tempdir().unwrap();
+        let rc = dir.path().join(".bashrc");
+        std::fs::write(
+            &rc,
+            "# >>> linthis shell init >>>\n[ -f \"$HOME/.linthis/shell.bash\" ] && . \"$HOME/.linthis/shell.bash\"\n# <<< linthis shell init <<<\n",
+        )
+        .unwrap();
+        // Marker is present, so should NOT be considered unmanaged.
+        assert!(!has_unmanaged_source_line(Shell::Bash, &rc));
+    }
+
+    #[test]
+    fn has_unmanaged_source_line_returns_true_when_manual_source_outside_marker() {
+        let dir = tempdir().unwrap();
+        let rc = dir.path().join(".bashrc");
+        std::fs::write(
+            &rc,
+            "# user content\nsource $HOME/.linthis/shell.bash\nexport FOO=1\n",
+        )
+        .unwrap();
+        assert!(has_unmanaged_source_line(Shell::Bash, &rc));
     }
 
     #[test]
