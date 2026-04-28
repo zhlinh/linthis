@@ -112,12 +112,19 @@ fn print_global_hook_status(hook_events: &[HookEvent]) {
     }
 }
 
-/// Print agent integration status for the project. Returns true if any agent is installed.
-fn print_agent_status(
-    git_root: &std::path::Path,
+/// Print agent integration status for a single scope. Returns true if any
+/// agent is installed under that scope.
+fn print_agent_status_for_scope(
+    base: &std::path::Path,
+    global: bool,
     skill_names: Option<&linthis::config::AgentSkillNamesConfig>,
 ) -> bool {
-    println!("\n{}", "Agent Integration".bold());
+    let title = if global {
+        "Agent Integration (Global skills)"
+    } else {
+        "Agent Integration (Project skills)"
+    };
+    println!("\n{}", title.bold());
     let events = [
         HookEvent::PreCommit,
         HookEvent::CommitMsg,
@@ -125,11 +132,11 @@ fn print_agent_status(
     ];
     let mut any_installed = false;
     for p in ALL_AGENT_PROVIDERS {
-        if agent_is_installed(git_root, p, false, skill_names) {
+        if agent_is_installed(base, p, global, skill_names) {
             any_installed = true;
             println!("{} {}", "✓".green(), p);
             for event in &events {
-                let path = agent_skill_path(git_root, p, false, event, skill_names);
+                let path = agent_skill_path(base, p, global, event, skill_names);
                 if path.exists() {
                     println!(
                         "  {} {} ({})",
@@ -139,17 +146,22 @@ fn print_agent_status(
                     );
                 }
             }
-            if let Some(settings_path) = agent_stop_hook_settings_path(git_root, p) {
-                let has_stop_hook = settings_path.exists()
-                    && std::fs::read_to_string(&settings_path)
-                        .map(|c| c.contains("linthis"))
-                        .unwrap_or(false);
-                if has_stop_hook {
-                    println!(
-                        "  {} Stop Hook ({})",
-                        "✓".green().dimmed(),
-                        settings_path.display()
-                    );
+            // Stop hook paths are constructed relative to base (e.g. base/.claude/settings.json).
+            // Only check in the global scope to avoid showing duplicate project-relative paths
+            // that are unlikely to hold stop-hook config.
+            if global {
+                if let Some(settings_path) = agent_stop_hook_settings_path(base, p) {
+                    let has_stop_hook = settings_path.exists()
+                        && std::fs::read_to_string(&settings_path)
+                            .map(|c| c.contains("linthis"))
+                            .unwrap_or(false);
+                    if has_stop_hook {
+                        println!(
+                            "  {} Stop Hook ({})",
+                            "✓".green().dimmed(),
+                            settings_path.display()
+                        );
+                    }
                 }
             }
         } else {
@@ -208,7 +220,20 @@ pub(crate) fn handle_hook_status() -> ExitCode {
         .hook
         .agent
         .skill_names;
-    let any_agent_installed = print_agent_status(&git_root, Some(&skill_names_cfg));
+    let any_agent_project =
+        print_agent_status_for_scope(&git_root, false, Some(&skill_names_cfg));
+    let any_agent_global = match linthis::utils::home_dir() {
+        Some(ref home) => print_agent_status_for_scope(home, true, Some(&skill_names_cfg)),
+        None => {
+            println!("\n{}", "Agent Integration (Global skills)".bold());
+            println!(
+                "  {} HOME / USERPROFILE not set — cannot check global skills",
+                "ℹ".cyan()
+            );
+            false
+        }
+    };
+    let any_agent_installed = any_agent_project || any_agent_global;
 
     println!("\n{}", "Commands:".bold());
     if !any_hook_installed {
