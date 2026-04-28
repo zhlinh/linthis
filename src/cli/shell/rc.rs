@@ -390,4 +390,74 @@ mod tests {
         delete_if_exists(&path).unwrap();
         assert!(!path.exists());
     }
+
+    #[test]
+    fn ensure_marker_is_idempotent_for_fish_multiline_block() {
+        let dir = tempdir().unwrap();
+        let rc = dir.path().join("config.fish");
+        std::fs::write(&rc, "# user fish content\nset -gx EDITOR vim\n").unwrap();
+
+        let first = ensure_marker(Shell::Fish, &rc).unwrap();
+        assert_eq!(first, EnsureOutcome::Inserted);
+        let after_first = std::fs::read_to_string(&rc).unwrap();
+
+        // Multi-line fish block must contain all three lines: `if test -f`,
+        // `source`, and `end`.
+        assert!(after_first.contains("if test -f"));
+        assert!(after_first.contains("source"));
+        assert!(after_first.contains("\nend\n"));
+
+        // Second invocation must be a no-op.
+        let second = ensure_marker(Shell::Fish, &rc).unwrap();
+        assert_eq!(second, EnsureOutcome::Idempotent);
+        let after_second = std::fs::read_to_string(&rc).unwrap();
+        assert_eq!(
+            after_first, after_second,
+            "fish marker block drifted on second ensure_marker"
+        );
+
+        // Sanity: user content preserved.
+        assert!(after_second.contains("set -gx EDITOR vim"));
+    }
+
+    #[test]
+    fn ensure_marker_is_idempotent_for_powershell_block() {
+        let dir = tempdir().unwrap();
+        let rc = dir.path().join("Microsoft.PowerShell_profile.ps1");
+        std::fs::write(&rc, "# user PS profile\nSet-Alias ll Get-ChildItem\n").unwrap();
+
+        let first = ensure_marker(Shell::PowerShell, &rc).unwrap();
+        assert_eq!(first, EnsureOutcome::Inserted);
+        let after_first = std::fs::read_to_string(&rc).unwrap();
+
+        // PowerShell single-line block: `if (Test-Path "...") { . "..." }`
+        assert!(after_first.contains("if (Test-Path"));
+        assert!(after_first.contains(". \"$HOME/.linthis/shell.ps1\""));
+
+        let second = ensure_marker(Shell::PowerShell, &rc).unwrap();
+        assert_eq!(second, EnsureOutcome::Idempotent);
+        let after_second = std::fs::read_to_string(&rc).unwrap();
+        assert_eq!(after_first, after_second);
+        assert!(after_second.contains("Set-Alias ll Get-ChildItem"));
+    }
+
+    #[test]
+    fn remove_marker_round_trips_for_fish_multiline_block() {
+        let dir = tempdir().unwrap();
+        let rc = dir.path().join("config.fish");
+        std::fs::write(&rc, "# top\nset -gx EDITOR vim\n").unwrap();
+
+        let original = std::fs::read_to_string(&rc).unwrap();
+        ensure_marker(Shell::Fish, &rc).unwrap();
+        remove_marker(&rc).unwrap();
+        let after_remove = std::fs::read_to_string(&rc).unwrap();
+
+        // After insert+remove, file should be functionally equivalent to original
+        // (modulo trailing whitespace differences, which the implementation may
+        // collapse). Just check user content is preserved and marker is gone.
+        assert!(after_remove.contains("set -gx EDITOR vim"));
+        assert!(!after_remove.contains(MARKER_OPEN));
+        assert!(!after_remove.contains("if test -f"));
+        let _ = original; // for clarity
+    }
 }
