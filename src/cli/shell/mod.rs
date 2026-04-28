@@ -116,65 +116,92 @@ fn apply_shell(
     }
 }
 
-fn handle_add(feature_arg: &str, shell_arg: Option<&str>) -> ExitCode {
+/// Common context for add/remove operations.
+struct OperationContext {
+    home: PathBuf,
+    feature: Feature,
+    targets: Vec<Shell>,
+    state: ShellState,
+    state_path: PathBuf,
+}
+
+/// Prepare context for add/remove operations. Returns Err(exit_code) on failure.
+fn prepare_context(
+    feature_arg: &str,
+    shell_arg: Option<&str>,
+) -> Result<OperationContext, ExitCode> {
     let Some(home) = home_dir() else {
         eprintln!("[linthis shell] $HOME / $USERPROFILE not set");
-        return ExitCode::from(1);
+        return Err(ExitCode::from(1));
     };
-    let feature = match parse_feature(feature_arg) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("[linthis shell] {e}");
-            return ExitCode::from(1);
-        }
-    };
-    let targets = match resolve_shells(shell_arg) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("[linthis shell] {e}");
-            return ExitCode::from(1);
-        }
-    };
-
+    let feature = parse_feature(feature_arg).map_err(|e| {
+        eprintln!("[linthis shell] {e}");
+        ExitCode::from(1)
+    })?;
+    let targets = resolve_shells(shell_arg).map_err(|e| {
+        eprintln!("[linthis shell] {e}");
+        ExitCode::from(1)
+    })?;
     let state_path = state::default_state_path(&home);
-    let mut s = match state::load(&state_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[linthis shell] {e}");
-            return ExitCode::from(2);
-        }
-    };
-    let snapshot = s; // for rollback on failure
+    let state = state::load(&state_path).map_err(|e| {
+        eprintln!("[linthis shell] {e}");
+        ExitCode::from(2)
+    })?;
+    Ok(OperationContext {
+        home,
+        feature,
+        targets,
+        state,
+        state_path,
+    })
+}
 
-    for sh in &targets {
-        set_feature(&mut s, *sh, feature, true);
+/// Print outcome message for add operation.
+fn print_add_outcome(shell: Shell, outcome: &rc::EnsureOutcome) {
+    match outcome {
+        rc::EnsureOutcome::Inserted => {
+            eprintln!("[linthis shell] {}: marker added", shell.key())
+        }
+        rc::EnsureOutcome::Idempotent => {
+            eprintln!("[linthis shell] {}: up to date", shell.key())
+        }
+        rc::EnsureOutcome::UnmanagedSourceLine => {
+            eprintln!(
+                "[linthis shell] {}: warning — your rc already sources \
+                 ~/.linthis/shell.{} outside our marker block; not modifying it.",
+                shell.key(),
+                shell.key()
+            );
+        }
+    }
+}
+
+fn handle_add(feature_arg: &str, shell_arg: Option<&str>) -> ExitCode {
+    let ctx = match prepare_context(feature_arg, shell_arg) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let mut s = ctx.state;
+    let snapshot = s;
+
+    for sh in &ctx.targets {
+        set_feature(&mut s, *sh, ctx.feature, true);
     }
 
-    for sh in &targets {
-        match apply_shell(*sh, s.flags(*sh), &home) {
-            Ok(rc::EnsureOutcome::Inserted) => {
-                eprintln!("[linthis shell] {}: marker added", sh.key())
-            }
-            Ok(rc::EnsureOutcome::Idempotent) => {
-                eprintln!("[linthis shell] {}: up to date", sh.key())
-            }
-            Ok(rc::EnsureOutcome::UnmanagedSourceLine) => {
-                eprintln!(
-                    "[linthis shell] {}: warning — your rc already sources \
-                     ~/.linthis/shell.{} outside our marker block; not modifying it.",
-                    sh.key(),
-                    sh.key()
-                );
-            }
+    for sh in &ctx.targets {
+        match apply_shell(*sh, s.flags(*sh), &ctx.home) {
+            Ok(outcome) => print_add_outcome(*sh, &outcome),
             Err(e) => {
                 eprintln!("[linthis shell] {}: write failed — {e}", sh.key());
-                let _ = state::save(&state_path, &snapshot);
+                if let Err(re) = state::save(&ctx.state_path, &snapshot) {
+                    eprintln!("[linthis shell] warning: state rollback also failed — {re}");
+                }
                 return ExitCode::from(1);
             }
         }
     }
 
-    if let Err(e) = state::save(&state_path, &s) {
+    if let Err(e) = state::save(&ctx.state_path, &s) {
         eprintln!("[linthis shell] failed to persist state: {e}");
         return ExitCode::from(2);
     }
@@ -184,48 +211,31 @@ fn handle_add(feature_arg: &str, shell_arg: Option<&str>) -> ExitCode {
 }
 
 fn handle_remove(feature_arg: &str, shell_arg: Option<&str>) -> ExitCode {
-    let Some(home) = home_dir() else {
-        eprintln!("[linthis shell] $HOME / $USERPROFILE not set");
-        return ExitCode::from(1);
+    let ctx = match prepare_context(feature_arg, shell_arg) {
+        Ok(c) => c,
+        Err(code) => return code,
     };
-    let feature = match parse_feature(feature_arg) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("[linthis shell] {e}");
-            return ExitCode::from(1);
-        }
-    };
-    let targets = match resolve_shells(shell_arg) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("[linthis shell] {e}");
-            return ExitCode::from(1);
-        }
-    };
-
-    let state_path = state::default_state_path(&home);
-    let mut s = match state::load(&state_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[linthis shell] {e}");
-            return ExitCode::from(2);
-        }
-    };
+    let mut s = ctx.state;
     let snapshot = s;
 
-    for sh in &targets {
-        set_feature(&mut s, *sh, feature, false);
+    for sh in &ctx.targets {
+        set_feature(&mut s, *sh, ctx.feature, false);
     }
 
-    for sh in &targets {
-        if let Err(e) = apply_shell(*sh, s.flags(*sh), &home) {
-            eprintln!("[linthis shell] {}: remove failed — {e}", sh.key());
-            let _ = state::save(&state_path, &snapshot);
-            return ExitCode::from(1);
+    for sh in &ctx.targets {
+        match apply_shell(*sh, s.flags(*sh), &ctx.home) {
+            Ok(_) => eprintln!("[linthis shell] {}: removed", sh.key()),
+            Err(e) => {
+                eprintln!("[linthis shell] {}: remove failed — {e}", sh.key());
+                if let Err(re) = state::save(&ctx.state_path, &snapshot) {
+                    eprintln!("[linthis shell] warning: state rollback also failed — {re}");
+                }
+                return ExitCode::from(1);
+            }
         }
     }
 
-    if let Err(e) = state::save(&state_path, &s) {
+    if let Err(e) = state::save(&ctx.state_path, &s) {
         eprintln!("[linthis shell] failed to persist state: {e}");
         return ExitCode::from(2);
     }
@@ -262,19 +272,27 @@ fn handle_status() -> ExitCode {
 
 fn handle_init(shell_arg: Option<&str>) -> ExitCode {
     let Some(home) = home_dir() else {
+        eprintln!("[linthis shell] $HOME / $USERPROFILE not set");
         return ExitCode::from(1);
     };
     let state_path = state::default_state_path(&home);
     let s = match state::load(&state_path) {
         Ok(s) => s,
-        Err(_) => return ExitCode::from(2),
+        Err(e) => {
+            eprintln!("[linthis shell] {e}");
+            return ExitCode::from(2);
+        }
     };
     let targets = match resolve_shells(shell_arg) {
         Ok(t) => t,
-        Err(_) => return ExitCode::from(1),
+        Err(e) => {
+            eprintln!("[linthis shell] {e}");
+            return ExitCode::from(1);
+        }
     };
     for sh in targets {
-        if render_and_write_source(sh, s.flags(sh), &home).is_err() {
+        if let Err(e) = render_and_write_source(sh, s.flags(sh), &home) {
+            eprintln!("[linthis shell] {}: init failed — {e}", sh.key());
             return ExitCode::from(1);
         }
     }
