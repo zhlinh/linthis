@@ -1,7 +1,5 @@
 //! Detect the user's current shell from environment / explicit flag.
 
-#![allow(dead_code)]
-
 use super::state::Shell;
 
 /// Detection error. Distinct variants so the caller can craft an actionable

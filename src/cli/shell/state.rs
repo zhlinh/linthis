@@ -8,11 +8,6 @@
 //!
 //! Single source of truth for which features are enabled per shell.
 
-// Items here are forward-declared for later tasks in the shell-integration
-// pipeline; suppressing dead-code warnings at the file level keeps the public
-// surface readable while the consumers land.
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

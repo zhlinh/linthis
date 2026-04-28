@@ -1,7 +1,5 @@
 //! `linthis shell completion <shell>` — emits clap-generated completion script.
 
-#![allow(dead_code)]
-
 use crate::cli::commands::Cli;
 use clap::CommandFactory;
 use clap_complete::Shell as CcShell;
