@@ -14,6 +14,7 @@
 //! that sources the per-shell file.
 
 mod detect;
+mod rc;
 mod render;
 mod state;
 
