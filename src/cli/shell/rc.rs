@@ -109,9 +109,6 @@ pub fn has_unmanaged_source_line(shell: Shell, rc: &Path) -> bool {
 /// outside the marker, returns `UnmanagedSourceLine` and leaves the rc alone.
 pub fn ensure_marker(shell: Shell, rc: &Path) -> std::io::Result<EnsureOutcome> {
     let source_line = rc_source_line(shell);
-    let unmanaged_substring = source_path_for(shell, Path::new("$HOME"))
-        .to_string_lossy()
-        .into_owned();
 
     let existing = match std::fs::read_to_string(rc) {
         Ok(s) => s,
@@ -141,8 +138,8 @@ pub fn ensure_marker(shell: Shell, rc: &Path) -> std::io::Result<EnsureOutcome> 
         return Ok(EnsureOutcome::Idempotent);
     }
 
-    // No marker. Check for unmanaged source line.
-    if existing.contains(&unmanaged_substring) && !existing.contains(MARKER_OPEN) {
+    // No marker. Check for unmanaged source line via shared helper.
+    if has_unmanaged_source_line(shell, rc) {
         return Ok(EnsureOutcome::UnmanagedSourceLine);
     }
 
