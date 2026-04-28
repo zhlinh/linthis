@@ -19,7 +19,7 @@ mod rc;
 mod render;
 mod state;
 
-use std::io;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -307,12 +307,23 @@ fn handle_completion(shell_arg: &str) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let mut out = io::stdout().lock();
-    if let Err(e) = completion::write_completion(shell, &mut out) {
+    // Buffer first so the panic path inside clap_complete::generate
+    // (which unwraps Write errors) can't fire on a closed pipe.
+    let mut buf: Vec<u8> = Vec::new();
+    if let Err(e) = completion::write_completion(shell, &mut buf) {
         eprintln!("[linthis shell] completion failed: {e}");
         return ExitCode::from(1);
     }
-    ExitCode::SUCCESS
+    let mut out = io::stdout().lock();
+    match out.write_all(&buf) {
+        Ok(()) => ExitCode::SUCCESS,
+        // BrokenPipe = downstream consumer closed (head, less, etc.) — fine.
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("[linthis shell] completion write failed: {e}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 pub fn handle_shell_command(action: ShellCommands) -> ExitCode {
