@@ -260,11 +260,18 @@ fn handle_status() -> ExitCode {
     for sh in Shell::ALL {
         let f = s.flags(sh);
         let mark = |on: bool| if on { "on " } else { "off" };
+        let rc_path = rc::rc_path_for(sh, &home);
+        let tag = if rc::has_unmanaged_source_line(sh, &rc_path) {
+            "  (unmanaged source line in rc \u{2014} see warning)"
+        } else {
+            ""
+        };
         println!(
-            "  {:<11}  ac:{}  alias:{}",
+            "  {:<11}  ac:{}  alias:{}{}",
             sh.key(),
             mark(f.ac),
-            mark(f.alias)
+            mark(f.alias),
+            tag
         );
     }
     ExitCode::SUCCESS
