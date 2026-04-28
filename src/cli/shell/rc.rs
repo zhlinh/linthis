@@ -55,7 +55,7 @@ pub fn rc_source_line(shell: Shell) -> String {
     let s = src.to_string_lossy();
     match shell {
         Shell::Bash | Shell::Zsh => format!("[ -f \"{s}\" ] && . \"{s}\""),
-        Shell::Fish => format!("if test -f {s}\n    source {s}\nend"),
+        Shell::Fish => format!("if test -f \"{s}\"\n    source \"{s}\"\nend"),
         Shell::PowerShell => format!("if (Test-Path \"{s}\") {{ . \"{s}\" }}"),
     }
 }
@@ -119,7 +119,11 @@ pub fn ensure_marker(shell: Shell, rc: &Path) -> std::io::Result<EnsureOutcome> 
             return Ok(EnsureOutcome::Idempotent);
         }
         atomic_write(rc, &new)?;
-        return Ok(EnsureOutcome::Idempotent); // content unchanged from the user's POV
+        // We manage the marker block contents — rewriting it (when the user
+        // mangled the inside) is transparent to the caller, so we still report
+        // Idempotent. Callers branch on `Inserted` only when a fresh marker
+        // block was added.
+        return Ok(EnsureOutcome::Idempotent);
     }
 
     // No marker. Check for unmanaged source line.
@@ -156,13 +160,13 @@ pub fn remove_marker(rc: &Path) -> std::io::Result<()> {
         return Ok(());
     };
     // Drop one trailing newline that the open marker introduced.
-    let mut new = String::with_capacity(before.len() + after.len());
-    new.push_str(before.trim_end_matches('\n'));
-    new.push_str(after);
+    let mut joined = String::with_capacity(before.len() + after.len());
+    joined.push_str(before.trim_end_matches('\n'));
+    joined.push_str(after);
     // Collapse double-blank-lines we may have created.
-    while new.contains("\n\n\n") {
-        new = new.replace("\n\n\n", "\n\n");
-    }
+    // `str::replace` is global; one pass is enough because the collapse
+    // pattern can't re-form (no overlap with the result).
+    let new = joined.replace("\n\n\n", "\n\n");
     atomic_write(rc, &new)
 }
 
