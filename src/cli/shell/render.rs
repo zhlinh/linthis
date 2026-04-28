@@ -8,8 +8,6 @@
 //!
 //! Pure functions — caller is responsible for writing to disk.
 
-#![allow(dead_code)]
-
 use super::state::{Shell, ShellFlags};
 
 /// Stable header so generated files are obviously machine-managed.

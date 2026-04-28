@@ -6,8 +6,6 @@
 
 //! Marker-block management for user rc files + atomic source-file writes.
 
-#![allow(dead_code)]
-
 use super::state::Shell;
 use std::path::{Path, PathBuf};
 
