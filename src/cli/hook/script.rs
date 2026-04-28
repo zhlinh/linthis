@@ -1779,8 +1779,7 @@ pub(crate) fn build_git_with_agent_prepush_script(
     let timer_fns = shell_timer_functions();
     let review_box = shell_review_box_fn();
     let fix_commit_mode_section = shell_read_fix_commit_mode("pre_push");
-    let agent_fix_in_wt =
-        shell_prepush_agent_fix_in_wt(linthis_cmd, fix_provider, &agent_fix_cmd);
+    let agent_fix_in_wt = shell_prepush_agent_fix_in_wt(linthis_cmd, fix_provider, &agent_fix_cmd);
     let footer_dirty_post_fix = shell_hook_footer(&FooterCtx {
         outcome: FooterOutcome::Applied,
         hook_type: HookTypeLabel::GitWithAgent,
@@ -2085,7 +2084,8 @@ fn shell_sandbox_agent_fix(
         hook_type: HookTypeLabel::GitWithAgent,
         mode: FixCommitMode::Squash,
         event: &HookEvent::PreCommit,
-        header: "⚠ Agent's fix conflicts with your uncommitted edits. Patch kept — resolve manually.",
+        header:
+            "⚠ Agent's fix conflicts with your uncommitted edits. Patch kept — resolve manually.",
         indent: "       ",
     });
     let sb_setup = shell_sandbox_setup();
@@ -2833,7 +2833,8 @@ fn shell_post_commit_apply_patch(
     footer_conflict: &str,
     save_diff: &str,
 ) -> String {
-    let success_block = shell_post_commit_apply_success(footer_agent, footer_format, footer_conflict, save_diff);
+    let success_block =
+        shell_post_commit_apply_success(footer_agent, footer_format, footer_conflict, save_diff);
     let failure_block = shell_post_commit_apply_failure(footer_conflict);
     format!(
         r#" if [ -s "$_AGENT_PATCH" ]; then
@@ -2922,7 +2923,8 @@ pub(crate) fn build_post_commit_with_agent_script(
         header: "⚠ Your uncommitted changes overlap with auto-fix. Working tree has conflict markers — resolve manually.",
         indent: "   ",
     });
-    let apply_patch = shell_post_commit_apply_patch(&footer_agent, &footer_format, &footer_conflict, &save_diff);
+    let apply_patch =
+        shell_post_commit_apply_patch(&footer_agent, &footer_format, &footer_conflict, &save_diff);
     format!(
         "#!/bin/sh\n\
          {timer}\
@@ -3489,7 +3491,9 @@ mod tests {
         // committing would collapse index into HEAD and leave nothing
         // "staged" for linthis to work on.
         assert!(
-            s.contains("git init -q && git -c user.email=linthis@local -c user.name=linthis add -A"),
+            s.contains(
+                "git init -q && git -c user.email=linthis@local -c user.name=linthis add -A"
+            ),
             "sandbox must init + stage files (no commit): {s}"
         );
         assert!(
@@ -3620,7 +3624,9 @@ mod tests {
             None,
         );
         assert!(
-            s.contains("_SENTINEL=\"$(git rev-parse --git-dir 2>/dev/null)/linthis/pending-fixup.json\""),
+            s.contains(
+                "_SENTINEL=\"$(git rev-parse --git-dir 2>/dev/null)/linthis/pending-fixup.json\""
+            ),
             "sentinel path resolution missing: {s}"
         );
         assert!(
@@ -4315,9 +4321,7 @@ mod tests {
         // Fast-path must come BEFORE the lint check (whole point is to
         // skip it). Anchor: compare position of the fast-path marker
         // and the lint check call.
-        let fast_idx = s
-            .find("Fast-path: HEAD")
-            .expect("fast-path marker missing");
+        let fast_idx = s.find("Fast-path: HEAD").expect("fast-path marker missing");
         let lint_idx = s
             .find("_LINT_OUT=$(linthis")
             .expect("lint check marker missing");
@@ -4372,7 +4376,7 @@ mod tests {
         );
     }
 
-/// Squash/fixup apply must ISOLATE the agent patch from any
+    /// Squash/fixup apply must ISOLATE the agent patch from any
     /// uncommitted user state in the user's WT/index. Old buggy flow
     /// did `git apply <patch>` then `git add <pushed_files>`, which
     /// staged the entire current state of the file (agent's diff +
@@ -4450,8 +4454,7 @@ mod tests {
     /// UNFIXED user HEAD and the agent's fixes never reach anywhere.
     #[test]
     fn pre_push_prompts_forbid_agent_committing_in_worktree() {
-        let fix_prompt =
-            super::agent_fix_prompt_for_event(&HookEvent::PrePush);
+        let fix_prompt = super::agent_fix_prompt_for_event(&HookEvent::PrePush);
         let review_prompt = super::prepush_review_prompt();
 
         for (label, prompt) in [
@@ -4487,8 +4490,7 @@ mod tests {
         // Minor must remain explicitly informational so the agent doesn't
         // bikeshed style-only nits in a long auto-fix loop.
         assert!(
-            prompt.contains("Minor issues are informational")
-                && prompt.contains("DO NOT auto-fix"),
+            prompt.contains("Minor issues are informational") && prompt.contains("DO NOT auto-fix"),
             "review prompt must keep Minor issues informational only: {prompt}"
         );
 
@@ -4519,7 +4521,9 @@ mod tests {
         // Setup writes _LINTHIS_REVIEW_DIR rooted at $_PREPUSH_STUB
         // (the real project slug), not via `git rev-parse --show-toplevel`.
         assert!(
-            s.contains("_LINTHIS_REVIEW_DIR=\"$HOME/.linthis/projects/$_PREPUSH_STUB/review/result\""),
+            s.contains(
+                "_LINTHIS_REVIEW_DIR=\"$HOME/.linthis/projects/$_PREPUSH_STUB/review/result\""
+            ),
             "review dir must be derived from $_PREPUSH_STUB (real project slug): {s}"
         );
 
@@ -4536,8 +4540,7 @@ mod tests {
             "review prompt must reference $_LINTHIS_REVIEW_DIR: {review_prompt}"
         );
         assert!(
-            !review_prompt
-                .contains("_SLUG=$(git rev-parse --show-toplevel"),
+            !review_prompt.contains("_SLUG=$(git rev-parse --show-toplevel"),
             "review prompt must NOT recompute slug from git toplevel \
              (returns wt path inside the hook): {review_prompt}"
         );
@@ -4559,8 +4562,7 @@ mod tests {
     /// result file — it works for any event (pre-commit, pre-push, etc.).
     #[test]
     fn pre_push_fix_prompt_uses_report_show_not_staged_check() {
-        let prompt =
-            super::agent_fix_prompt_for_event(&HookEvent::PrePush);
+        let prompt = super::agent_fix_prompt_for_event(&HookEvent::PrePush);
         // Must point the agent at report show (works regardless of staging).
         assert!(
             prompt.contains("linthis report show"),
@@ -4583,8 +4585,7 @@ mod tests {
             );
         }
         // Pre-commit prompt unchanged — sanity check.
-        let pre_commit_prompt =
-            super::agent_fix_prompt_for_event(&HookEvent::PreCommit);
+        let pre_commit_prompt = super::agent_fix_prompt_for_event(&HookEvent::PreCommit);
         assert!(
             pre_commit_prompt.contains("linthis -s"),
             "pre-commit prompt should still use `linthis -s` (staged files): \
@@ -4606,7 +4607,9 @@ mod tests {
 
         // The dirty post-fix block must check the flag AND mode, then exit 1.
         assert!(
-            s.contains("[ \"$_FIX_MODE\" = \"dirty\" ] && [ \"${_AGENT_FIX_ATTEMPTED:-0}\" = \"1\" ]"),
+            s.contains(
+                "[ \"$_FIX_MODE\" = \"dirty\" ] && [ \"${_AGENT_FIX_ATTEMPTED:-0}\" = \"1\" ]"
+            ),
             "dirty post-fix block must gate on $_FIX_MODE and $_AGENT_FIX_ATTEMPTED: {s}"
         );
 
@@ -4626,7 +4629,9 @@ mod tests {
 
         // The block must exit 1, not fall through to `exit $REVIEW_EXIT`.
         let after_block = &s[dirty_block_idx..];
-        let exit1_idx = after_block.find("exit 1").expect("exit 1 missing in dirty block");
+        let exit1_idx = after_block
+            .find("exit 1")
+            .expect("exit 1 missing in dirty block");
         let next_fi_idx = after_block.find("\nfi").expect("closing fi missing");
         assert!(
             exit1_idx < next_fi_idx,
@@ -5082,9 +5087,9 @@ mod tests {
         assert!(s.contains(
             "fixup  (f) = commit proceeds; a separate auto-fix commit is created post-commit"
         ));
-        assert!(!s.contains(
-            "squash (s) = format auto-staged into your commit — one commit (current)"
-        ));
+        assert!(
+            !s.contains("squash (s) = format auto-staged into your commit — one commit (current)")
+        );
     }
 
     #[test]
@@ -5141,7 +5146,9 @@ mod tests {
             "Files formatted but not staged (dirty mode).",
         );
         assert!(
-            s.contains("✓ Done — review with 'git diff', stage with 'git add', then 'git commit' again."),
+            s.contains(
+                "✓ Done — review with 'git diff', stage with 'git add', then 'git commit' again."
+            ),
             "pre-commit dirty footer must end with an explicit Done marker: {s}"
         );
         // And it's the LAST line of the output.
@@ -5192,7 +5199,9 @@ mod tests {
             "⚠ overlap",
         );
         assert!(
-            conflict.contains("⚠ Conflict — resolve markers in the working tree, then 'git commit' again."),
+            conflict.contains(
+                "⚠ Conflict — resolve markers in the working tree, then 'git commit' again."
+            ),
             "Conflict must carry a ⚠ end-hint: {conflict}"
         );
     }

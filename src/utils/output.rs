@@ -774,10 +774,7 @@ fn fix_commit_mode_suffix(hook_type: Option<&str>) -> String {
 
 /// Collect hook detail flags as (key, value) pairs in display order:
 /// --type, --provider, --model, --fix-commit-mode.
-fn collect_hook_details(
-    hook_path: &std::path::Path,
-    mode_suffix: &str,
-) -> Vec<(String, String)> {
+fn collect_hook_details(hook_path: &std::path::Path, mode_suffix: &str) -> Vec<(String, String)> {
     let mut items = Vec::new();
     if let Some(t) = extract_hook_script_type(hook_path) {
         items.push(("--type".to_string(), t));
@@ -855,11 +852,7 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
             }
         })
     {
-        lines.push(
-            format!("  Global: {}", p.display())
-                .dimmed()
-                .to_string(),
-        );
+        lines.push(format!("  Global: {}", p.display()).dimmed().to_string());
         lines.extend(build_hook_detail_lines(&p, &mode_suffix));
     }
 
@@ -889,11 +882,7 @@ fn format_hook_paths_footer(hook_type: Option<&str>) -> String {
             }
         })
     {
-        lines.push(
-            format!("  Local:  {}", p.display())
-                .dimmed()
-                .to_string(),
-        );
+        lines.push(format!("  Local:  {}", p.display()).dimmed().to_string());
         lines.extend(build_hook_detail_lines(&p, &mode_suffix));
     }
 
@@ -1043,11 +1032,7 @@ fn format_hook_success_box(
         ));
         output.push_str(&format!(
             "{}\n",
-            ctx.pad_line_bordered(
-                "Pre-change state saved in stash.",
-                0,
-                colored::Color::Green,
-            )
+            ctx.pad_line_bordered("Pre-change state saved in stash.", 0, colored::Color::Green,)
         ));
         output.push_str(&format!(
             "{}\n",
@@ -1257,10 +1242,7 @@ fn append_issue_summary(output: &mut String, issues: &[&LintIssue], ctx: &HookBo
         if files_with_issues == 1 { "" } else { "s" },
     );
     let border = colored::Color::Red;
-    output.push_str(&format!(
-        "{}\n",
-        ctx.pad_line_bordered(&summary, 0, border)
-    ));
+    output.push_str(&format!("{}\n", ctx.pad_line_bordered(&summary, 0, border)));
     output.push_str(&format!("{}\n", ctx.pad_line_bordered("", 0, border)));
 }
 
@@ -1631,11 +1613,7 @@ BEGIN { ESC = sprintf("\033"); RESET = ESC "[0m"; RESET_RE = ESC "\\[0m"; WHITE 
             ..Default::default()
         };
         for width in [50_u32, 60, 80, 100, 120] {
-            let out = format_result_hook_with_width(
-                &result,
-                Some("post-commit"),
-                Some(width),
-            );
+            let out = format_result_hook_with_width(&result, Some("post-commit"), Some(width));
             // No two vertical bars may touch in any line.
             for (idx, line) in out.lines().enumerate() {
                 assert!(
@@ -1646,11 +1624,7 @@ BEGIN { ESC = sprintf("\033"); RESET = ESC "[0m"; RESET_RE = ESC "\\[0m"; WHITE 
             // The empty padding row between summary and issue list must have
             // exactly `content_width` spaces between the two sidebars.
             let content_width = (width as usize) - 4;
-            let expected_empty = format!(
-                "│ {}{} │",
-                "",
-                " ".repeat(content_width)
-            );
+            let expected_empty = format!("│ {}{} │", "", " ".repeat(content_width));
             // Strip ANSI colour codes before matching.
             let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
             let stripped: String = out
@@ -1760,7 +1734,10 @@ BEGIN { ESC = sprintf("\033"); RESET = ESC "[0m"; RESET_RE = ESC "\\[0m"; WHITE 
         let model = extract_hook_script_model(&tmp);
         let _ = std::fs::remove_file(&tmp);
 
-        assert!(provider.is_none(), "should not confuse --provider-args with --provider");
+        assert!(
+            provider.is_none(),
+            "should not confuse --provider-args with --provider"
+        );
         assert_eq!(model.as_deref(), Some("glm"));
     }
 }

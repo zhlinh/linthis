@@ -170,10 +170,12 @@ pub(crate) fn handle_hook_run(
 
     let already_running = std::env::vars().any(|(k, _)| k.starts_with(LINTHIS_HOOK_RUNNING_PREFIX));
 
-    let script = match build_hook_script_for_run(event, hook_type, provider, provider_args, already_running) {
-        Ok(s) => s,
-        Err(code) => return code,
-    };
+    let script =
+        match build_hook_script_for_run(event, hook_type, provider, provider_args, already_running)
+        {
+            Ok(s) => s,
+            Err(code) => return code,
+        };
 
     // Skip hook entirely during rebase/merge/cherry-pick
     if is_rebase_in_progress() {

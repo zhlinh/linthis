@@ -231,11 +231,8 @@ fn apply_fix_commit_mode(mode: &str, global: bool) -> Result<(), ExitCode> {
         canonical,
         global,
     );
-    let _ = linthis::config::cli::handle_config_set(
-        "hook.pre_push.fix_commit_mode",
-        canonical,
-        global,
-    );
+    let _ =
+        linthis::config::cli::handle_config_set("hook.pre_push.fix_commit_mode", canonical, global);
     Ok(())
 }
 
