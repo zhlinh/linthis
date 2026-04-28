@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-04-28
+
+### Added
+
+- macOS bash_profile shim sources .bashrc for login shells
+- status surfaces unmanaged source line in rc
+- wire add/remove/status/init/completion handlers
+- clap_complete-based completion-script generator
+- marker-block rc-file edits with atomic write
+- render state to per-shell source-file content
+- add shell detection from $SHELL and --shell flag
+- improve StateError context and document atomic save invariant
+- add ShellState type and TOML round-trip
+- scaffold linthis shell subcommand tree
+
+### Fixed
+
+- cargo fmt + restore stop-hook check at project scope
+- status surfaces global agent skills in dedicated subsection
+- surface non-NotFound I/O errors in bash_profile shim writer
+- handle BrokenPipe gracefully in completion stdout
+- document rollback scope, surface rollback failures, symmetric messages
+- tighten rc.rs comment, replace loop, quote fish path
+- strip leading whitespace from generated header
+
+### Changed
+
+- consolidate 7 duplicate home_dir helpers into utils::home_dir
+- self-contained status hint, dedupe detection logic
+- tighten state.rs visibility and lint allows
+
 ## [0.21.0] - 2026-04-27
 
 ### Added
