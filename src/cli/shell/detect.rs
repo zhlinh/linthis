@@ -18,7 +18,10 @@ impl std::fmt::Display for DetectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DetectError::Unset => {
-                write!(f, "could not detect shell (set $SHELL or pass --shell <name>)")
+                write!(
+                    f,
+                    "could not detect shell (set $SHELL or pass --shell <name>)"
+                )
             }
             DetectError::Unrecognized(s) => {
                 write!(
