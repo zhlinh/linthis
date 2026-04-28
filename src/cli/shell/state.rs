@@ -41,6 +41,7 @@ impl Shell {
         }
     }
 
+    /// All supported shells, in display/iteration order.
     pub const ALL: [Shell; 4] = [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::PowerShell];
 }
 
@@ -103,7 +104,7 @@ pub enum StateError {
 impl std::fmt::Display for StateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StateError::Io(e) => write!(f, "{e}"),
+            StateError::Io(e) => write!(f, "shell-state I/O error: {e}"),
             StateError::Corrupt(s) => write!(f, "shell-state.toml is corrupt: {s}"),
         }
     }
@@ -133,7 +134,11 @@ pub fn save(path: &Path, state: &ShellState) -> Result<(), StateError> {
     }
     let body = toml::to_string_pretty(state)
         .map_err(|e| StateError::Corrupt(format!("failed to serialize: {e}")))?;
-    // Atomic write: temp file + rename.
+    // Atomic save: write to .toml.tmp first, then rename over the real file.
+    // If the process dies between write and rename, the orphaned .tmp file is
+    // harmless — `load` only reads `.toml`, and the next `save` will overwrite
+    // the temp before renaming. Same-directory write guarantees same-device
+    // rename, so cross-device rename failures are not possible here.
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, body.as_bytes()).map_err(StateError::Io)?;
     std::fs::rename(&tmp, path).map_err(StateError::Io)?;
