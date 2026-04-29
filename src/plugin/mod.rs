@@ -112,7 +112,7 @@ pub enum PluginError {
         current: String,
     },
 
-    #[error("Unknown plugin: '{name}'. Use a full Git URL or one of: official")]
+    #[error("{}", format_unknown_plugin(name))]
     UnknownPlugin { name: String },
 
     #[error("Network error while fetching plugin: {message}")]
@@ -142,6 +142,63 @@ pub enum PluginError {
 
 pub type Result<T> = std::result::Result<T, PluginError>;
 
+/// Format the `UnknownPlugin` error message, adding a helpful hint when the
+/// name appears to have been polluted by a shell-wrapping `git` command
+/// (e.g. `[WARN] ... \n<actual-url>`).
+fn format_unknown_plugin(name: &str) -> String {
+    if name.contains('\n') || name.contains('\r') || name.contains("[WARN]") {
+        let preview: String = name.chars().take(80).collect();
+        format!(
+            "Unknown plugin (with garbled name, possibly from a shell-wrapped git command). \
+             Preview: {:?}. \
+             Check if your shell wraps `git` to print warnings to stdout — that breaks linthis's \
+             plugin URL parsing. Common fix: ensure git auth is configured (SSH key or cached \
+             credential), so the wrapper doesn't emit warnings.",
+            preview
+        )
+    } else {
+        format!("Unknown plugin: '{name}'. Use a full Git URL or one of: official")
+    }
+}
+
+/// Sanitize a `name_or_url` input that may have been polluted by an
+/// upstream shell wrapper (e.g., a Tencent-internal git proxy printing
+/// `[WARN] ... \n<actual-url>`). Returns the cleaned input plus an
+/// optional warning string for the caller to log.
+///
+/// Heuristic: if the input has multiple non-empty lines, take the LAST
+/// line that contains either `://` or starts with `git@` (a real URL),
+/// or any non-empty line if no URL-shaped line is found. This matches
+/// the typical pattern of "warning text on first line, real URL on
+/// last line".
+fn sanitize_plugin_input(raw: &str) -> (String, Option<String>) {
+    let trimmed = raw.trim();
+    if !trimmed.contains('\n') && !trimmed.contains('\r') {
+        return (trimmed.to_string(), None);
+    }
+    // Multi-line — try to recover the actual URL/name.
+    let lines: Vec<&str> = trimmed
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let recovered = lines
+        .iter()
+        .rev()
+        .find(|l| l.contains("://") || l.starts_with("git@") || l.starts_with('/'))
+        .copied()
+        .or_else(|| lines.last().copied())
+        .unwrap_or(trimmed)
+        .to_string();
+    let warning = format!(
+        "[plugin] sanitized multi-line input (kept last URL-like line). \
+         If this surprises you, check whether your shell wraps `git` to \
+         emit warnings on stdout. Raw input was: {:?}",
+        raw
+    );
+    (recovered, Some(warning))
+}
+
 impl From<crate::LintisError> for PluginError {
     fn from(err: crate::LintisError) -> Self {
         match err {
@@ -170,6 +227,11 @@ pub struct PluginSource {
 impl PluginSource {
     /// Create a new plugin source from a name (registry lookup), URL, or local path
     pub fn new(name_or_url: &str) -> Self {
+        let (cleaned, warning) = sanitize_plugin_input(name_or_url);
+        if let Some(w) = warning {
+            eprintln!("{}", w);
+        }
+        let name_or_url = cleaned.as_str();
         if name_or_url.contains("://") || name_or_url.starts_with("git@") {
             // It's a URL
             Self {
@@ -431,5 +493,78 @@ mod tests {
         let msg = format!("{}", err);
         assert!(msg.contains("Invalid plugin manifest"));
         assert!(msg.contains("manifest.toml"));
+    }
+
+    // ==================== sanitize_plugin_input tests ====================
+
+    #[test]
+    fn sanitize_plugin_input_passthrough_on_clean_url() {
+        let (out, warn) = sanitize_plugin_input("https://github.com/user/repo.git");
+        assert_eq!(out, "https://github.com/user/repo.git");
+        assert!(warn.is_none());
+    }
+
+    #[test]
+    fn sanitize_plugin_input_trims_whitespace() {
+        let (out, warn) = sanitize_plugin_input("  https://example.com/r.git  ");
+        assert_eq!(out, "https://example.com/r.git");
+        assert!(warn.is_none(), "no newline -> no warning");
+    }
+
+    #[test]
+    fn sanitize_plugin_input_recovers_url_from_warn_prefix() {
+        let raw =
+            "[WARN] HTTPS auth required (HTTP 401), falling back to SSH\ngit@example.com:user/repo.git";
+        let (out, warn) = sanitize_plugin_input(raw);
+        assert_eq!(out, "git@example.com:user/repo.git");
+        assert!(warn.is_some(), "should warn on cleanup");
+        let w = warn.unwrap();
+        assert!(w.contains("sanitized multi-line input"));
+    }
+
+    #[test]
+    fn sanitize_plugin_input_picks_last_url_line() {
+        let raw = "warning 1\nwarning 2\nhttps://github.com/u/r.git";
+        let (out, _) = sanitize_plugin_input(raw);
+        assert_eq!(out, "https://github.com/u/r.git");
+    }
+
+    #[test]
+    fn sanitize_plugin_input_falls_back_to_last_line_when_no_url_shape() {
+        let raw = "warning\nmy-plugin";
+        let (out, _) = sanitize_plugin_input(raw);
+        assert_eq!(out, "my-plugin");
+    }
+
+    #[test]
+    fn plugin_source_new_recovers_from_polluted_url() {
+        let raw = "[WARN] auth failed\ngit@github.com:u/r.git";
+        let s = PluginSource::new(raw);
+        assert_eq!(s.url.as_deref(), Some("git@github.com:u/r.git"));
+        assert!(
+            !s.name.contains("[WARN]"),
+            "name should not have warn prefix: {}",
+            s.name
+        );
+    }
+
+    #[test]
+    fn unknown_plugin_error_renders_garbled_name_with_hint() {
+        let err = PluginError::UnknownPlugin {
+            name: "[WARN] auth\ngit@x:y/z.git".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("garbled name"), "{msg}");
+        assert!(msg.contains("shell wraps `git`"), "{msg}");
+    }
+
+    #[test]
+    fn unknown_plugin_error_renders_clean_name_simply() {
+        let err = PluginError::UnknownPlugin {
+            name: "missing-plugin".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("'missing-plugin'"), "{msg}");
+        assert!(!msg.contains("garbled"), "{msg}");
     }
 }
