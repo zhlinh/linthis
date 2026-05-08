@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-05-08
+
+### Fixed
+
+- post-commit gates strictly on sentinel; sentinel writes are loud
+
 ## [0.22.1] - 2026-04-29
 
 ### Fixed
