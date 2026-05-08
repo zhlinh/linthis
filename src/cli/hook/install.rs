@@ -336,7 +336,9 @@ pub(crate) fn handle_hook_install(params: HookInstallParams) -> ExitCode {
 
         // Auto-install post-commit hook alongside pre-commit for git/git-with-agent
         // types to support the fixup fix_commit_mode. The post-commit script self-guards
-        // and exits immediately unless fix_commit_mode == "fixup".
+        // on the pre-commit fixup sentinel (.git/linthis/pending-fixup.json) and exits
+        // immediately when it is absent — so non-fixup modes and `git commit --no-verify`
+        // (which bypasses pre-commit, leaving no sentinel) both produce a clean no-op.
         let is_git_type = matches!(hook_type, HookTool::Git | HookTool::GitWithAgent);
         let has_pre_commit = hook_events
             .iter()
