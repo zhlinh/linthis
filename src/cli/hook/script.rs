@@ -938,7 +938,7 @@ pub(crate) fn shell_hook_footer(ctx: &FooterCtx<'_>) -> String {
 /// Shell snippet that writes the pre-commit → post-commit fixup sentinel
 /// at `.git/linthis/pending-fixup.json`.
 ///
-/// The post-commit agent hook (built by
+/// The post-commit hook (both [`build_post_commit_script`] and
 /// [`build_post_commit_with_agent_script`]) reads this file as its
 /// activation gate: its existence means "pre-commit fixup mode ran, now
 /// do the auto-fix commit". The file's CONTENTS are informational only
@@ -947,20 +947,33 @@ pub(crate) fn shell_hook_footer(ctx: &FooterCtx<'_>) -> String {
 ///
 /// Path: resolved via `git rev-parse --git-dir` so it works in both
 /// normal repositories and worktrees.
+///
+/// Failure mode: `mkdir` and the JSON write are LOUD — they print a
+/// warning to stderr instead of silently swallowing errors. Without this,
+/// a read-only / full / permission-broken `.git` would silently skip
+/// post-commit fixup work; the user needs to see the warning to fix the
+/// underlying environment problem.
 fn shell_write_pending_fixup_sentinel(indent: &str) -> String {
     format!(
-        "{i}# Write post-commit fixup sentinel. The post-commit agent hook\n\
-         {i}# gates its activation on the presence of this file.\n\
+        "{i}# Write post-commit fixup sentinel. The post-commit hook gates\n\
+         {i}# its activation on the presence of this file. Failures here are\n\
+         {i}# loud (printed to stderr) so a broken .git won't silently skip\n\
+         {i}# the post-commit fixup work.\n\
          {i}_GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)\n\
          {i}if [ -n \"$_GIT_DIR\" ]; then\n\
-         {i}  mkdir -p \"$_GIT_DIR/linthis\" 2>/dev/null\n\
-         {i}  {{\n\
-         {i}    echo '{{'\n\
-         {i}    echo '  \"event\": \"pre_commit\",'\n\
-         {i}    echo '  \"mode\": \"fixup\",'\n\
-         {i}    printf '  \"created_at\": \"%s\"\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)\"\n\
-         {i}    echo '}}'\n\
-         {i}  }} > \"$_GIT_DIR/linthis/pending-fixup.json\" 2>/dev/null\n\
+         {i}  if ! mkdir -p \"$_GIT_DIR/linthis\"; then\n\
+         {i}    printf >&2 '[linthis] warning: failed to create %s/linthis (post-commit fixup will skip)\\n' \"$_GIT_DIR\"\n\
+         {i}  else\n\
+         {i}    if ! {{\n\
+         {i}      echo '{{'\n\
+         {i}      echo '  \"event\": \"pre_commit\",'\n\
+         {i}      echo '  \"mode\": \"fixup\",'\n\
+         {i}      printf '  \"created_at\": \"%s\"\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)\"\n\
+         {i}      echo '}}'\n\
+         {i}    }} > \"$_GIT_DIR/linthis/pending-fixup.json\"; then\n\
+         {i}      printf >&2 '[linthis] warning: failed to write %s/linthis/pending-fixup.json (post-commit fixup will skip)\\n' \"$_GIT_DIR\"\n\
+         {i}    fi\n\
+         {i}  fi\n\
          {i}fi\n",
         i = indent,
     )
@@ -2701,22 +2714,34 @@ fn shell_read_fix_commit_mode(config_section: &str) -> String {
 }
 
 /// Build a post-commit hook script for fixup fix mode.
+///
+/// Activation gate: runs ONLY when the pre-commit fixup sentinel
+/// exists (`.git/linthis/pending-fixup.json`, written by pre-commit
+/// fixup mode — step 5). Without the sentinel, pre-commit did not run
+/// (e.g. `git commit --no-verify` bypassed it) and there's nothing to
+/// fix up. The sentinel is consumed at the end regardless of outcome
+/// so a broken run doesn't loop forever.
 pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
     let timer_fns = shell_timer_functions();
-    let fix_commit_mode_section = shell_read_fix_commit_mode("pre_commit");
     let restage_scope = shell_restage_committed_scope(" ");
     format!(
         "#!/bin/sh\n\
          {timer}\
-         # Read fix_commit_mode — only activate in fixup mode\n\
-         {fix_commit_mode}\
-         if [ \"$_FIX_MODE\" != \"fixup\" ]; then\n\
+         # Activation gate: the pre-commit fixup sentinel.\n\
+         # Sentinel presence = pre-commit fixup branch ran and deferred\n\
+         # work to us. Without it (e.g. when --no-verify bypassed\n\
+         # pre-commit) there's nothing to fix up.\n\
+         _SENTINEL=\"$(git rev-parse --git-dir 2>/dev/null)/linthis/pending-fixup.json\"\n\
+         if [ ! -f \"$_SENTINEL\" ]; then\n\
          \x20 exit 0\n\
          fi\n\
          \n\
          # Get files from the commit that was just created\n\
          _FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)\n\
-         [ -z \"$_FILES\" ] && exit 0\n\
+         if [ -z \"$_FILES\" ]; then\n\
+         \x20 [ -f \"$_SENTINEL\" ] && rm -f \"$_SENTINEL\"\n\
+         \x20 exit 0\n\
+         fi\n\
          \n\
          # Build -i <file> args and run linthis once for all committed files\n\
          # (single invocation = single [Post-commit] output box)\n\
@@ -2735,9 +2760,10 @@ pub(crate) fn build_post_commit_script(linthis_cmd: &str) -> String {
          \x20 # consoles don't render it red.\n\
          \x20 git commit --no-verify -m \"fix(linthis): auto-fix lint issues\" 2>&1 | _linthis_paint\n\
          {footer}\
-         fi\n",
+         fi\n\
+         # Consume the sentinel regardless of outcome — no retry on failure.\n\
+         [ -f \"$_SENTINEL\" ] && rm -f \"$_SENTINEL\"\n",
         timer = timer_fns,
-        fix_commit_mode = fix_commit_mode_section,
         linthis = linthis_cmd,
         restage = restage_scope,
         footer = shell_hook_footer(&FooterCtx {
@@ -2881,18 +2907,19 @@ _POST_COMMIT_RESET_EOF_
 /// torn down, and `git apply --3way --index` replays the patch onto the
 /// real root where `git commit` creates the fixup commit.
 ///
-/// Activation gate: runs when EITHER the pre-commit sentinel exists
-/// (`.git/linthis/pending-fixup.json`, written by pre-commit fixup
-/// mode — step 5) OR the global `_FIX_MODE == fixup` is set. The
-/// sentinel is consumed at the end regardless of outcome (no retry on
-/// failure) so a broken run doesn't loop forever.
+/// Activation gate: runs ONLY when the pre-commit fixup sentinel
+/// exists (`.git/linthis/pending-fixup.json`, written by pre-commit
+/// fixup mode — step 5). Without the sentinel, pre-commit did not
+/// run (e.g. `git commit --no-verify` bypassed it) and there's
+/// nothing to fix up. The sentinel is consumed at the end regardless
+/// of outcome (no retry on failure) so a broken run doesn't loop
+/// forever.
 pub(crate) fn build_post_commit_with_agent_script(
     linthis_fmt_cmd: &str,
     fix_provider: &AgentFixProvider,
     provider_args: Option<&str>,
 ) -> String {
     let timer_fns = shell_timer_functions();
-    let fix_commit_mode_section = shell_read_fix_commit_mode("pre_commit");
     let prompt = agent_fix_prompt_for_post_commit();
     let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt, provider_args);
     let error_msg = "Lint issues remain after formatting";
@@ -2928,10 +2955,12 @@ pub(crate) fn build_post_commit_with_agent_script(
     format!(
         "#!/bin/sh\n\
          {timer}\
-         # Read fix_commit_mode (config fallback) and look for the pre-commit sentinel.\n\
-         {fix_commit_mode}\
+         # Activation gate: the pre-commit fixup sentinel.\n\
+         # Sentinel presence = pre-commit fixup branch ran and deferred\n\
+         # work to us. Without it (e.g. when --no-verify bypassed\n\
+         # pre-commit) there's nothing to fix up.\n\
          _SENTINEL=\"$(git rev-parse --git-dir 2>/dev/null)/linthis/pending-fixup.json\"\n\
-         if [ ! -f \"$_SENTINEL\" ] && [ \"$_FIX_MODE\" != \"fixup\" ]; then\n\
+         if [ ! -f \"$_SENTINEL\" ]; then\n\
          \x20 exit 0\n\
          fi\n\
          \n\
@@ -2983,7 +3012,6 @@ pub(crate) fn build_post_commit_with_agent_script(
          # Consume the sentinel regardless of outcome — no retry on failure.\n\
          [ -f \"$_SENTINEL\" ] && rm -f \"$_SENTINEL\"\n",
         timer = timer_fns,
-        fix_commit_mode = fix_commit_mode_section,
         linthis_fmt = linthis_fmt_cmd,
         agent_check = agent_check,
         agent_block = agent_block,
@@ -3611,13 +3639,59 @@ mod tests {
         );
     }
 
-    /// Sentinel-based activation gate: post-commit fires when the
-    /// `.git/linthis/pending-fixup.json` file exists (written by the
-    /// pre-commit fixup path in step 5) OR when `_FIX_MODE == fixup`
-    /// is set globally (config fallback). The sentinel is consumed at
-    /// the end regardless of outcome — no retry on failure.
+    /// Sentinel write must FAIL LOUDLY. Without this, a read-only or
+    /// permission-broken `.git` directory would silently swallow the
+    /// `mkdir`/redirect failures, leaving no sentinel and no signal —
+    /// post-commit would skip fixup work and the user would have no way
+    /// to know why the auto-format never happened.
+    ///
+    /// This test guards two regressions:
+    ///   1. The mkdir/write commands must NOT redirect stderr to /dev/null.
+    ///   2. They must emit a `[linthis] warning:` to stderr on failure.
     #[test]
-    fn post_commit_with_agent_script_gates_on_sentinel_or_fix_mode() {
+    fn pending_fixup_sentinel_write_fails_loudly() {
+        let snippet = shell_write_pending_fixup_sentinel(" ");
+
+        // No silent fallback — the mkdir and the JSON write must be loud.
+        assert!(
+            !snippet.contains("mkdir -p \"$_GIT_DIR/linthis\" 2>/dev/null"),
+            "mkdir of $_GIT_DIR/linthis must not silently swallow errors: {snippet}"
+        );
+        assert!(
+            !snippet.contains("> \"$_GIT_DIR/linthis/pending-fixup.json\" 2>/dev/null"),
+            "sentinel JSON write must not silently swallow errors: {snippet}"
+        );
+
+        // Both failure paths emit a stderr warning the user can act on.
+        assert!(
+            snippet.contains(
+                "printf >&2 '[linthis] warning: failed to create %s/linthis (post-commit fixup will skip)\\n'"
+            ),
+            "mkdir failure must print a stderr warning: {snippet}"
+        );
+        assert!(
+            snippet.contains(
+                "printf >&2 '[linthis] warning: failed to write %s/linthis/pending-fixup.json (post-commit fixup will skip)\\n'"
+            ),
+            "JSON write failure must print a stderr warning: {snippet}"
+        );
+
+        // The `date` fallback inside `created_at` is allowed to be silent —
+        // it's a cosmetic field and `date` without args is a hard fallback.
+        assert!(
+            snippet.contains("date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date"),
+            "created_at timestamp fallback should remain: {snippet}"
+        );
+    }
+
+    /// Sentinel-only activation gate: post-commit fires ONLY when
+    /// `.git/linthis/pending-fixup.json` exists (written by the
+    /// pre-commit fixup path in step 5). This makes `git commit
+    /// --no-verify` a clean opt-out — without pre-commit running, no
+    /// sentinel is written, so post-commit cleanly exits 0. The sentinel
+    /// is consumed at the end regardless of outcome — no retry on failure.
+    #[test]
+    fn post_commit_with_agent_script_gates_on_sentinel_only() {
         let s = build_post_commit_with_agent_script(
             "linthis -c -f --hook-event=post-commit",
             &AgentFixProvider::Claude,
@@ -3630,8 +3704,40 @@ mod tests {
             "sentinel path resolution missing: {s}"
         );
         assert!(
-            s.contains("if [ ! -f \"$_SENTINEL\" ] && [ \"$_FIX_MODE\" != \"fixup\" ]; then"),
-            "sentinel-or-fix_mode activation gate missing: {s}"
+            s.contains("if [ ! -f \"$_SENTINEL\" ]; then"),
+            "sentinel-only activation gate missing: {s}"
+        );
+        assert!(
+            !s.contains("\"$_FIX_MODE\" != \"fixup\""),
+            "post-commit must not gate on _FIX_MODE — it lets --no-verify leak through: {s}"
+        );
+        assert!(
+            s.contains("[ -f \"$_SENTINEL\" ] && rm -f \"$_SENTINEL\""),
+            "sentinel consumption on exit missing: {s}"
+        );
+    }
+
+    /// The plain (non-agent) post-commit script must use the same
+    /// sentinel-only gate so `--no-verify` cleanly bypasses both
+    /// flavors. Before this fix the plain script gated only on
+    /// `_FIX_MODE`, which meant fixup-mode users still ran a stray
+    /// post-commit even after `--no-verify`.
+    #[test]
+    fn post_commit_script_gates_on_sentinel_only() {
+        let s = build_post_commit_script("linthis -c -f --hook-event=post-commit");
+        assert!(
+            s.contains(
+                "_SENTINEL=\"$(git rev-parse --git-dir 2>/dev/null)/linthis/pending-fixup.json\""
+            ),
+            "sentinel path resolution missing: {s}"
+        );
+        assert!(
+            s.contains("if [ ! -f \"$_SENTINEL\" ]; then"),
+            "sentinel-only activation gate missing: {s}"
+        );
+        assert!(
+            !s.contains("\"$_FIX_MODE\" != \"fixup\""),
+            "plain post-commit must not gate on _FIX_MODE — it lets --no-verify leak through: {s}"
         );
         assert!(
             s.contains("[ -f \"$_SENTINEL\" ] && rm -f \"$_SENTINEL\""),
