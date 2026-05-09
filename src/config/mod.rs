@@ -2170,6 +2170,62 @@ sources = [{{ name = "test-plugin", url = "{}" }}]
         project_dir
     }
 
+    /// Serialize tests that read or mutate `LINTHIS_TEST_PLUGIN_CACHE_DIR`.
+    ///
+    /// Cargo runs tests in parallel by default. `Config::load_merged`
+    /// reads this env var, so any two tests that race on it can clobber
+    /// each other: test A sets `/A/path`, test B sets `/B/path`, test A
+    /// calls `load_merged` and sees B's path, asserts on data that
+    /// isn't there. Holding this mutex for the full lifetime of the
+    /// guard restores test isolation.
+    static PLUGIN_CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// RAII guard: lock the test mutex, set `LINTHIS_TEST_PLUGIN_CACHE_DIR`
+    /// to `path` (or remove it on `new_unset`), restore the original value
+    /// on drop. Even tests that don't *set* the env var should hold a
+    /// guard, because they still *read* it via `Config::load_merged` and
+    /// could otherwise see a sibling test's value.
+    struct PluginCacheEnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        original: Option<String>,
+    }
+
+    impl PluginCacheEnvGuard {
+        fn new(path: &std::path::Path) -> Self {
+            let lock = PLUGIN_CACHE_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let original = std::env::var("LINTHIS_TEST_PLUGIN_CACHE_DIR").ok();
+            std::env::set_var("LINTHIS_TEST_PLUGIN_CACHE_DIR", path);
+            Self {
+                _lock: lock,
+                original,
+            }
+        }
+
+        /// Acquire the lock and ensure the env var is unset for this test.
+        fn new_unset() -> Self {
+            let lock = PLUGIN_CACHE_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let original = std::env::var("LINTHIS_TEST_PLUGIN_CACHE_DIR").ok();
+            std::env::remove_var("LINTHIS_TEST_PLUGIN_CACHE_DIR");
+            Self {
+                _lock: lock,
+                original,
+            }
+        }
+    }
+
+    impl Drop for PluginCacheEnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => std::env::set_var("LINTHIS_TEST_PLUGIN_CACHE_DIR", v),
+                None => std::env::remove_var("LINTHIS_TEST_PLUGIN_CACHE_DIR"),
+            }
+        }
+    }
+
     #[test]
     fn test_fn_length_plugin_linthis_toml_loaded() {
         // Plugin linthis.toml sets fn_length=60; default is 80.
@@ -2178,10 +2234,10 @@ sources = [{{ name = "test-plugin", url = "{}" }}]
             setup_fake_plugin_cache("[cpp]\nfn_length = 60\n[oc]\nfn_length = 60\n");
         let project_dir = setup_project_with_plugin("", &url);
 
-        // Override cache dir so load_plugin_linthis_toml finds our fake plugin
-        std::env::set_var("LINTHIS_TEST_PLUGIN_CACHE_DIR", cache_root.path());
+        // Override cache dir so load_plugin_linthis_toml finds our fake plugin.
+        // Guard serializes against sibling tests that touch the same env var.
+        let _guard = PluginCacheEnvGuard::new(cache_root.path());
         let merged = Config::load_merged(project_dir.path());
-        std::env::remove_var("LINTHIS_TEST_PLUGIN_CACHE_DIR");
 
         assert_eq!(
             merged
@@ -2210,9 +2266,8 @@ sources = [{{ name = "test-plugin", url = "{}" }}]
         let project_dir =
             setup_project_with_plugin("\n[cpp]\nfn_length = 40\n[oc]\nfn_length = 40\n", &url);
 
-        std::env::set_var("LINTHIS_TEST_PLUGIN_CACHE_DIR", cache_root.path());
+        let _guard = PluginCacheEnvGuard::new(cache_root.path());
         let merged = Config::load_merged(project_dir.path());
-        std::env::remove_var("LINTHIS_TEST_PLUGIN_CACHE_DIR");
 
         assert_eq!(
             merged
@@ -2239,12 +2294,10 @@ sources = [{{ name = "test-plugin", url = "{}" }}]
         // Isolate from real plugin cache: point LINTHIS_TEST_PLUGIN_CACHE_DIR to
         // an empty temp dir so globally-installed plugins don't leak into the test.
         let empty_cache = tempfile::TempDir::new().unwrap();
-        std::env::set_var("LINTHIS_TEST_PLUGIN_CACHE_DIR", empty_cache.path());
+        let _guard = PluginCacheEnvGuard::new(empty_cache.path());
 
         let project_dir = tempfile::TempDir::new().unwrap();
         let merged = Config::load_merged(project_dir.path());
-
-        std::env::remove_var("LINTHIS_TEST_PLUGIN_CACHE_DIR");
 
         // No plugin, no config → None (CppChecker::new() will unwrap_or(80))
         assert!(
@@ -2261,6 +2314,10 @@ sources = [{{ name = "test-plugin", url = "{}" }}]
     #[test]
     fn test_fn_length_project_config_without_plugin() {
         // Only project config.toml sets fn_length=50; no plugin.
+        // Hold the guard with the env var unset so a sibling test that
+        // pointed it at a fake cache can't bleed into this read.
+        let _guard = PluginCacheEnvGuard::new_unset();
+
         let project_dir = tempfile::TempDir::new().unwrap();
         let linthis_dir = project_dir.path().join(".linthis");
         std::fs::create_dir_all(&linthis_dir).unwrap();
