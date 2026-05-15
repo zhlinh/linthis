@@ -1937,7 +1937,7 @@ fn shell_worktree_agent_fix(
          {agent_hint}\
          \x20\x20\x20\x20\x20 # Re-stage files modified by agent\n\
          \x20\x20\x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | while IFS= read -r _SF; do [ -z \"$_SF\" ] && continue; if [ -e \"$_SF\" ]; then git add -- \"$_SF\" 2>/dev/null || true; else echo \"[linthis] Warning: skipped missing file: $_SF\" >&2; fi; done\n\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20\x20\x20 # Re-verify after agent fix\n\
          \x20\x20\x20\x20\x20 printf \"${{_LINTHIS_W}}[linthis] Re-verifying...${{_LINTHIS_R}}\\n\"\n\
@@ -2121,7 +2121,7 @@ fn shell_sandbox_agent_fix(
          {sb_capture_apply}\
          {agent_hint}\
          \x20\x20\x20\x20\x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20\x20\x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | while IFS= read -r _SF; do [ -z \"$_SF\" ] && continue; if [ -e \"$_SF\" ]; then git add -- \"$_SF\" 2>/dev/null || true; else echo \"[linthis] Warning: skipped missing file: $_SF\" >&2; fi; done\n\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20\x20\x20 printf \"${{_LINTHIS_W}}[linthis] Re-verifying...${{_LINTHIS_R}}\\n\"\n\
          \x20\x20\x20\x20\x20 _linthis_run_painted $LINTHIS_CMD\n\
@@ -2152,7 +2152,7 @@ fn build_git_with_agent_commitmsg_script(
         "#!/bin/sh\n\
          {timer}\
          LINTHIS_CMD=\"{linthis}\"\n\
-         _STAGED_FILES=$(git diff --cached --name-only)\n\
+         _STAGED_FILES=$(git diff --cached --name-only --diff-filter=d)\n\
          \n\
          if [ -z \"$_STAGED_FILES\" ]; then\n\
          \x20 exit 0\n\
@@ -2161,7 +2161,7 @@ fn build_git_with_agent_commitmsg_script(
          _linthis_run_painted $LINTHIS_CMD\n\
          LINTHIS_EXIT=$?\n\
          if [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20 echo \"$_STAGED_FILES\" | while IFS= read -r _SF; do [ -z \"$_SF\" ] && continue; if [ -e \"$_SF\" ]; then git add -- \"$_SF\" 2>/dev/null || true; else echo \"[linthis] Warning: skipped missing file: $_SF\" >&2; fi; done\n\
          fi\n\
          \n\
          if [ $LINTHIS_EXIT -ne 0 ]; then\n\
@@ -2183,32 +2183,78 @@ pub(crate) fn build_git_with_agent_hook_script(
     hook_event: &HookEvent,
     provider_args: Option<&str>,
 ) -> String {
-    if matches!(hook_event, HookEvent::PrePush) {
-        return build_git_with_agent_prepush_script(linthis_cmd, fix_provider, provider_args);
+    match hook_event {
+        HookEvent::PrePush => {
+            build_git_with_agent_prepush_script(linthis_cmd, fix_provider, provider_args)
+        }
+        HookEvent::CommitMsg => {
+            build_git_with_agent_commitmsg_script(linthis_cmd, fix_provider, provider_args)
+        }
+        _ => build_git_with_agent_precommit_script(
+            linthis_cmd,
+            fix_provider,
+            hook_event,
+            provider_args,
+        ),
     }
-    if matches!(hook_event, HookEvent::CommitMsg) {
-        return build_git_with_agent_commitmsg_script(linthis_cmd, fix_provider, provider_args);
-    }
+}
 
+/// Pre-commit (and post-commit) branch of `build_git_with_agent_hook_script`.
+///
+/// Path B: pre-commit agent runs inside a fake-worktree sandbox so the user's
+/// real working tree is untouched during the (multi-minute) agent run. Real
+/// `git worktree` isn't usable here because pre-commit holds the index lock.
+fn build_git_with_agent_precommit_script(
+    linthis_cmd: &str,
+    fix_provider: &AgentFixProvider,
+    hook_event: &HookEvent,
+    provider_args: Option<&str>,
+) -> String {
     let prompt = agent_fix_prompt_for_event(hook_event);
     let agent_cmd = agent_fix_headless_cmd(fix_provider, &prompt, provider_args);
     let error_msg = agent_fix_error_msg(hook_event);
-    let timer_fns = shell_timer_functions();
-    // Path B: pre-commit agent runs inside a fake-worktree sandbox so the
-    // user's real working tree is untouched during the (multi-minute) agent
-    // run. Real `git worktree` isn't usable here because pre-commit holds
-    // the index lock.
-    let worktree_fix = shell_sandbox_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg);
+    let parts = GitWithAgentPrecommitParts {
+        timer: shell_timer_functions().to_string(),
+        worktree_fix: shell_sandbox_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg),
+        fix_commit_mode: shell_read_fix_commit_mode("pre_commit"),
+        linthis_check_only: linthis_cmd.replace("-c -f", "-c"),
+        save_diff: shell_save_diff_patch(),
+        sentinel_write: shell_write_pending_fixup_sentinel(" "),
+        linthis: linthis_cmd.to_string(),
+        footers: build_git_with_agent_precommit_footers(),
+    };
+    render_git_with_agent_precommit_template(&parts)
+}
 
-    // For pre-commit (and post-commit), add fix_commit_mode branching
-    let fix_commit_mode_section = shell_read_fix_commit_mode("pre_commit");
-    let linthis_check_only = linthis_cmd.replace("-c -f", "-c");
-    let save_diff = shell_save_diff_patch();
+/// Inputs assembled by `build_git_with_agent_precommit_script` and consumed by
+/// the template renderer. Keeps the shell template free of branching helpers.
+struct GitWithAgentPrecommitParts {
+    timer: String,
+    worktree_fix: String,
+    fix_commit_mode: String,
+    linthis_check_only: String,
+    save_diff: String,
+    sentinel_write: String,
+    linthis: String,
+    footers: GitWithAgentPrecommitFooters,
+}
 
+/// Render the shell template using pre-computed parts. Splits into header and
+/// post-format chunks so each renderer carries fewer shell branches (the
+/// complexity metric counts `if`/`elif` tokens inside string literals).
+fn render_git_with_agent_precommit_template(parts: &GitWithAgentPrecommitParts) -> String {
+    let header = render_precommit_template_header(parts);
+    let post_format = render_precommit_template_post_format(parts);
+    format!("{header}{post_format}\nexit $LINTHIS_EXIT\n")
+}
+
+/// Shebang, staged-file guard, fixup early-exit branch, stash snapshot,
+/// linthis invocation, and the agent fallback block.
+fn render_precommit_template_header(parts: &GitWithAgentPrecommitParts) -> String {
     format!(
         "#!/bin/sh\n\
          {timer}\
-         _STAGED_FILES=$(git diff --cached --name-only)\n\
+         _STAGED_FILES=$(git diff --cached --name-only --diff-filter=d)\n\
          \n\
          # Skip entirely if no staged files (empty commit)\n\
          if [ -z \"$_STAGED_FILES\" ]; then\n\
@@ -2242,13 +2288,25 @@ pub(crate) fn build_git_with_agent_hook_script(
          # agent never ran for dirty + --type git-with-agent.\n\
          if [ $LINTHIS_EXIT -ne 0 ]; then\n\
          {worktree_fix}\
-         fi\n\
-         \n\
-         {save_diff}\
+         fi\n",
+        timer = parts.timer,
+        fix_commit_mode = parts.fix_commit_mode,
+        linthis_check_only = parts.linthis_check_only,
+        linthis = parts.linthis,
+        worktree_fix = parts.worktree_fix,
+        sentinel_write = parts.sentinel_write,
+    )
+}
+
+/// Post-format handling: save diff patch, then re-stage or block based on
+/// `$_FIX_MODE` (squash | dirty).
+fn render_precommit_template_post_format(parts: &GitWithAgentPrecommitParts) -> String {
+    format!(
+        "\n{save_diff}\
          if [ \"$_FIX_MODE\" = \"squash\" ]; then\n\
          \x20 # Re-stage files modified by linthis -f (auto-format) or agent.\n\
          \x20 if [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20 echo \"$_STAGED_FILES\" | while IFS= read -r _SF; do [ -z \"$_SF\" ] && continue; if [ -e \"$_SF\" ]; then git add -- \"$_SF\" 2>/dev/null || true; else echo \"[linthis] Warning: skipped missing file: $_SF\" >&2; fi; done\n\
          \x20 fi\n\
          \x20 # Save stash if files were formatted\n\
          \x20 if [ -n \"$_STASH_REF\" ]; then\n\
@@ -2267,16 +2325,24 @@ pub(crate) fn build_git_with_agent_hook_script(
          {footer_dirty}\
          \x20\x20\x20 exit 1\n\
          \x20 fi\n\
-         fi\n\
-         \n\
-         exit $LINTHIS_EXIT\n",
-        timer = timer_fns,
-        fix_commit_mode = fix_commit_mode_section,
-        linthis_check_only = linthis_check_only,
-        linthis = linthis_cmd,
-        worktree_fix = worktree_fix,
-        save_diff = save_diff,
-        footer_squash_success = shell_hook_footer(&FooterCtx {
+         fi\n",
+        save_diff = parts.save_diff,
+        footer_squash_success = parts.footers.squash_success,
+        footer_squash_blocked = parts.footers.squash_blocked,
+        footer_dirty = parts.footers.dirty,
+    )
+}
+
+/// Pre-rendered footer snippets for the `git-with-agent` pre-commit script.
+struct GitWithAgentPrecommitFooters {
+    squash_success: String,
+    squash_blocked: String,
+    dirty: String,
+}
+
+fn build_git_with_agent_precommit_footers() -> GitWithAgentPrecommitFooters {
+    GitWithAgentPrecommitFooters {
+        squash_success: shell_hook_footer(&FooterCtx {
             outcome: FooterOutcome::Applied,
             hook_type: HookTypeLabel::GitWithAgent,
             mode: FixCommitMode::Squash,
@@ -2284,7 +2350,7 @@ pub(crate) fn build_git_with_agent_hook_script(
             header: "Format fixes folded into your commit (squash mode — single commit).",
             indent: "   ",
         }),
-        footer_squash_blocked = shell_hook_footer(&FooterCtx {
+        squash_blocked: shell_hook_footer(&FooterCtx {
             outcome: FooterOutcome::Blocked,
             hook_type: HookTypeLabel::GitWithAgent,
             mode: FixCommitMode::Squash,
@@ -2292,7 +2358,7 @@ pub(crate) fn build_git_with_agent_hook_script(
             header: "✗ Unfixable lint issues above — THIS commit blocked. Fix manually, then 'git commit' again.",
             indent: "   ",
         }),
-        footer_dirty = shell_hook_footer(&FooterCtx {
+        dirty: shell_hook_footer(&FooterCtx {
             outcome: FooterOutcome::Applied,
             hook_type: HookTypeLabel::GitWithAgent,
             mode: FixCommitMode::Dirty,
@@ -2300,8 +2366,7 @@ pub(crate) fn build_git_with_agent_hook_script(
             header: "Files formatted but not staged (dirty mode).",
             indent: "   ",
         }),
-        sentinel_write = shell_write_pending_fixup_sentinel(" "),
-    )
+    }
 }
 
 /// Generate the pre-push fix_commit_mode handler shell snippet.
@@ -2509,47 +2574,55 @@ fn shell_precise_skip_restore() -> String {
 /// For pre-commit: re-stage formatted files based on mode.
 /// For pre-push: handle format changes based on mode.
 fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
-    if matches!(hook_event, HookEvent::PreCommit) {
-        // Pre-commit: handle staged files after format
-        let save_diff = shell_save_diff_patch();
-        let footer_squash_success = shell_hook_footer(&FooterCtx {
-            outcome: FooterOutcome::Applied,
-            hook_type: HookTypeLabel::Git,
-            mode: FixCommitMode::Squash,
-            event: &HookEvent::PreCommit,
-            header: "Format fixes folded into your commit (squash mode — single commit).",
-            indent: "       ",
-        });
-        let footer_squash_blocked_after_format = shell_hook_footer(&FooterCtx {
-            outcome: FooterOutcome::Blocked,
-            hook_type: HookTypeLabel::Git,
-            mode: FixCommitMode::Squash,
-            event: &HookEvent::PreCommit,
-            header: "✗ Unfixable lint issues above — THIS commit blocked. Fix manually, then 'git commit' again.",
-            indent: "       ",
-        });
-        let footer_squash_blocked_no_format = shell_hook_footer(&FooterCtx {
-            outcome: FooterOutcome::Blocked,
-            hook_type: HookTypeLabel::Git,
-            mode: FixCommitMode::Squash,
-            event: &HookEvent::PreCommit,
-            header: "✗ Lint check failed (squash mode) — commit blocked. Fix the errors above and retry.",
-            indent: "       ",
-        });
-        let footer_dirty = shell_hook_footer(&FooterCtx {
-            outcome: FooterOutcome::Applied,
-            hook_type: HookTypeLabel::Git,
-            mode: FixCommitMode::Dirty,
-            event: &HookEvent::PreCommit,
-            header: "Files formatted but not staged (dirty mode).",
-            indent: "       ",
-        });
-        format!(
-        "\x20\x20\x20 _STAGED_FILES=$(git diff --cached --name-only)\n\
+    match hook_event {
+        HookEvent::PreCommit => shell_git_pre_commit_fix_commit_mode_handler(),
+        HookEvent::PrePush => shell_git_pre_push_fix_commit_mode_handler(),
+        _ => String::new(),
+    }
+}
+
+/// Pre-commit branch of `shell_git_fix_commit_mode_handler`: handle staged
+/// files after the formatter runs, based on `fix_commit_mode`.
+fn shell_git_pre_commit_fix_commit_mode_handler() -> String {
+    let save_diff = shell_save_diff_patch();
+    let footer_squash_success = shell_hook_footer(&FooterCtx {
+        outcome: FooterOutcome::Applied,
+        hook_type: HookTypeLabel::Git,
+        mode: FixCommitMode::Squash,
+        event: &HookEvent::PreCommit,
+        header: "Format fixes folded into your commit (squash mode — single commit).",
+        indent: "       ",
+    });
+    let footer_squash_blocked_after_format = shell_hook_footer(&FooterCtx {
+        outcome: FooterOutcome::Blocked,
+        hook_type: HookTypeLabel::Git,
+        mode: FixCommitMode::Squash,
+        event: &HookEvent::PreCommit,
+        header: "✗ Unfixable lint issues above — THIS commit blocked. Fix manually, then 'git commit' again.",
+        indent: "       ",
+    });
+    let footer_squash_blocked_no_format = shell_hook_footer(&FooterCtx {
+        outcome: FooterOutcome::Blocked,
+        hook_type: HookTypeLabel::Git,
+        mode: FixCommitMode::Squash,
+        event: &HookEvent::PreCommit,
+        header: "✗ Lint check failed (squash mode) — commit blocked. Fix the errors above and retry.",
+        indent: "       ",
+    });
+    let footer_dirty = shell_hook_footer(&FooterCtx {
+        outcome: FooterOutcome::Applied,
+        hook_type: HookTypeLabel::Git,
+        mode: FixCommitMode::Dirty,
+        event: &HookEvent::PreCommit,
+        header: "Files formatted but not staged (dirty mode).",
+        indent: "       ",
+    });
+    format!(
+        "\x20\x20\x20 _STAGED_FILES=$(git diff --cached --name-only --diff-filter=d)\n\
          \x20\x20\x20 _DIRTY=$(git diff --name-only)\n\
          \x20\x20\x20 if [ \"$_FIX_MODE\" = \"squash\" ] && [ -n \"$_DIRTY\" ]; then\n\
          \x20\x20\x20\x20\x20 {save_diff}\
-         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | while IFS= read -r _SF; do [ -z \"$_SF\" ] && continue; if [ -e \"$_SF\" ]; then git add -- \"$_SF\" 2>/dev/null || true; else echo \"[linthis] Warning: skipped missing file: $_SF\" >&2; fi; done\n\
          \x20\x20\x20\x20\x20 # Save stash snapshot\n\
          \x20\x20\x20\x20\x20 if [ -n \"$_STASH_REF\" ]; then\n\
          \x20\x20\x20\x20\x20\x20\x20 git stash store -m \"linthis: pre-format snapshot\" \"$_STASH_REF\" 2>/dev/null\n\
@@ -2561,7 +2634,7 @@ fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
          {footer_squash_blocked_after_format}\
          \x20\x20\x20\x20\x20 fi\n\
          \x20\x20\x20 elif [ \"$_FIX_MODE\" = \"squash\" ] && [ -n \"$_STAGED_FILES\" ]; then\n\
-         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | xargs git add\n\
+         \x20\x20\x20\x20\x20 echo \"$_STAGED_FILES\" | while IFS= read -r _SF; do [ -z \"$_SF\" ] && continue; if [ -e \"$_SF\" ]; then git add -- \"$_SF\" 2>/dev/null || true; else echo \"[linthis] Warning: skipped missing file: $_SF\" >&2; fi; done\n\
          \x20\x20\x20\x20\x20 if [ \"$LINTHIS_EXIT\" -ne 0 ]; then\n\
          {footer_squash_blocked_no_format}\
          \x20\x20\x20\x20\x20 fi\n\
@@ -2576,40 +2649,39 @@ fn shell_git_fix_commit_mode_handler(hook_event: &HookEvent) -> String {
          \x20\x20\x20\x20\x20 # fixup for git type: check only, no format (post-commit handles it)\n\
          {sentinel_write}\
          \x20\x20\x20 fi\n",
-         save_diff = save_diff,
-         sentinel_write = shell_write_pending_fixup_sentinel("     "),
-        )
-    } else if matches!(hook_event, HookEvent::PrePush) {
-        // `--type git` pre-push: check-only, no auto-fix/commit dance. Emit
-        // pass/fail via the unified footer; failure carries the upgrade hint
-        // because `hook_type = Git`.
-        let footer_clean = shell_hook_footer(&FooterCtx {
-            outcome: FooterOutcome::Clean,
-            hook_type: HookTypeLabel::Git,
-            mode: FixCommitMode::Squash,
-            event: &HookEvent::PrePush,
-            header: "✓ Pre-push check passed — push proceeding.",
-            indent: "   ",
-        });
-        let footer_blocked = shell_hook_footer(&FooterCtx {
-            outcome: FooterOutcome::Blocked,
-            hook_type: HookTypeLabel::Git,
-            mode: FixCommitMode::Squash,
-            event: &HookEvent::PrePush,
-            header: "✗ Pre-push check failed — push blocked. Fix the errors above and retry.",
-            indent: "   ",
-        });
-        format!(
-            "\x20 # --type git pre-push: report result explicitly.\n\
-             \x20 if [ \"$LINTHIS_EXIT\" -eq 0 ]; then\n\
-             {footer_clean}\
-             \x20 else\n\
-             {footer_blocked}\
-             \x20 fi\n",
-        )
-    } else {
-        String::new()
-    }
+        save_diff = save_diff,
+        sentinel_write = shell_write_pending_fixup_sentinel("     "),
+    )
+}
+
+/// Pre-push branch of `shell_git_fix_commit_mode_handler`. `--type git`
+/// pre-push is check-only — no auto-fix/commit dance. Emits pass/fail via the
+/// unified footer; failure carries the upgrade hint because `hook_type = Git`.
+fn shell_git_pre_push_fix_commit_mode_handler() -> String {
+    let footer_clean = shell_hook_footer(&FooterCtx {
+        outcome: FooterOutcome::Clean,
+        hook_type: HookTypeLabel::Git,
+        mode: FixCommitMode::Squash,
+        event: &HookEvent::PrePush,
+        header: "✓ Pre-push check passed — push proceeding.",
+        indent: "   ",
+    });
+    let footer_blocked = shell_hook_footer(&FooterCtx {
+        outcome: FooterOutcome::Blocked,
+        hook_type: HookTypeLabel::Git,
+        mode: FixCommitMode::Squash,
+        event: &HookEvent::PrePush,
+        header: "✗ Pre-push check failed — push blocked. Fix the errors above and retry.",
+        indent: "   ",
+    });
+    format!(
+        "\x20 # --type git pre-push: report result explicitly.\n\
+         \x20 if [ \"$LINTHIS_EXIT\" -eq 0 ]; then\n\
+         {footer_clean}\
+         \x20 else\n\
+         {footer_blocked}\
+         \x20 fi\n",
+    )
 }
 
 /// Generate shell snippet to save linthis changes as a git patch file.
