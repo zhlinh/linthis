@@ -525,6 +525,7 @@ fn parse_unified_complexity_issues(unified: &serde_json::Value, result: &mut Run
             severity,
         );
         issue = issue.with_source("linthis-complexity".to_string());
+        issue = issue.with_code("linthis-complexity".to_string());
         if let Some(sug) = iv.get("suggestion").and_then(|v| v.as_str()) {
             issue = issue.with_suggestion(sug.to_string());
         }

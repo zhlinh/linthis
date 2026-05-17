@@ -93,6 +93,16 @@ pub fn build_exclusion_patterns(options: &PathCollectionOptions) -> Vec<String> 
         }
     }
 
+    // Add .linthisignore path patterns
+    let linthisignore = linthis::utils::linthisignore::LinthisIgnore::load(&project_root);
+    if options.verbose && !linthisignore.path_patterns.is_empty() {
+        eprintln!(
+            "Loaded {} patterns from .linthisignore",
+            linthisignore.path_patterns.len()
+        );
+    }
+    exclude_patterns.extend(linthisignore.path_patterns);
+
     exclude_patterns
 }
 

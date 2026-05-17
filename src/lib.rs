@@ -1680,7 +1680,9 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
 
     // Load config and cache
     let project_root = utils::get_project_root();
-    let config = Config::load_merged(&project_root);
+    let mut config = Config::load_merged(&project_root);
+    let linthisignore = utils::linthisignore::LinthisIgnore::load(&project_root);
+    config.rules.disable.extend(linthisignore.rule_codes);
     let cache = load_cache(
         options.no_cache,
         &options.mode,

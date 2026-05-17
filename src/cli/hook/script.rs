@@ -2606,7 +2606,8 @@ fn shell_git_pre_commit_fix_commit_mode_handler() -> String {
         hook_type: HookTypeLabel::Git,
         mode: FixCommitMode::Squash,
         event: &HookEvent::PreCommit,
-        header: "✗ Lint check failed (squash mode) — commit blocked. Fix the errors above and retry.",
+        header:
+            "✗ Lint check failed (squash mode) — commit blocked. Fix the errors above and retry.",
         indent: "       ",
     });
     let footer_dirty = shell_hook_footer(&FooterCtx {

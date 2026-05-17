@@ -11,6 +11,7 @@
 //! Utility modules for linthis.
 
 pub mod language;
+pub mod linthisignore;
 pub mod output;
 pub mod types;
 pub mod unicode;

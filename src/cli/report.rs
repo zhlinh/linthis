@@ -219,6 +219,17 @@ fn handle_show_report(
     // Merge security/complexity findings into unified issues list
     result.merge_all_check_issues();
 
+    // Apply rule filter from .linthisignore so disabled rules are hidden here too
+    {
+        let project_root = linthis::utils::get_project_root();
+        let linthisignore = linthis::utils::linthisignore::LinthisIgnore::load(&project_root);
+        let config = linthis::config::Config::load_merged(&project_root);
+        let mut rules = config.rules;
+        rules.disable.extend(linthisignore.rule_codes);
+        let filter = linthis::rules::RuleFilter::from_config(&rules);
+        result.issues = filter.filter_issues(std::mem::take(&mut result.issues));
+    }
+
     let (display_issues, total_filtered) = filter_and_limit_issues(&result.issues, severity, limit);
     let displayed_count = display_issues.len();
 

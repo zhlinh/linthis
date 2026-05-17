@@ -20,12 +20,13 @@ use std::process::ExitCode;
 use cli::{
     collect_paths, handle_backup_command, handle_cache_command, handle_commit_msg_check,
     handle_complexity_command, handle_config_command, handle_doctor_command, handle_fix_command,
-    handle_format_command, handle_hook_command, handle_init_command, handle_license_command,
-    handle_plugin_command, handle_report_command, handle_review_command, handle_security_command,
-    handle_self_update_command, handle_shell_command, init_linter_configs, perform_auto_sync,
-    perform_self_update, print_fix_hint, run_benchmark, run_complexity_analysis, run_sast_scan,
-    run_watch, strip_ansi_codes, Cli, Commands, ComplexityCommandOptions, FixCommandOptions,
-    FormatCommandOptions, PathCollectionOptions, PathCollectionResult, ReviewCommandOptions,
+    handle_format_command, handle_hook_command, handle_ignore_command, handle_init_command,
+    handle_license_command, handle_plugin_command, handle_report_command, handle_review_command,
+    handle_security_command, handle_self_update_command, handle_shell_command, init_linter_configs,
+    perform_auto_sync, perform_self_update, print_fix_hint, run_benchmark, run_complexity_analysis,
+    run_sast_scan, run_watch, strip_ansi_codes, Cli, Commands, ComplexityCommandOptions,
+    FixCommandOptions, FormatCommandOptions, PathCollectionOptions, PathCollectionResult,
+    ReviewCommandOptions,
 };
 use linthis::config::resolver::{ConfigResolver, ConfigSource, ResolvedConfig};
 use linthis::lsp::{run_lsp_server_with_config, LspMode};
@@ -131,6 +132,7 @@ fn dispatch_utility(command: Commands) -> ExitCode {
         } => handle_lsp_subcommand(mode, port, use_plugin),
         Commands::Report { action } => handle_report_command(action),
         Commands::Backup { action } => handle_backup_command(action),
+        Commands::Ignore { action } => handle_ignore_command(action),
         Commands::Update {
             check,
             force,
@@ -1611,6 +1613,17 @@ fn process_lint_result(
     // Merge security/complexity issues into result.issues so all formatters
     // (including hook box output) can see them
     result.merge_all_check_issues();
+
+    // Re-apply rule filter to catch complexity/security issues added by merge.
+    // The lib.rs run() filter only saw lint issues; we must filter again here.
+    {
+        let linthisignore =
+            linthis::utils::linthisignore::LinthisIgnore::load(runtime_project_root);
+        let mut rules = runtime_config.rules.clone();
+        rules.disable.extend(linthisignore.rule_codes);
+        let filter = linthis::rules::RuleFilter::from_config(&rules);
+        result.issues = filter.filter_issues(std::mem::take(&mut result.issues));
+    }
 
     let output = format_result_with_hook_type(&result, output_format, hook_type.as_deref());
 
