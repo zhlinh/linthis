@@ -41,6 +41,8 @@ pub enum InteractiveAction {
     GoTo(usize),
     /// Get AI-powered fix suggestion
     AiFix,
+    /// Write rule to .linthisignore (permanent ignore)
+    WriteIgnore,
     /// Quit interactive mode
     Quit,
 }
@@ -206,6 +208,11 @@ fn run_issue_review(issues: &[LintIssue]) -> InteractiveResult {
                 handle_ai_fix_action(issue, &mut result);
                 idx += 1;
             }
+            InteractiveAction::WriteIgnore => {
+                processed[idx] = true;
+                handle_write_ignore_action(issue, &mut result);
+                idx += 1;
+            }
             InteractiveAction::Skip => {
                 result.skipped += 1;
                 processed[idx] = true;
@@ -292,6 +299,51 @@ fn handle_ignore_action(issue: &LintIssue, result: &mut InteractiveResult) {
     }
 }
 
+/// Handle the WriteIgnore action — append rule:<code> to .linthisignore
+fn handle_write_ignore_action(issue: &LintIssue, result: &mut InteractiveResult) {
+    let code = match issue.code.as_deref() {
+        Some(c) if !c.is_empty() => c,
+        _ => {
+            println!(
+                "  {} This issue has no rule code — add a path pattern manually:",
+                "Note:".yellow()
+            );
+            println!(
+                "    {}",
+                format!("linthis ignore add \"{}/**\"", issue.file_path.display()).dimmed()
+            );
+            result.skipped += 1;
+            return;
+        }
+    };
+
+    let entry = format!("rule:{code}");
+    let project_root = crate::utils::get_project_root();
+
+    match crate::utils::linthisignore::LinthisIgnore::append(&project_root, &entry) {
+        Ok(true) => {
+            println!(
+                "  {} Already in .linthisignore: {}",
+                "→".dimmed(),
+                entry.dimmed()
+            );
+            result.skipped += 1;
+        }
+        Ok(false) => {
+            println!(
+                "{} Written to .linthisignore: {}",
+                "✓".green(),
+                entry.cyan()
+            );
+            result.ignored += 1;
+        }
+        Err(e) => {
+            eprintln!("{}: {}", "Failed to write .linthisignore".red(), e);
+            result.skipped += 1;
+        }
+    }
+}
+
 /// Handle the AI Fix action for a single issue
 fn handle_ai_fix_action(issue: &LintIssue, result: &mut InteractiveResult) {
     let ai_config = AiFixConfig::default();
@@ -338,6 +390,7 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
         "e" | "edit" => InteractiveAction::Edit,
         "i" | "ignore" => InteractiveAction::Ignore,
         "a" | "ai" | "aifix" | "ai-fix" => InteractiveAction::AiFix,
+        "w" | "write" | "write-ignore" => InteractiveAction::WriteIgnore,
         "s" | "skip" | "" => InteractiveAction::Skip,
         "p" | "prev" | "previous" => InteractiveAction::Previous,
         "q" | "quit" => InteractiveAction::Quit,
@@ -345,7 +398,7 @@ fn show_issue_menu(issue: &LintIssue, current: usize, total: usize) -> Interacti
             parse_goto_input(input).unwrap_or_else(|| show_issue_menu(issue, current, total))
         }
         _ => {
-            println!("{}", "Invalid choice. Use: e/i/s/p/g/q".yellow());
+            println!("{}", "Invalid choice. Use: e/i/a/w/s/p/g/q".yellow());
             show_issue_menu(issue, current, total)
         }
     }
@@ -416,6 +469,10 @@ fn display_issue_actions(issue: &LintIssue, current: usize, total: usize) {
     println!(
         "    [{}] AI fix - get AI suggestion for this issue",
         "a".cyan()
+    );
+    println!(
+        "    [{}] Write to .linthisignore - permanently ignore this rule",
+        "w".cyan()
     );
     println!("    [{}] Skip", "s".cyan());
     if current > 1 {

@@ -376,6 +376,7 @@ impl RunResult {
                             severity,
                         );
                         issue = issue.with_source("linthis-complexity".to_string());
+                        issue = issue.with_code("linthis-complexity".to_string());
                         issue = issue.with_suggestion(
                             "Consider refactoring into smaller functions".to_string(),
                         );

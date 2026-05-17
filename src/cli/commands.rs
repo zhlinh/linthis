@@ -1090,6 +1090,23 @@ pub enum Commands {
         action: BackupCommands,
     },
 
+    /// Manage .linthisignore patterns
+    ///
+    /// Adds file/path globs and rule-disable entries to a .linthisignore file
+    /// in the project root. Supports two formats:
+    ///   vendor/**          ← exclude files matching this glob
+    ///   rule:E501          ← disable lint rule globally
+    ///
+    /// Example usage:
+    ///   linthis ignore add "vendor/**"
+    ///   linthis ignore add "rule:E501"
+    ///   linthis ignore remove "vendor/**"
+    ///   linthis ignore list
+    Ignore {
+        #[command(subcommand)]
+        action: IgnoreCommands,
+    },
+
     /// Self-update linthis to the latest version
     ///
     /// Detects the installation method (cargo, uv tool, pipx, pip) and uses
@@ -1702,4 +1719,31 @@ pub enum ReportCommands {
         #[arg(short, long, default_value = "human")]
         format: String,
     },
+}
+
+/// Subcommands for `linthis ignore`
+#[derive(clap::Subcommand, Debug)]
+pub enum IgnoreCommands {
+    /// Add a pattern to .linthisignore
+    ///
+    /// Use a glob for paths, or "rule:<code>" to disable a rule.
+    /// Examples:
+    ///   linthis ignore add "vendor/**"
+    ///   linthis ignore add "rule:E501"
+    ///   linthis ignore add "rule:linthis-complexity"
+    Add {
+        /// Pattern to add (glob or "rule:<code>")
+        pattern: String,
+    },
+    /// Remove a pattern from .linthisignore
+    ///
+    /// Examples:
+    ///   linthis ignore remove "vendor/**"
+    ///   linthis ignore remove "rule:E501"
+    Remove {
+        /// Pattern to remove (must match exactly)
+        pattern: String,
+    },
+    /// Show current .linthisignore contents
+    List,
 }

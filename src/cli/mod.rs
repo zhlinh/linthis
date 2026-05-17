@@ -22,6 +22,7 @@ mod fix;
 mod format;
 mod helpers;
 pub mod hook;
+mod ignore;
 mod init;
 mod license;
 mod paths;
@@ -48,6 +49,7 @@ pub use helpers::{
     strip_ansi_codes,
 };
 pub use hook::{handle_commit_msg_check, handle_hook_command};
+pub use ignore::handle_ignore_command;
 pub use init::{handle_config_command, handle_init_command, init_linter_configs};
 pub use license::{handle_license_command, LicenseCommandParams};
 pub use paths::{collect_paths, PathCollectionOptions, PathCollectionResult};
