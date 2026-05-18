@@ -39,7 +39,7 @@ pub use sync::{handle_hook_sync, handle_hook_sync_after_plugin_sync};
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
-        HookCommands::Install {
+        HookCommands::Add {
             hook_types,
             hook_events,
             force,
@@ -68,7 +68,7 @@ pub fn handle_hook_command(action: HookCommands) -> ExitCode {
             all_types,
             all,
         }),
-        HookCommands::Uninstall {
+        HookCommands::Remove {
             hook_types,
             hook_events,
             all,
@@ -137,7 +137,7 @@ pub fn find_git_root() -> Option<PathBuf> {
 }
 
 /// Validate and apply --fix-commit-mode to config.
-/// Bundled args for `linthis hook install` dispatch (keeps handler under the
+/// Bundled args for `linthis hook add` dispatch (keeps handler under the
 /// cyclomatic complexity threshold).
 struct InstallArgs {
     hook_types: Vec<HookTool>,

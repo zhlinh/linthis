@@ -276,12 +276,12 @@ pub fn handle_init_command(global: bool, with_hook: bool, force: bool) -> ExitCo
             eprintln!("  Global hook template feature has been removed");
             eprintln!(
                 "  Use {} in each project instead",
-                "linthis hook install".cyan()
+                "linthis hook add".cyan()
             );
         } else {
             // Install hook for project
             println!();
-            let exit_code = handle_hook_command(HookCommands::Install {
+            let exit_code = handle_hook_command(HookCommands::Add {
                 hook_types: vec![],                      // Use default hook type (Git)
                 hook_events: vec![HookEvent::PreCommit], // Default to pre-commit hook
                 force,                                   // Use force flag from init

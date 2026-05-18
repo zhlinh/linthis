@@ -1184,7 +1184,7 @@ pub enum BackupCommands {
 /// Hook subcommands
 #[derive(clap::Subcommand, Debug)]
 pub enum HookCommands {
-    /// Install git hooks or AI agent skills
+    /// Add git hooks or AI agent skills
     ///
     /// Hook types (--type):
     ///
@@ -1193,7 +1193,8 @@ pub enum HookCommands {
     ///   {git,prek}-with-agent  Shell hook + AI auto-fix on failure
     ///
     ///   agent                             AI coding agent lint skill (Claude, Cursor, etc.)
-    Install {
+    #[command(alias = "install")]
+    Add {
         /// Hook tool(s) to use — comma-separated or repeated
         /// (e.g. --type git,agent or --type git --type agent)
         ///
@@ -1281,8 +1282,9 @@ pub enum HookCommands {
         #[arg(long)]
         all: bool,
     },
-    /// Uninstall git hook
-    Uninstall {
+    /// Remove git hook
+    #[command(alias = "uninstall")]
+    Remove {
         /// Hook tool(s) to uninstall — comma-separated or repeated
         /// (e.g. --type git,agent or --type git --type agent)
         #[arg(long = "type", value_name = "TYPE", value_delimiter = ',', num_args = 0..)]
