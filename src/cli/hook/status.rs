@@ -231,42 +231,42 @@ pub(crate) fn handle_hook_status() -> ExitCode {
 
     println!("\n{}", "Commands:".bold());
     if !any_hook_installed {
-        println!("  Install pre-commit:  {}", "linthis hook install".cyan());
+        println!("  Add pre-commit:  {}", "linthis hook add".cyan());
         println!(
-            "  Install pre-push:    {}",
-            "linthis hook install --event pre-push".cyan()
+            "  Add pre-push:    {}",
+            "linthis hook add --event pre-push".cyan()
         );
         println!(
-            "  Install commit-msg:  {}",
-            "linthis hook install --event commit-msg".cyan()
+            "  Add commit-msg:  {}",
+            "linthis hook add --event commit-msg".cyan()
         );
     } else {
         println!(
-            "  Install hook:   {}",
-            "linthis hook install --event <event>".cyan()
+            "  Add hook:    {}",
+            "linthis hook add --event <event>".cyan()
         );
         println!(
-            "  Uninstall hook: {}",
-            "linthis hook uninstall --event <event>".cyan()
+            "  Remove hook: {}",
+            "linthis hook remove --event <event>".cyan()
         );
         println!(
-            "  Uninstall all:  {}",
-            "linthis hook uninstall --all".cyan()
+            "  Remove all:  {}",
+            "linthis hook remove --all".cyan()
         );
     }
     if !any_agent_installed {
         println!(
-            "  Install agent:  {}",
-            "linthis hook install --type agent".cyan()
+            "  Add agent:   {}",
+            "linthis hook add --type agent".cyan()
         );
     } else {
         println!(
-            "  Install agent:  {}",
-            "linthis hook install --type agent --provider <name>".cyan()
+            "  Add agent:   {}",
+            "linthis hook add --type agent --provider <name>".cyan()
         );
         println!(
-            "  Uninstall all:  {}",
-            "linthis hook uninstall --all".cyan()
+            "  Remove all:  {}",
+            "linthis hook remove --all".cyan()
         );
     }
 

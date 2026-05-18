@@ -82,9 +82,9 @@ fn inject_dynamic_help(cmd: &mut clap::Command) {
         }
     }
 
-    // Inject into "hook install" subcommand
+    // Inject into "hook add" subcommand
     if let Some(hook_cmd) = cmd.find_subcommand_mut("hook") {
-        if let Some(install_cmd) = hook_cmd.find_subcommand_mut("install") {
+        if let Some(install_cmd) = hook_cmd.find_subcommand_mut("add") {
             let existing = install_cmd
                 .get_after_long_help()
                 .map(|h| h.to_string())

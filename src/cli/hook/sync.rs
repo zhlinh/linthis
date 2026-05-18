@@ -136,7 +136,7 @@ fn migrate_old_hook(
     eprintln!(
         "  {} Hook type inferred from old script content (heuristic). \
          If incorrect, re-install with the right type:\n  \
-         linthis hook install{} --event {} --type <type> --force",
+         linthis hook add{} --event {} --type <type> --force",
         "⚠".yellow(),
         if global { " -g" } else { "" },
         event.as_str(),
@@ -479,13 +479,13 @@ fn handle_sync_no_metadata(global: bool, project_root: &std::path::Path) -> i32 
             println!("No global linthis hooks found to sync.");
             println!(
                 "  Run {} to install global hooks",
-                "linthis hook install -g".cyan()
+                "linthis hook add -g".cyan()
             );
         } else {
             println!("No local linthis hooks found for this project.");
             println!(
                 "  Run {} to install and record hooks",
-                "linthis hook install".cyan()
+                "linthis hook add".cyan()
             );
             println!(
                 "  Use {} to sync global hooks.",

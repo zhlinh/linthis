@@ -850,7 +850,7 @@ fn footer_mode_desc(event: &HookEvent, mode: FixCommitMode) -> &'static str {
 /// [linthis]   Undo (by patch created) : git apply -R ...    ── Applied + $_DIFF_FILE non-empty
 /// [linthis]   Currently: --type git                         ── Blocked + Git
 /// [linthis]   → Want auto-fix + AI code review? Switch hook type:
-/// [linthis]     linthis hook install -g --type git-with-agent --provider <...> --event <event> --force
+/// [linthis]     linthis hook add -g --type git-with-agent --provider <...> --event <event> --force
 /// [linthis]   → Switch fix_commit_mode: linthis config set hook.<event>.fix_commit_mode <mode> -g
 /// [linthis]       dirty  (d) = <desc>  [(current) if active]
 /// [linthis]       squash (s) = <desc>  [(current) if active]
@@ -898,7 +898,7 @@ pub(crate) fn shell_hook_footer(ctx: &FooterCtx<'_>) -> String {
         out.push_str(&format!(
             "{i}printf \"${{_LINTHIS_W}}[linthis]   Currently: --type git${{_LINTHIS_R}}\\n\"\n\
              {i}printf \"${{_LINTHIS_W}}[linthis]   → Want auto-fix + AI code review? Switch hook type:${{_LINTHIS_R}}\\n\"\n\
-             {i}printf \"${{_LINTHIS_W}}[linthis]     linthis hook install -g --type git-with-agent --provider <claude|codebuddy|...> --event {event_name} --force${{_LINTHIS_R}}\\n\"\n"
+             {i}printf \"${{_LINTHIS_W}}[linthis]     linthis hook add -g --type git-with-agent --provider <claude|codebuddy|...> --event {event_name} --force${{_LINTHIS_R}}\\n\"\n"
         ));
     }
 
@@ -1272,7 +1272,7 @@ pub(crate) fn shell_agent_availability_check(provider: &AgentFixProvider) -> Str
          \x20 _LINTHIS_AGENT_OK=0\n\
          \x20 echo \"[linthis] ⚠ '{bin}' not found in PATH — skipping AI auto-fix\" >&2\n\
          \x20 echo \"[linthis]   To install: https://docs.anthropic.com/en/docs/claude-code\" >&2\n\
-         \x20 echo \"[linthis]   To change provider: linthis hook install -g --type git-with-agent --provider <name> --event <event> --force\" >&2\n\
+         \x20 echo \"[linthis]   To change provider: linthis hook add -g --type git-with-agent --provider <name> --event <event> --force\" >&2\n\
          \x20 echo \"[linthis]   Please fix the issues manually and retry.\" >&2\n\
          fi\n",
         bin = bin,
@@ -4908,9 +4908,9 @@ mod tests {
             "pre-commit (git type) blocked footer must suggest git-with-agent: {pre_commit_git}"
         );
         assert!(
-            pre_commit_git.contains("linthis hook install -g --type git-with-agent")
+            pre_commit_git.contains("linthis hook add -g --type git-with-agent")
                 && pre_commit_git.contains("--event pre-commit --force"),
-            "pre-commit (git type) blocked footer must include install command with event: \
+            "pre-commit (git type) blocked footer must include add command with event: \
              {pre_commit_git}"
         );
         // Per-mode explanations carry the short alias in parens and the
@@ -5190,9 +5190,9 @@ mod tests {
             "blocked+git must suggest upgrade: {s}"
         );
         assert!(
-            s.contains("linthis hook install -g --type git-with-agent")
+            s.contains("linthis hook add -g --type git-with-agent")
                 && s.contains("--event pre-commit --force"),
-            "upgrade hint must include install command with event name: {s}"
+            "upgrade hint must include add command with event name: {s}"
         );
     }
 
