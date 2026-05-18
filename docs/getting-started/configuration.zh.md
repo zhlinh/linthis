@@ -223,7 +223,36 @@ LINTHIS_AGENT_MAX_AUTO_FIX=0 git commit -m "..."
 
 对 Claude Code 和 CodeBuddy，`linthis` 会用 `--output-format stream-json` 启动它们，然后把事件流通过管道喂给 `linthis agent-stream`，逐行把每个 assistant 消息、工具调用（`Edit /path/to/file`、`Bash cargo check` 等）渲染成人类可读的输出。其他 provider（`codex exec`、`cursor-agent chat`、`droid exec`）本身就是流式的。
 
+## `.linthisignore`
+
+项目根目录下的 `.linthisignore` 文件提供了一种无需编辑 `config.toml` 就能快速抑制 lint 问题的方式。支持两种条目类型：
+
+```gitignore
+# 从 lint 中排除文件（gitignore glob 语法）
+vendor/**
+*.generated.go
+
+# 按代码禁用规则
+rule:E501
+rule:clippy::too_many_arguments
+rule:linthis-complexity
+```
+
+使用 `linthis ignore` 命令管理条目：
+
+```bash
+linthis ignore add "vendor/**"
+linthis ignore add "rule:E501"
+linthis ignore remove "rule:E501"
+linthis ignore list
+```
+
+在交互式修复模式（`linthis fix`）中，按 **`w`** 键可直接将当前问题的规则代码写入 `.linthisignore`。
+
+详细文档见 [忽略规则](../features/ignore.zh.md)。
+
 ## 下一步
 
-- [插件系统](../features/plugins.md) - 共享配置
-- [CLI 参考](../reference/cli.md) - 所有命令选项
+- [忽略规则](../features/ignore.zh.md) - 用 `.linthisignore` 抑制问题
+- [插件系统](../features/plugins.zh.md) - 共享配置
+- [CLI 参考](../reference/cli.zh.md) - 所有命令选项

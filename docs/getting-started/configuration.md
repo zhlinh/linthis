@@ -223,7 +223,36 @@ When the hook decides to invoke the agent, its output streams directly to your t
 
 For Claude Code and CodeBuddy, `linthis` runs them with `--output-format stream-json` and pipes the JSON event stream through `linthis agent-stream`, which pretty-prints each assistant message and tool call (`Edit /path/to/file`, `Bash cargo check`, etc.) as they happen. Other providers (`codex exec`, `cursor-agent chat`, `droid exec`) stream natively.
 
+## `.linthisignore`
+
+The `.linthisignore` file at the project root provides a quick way to suppress lint issues without editing `config.toml`. It supports two entry types:
+
+```gitignore
+# Exclude files from linting (gitignore glob syntax)
+vendor/**
+*.generated.go
+
+# Disable rules by code
+rule:E501
+rule:clippy::too_many_arguments
+rule:linthis-complexity
+```
+
+Manage entries with the `linthis ignore` command:
+
+```bash
+linthis ignore add "vendor/**"
+linthis ignore add "rule:E501"
+linthis ignore remove "rule:E501"
+linthis ignore list
+```
+
+In interactive fix mode (`linthis fix`), press **`w`** to write the current issue's rule code to `.linthisignore` directly.
+
+See [Ignore Rules](../features/ignore.md) for full documentation.
+
 ## Next Steps
 
+- [Ignore Rules](../features/ignore.md) - Suppress issues with `.linthisignore`
 - [Plugin System](../features/plugins.md) - Share configurations
 - [CLI Reference](../reference/cli.md) - All command options
