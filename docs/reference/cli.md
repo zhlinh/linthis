@@ -65,18 +65,20 @@ linthis init --with-hook        # Init config and install hook
 
 Manage Git hooks.
 
-### hook install
+### hook add
 
 ```bash
-linthis hook install [OPTIONS]
+linthis hook add [OPTIONS]
 ```
+
+Alias: `linthis hook install` (hidden, kept for backward compatibility)
 
 | Option | Description |
 |--------|-------------|
 | `--type` | Hook type: `git` (default), `git-with-agent`, `agent`, `prek`, `prek-with-agent` |
 | `--event` | Hook event: `pre-commit` (default), `pre-push`, `commit-msg` |
 | `--args` | Extra arguments for the linthis command in hook script (default: `-c -f`, check + format) |
-| `-g, --global` | Install globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath` |
+| `-g, --global` | Add globally: agent type → user home dir; others → `~/.config/git/hooks/` + `core.hooksPath` |
 | `--provider` | AI provider: `claude`, `codex`, `gemini`, `cursor`, `droid`, `auggie`, `codebuddy`. Supports `provider/model` syntax (e.g. `claude/opus`). For `--type agent`: installs rules/settings files. For `*-with-agent`: uses headless CLI to auto-fix. |
 | `--provider-args` | Extra arguments passed to the AI agent CLI (e.g. `"--model opus"`). Merged with model from `provider/model` syntax if both specified. |
 | `--force` | Force overwrite existing |
@@ -86,39 +88,41 @@ linthis hook install [OPTIONS]
 
 ```bash
 # Project-level hooks
-linthis hook install                                           # Default git hook (check + format)
-linthis hook install --event pre-push                         # Pre-push hook
-linthis hook install --event commit-msg                       # Commit message format hook
-linthis hook install --args "-c"                              # Check-only hook
-linthis hook install --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
-linthis hook install --type agent --provider claude           # Agent integration
+linthis hook add                                           # Default git hook (check + format)
+linthis hook add --event pre-push                         # Pre-push hook
+linthis hook add --event commit-msg                       # Commit message format hook
+linthis hook add --args "-c"                              # Check-only hook
+linthis hook add --type git-with-agent --provider claude  # git hook + AI auto-fix on failure
+linthis hook add --type agent --provider claude           # Agent integration
 
 # Global hooks (apply to all repos on this machine)
-linthis hook install --global                                 # Global git pre-commit
-linthis hook install --global --event commit-msg              # Global commit-msg hook
-linthis hook install --global --type git-with-agent --provider claude  # Global + AI auto-fix
-linthis hook install --type agent --provider claude --global  # AI agent rules (user home)
+linthis hook add --global                                 # Global git pre-commit
+linthis hook add --global --event commit-msg              # Global commit-msg hook
+linthis hook add --global --type git-with-agent --provider claude  # Global + AI auto-fix
+linthis hook add --type agent --provider claude --global  # AI agent rules (user home)
 ```
 
-### hook uninstall
+### hook remove
 
 ```bash
-linthis hook uninstall [OPTIONS]
+linthis hook remove [OPTIONS]
 ```
+
+Alias: `linthis hook uninstall` (hidden, kept for backward compatibility)
 
 | Option | Description |
 |--------|-------------|
-| `--event` | Hook event to uninstall |
-| `-g, --global` | Uninstall global hook |
-| `--all` | Uninstall all hooks |
+| `--event` | Hook event to remove |
+| `-g, --global` | Remove global hook |
+| `--all` | Remove all hooks |
 | `-y, --yes` | Non-interactive mode |
 
 **Examples:**
 
 ```bash
-linthis hook uninstall                  # Uninstall project pre-commit hook
-linthis hook uninstall --global         # Uninstall global pre-commit hook
-linthis hook uninstall --global --all   # Uninstall all global hooks
+linthis hook remove                  # Remove project pre-commit hook
+linthis hook remove --global         # Remove global pre-commit hook
+linthis hook remove --global --all   # Remove all global hooks
 ```
 
 ### hook status
@@ -210,6 +214,55 @@ linthis plugin clean [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--all` | Clean all caches |
+
+---
+
+## ignore
+
+Manage the `.linthisignore` file. Supports two entry types: file glob patterns (exclude files from linting) and rule codes (suppress specific rules).
+
+See [Ignore Rules](../features/ignore.md) for full documentation.
+
+### ignore add
+
+```bash
+linthis ignore add <PATTERN>
+```
+
+Appends a pattern to `.linthisignore`. Use the `rule:` prefix to disable a rule by code.
+
+**Examples:**
+
+```bash
+linthis ignore add "vendor/**"                    # Exclude a directory
+linthis ignore add "*.generated.go"               # Exclude generated files
+linthis ignore add "rule:E501"                    # Disable a lint rule
+linthis ignore add "rule:clippy::too_many_arguments"
+linthis ignore add "rule:linthis-complexity"      # Disable complexity checks
+```
+
+### ignore remove
+
+```bash
+linthis ignore remove <PATTERN>
+```
+
+Removes an entry from `.linthisignore` (exact match).
+
+**Examples:**
+
+```bash
+linthis ignore remove "vendor/**"
+linthis ignore remove "rule:E501"
+```
+
+### ignore list
+
+```bash
+linthis ignore list
+```
+
+Lists all current entries in `.linthisignore`, grouped by type (path patterns and disabled rules).
 
 ---
 

@@ -65,18 +65,20 @@ linthis init --with-hook        # 初始化配置并安装 hook
 
 管理 Git hooks。
 
-### hook install
+### hook add
 
 ```bash
-linthis hook install [OPTIONS]
+linthis hook add [OPTIONS]
 ```
+
+别名：`linthis hook install`（隐藏，保留向后兼容）
 
 | 选项 | 描述 |
 |-----|------|
 | `--type` | Hook 类型：`git`（默认）、`git-with-agent`、`agent`、`prek`、`prek-with-agent` |
 | `--event` | Hook 事件：`pre-commit`（默认）、`pre-push`、`commit-msg` |
 | `--args` | Hook 脚本中 linthis 命令的额外参数（默认：`-c -f`，检查 + 格式化） |
-| `-g, --global` | 全局安装：agent 类型 → 用户主目录；其他类型 → `~/.config/git/hooks/` + `core.hooksPath` |
+| `-g, --global` | 全局添加：agent 类型 → 用户主目录；其他类型 → `~/.config/git/hooks/` + `core.hooksPath` |
 | `--provider` | AI 提供商：`claude`、`codex`、`gemini`、`cursor`、`droid`、`auggie`、`codebuddy`。支持 `provider/model` 语法（如 `claude/opus`）。用于 `--type agent`：安装规则/设置文件。用于 `*-with-agent`：使用无头 CLI 自动修复。 |
 | `--provider-args` | 传递给 AI agent CLI 的额外参数（如 `"--model opus"`）。与 `provider/model` 语法中的 model 合并（若同时指定）。 |
 | `--force` | 强制覆盖现有 hook |
@@ -86,39 +88,41 @@ linthis hook install [OPTIONS]
 
 ```bash
 # 项目级 hook
-linthis hook install                                           # 默认 git hook（检查 + 格式化）
-linthis hook install --event pre-push                         # Pre-push hook
-linthis hook install --event commit-msg                       # Commit message 格式检查 hook
-linthis hook install --args "-c"                              # 仅检查模式
-linthis hook install --type git-with-agent --provider claude  # git hook + AI 自动修复失败
-linthis hook install --type agent --provider claude           # Agent 集成
+linthis hook add                                           # 默认 git hook（检查 + 格式化）
+linthis hook add --event pre-push                         # Pre-push hook
+linthis hook add --event commit-msg                       # Commit message 格式检查 hook
+linthis hook add --args "-c"                              # 仅检查模式
+linthis hook add --type git-with-agent --provider claude  # git hook + AI 自动修复失败
+linthis hook add --type agent --provider claude           # Agent 集成
 
 # 全局 hook（适用于此机器上的所有仓库）
-linthis hook install --global                                 # 全局 git pre-commit
-linthis hook install --global --event commit-msg              # 全局 commit-msg hook
-linthis hook install --global --type git-with-agent --provider claude  # 全局 + AI 自动修复
-linthis hook install --type agent --provider claude --global  # AI agent 规则（用户主目录）
+linthis hook add --global                                 # 全局 git pre-commit
+linthis hook add --global --event commit-msg              # 全局 commit-msg hook
+linthis hook add --global --type git-with-agent --provider claude  # 全局 + AI 自动修复
+linthis hook add --type agent --provider claude --global  # AI agent 规则（用户主目录）
 ```
 
-### hook uninstall
+### hook remove
 
 ```bash
-linthis hook uninstall [OPTIONS]
+linthis hook remove [OPTIONS]
 ```
+
+别名：`linthis hook uninstall`（隐藏，保留向后兼容）
 
 | 选项 | 描述 |
 |-----|------|
-| `--event` | 要卸载的 hook 事件 |
-| `-g, --global` | 卸载全局 hook |
-| `--all` | 卸载所有 hook |
+| `--event` | 要移除的 hook 事件 |
+| `-g, --global` | 移除全局 hook |
+| `--all` | 移除所有 hook |
 | `-y, --yes` | 非交互模式 |
 
 **示例：**
 
 ```bash
-linthis hook uninstall                  # 卸载项目 pre-commit hook
-linthis hook uninstall --global         # 卸载全局 pre-commit hook
-linthis hook uninstall --global --all   # 卸载所有全局 hook
+linthis hook remove                  # 移除项目 pre-commit hook
+linthis hook remove --global         # 移除全局 pre-commit hook
+linthis hook remove --global --all   # 移除所有全局 hook
 ```
 
 ### hook status
@@ -210,6 +214,55 @@ linthis plugin clean [OPTIONS]
 | 选项 | 描述 |
 |-----|------|
 | `--all` | 清理所有缓存 |
+
+---
+
+## ignore
+
+管理 `.linthisignore` 文件。支持两种条目类型：文件 glob 模式（从 lint 中排除文件）和规则代码（抑制特定规则）。
+
+详细文档见 [忽略规则](../features/ignore.zh.md)。
+
+### ignore add
+
+```bash
+linthis ignore add <PATTERN>
+```
+
+将模式追加到 `.linthisignore`。使用 `rule:` 前缀可按代码禁用规则。
+
+**示例：**
+
+```bash
+linthis ignore add "vendor/**"                    # 排除目录
+linthis ignore add "*.generated.go"               # 排除生成文件
+linthis ignore add "rule:E501"                    # 禁用某条 lint 规则
+linthis ignore add "rule:clippy::too_many_arguments"
+linthis ignore add "rule:linthis-complexity"      # 禁用复杂度检查
+```
+
+### ignore remove
+
+```bash
+linthis ignore remove <PATTERN>
+```
+
+从 `.linthisignore` 中移除条目（精确匹配）。
+
+**示例：**
+
+```bash
+linthis ignore remove "vendor/**"
+linthis ignore remove "rule:E501"
+```
+
+### ignore list
+
+```bash
+linthis ignore list
+```
+
+列出 `.linthisignore` 中的所有当前条目，按类型分组显示（路径模式和禁用规则）。
 
 ---
 
