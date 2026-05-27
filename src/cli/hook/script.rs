@@ -927,9 +927,22 @@ pub(crate) fn shell_hook_footer(ctx: &FooterCtx<'_>) -> String {
     // output signal for modes that don't have a trailing git summary to
     // signal completion (dirty, Blocked, Conflict).
     if let Some(hint) = footer_end_hint(ctx.outcome, ctx.mode, ctx.event) {
-        out.push_str(&format!(
-            "{i}printf \"${{_LINTHIS_W}}[linthis] {hint}${{_LINTHIS_R}}\\n\"\n"
-        ));
+        if blocked {
+            let skip_cmd = match ctx.event {
+                HookEvent::PrePush => "git push --no-verify",
+                _ => "git commit --no-verify",
+            };
+            out.push_str(&format!(
+                "{i}printf \"\\033[0;31m[linthis] {hint}${{_LINTHIS_R}}\\n\"\n"
+            ));
+            out.push_str(&format!(
+                "{i}printf \"\\033[0;31m[linthis] To skip this check: {skip_cmd}${{_LINTHIS_R}}\\n\"\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "{i}printf \"${{_LINTHIS_W}}[linthis] {hint}${{_LINTHIS_R}}\\n\"\n"
+            ));
+        }
     }
 
     out
@@ -5368,6 +5381,14 @@ mod tests {
         assert!(
             blocked.contains("✗ Blocked — fix the errors above manually, then 'git commit' again."),
             "Blocked must carry a ✗ end-hint: {blocked}"
+        );
+        assert!(
+            blocked.contains("To skip this check: git commit --no-verify"),
+            "Blocked must carry a skip hint: {blocked}"
+        );
+        assert!(
+            blocked.contains("\\033[0;31m"),
+            "Blocked end-hint must use red colour: {blocked}"
         );
 
         let conflict = footer(
