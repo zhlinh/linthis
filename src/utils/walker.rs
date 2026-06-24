@@ -65,19 +65,24 @@ fn is_excluded(path: &Path, glob_set: &Option<GlobSet>) -> bool {
             }
         }
 
-        // Check just the file/dir name
-        if let Some(name) = path.file_name() {
-            if gs.is_match(name) {
+        // Check every path suffix so directory patterns like "third_party/**"
+        // match even when the excluded directory is nested (e.g.
+        // "modules/third_party/foo.c") or the path is absolute. This mirrors
+        // `filter_files_with_exclusions` in `cli::paths`, keeping explicit
+        // `-i <file>` inputs (used by the pre-push hook) consistent with
+        // staged/since/modified collection. The shortest suffix is the bare
+        // file name, so this also covers patterns like "*.log".
+        let normals: Vec<&std::ffi::OsStr> = path
+            .components()
+            .filter_map(|component| match component {
+                std::path::Component::Normal(name) => Some(name),
+                _ => None,
+            })
+            .collect();
+        for start in 0..normals.len() {
+            let subpath: PathBuf = normals[start..].iter().collect();
+            if gs.is_match(&subpath) {
                 return true;
-            }
-        }
-
-        // Check each path component (for patterns like "target/**")
-        for component in path.components() {
-            if let std::path::Component::Normal(name) = component {
-                if gs.is_match(Path::new(name)) {
-                    return true;
-                }
             }
         }
     }
@@ -217,6 +222,29 @@ mod tests {
             &glob_set
         ));
         assert!(!is_excluded(Path::new("src/main.rs"), &glob_set));
+    }
+
+    #[test]
+    fn test_is_excluded_nested_directory_pattern() {
+        // A directory-glob pattern like "third_party/**" must match even when
+        // the excluded directory is nested under other path segments. This
+        // keeps explicit `-i <file>` inputs (e.g. pre-push hook) consistent
+        // with staged collection, which strips the project root and matches
+        // every path suffix.
+        let patterns = vec!["third_party/**".to_string()];
+        let glob_set = build_glob_set(&patterns);
+
+        assert!(is_excluded(Path::new("third_party/foo.c"), &glob_set));
+        assert!(is_excluded(
+            Path::new("modules/third_party/nested.c"),
+            &glob_set
+        ));
+        // Absolute paths must be excluded by the same suffix rule.
+        assert!(is_excluded(
+            Path::new("/repo/modules/third_party/nested.c"),
+            &glob_set
+        ));
+        assert!(!is_excluded(Path::new("src/third_party.rs"), &glob_set));
     }
 
     #[test]
