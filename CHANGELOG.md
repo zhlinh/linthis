@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-06-25
+
+### Added
+
+- show blocked end-hint in red and add --no-verify skip tip
+
+### Fixed
+
+- add polling backend so file-change test is deterministic
+- use three-dot diff for pre-push file selection
+- match directory globs for nested and absolute paths
+
 ## [0.25.2] - 2026-05-22
 
 ### Fixed
