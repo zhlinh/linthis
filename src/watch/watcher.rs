@@ -10,12 +10,15 @@
 
 //! File system watcher using the notify crate.
 
-use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use crate::Language;
+
+/// Poll interval used by the polling watcher backend.
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Kind of watch event
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,8 +76,9 @@ pub enum WatchError {
 
 /// File system watcher
 pub struct FileWatcher {
-    /// The underlying notify watcher
-    _watcher: RecommendedWatcher,
+    /// The underlying notify watcher, kept alive for the watcher's lifetime.
+    /// Boxed as a trait object so either the native or polling backend can be used.
+    _watcher: Box<dyn Watcher + Send>,
     /// Receiver for watch events
     rx: Receiver<WatchEvent>,
     /// Paths being watched
@@ -82,19 +86,49 @@ pub struct FileWatcher {
 }
 
 impl FileWatcher {
-    /// Create a new file watcher for the given paths
+    /// Create a new file watcher for the given paths.
+    ///
+    /// Uses the platform's native backend (e.g. FSEvents, inotify), which is the
+    /// most efficient choice for normal use.
     pub fn new(paths: Vec<PathBuf>) -> Result<Self, WatchError> {
+        Self::build(paths, false)
+    }
+
+    /// Create a new file watcher that polls the filesystem instead of relying on
+    /// the platform's native event backend.
+    ///
+    /// Polling is slower but works in environments where native FS events are not
+    /// delivered — e.g. some sandboxes, containers, or network/virtual filesystems.
+    pub fn new_polling(paths: Vec<PathBuf>) -> Result<Self, WatchError> {
+        Self::build(paths, true)
+    }
+
+    /// Build a watcher using either the polling or native backend.
+    fn build(paths: Vec<PathBuf>, poll: bool) -> Result<Self, WatchError> {
         let (tx, rx) = mpsc::channel();
 
-        let event_tx = tx.clone();
-        let mut watcher = RecommendedWatcher::new(
-            move |result: Result<Event, notify::Error>| {
-                if let Ok(event) = result {
-                    Self::handle_event(event, &event_tx);
-                }
-            },
-            Config::default().with_poll_interval(Duration::from_millis(100)),
-        )?;
+        let config = Config::default().with_poll_interval(POLL_INTERVAL);
+        let poll_tx = tx.clone();
+        let native_tx = tx.clone();
+        let mut watcher: Box<dyn Watcher + Send> = if poll {
+            Box::new(PollWatcher::new(
+                move |result: Result<Event, notify::Error>| {
+                    if let Ok(event) = result {
+                        Self::handle_event(event, &poll_tx);
+                    }
+                },
+                config,
+            )?)
+        } else {
+            Box::new(RecommendedWatcher::new(
+                move |result: Result<Event, notify::Error>| {
+                    if let Ok(event) = result {
+                        Self::handle_event(event, &native_tx);
+                    }
+                },
+                config,
+            )?)
+        };
 
         // Watch all paths
         let mut watched_paths = Vec::new();
@@ -116,36 +150,41 @@ impl FileWatcher {
         })
     }
 
-    /// Handle a notify event and convert to WatchEvent
-    fn handle_event(event: Event, tx: &Sender<WatchEvent>) {
-        let kind = match event.kind {
+    /// Map a notify event kind to a `WatchEventKind`, or `None` if it is not
+    /// a change we care about.
+    fn map_event_kind(kind: EventKind) -> Option<WatchEventKind> {
+        match kind {
             EventKind::Create(_) => Some(WatchEventKind::Created),
             EventKind::Modify(_) => Some(WatchEventKind::Modified),
             EventKind::Remove(_) => Some(WatchEventKind::Removed),
-            EventKind::Any => None,
-            EventKind::Access(_) => None,
-            EventKind::Other => None,
+            EventKind::Any | EventKind::Access(_) | EventKind::Other => None,
+        }
+    }
+
+    /// Build and send a watch event for a single changed path, applying skip and
+    /// lintability filters.
+    fn dispatch_path(path: PathBuf, kind: &WatchEventKind, tx: &Sender<WatchEvent>) {
+        // Skip directories, hidden files, and common non-source files.
+        if path.is_dir() || Self::should_skip_path(&path) {
+            return;
+        }
+
+        let watch_event = WatchEvent::new(path, kind.clone());
+
+        // Only send events for lintable files
+        if watch_event.is_lintable() {
+            let _ = tx.send(watch_event);
+        }
+    }
+
+    /// Handle a notify event and convert to WatchEvent
+    fn handle_event(event: Event, tx: &Sender<WatchEvent>) {
+        let Some(kind) = Self::map_event_kind(event.kind) else {
+            return;
         };
 
-        if let Some(kind) = kind {
-            for path in event.paths {
-                // Skip directories
-                if path.is_dir() {
-                    continue;
-                }
-
-                // Skip hidden files and common non-source files
-                if Self::should_skip_path(&path) {
-                    continue;
-                }
-
-                let watch_event = WatchEvent::new(path, kind.clone());
-
-                // Only send events for lintable files
-                if watch_event.is_lintable() {
-                    let _ = tx.send(watch_event);
-                }
-            }
+        for path in event.paths {
+            Self::dispatch_path(path, &kind, tx);
         }
     }
 
@@ -271,7 +310,9 @@ mod tests {
     #[test]
     fn test_file_watcher_detects_changes() {
         let temp_dir = TempDir::new().unwrap();
-        let watcher = FileWatcher::new(vec![temp_dir.path().to_path_buf()]).unwrap();
+        // Use the polling backend so the test is deterministic and independent of
+        // native FS-event delivery, which is unavailable in some sandboxes/CI.
+        let watcher = FileWatcher::new_polling(vec![temp_dir.path().to_path_buf()]).unwrap();
 
         // Create a test file
         let test_file = temp_dir.path().join("test.rs");
@@ -280,22 +321,34 @@ mod tests {
         // Canonicalize the test file path to handle symlinks (e.g., /var -> /private/var on macOS)
         let test_file_canonical = test_file.canonicalize().unwrap_or(test_file.clone());
 
-        // Give the watcher time to detect the change
-        std::thread::sleep(Duration::from_millis(200));
-
-        // We should have received an event
-        let events = watcher.drain_events();
-        // Note: The number of events may vary depending on the platform
-        // Some platforms may emit multiple events for a single file operation
-        // Compare canonicalized paths to handle symlinks
-        assert!(
-            events.iter().any(|e| {
+        // FS events arrive asynchronously and their latency is platform- and
+        // load-dependent. Rather than sleeping a single fixed interval (which is
+        // flaky when an event takes longer than expected to surface), poll for
+        // the event up to a generous deadline, accumulating drained events.
+        let deadline = Duration::from_secs(5);
+        let poll_interval = Duration::from_millis(50);
+        let start = std::time::Instant::now();
+        let mut events = Vec::new();
+        let mut found = false;
+        while start.elapsed() < deadline {
+            events.extend(watcher.drain_events());
+            // Note: The number of events may vary depending on the platform.
+            // Some platforms may emit multiple events for a single file
+            // operation. Compare canonicalized paths to handle symlinks.
+            found = events.iter().any(|e| {
                 let event_path = e.path.canonicalize().unwrap_or(e.path.clone());
                 event_path == test_file_canonical
-            }),
-            "Expected to find event for {:?}, got {:?}",
-            test_file_canonical,
-            events
+            });
+            if found {
+                break;
+            }
+            std::thread::sleep(poll_interval);
+        }
+
+        assert!(
+            found,
+            "Expected to find event for {:?} within {:?}, got {:?}",
+            test_file_canonical, deadline, events
         );
     }
 }
