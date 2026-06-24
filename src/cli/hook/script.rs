@@ -502,19 +502,21 @@ pub(crate) fn build_pre_push_preamble() -> (String, &'static str) {
          else\n\
          \x20 _BASE=\"$_REMOTE_SHA\"\n\
          fi\n\
-         # Use `git diff --name-only` (tree delta between the two endpoints):\n\
-         # if the net effect of the push range is identical content for a\n\
-         # file (e.g. added then reverted within the push), that file's final\n\
-         # state already exists in the remote tree and has already been\n\
-         # reviewed — no need to re-lint. Only files whose final content\n\
-         # differs from the remote's tree are worth checking.\n\
-         _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..\"$_LOCAL_SHA\" 2>/dev/null | grep -v '^$')\n\
+         # Use `git diff --name-only` with THREE dots (symmetric/merge-base\n\
+         # delta): `A...B` diffs from merge-base(A,B) to B, so only the content\n\
+         # the push actually introduces is checked. Two-dot `A..B` would also\n\
+         # flag files the remote changed but local never touched (when local is\n\
+         # behind or diverged after a force-push), causing spurious re-lints —\n\
+         # e.g. reverting a commit then `git push -f` shows zero net change.\n\
+         # Net-no-change files (added then reverted within the push) still drop\n\
+         # out because the endpoints' trees match.\n\
+         _PUSHED_FILES=$(git diff --name-only \"$_BASE\"...\"$_LOCAL_SHA\" 2>/dev/null | grep -v '^$')\n\
          # Fallback: if diff failed or is empty (e.g. remote SHA not fetched),\n\
          # try upstream, then HEAD~1.\n\
          if [ -z \"$_PUSHED_FILES\" ]; then\n\
          \x20 _FALLBACK_BASE=$(git rev-parse '@{u}' 2>/dev/null || git rev-parse 'HEAD~1' 2>/dev/null)\n\
          \x20 if [ -n \"$_FALLBACK_BASE\" ] && [ \"$_FALLBACK_BASE\" != \"$_BASE\" ]; then\n\
-         \x20\x20\x20 _PUSHED_FILES=$(git diff --name-only \"$_FALLBACK_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
+         \x20\x20\x20 _PUSHED_FILES=$(git diff --name-only \"$_FALLBACK_BASE\"...HEAD 2>/dev/null | grep -v '^$')\n\
          \x20\x20\x20 if [ -n \"$_PUSHED_FILES\" ]; then\n\
          \x20\x20\x20\x20\x20 echo \"[linthis] Remote SHA not fetched locally — using $_FALLBACK_BASE as base.\" >&2\n\
          \x20\x20\x20 fi\n\
@@ -1825,11 +1827,13 @@ pub(crate) fn build_git_with_agent_prepush_script(
          # Read fix_commit_mode from config\n\
          {fix_commit_mode}\n\
          \n\
-         # Tree-delta semantics: net-no-change files don't need re-linting.\n\
+         # Merge-base delta (three-dot): net-no-change files don't need\n\
+         # re-linting, and files only the remote changed (local behind/diverged\n\
+         # after a force-push) are excluded so they aren't spuriously re-linted.\n\
          _BASE=$(git rev-parse '@{{u}}' 2>/dev/null || \\\n\
          \x20       git merge-base HEAD origin/main 2>/dev/null || \\\n\
          \x20       git rev-parse 'HEAD~1' 2>/dev/null)\n\
-         _PUSHED_FILES=$(git diff --name-only \"$_BASE\"..HEAD 2>/dev/null | grep -v '^$')\n\
+         _PUSHED_FILES=$(git diff --name-only \"$_BASE\"...HEAD 2>/dev/null | grep -v '^$')\n\
          \n\
          {worktree_setup}\
          # Check agent provider availability up-front so both the fix path\n\
@@ -4992,11 +4996,13 @@ mod tests {
         );
     }
 
-    /// Pre-push `_PUSHED_FILES` uses `git diff --name-only A..B` (tree-delta
-    /// semantics): if a file is added then reverted inside the push range,
-    /// its final content matches what's already reviewed on the remote, so
-    /// there's nothing new to re-check. Using `git log --name-only` (union)
-    /// would force re-linting for files with zero net change — wasted work.
+    /// Pre-push `_PUSHED_FILES` uses `git diff --name-only A...B` (three-dot,
+    /// merge-base delta): if a file is added then reverted inside the push
+    /// range, its final content matches what's already reviewed on the remote,
+    /// so there's nothing new to re-check; and files only the remote changed
+    /// (local behind/diverged after a force-push) are excluded. Two-dot `A..B`
+    /// would flag those, and `git log --name-only` (union) would force
+    /// re-linting for files with zero net change — wasted work.
     #[test]
     fn pre_push_uses_tree_delta_not_commit_union() {
         use crate::cli::commands::HookEvent;
@@ -5004,8 +5010,9 @@ mod tests {
         // --type git pre-push
         let git_script = build_global_hook_script_for_event(&HookEvent::PrePush, &None, None);
         assert!(
-            git_script.contains("git diff --name-only \"$_BASE\"..\"$_LOCAL_SHA\""),
-            "--type git pre-push must use `git diff --name-only` for tree-delta: {git_script}"
+            git_script.contains("git diff --name-only \"$_BASE\"...\"$_LOCAL_SHA\""),
+            "--type git pre-push must use three-dot `git diff --name-only A...B` for \
+             merge-base delta: {git_script}"
         );
         assert!(
             !git_script.contains("git log --name-only --pretty=format:"),
@@ -5020,9 +5027,9 @@ mod tests {
             None,
         );
         assert!(
-            agent_script.contains("git diff --name-only \"$_BASE\"..HEAD"),
-            "--type git-with-agent pre-push must use `git diff --name-only` for tree-delta: \
-             {agent_script}"
+            agent_script.contains("git diff --name-only \"$_BASE\"...HEAD"),
+            "--type git-with-agent pre-push must use three-dot `git diff --name-only A...B` \
+             for merge-base delta: {agent_script}"
         );
         assert!(
             !agent_script.contains("git log --name-only --pretty=format:"),
