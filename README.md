@@ -54,14 +54,17 @@ linthis init
 # Create global configuration file
 linthis init -g
 
-# Initialize with pre-commit hooks
-linthis init --hook prek
-linthis init --hook pre-commit
-linthis init --hook git
+# Create global git hook template (for all new repos)
+linthis init -g --hook-type git
+
+# Initialize with pre-commit hooks (project-level)
+linthis init --hook-type prek
+linthis init --hook-type pre-commit
+linthis init --hook-type git
 
 # Force overwrite existing files
 linthis init --force
-linthis init --hook prek -f
+linthis init --hook-type prek -f
 ```
 
 ### Basic Usage
@@ -484,7 +487,45 @@ All modifications preserve TOML file format and comments.
 
 ### Pre-commit Hook
 
-#### Method 1: Using prek (Recommended, Faster)
+#### Method 1: Global Hook Template (One-time Setup)
+
+Set up a global Git hook template that applies to all new repositories:
+
+```bash
+# Create global hook template
+linthis init -g --hook-type git
+
+# All new repos will automatically include the hook
+git init new-project
+cd new-project
+# .git/hooks/pre-commit is already set up!
+```
+
+For existing repositories:
+```bash
+cd existing-project
+git init  # Re-apply template
+```
+
+**Features:**
+- 🎯 **Smart Detection**: Only runs if project has linthis config
+- 🔗 **Hook Chaining**: Supports `.git/hooks/pre-commit.local` for project-specific hooks
+- 🚫 **Zero Interference**: Projects without linthis config are not affected
+- ⚡ **One-time Setup**: Works for all your new repositories
+
+**Pros:**
+- One-time setup for all your projects
+- No need to configure hooks per project
+- Perfect for personal development
+- Won't interfere with other projects or hook tools
+
+**Cons:**
+- Not shared with team members
+- Requires manual setup on each machine
+
+See [Global Hooks Guide](docs/GLOBAL_HOOKS.md) for details.
+
+#### Method 2: Using prek (Recommended for Teams)
 
 [prek](https://prek.j178.dev) is a high-performance Git hooks manager written in Rust, fully compatible with pre-commit config format but much faster.
 
@@ -518,7 +559,7 @@ Install hook:
 prek install
 ```
 
-#### Method 2: Traditional Git Hook
+#### Method 3: Traditional Git Hook (Project-level)
 
 Add to `.git/hooks/pre-commit`:
 
@@ -527,7 +568,12 @@ Add to `.git/hooks/pre-commit`:
 linthis --staged --check-only
 ```
 
-#### Method 3: Using pre-commit Framework
+Or use linthis to create it automatically:
+```bash
+linthis init --hook-type git
+```
+
+#### Method 4: Using pre-commit Framework
 
 Using the [pre-commit](https://pre-commit.com/) framework:
 
