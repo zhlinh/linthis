@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use linthis::utils::output::{format_result, OutputFormat};
-use linthis::{run, Language, RunMode, RunOptions};
+use linthis::{run, Language, RunMode, RunOptions, Severity};
 
 #[derive(Parser, Debug)]
 #[command(name = "linthis")]
@@ -3008,6 +3008,44 @@ fn handle_plugin_command(action: PluginCommands) -> ExitCode {
             if plugins.is_empty() {
                 println!("No {} plugins configured to sync.", config_type);
                 println!("\nConfig: {}", manager.config_path().display());
+
+                // Check if the other config has plugins and provide helpful hints
+                if !global {
+                    // If project config is empty, check global config
+                    if let Ok(global_mgr) = PluginConfigManager::global() {
+                        if let Ok(global_plugins) = global_mgr.list_plugins() {
+                            if !global_plugins.is_empty() {
+                                println!(
+                                    "\n{} Found {} global plugin(s).",
+                                    "ℹ".cyan(),
+                                    global_plugins.len()
+                                );
+                                println!(
+                                    "Run {} to sync global plugins.",
+                                    "linthis plugin sync -g".bold()
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    // If global config is empty, check project config
+                    if let Ok(project_mgr) = PluginConfigManager::project() {
+                        if let Ok(project_plugins) = project_mgr.list_plugins() {
+                            if !project_plugins.is_empty() {
+                                println!(
+                                    "\n{} Found {} project plugin(s).",
+                                    "ℹ".cyan(),
+                                    project_plugins.len()
+                                );
+                                println!(
+                                    "Run {} to sync project plugins.",
+                                    "linthis plugin sync".bold()
+                                );
+                            }
+                        }
+                    }
+                }
+
                 return ExitCode::SUCCESS;
             }
 
@@ -4293,31 +4331,8 @@ fn main() -> ExitCode {
         .filter_map(|s| Language::from_name(s))
         .collect();
 
-    // Get paths (handle staged files)
-    let paths = if cli.staged {
-        match linthis::utils::get_staged_files() {
-            Ok(files) => {
-                if files.is_empty() {
-                    if !cli.quiet {
-                        println!("{}", "No staged files to check".yellow());
-                    }
-                    return ExitCode::SUCCESS;
-                }
-                files
-            }
-            Err(e) => {
-                eprintln!("{}: {}", "Error getting staged files".red(), e);
-                return ExitCode::from(2);
-            }
-        }
-    } else if cli.paths.is_empty() {
-        // Default to current directory if no paths specified
-        vec![PathBuf::from(".")]
-    } else {
-        cli.paths
-    };
-
-    // Build exclusion patterns (defaults + gitignore + user-specified)
+    // Build exclusion patterns FIRST (defaults + gitignore + user-specified)
+    // This must be done before getting staged files so we can filter them
     let mut exclude_patterns: Vec<String> = if cli.no_default_excludes {
         Vec::new()
     } else {
@@ -4355,6 +4370,77 @@ fn main() -> ExitCode {
             exclude_patterns.extend(project_config.excludes);
         }
     }
+
+    // Get paths (handle staged files) and apply exclusion filters
+    let paths = if cli.staged {
+        match linthis::utils::get_staged_files() {
+            Ok(files) => {
+                if files.is_empty() {
+                    if !cli.quiet {
+                        println!("{}", "No staged files to check".yellow());
+                    }
+                    return ExitCode::SUCCESS;
+                }
+
+                // Filter staged files using exclusion patterns
+                use linthis::utils::walker::build_glob_set;
+                let glob_set = build_glob_set(&exclude_patterns);
+                let filtered_files: Vec<PathBuf> = files
+                    .into_iter()
+                    .filter(|path| {
+                        // Check if file should be excluded
+                        if let Some(ref gs) = glob_set {
+                            // Check relative path from git root
+                            if let Ok(relative) = path.strip_prefix(&project_root) {
+                                if gs.is_match(relative) {
+                                    if cli.verbose {
+                                        eprintln!("Excluding: {}", relative.display());
+                                    }
+                                    return false;
+                                }
+
+                                // Check all subpaths starting from each component
+                                // This handles patterns like "third_party/**" matching "vpncomm/third_party/..."
+                                let components: Vec<_> = relative.components().collect();
+                                for i in 0..components.len() {
+                                    let subpath: PathBuf = components[i..].iter().collect();
+                                    if gs.is_match(&subpath) {
+                                        if cli.verbose {
+                                            eprintln!("Excluding: {} (matches from subpath {})", relative.display(), subpath.display());
+                                        }
+                                        return false;
+                                    }
+                                }
+                            }
+                        }
+                        true
+                    })
+                    .collect();
+
+                if filtered_files.is_empty() {
+                    if !cli.quiet {
+                        println!("{}", "No staged files to check after exclusions".yellow());
+                    }
+                    return ExitCode::SUCCESS;
+                }
+
+                if cli.verbose {
+                    eprintln!("Checking {} staged file(s) after exclusions", filtered_files.len());
+                }
+
+                filtered_files
+            }
+            Err(e) => {
+                eprintln!("{}: {}", "Error getting staged files".red(), e);
+                return ExitCode::from(2);
+            }
+        }
+    } else if cli.paths.is_empty() {
+        // Default to current directory if no paths specified
+        vec![PathBuf::from(".")]
+    } else {
+        cli.paths
+    };
 
     // Build options
     let options = RunOptions {
@@ -4491,6 +4577,34 @@ fn main() -> ExitCode {
                             );
                         }
                     }
+                }
+            }
+
+            // Show failure message if exit code is non-zero
+            if result.exit_code != 0 && !cli.quiet {
+                eprintln!();
+                if result.exit_code == 1 {
+                    let has_errors = result.issues.iter().any(|i| i.severity == Severity::Error);
+                    let has_warnings = result.issues.iter().any(|i| i.severity == Severity::Warning);
+
+                    if has_errors {
+                        eprintln!("{} {} {}",
+                            "✗".red().bold(),
+                            "Linting failed due to errors.".red().bold(),
+                            "Fix the issues above before committing.".red()
+                        );
+                    } else if has_warnings && cli.fail_on_warnings {
+                        eprintln!("{} {} {}",
+                            "✗".red().bold(),
+                            "Linting failed due to warnings (--fail-on-warnings is enabled).".red().bold(),
+                            "Fix the warnings above before committing.".red()
+                        );
+                    }
+                } else if result.exit_code == 2 {
+                    eprintln!("{} {}",
+                        "✗".red().bold(),
+                        "Linting failed due to formatting errors.".red().bold()
+                    );
                 }
             }
 

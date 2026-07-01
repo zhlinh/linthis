@@ -51,12 +51,34 @@ impl CppChecker {
         // Try to load cpplint config from linthis config files
         let (cpp_config, oc_config) = Self::load_cpplint_configs();
 
+        // Load clang-tidy config from linthis plugin configs
+        let clang_tidy_config = Self::find_plugin_clang_tidy_config();
+
         Self {
-            config_path: None,
+            config_path: clang_tidy_config,
             compile_commands_dir: None,
             cpplint_cpp_config: cpp_config,
             cpplint_oc_config: oc_config,
         }
+    }
+
+    /// Find clang-tidy config from linthis plugin configs
+    fn find_plugin_clang_tidy_config() -> Option<PathBuf> {
+        let project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+        // Check for cpp config first
+        let cpp_clang_tidy = project_dir.join(".linthis/configs/cpp/.clang-tidy");
+        if cpp_clang_tidy.exists() {
+            return Some(cpp_clang_tidy);
+        }
+
+        // Check for oc config as fallback
+        let oc_clang_tidy = project_dir.join(".linthis/configs/oc/.clang-tidy");
+        if oc_clang_tidy.exists() {
+            return Some(oc_clang_tidy);
+        }
+
+        None
     }
 
     /// Load cpplint configs from linthis configuration
@@ -371,6 +393,11 @@ impl CppChecker {
 
     /// Run clang-tidy on a file (check only, no fix)
     fn run_clang_tidy(&self, path: &Path) -> Result<Vec<LintIssue>> {
+        // Skip clang-tidy if LINTHIS_SKIP_CLANG_TIDY env var is set
+        if std::env::var("LINTHIS_SKIP_CLANG_TIDY").is_ok() {
+            return Ok(vec![]);
+        }
+
         let mut cmd = Command::new("clang-tidy");
         cmd.arg(path);
 
@@ -468,6 +495,23 @@ impl CppChecker {
         }
 
         let file_path_parsed = std::path::PathBuf::from(parts[0]);
+
+        // Filter out issues from third_party and other excluded directories
+        // Check both the parsed path and individual components
+        let path_str = file_path_parsed.to_string_lossy();
+        if path_str.contains("third_party")
+            || path_str.contains("thirdparty")
+            || path_str.contains("third-party")
+            || path_str.contains("3rdparty")
+            || path_str.contains("3rd_party")
+            || path_str.contains("3rd-party")
+            || path_str.contains("external")
+            || path_str.contains("externals")
+            || path_str.contains("vendor")
+            || path_str.contains("node_modules") {
+            return None;
+        }
+
         let line_num = parts[1].trim().parse::<usize>().ok()?;
         let col = parts[2].trim().parse::<usize>().ok();
 
