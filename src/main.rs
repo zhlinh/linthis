@@ -145,32 +145,61 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigCommands,
     },
+    /// Git hook management commands
+    Hook {
+        #[command(subcommand)]
+        action: HookCommands,
+    },
     /// Initialize configuration file
     Init {
         /// Create global configuration (~/.linthis/config.toml)
         #[arg(short, long)]
         global: bool,
 
-        /// Disable git hook installation (hooks are installed by default)
+        /// Also install git hook after creating config
         #[arg(long)]
-        no_hook: bool,
-
-        /// Specify hook type (default: git)
-        #[arg(long, value_name = "TYPE", conflicts_with = "no_hook")]
-        hook_type: Option<HookTool>,
-
-        /// Hook only runs check (no formatting)
-        #[arg(short = 'c', long = "hook-check-only", conflicts_with = "no_hook", conflicts_with = "hook_format_only")]
-        hook_check_only: bool,
-
-        /// Hook only runs format (no linting)
-        #[arg(short = 'f', long = "hook-format-only", conflicts_with = "no_hook", conflicts_with = "hook_check_only")]
-        hook_format_only: bool,
+        with_hook: bool,
 
         /// Force overwrite existing files
         #[arg(long)]
         force: bool,
     },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum HookCommands {
+    /// Install git pre-commit hook
+    Install {
+        /// Hook type to install
+        #[arg(long = "type", value_name = "TYPE")]
+        hook_type: Option<HookTool>,
+
+        /// Hook only runs check (no formatting)
+        #[arg(short = 'c', long = "check-only")]
+        check_only: bool,
+
+        /// Hook only runs format (no linting)
+        #[arg(short = 'f', long = "format-only")]
+        format_only: bool,
+
+        /// Force overwrite existing hook
+        #[arg(long)]
+        force: bool,
+
+        /// Non-interactive mode (use defaults, no prompts)
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+    /// Uninstall git pre-commit hook
+    Uninstall {
+        /// Non-interactive mode
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+    /// Show git hook status
+    Status,
+    /// Check for hook conflicts
+    Check,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -3470,10 +3499,7 @@ fn handle_config_command(action: ConfigCommands) -> ExitCode {
 /// Handle init subcommand
 fn handle_init_command(
     global: bool,
-    no_hook: bool,
-    hook_type: Option<HookTool>,
-    hook_check_only: bool,
-    hook_format_only: bool,
+    with_hook: bool,
     force: bool
 ) -> ExitCode {
     use colored::Colorize;
@@ -3529,34 +3555,480 @@ fn handle_init_command(
         }
     }
 
-    // Handle hook initialization
-    // Warning: hooks only make sense for project-level config
-    if global && (hook_type.is_some() || !no_hook) {
-        eprintln!(
-            "{}: Hooks can only be configured at project level, ignoring hook configuration",
-            "Warning".yellow()
-        );
+    // Handle hook installation if requested
+    if with_hook {
+        if global {
+            eprintln!(
+                "{}: Global config does not support --with-hook",
+                "Warning".yellow()
+            );
+            eprintln!("  Global hook template feature has been removed");
+            eprintln!("  Use {} in each project instead",
+                "linthis hook install".cyan()
+            );
+        } else {
+            // Install hook for project
+            println!();
+            let exit_code = handle_hook_install(
+                None,        // Use default hook type (Git)
+                false,       // Not check-only
+                false,       // Not format-only
+                force,       // Use force flag from init
+                true         // Non-interactive mode
+            );
+            if exit_code != ExitCode::SUCCESS {
+                return exit_code;
+            }
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Handle hook subcommands
+fn handle_hook_command(action: HookCommands) -> ExitCode {
+    match action {
+        HookCommands::Install { hook_type, check_only, format_only, force, yes } => {
+            handle_hook_install(hook_type, check_only, format_only, force, yes)
+        }
+        HookCommands::Uninstall { yes } => {
+            handle_hook_uninstall(yes)
+        }
+        HookCommands::Status => {
+            handle_hook_status()
+        }
+        HookCommands::Check => {
+            handle_hook_check()
+        }
+    }
+}
+
+/// Install git pre-commit hook
+fn handle_hook_install(
+    hook_type: Option<HookTool>,
+    check_only: bool,
+    format_only: bool,
+    force: bool,
+    yes: bool,
+) -> ExitCode {
+    use colored::Colorize;
+    use std::io::{self, Write};
+
+    // Find git root
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => {
+            eprintln!("{}: Not in a git repository", "Error".red());
+            eprintln!("  Run this command from within a git repository");
+            return ExitCode::from(1);
+        }
+    };
+
+    let hook_path = git_root.join(".git/hooks/pre-commit");
+
+    // Check for existing hook
+    if hook_path.exists() && !force {
+        println!("{}: {} already exists", "Warning".yellow(), hook_path.display());
+
+        // Read and analyze existing hook
+        if let Ok(existing_content) = std::fs::read_to_string(&hook_path) {
+            let has_linthis = existing_content.contains("linthis");
+            let has_prek = existing_content.contains("prek") || std::path::Path::new(".pre-commit-config.yaml").exists();
+            let has_precommit = existing_content.contains("pre-commit");
+            let has_husky = existing_content.contains("husky");
+
+            println!("\nDetected hook content:");
+            if has_linthis {
+                println!("  {} linthis", "✓".green());
+            }
+            if has_prek {
+                println!("  {} prek/pre-commit framework", "⚠".yellow());
+            }
+            if has_precommit && !has_prek {
+                println!("  {} pre-commit hooks", "⚠".yellow());
+            }
+            if has_husky {
+                println!("  {} husky", "⚠".yellow());
+            }
+
+            if !yes {
+                println!("\nOptions:");
+                println!("  1. {} - Replace existing hook with linthis", "Replace".cyan());
+                println!("  2. {} - Append linthis to existing hook", "Append".cyan());
+                println!("  3. {} - Create backup and replace", "Backup".cyan());
+                println!("  4. {} - Cancel", "Cancel".cyan());
+
+                print!("\nChoose an option [1-4]: ");
+                io::stdout().flush().unwrap();
+
+                let mut choice = String::new();
+                io::stdin().read_line(&mut choice).ok();
+
+                match choice.trim() {
+                    "1" => {
+                        // Replace: use force flag internally
+                        return handle_hook_install_impl(hook_type, check_only, format_only, true, false);
+                    }
+                    "2" => {
+                        // Append
+                        return handle_hook_install_impl(hook_type, check_only, format_only, false, true);
+                    }
+                    "3" => {
+                        // Backup and replace
+                        let backup_path = hook_path.with_extension("pre-commit.backup");
+                        if let Err(e) = std::fs::copy(&hook_path, &backup_path) {
+                            eprintln!("{}: Failed to create backup: {}", "Error".red(), e);
+                            return ExitCode::from(2);
+                        }
+                        println!("{} Created backup at {}", "✓".green(), backup_path.display());
+                        return handle_hook_install_impl(hook_type, check_only, format_only, true, false);
+                    }
+                    "4" | _ => {
+                        println!("Installation cancelled");
+                        return ExitCode::SUCCESS;
+                    }
+                }
+            } else {
+                // Non-interactive mode: append by default
+                return handle_hook_install_impl(hook_type, check_only, format_only, false, true);
+            }
+        }
+
+        println!("  Use {} to overwrite, or {} to append", "--force".yellow(), "choose option 2".cyan());
+        return ExitCode::from(1);
+    }
+
+    // No existing hook or force mode - create new hook
+    handle_hook_install_impl(hook_type, check_only, format_only, force, false)
+}
+
+/// Internal implementation of hook installation
+fn handle_hook_install_impl(
+    hook_type: Option<HookTool>,
+    check_only: bool,
+    format_only: bool,
+    force: bool,
+    append: bool,
+) -> ExitCode {
+    let tool = hook_type.unwrap_or(HookTool::Git);
+
+    // For append mode, we need to modify create_hook_config to support appending
+    if append {
+        // For now, use create_hook_config which already handles appending for git hooks
+        if let Err(exit_code) = create_hook_config(&tool, check_only, format_only, false) {
+            return exit_code;
+        }
+    } else {
+        if let Err(exit_code) = create_hook_config(&tool, check_only, format_only, force) {
+            return exit_code;
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Show git hook status
+fn handle_hook_status() -> ExitCode {
+    use colored::Colorize;
+
+    // Find git root
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => {
+            eprintln!("{}: Not in a git repository", "Error".red());
+            return ExitCode::from(1);
+        }
+    };
+
+    let hook_path = git_root.join(".git/hooks/pre-commit");
+    let prek_config = std::path::Path::new(".pre-commit-config.yaml");
+
+    println!("{}", "Git Hook Status".bold());
+    println!("Repository: {}", git_root.display());
+    println!();
+
+    // Check pre-commit hook
+    if hook_path.exists() {
+        println!("{} {}", "✓".green(), hook_path.display());
+
+        if let Ok(content) = std::fs::read_to_string(&hook_path) {
+            let has_linthis = content.contains("linthis");
+            let has_prek = content.contains("prek");
+            let has_precommit = content.contains("pre-commit");
+            let has_husky = content.contains("husky");
+
+            println!("\nHook contains:");
+            if has_linthis {
+                println!("  {} linthis", "✓".green());
+            }
+            if has_prek {
+                println!("  {} prek", "ℹ".cyan());
+            }
+            if has_precommit {
+                println!("  {} pre-commit", "ℹ".cyan());
+            }
+            if has_husky {
+                println!("  {} husky", "ℹ".cyan());
+            }
+
+            if !has_linthis && !has_prek && !has_precommit && !has_husky {
+                println!("  {} Custom hook", "ℹ".cyan());
+            }
+        }
+    } else {
+        println!("{} No pre-commit hook installed", "✗".red());
+    }
+
+    // Check for prek/pre-commit config
+    if prek_config.exists() {
+        println!("\n{} {}", "✓".green(), prek_config.display());
+
+        if let Ok(content) = std::fs::read_to_string(prek_config) {
+            if content.contains("linthis") {
+                println!("  {} Contains linthis configuration", "✓".green());
+            } else {
+                println!("  {} No linthis configuration found", "⚠".yellow());
+            }
+        }
+    }
+
+    println!("\n{}", "Next steps:".bold());
+    if !hook_path.exists() {
+        println!("  Run {} to install hook", "linthis hook install".cyan());
+    } else if let Ok(content) = std::fs::read_to_string(&hook_path) {
+        if !content.contains("linthis") {
+            println!("  Run {} to add linthis to existing hook", "linthis hook install".cyan());
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Uninstall git pre-commit hook
+fn handle_hook_uninstall(yes: bool) -> ExitCode {
+    use colored::Colorize;
+    use std::io::{self, Write};
+
+    // Find git root
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => {
+            eprintln!("{}: Not in a git repository", "Error".red());
+            return ExitCode::from(1);
+        }
+    };
+
+    let hook_path = git_root.join(".git/hooks/pre-commit");
+
+    if !hook_path.exists() {
+        println!("{}: No pre-commit hook found", "Info".cyan());
         return ExitCode::SUCCESS;
     }
 
-    // Determine which hook tool to use
-    let hook_tool = if no_hook {
-        // User explicitly disabled hooks
-        None
-    } else if let Some(tool) = hook_type {
-        // User specified a hook type
-        Some(tool)
-    } else if !global {
-        // Default: use git hooks for project-level init
-        Some(HookTool::Git)
-    } else {
-        None
+    // Read existing hook
+    let existing_content = match std::fs::read_to_string(&hook_path) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("{}: Failed to read hook file: {}", "Error".red(), e);
+            return ExitCode::from(2);
+        }
     };
 
-    if let Some(tool) = hook_tool {
-        if let Err(exit_code) = create_hook_config(&tool, hook_check_only, hook_format_only, force) {
-            return exit_code;
+    let has_linthis = existing_content.contains("linthis");
+    let has_other_content = existing_content.lines()
+        .any(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty()
+                && !trimmed.starts_with('#')
+                && !trimmed.starts_with("#!/")
+                && !trimmed.contains("linthis")
+        });
+
+    if !has_linthis {
+        println!("{}: Hook does not contain linthis", "Info".cyan());
+        println!("  Nothing to uninstall");
+        return ExitCode::SUCCESS;
+    }
+
+    if !yes {
+        println!("{}: {} contains:", "Warning".yellow(), hook_path.display());
+        if has_linthis {
+            println!("  {} linthis", "✓".green());
         }
+        if has_other_content {
+            println!("  {} Other hooks/commands", "⚠".yellow());
+        }
+
+        println!("\nOptions:");
+        if has_other_content {
+            println!("  1. {} - Remove only linthis lines", "Remove linthis".cyan());
+            println!("  2. {} - Delete entire hook file", "Delete all".cyan());
+        } else {
+            println!("  1. {} - Delete hook file", "Delete".cyan());
+        }
+        println!("  3. {} - Cancel", "Cancel".cyan());
+
+        print!("\nChoose an option: ");
+        io::stdout().flush().unwrap();
+
+        let mut choice = String::new();
+        io::stdin().read_line(&mut choice).ok();
+
+        match choice.trim() {
+            "1" => {
+                if has_other_content {
+                    // Remove only linthis lines
+                    let new_content: String = existing_content
+                        .lines()
+                        .filter(|line| !line.contains("linthis") && !line.contains("# linthis hook"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    if let Err(e) = std::fs::write(&hook_path, new_content + "\n") {
+                        eprintln!("{}: Failed to update hook: {}", "Error".red(), e);
+                        return ExitCode::from(2);
+                    }
+                    println!("{} Removed linthis from {}", "✓".green(), hook_path.display());
+                } else {
+                    // Delete entire file
+                    if let Err(e) = std::fs::remove_file(&hook_path) {
+                        eprintln!("{}: Failed to delete hook: {}", "Error".red(), e);
+                        return ExitCode::from(2);
+                    }
+                    println!("{} Deleted {}", "✓".green(), hook_path.display());
+                }
+            }
+            "2" if has_other_content => {
+                // Delete entire file
+                if let Err(e) = std::fs::remove_file(&hook_path) {
+                    eprintln!("{}: Failed to delete hook: {}", "Error".red(), e);
+                    return ExitCode::from(2);
+                }
+                println!("{} Deleted {}", "✓".green(), hook_path.display());
+            }
+            "3" | _ => {
+                println!("Uninstall cancelled");
+                return ExitCode::SUCCESS;
+            }
+        }
+    } else {
+        // Non-interactive mode: remove only linthis if there's other content, otherwise delete file
+        if has_other_content {
+            let new_content: String = existing_content
+                .lines()
+                .filter(|line| !line.contains("linthis") && !line.contains("# linthis hook"))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            if let Err(e) = std::fs::write(&hook_path, new_content + "\n") {
+                eprintln!("{}: Failed to update hook: {}", "Error".red(), e);
+                return ExitCode::from(2);
+            }
+            println!("{} Removed linthis from hook", "✓".green());
+        } else {
+            if let Err(e) = std::fs::remove_file(&hook_path) {
+                eprintln!("{}: Failed to delete hook: {}", "Error".red(), e);
+                return ExitCode::from(2);
+            }
+            println!("{} Deleted hook", "✓".green());
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Check for hook conflicts
+fn handle_hook_check() -> ExitCode {
+    use colored::Colorize;
+
+    // Find git root
+    let git_root = match find_git_root() {
+        Some(root) => root,
+        None => {
+            eprintln!("{}: Not in a git repository", "Error".red());
+            return ExitCode::from(1);
+        }
+    };
+
+    let hook_path = git_root.join(".git/hooks/pre-commit");
+    let prek_config = std::path::Path::new(".pre-commit-config.yaml");
+    let husky_dir = std::path::Path::new(".husky");
+
+    println!("{}", "Checking for hook conflicts...".bold());
+    println!();
+
+    let mut has_conflicts = false;
+    let mut warnings = Vec::new();
+
+    // Check pre-commit hook
+    if hook_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&hook_path) {
+            let has_linthis = content.contains("linthis");
+            let has_prek = content.contains("prek");
+            let has_precommit = content.contains("pre-commit");
+            let has_husky = content.contains("husky");
+
+            let tool_count = [has_prek, has_precommit, has_husky, has_linthis]
+                .iter()
+                .filter(|&&x| x)
+                .count();
+
+            if tool_count > 1 {
+                has_conflicts = true;
+                println!("{} Multiple hook tools detected in {}", "⚠".yellow(), hook_path.display());
+                if has_linthis {
+                    println!("  {} linthis", "✓".green());
+                }
+                if has_prek {
+                    println!("  {} prek", "⚠".yellow());
+                }
+                if has_precommit {
+                    println!("  {} pre-commit", "⚠".yellow());
+                }
+                if has_husky {
+                    println!("  {} husky", "⚠".yellow());
+                }
+                warnings.push("Consider using only one hook management tool");
+            }
+        }
+    }
+
+    // Check for prek/pre-commit config without hook
+    if prek_config.exists() {
+        if let Ok(content) = std::fs::read_to_string(prek_config) {
+            if content.contains("linthis") {
+                if !hook_path.exists() {
+                    has_conflicts = true;
+                    println!("{} {} exists but no hook installed", "⚠".yellow(), prek_config.display());
+                    warnings.push("Run 'prek install' or 'pre-commit install' to activate hooks");
+                }
+            }
+        }
+    }
+
+    // Check for husky
+    if husky_dir.exists() {
+        let husky_pre_commit = husky_dir.join("pre-commit");
+        if husky_pre_commit.exists() {
+            println!("{} Husky detected: {}", "ℹ".cyan(), husky_pre_commit.display());
+            warnings.push("Husky manages its own hooks in .husky/ directory");
+            warnings.push("To use linthis with husky, add linthis command to .husky/pre-commit");
+        }
+    }
+
+    println!();
+    if has_conflicts {
+        println!("{}", "Conflicts detected:".yellow().bold());
+        for warning in warnings {
+            println!("  • {}", warning);
+        }
+        println!();
+        println!("{}", "Recommendations:".bold());
+        println!("  • Use {} to see current hook setup", "linthis hook status".cyan());
+        println!("  • Choose one hook tool and stick with it");
+        println!("  • For teams, document hook setup in README");
+    } else {
+        println!("{} No conflicts detected", "✓".green().bold());
     }
 
     ExitCode::SUCCESS
@@ -3613,7 +4085,6 @@ fn find_git_root() -> Option<PathBuf> {
         }
     }
 }
-
 /// Create hook configuration file based on the selected tool
 fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: bool, force: bool) -> Result<(), ExitCode> {
     use colored::Colorize;
@@ -3727,6 +4198,19 @@ fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: 
 
             let git_hooks_dir = git_root.join(".git/hooks");
             let hook_path = git_hooks_dir.join("pre-commit");
+
+            // Create hooks directory if it doesn't exist
+            if !git_hooks_dir.exists() {
+                if let Err(e) = fs::create_dir_all(&git_hooks_dir) {
+                    eprintln!(
+                        "{}: Failed to create hooks directory {}: {}",
+                        "Error".red(),
+                        git_hooks_dir.display(),
+                        e
+                    );
+                    return Err(ExitCode::from(2));
+                }
+            }
 
             // Build hook command based on options
             let linthis_hook_line = if hook_check_only {
@@ -4082,9 +4566,14 @@ fn main() -> ExitCode {
         return handle_config_command(action);
     }
 
+    // Handle hook subcommands
+    if let Some(Commands::Hook { action }) = cli.command {
+        return handle_hook_command(action);
+    }
+
     // Handle init subcommand
-    if let Some(Commands::Init { global, no_hook, hook_type, hook_check_only, hook_format_only, force }) = cli.command {
-        return handle_init_command(global, no_hook, hook_type, hook_check_only, hook_format_only, force);
+    if let Some(Commands::Init { global, with_hook, force }) = cli.command {
+        return handle_init_command(global, with_hook, force);
     }
 
     // Perform self-update and auto-sync checks (before loading plugins)
