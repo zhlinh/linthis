@@ -99,6 +99,10 @@ struct Cli {
     #[arg(short, long)]
     quiet: bool,
 
+    /// Fail on warnings (treat warnings as errors for exit code)
+    #[arg(short = 'w', long)]
+    fail_on_warnings: bool,
+
     /// Run benchmark comparing ruff vs flake8+black for Python
     #[arg(long)]
     benchmark: bool,
@@ -147,16 +151,24 @@ enum Commands {
         #[arg(short, long)]
         global: bool,
 
-        /// Initialize pre-commit hooks (prek, pre-commit, or git)
-        #[arg(long, value_name = "TOOL")]
-        hook: Option<HookTool>,
+        /// Disable git hook installation (hooks are installed by default)
+        #[arg(long)]
+        no_hook: bool,
 
-        /// Interactive mode - prompt for hooks setup
-        #[arg(short, long)]
-        interactive: bool,
+        /// Specify hook type (default: git)
+        #[arg(long, value_name = "TYPE", conflicts_with = "no_hook")]
+        hook_type: Option<HookTool>,
+
+        /// Hook only runs check (no formatting)
+        #[arg(short = 'c', long = "hook-check-only", conflicts_with = "no_hook", conflicts_with = "hook_format_only")]
+        hook_check_only: bool,
+
+        /// Hook only runs format (no linting)
+        #[arg(short = 'f', long = "hook-format-only", conflicts_with = "no_hook", conflicts_with = "hook_check_only")]
+        hook_format_only: bool,
 
         /// Force overwrite existing files
-        #[arg(short, long)]
+        #[arg(long)]
         force: bool,
     },
 }
@@ -3418,7 +3430,14 @@ fn handle_config_command(action: ConfigCommands) -> ExitCode {
 }
 
 /// Handle init subcommand
-fn handle_init_command(global: bool, hook: Option<HookTool>, interactive: bool, force: bool) -> ExitCode {
+fn handle_init_command(
+    global: bool,
+    no_hook: bool,
+    hook_type: Option<HookTool>,
+    hook_check_only: bool,
+    hook_format_only: bool,
+    force: bool
+) -> ExitCode {
     use colored::Colorize;
     use linthis::config::Config;
 
@@ -3437,101 +3456,72 @@ fn handle_init_command(global: bool, hook: Option<HookTool>, interactive: bool, 
         Config::project_config_path(&std::env::current_dir().unwrap_or_default())
     };
 
+    // Create or skip config file based on existence
     if config_path.exists() && !force {
-        eprintln!(
-            "{}: {} already exists",
-            "Warning".yellow(),
+        // Config already exists, skip creation but continue with hook setup
+        println!(
+            "{}: {} already exists, skipping config creation",
+            "Info".cyan(),
             config_path.display()
         );
-        return ExitCode::from(1);
-    }
-
-    // Create parent directory if needed
-    if let Some(parent) = config_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!(
-                "{}: Failed to create directory {}: {}",
-                "Error".red(),
-                parent.display(),
-                e
-            );
-            return ExitCode::from(2);
+    } else {
+        // Create parent directory if needed
+        if let Some(parent) = config_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!(
+                    "{}: Failed to create directory {}: {}",
+                    "Error".red(),
+                    parent.display(),
+                    e
+                );
+                return ExitCode::from(2);
+            }
         }
-    }
 
-    let content = Config::generate_default_toml();
-    match std::fs::write(&config_path, content) {
-        Ok(_) => {
-            println!("{} Created {}", "✓".green(), config_path.display());
-        }
-        Err(e) => {
-            eprintln!("{}: Failed to create config: {}", "Error".red(), e);
-            return ExitCode::from(2);
+        // Create config file
+        let content = Config::generate_default_toml();
+        match std::fs::write(&config_path, content) {
+            Ok(_) => {
+                println!("{} Created {}", "✓".green(), config_path.display());
+            }
+            Err(e) => {
+                eprintln!("{}: Failed to create config: {}", "Error".red(), e);
+                return ExitCode::from(2);
+            }
         }
     }
 
     // Handle hook initialization
     // Warning: hooks only make sense for project-level config
-    if global && hook.is_some() {
+    if global && (hook_type.is_some() || !no_hook) {
         eprintln!(
-            "{}: Hooks can only be configured at project level, ignoring --hook flag",
+            "{}: Hooks can only be configured at project level, ignoring hook configuration",
             "Warning".yellow()
         );
         return ExitCode::SUCCESS;
     }
 
     // Determine which hook tool to use
-    let hook_tool = if let Some(tool) = hook {
+    let hook_tool = if no_hook {
+        // User explicitly disabled hooks
+        None
+    } else if let Some(tool) = hook_type {
+        // User specified a hook type
         Some(tool)
-    } else if interactive && !global {
-        prompt_for_hook_tool()
+    } else if !global {
+        // Default: use git hooks for project-level init
+        Some(HookTool::Git)
     } else {
         None
     };
 
     if let Some(tool) = hook_tool {
-        if let Err(exit_code) = create_hook_config(&tool, force) {
+        if let Err(exit_code) = create_hook_config(&tool, hook_check_only, hook_format_only, force) {
             return exit_code;
         }
     }
 
     ExitCode::SUCCESS
-}
-
-/// Prompt user to select a hook tool interactively
-fn prompt_for_hook_tool() -> Option<HookTool> {
-    use colored::Colorize;
-    use std::io::{self, Write};
-
-    print!("\nWould you like to set up pre-commit hooks? (y/n) ");
-    io::stdout().flush().ok()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok()?;
-
-    if !input.trim().eq_ignore_ascii_case("y") {
-        return None;
-    }
-
-    println!("\nChoose a hook manager:");
-    println!("  {}. {} (recommended, faster)", "1".cyan(), "prek".bold());
-    println!("  {}. {} (standard)", "2".cyan(), "pre-commit".bold());
-    println!("  {}. {} (simple)", "3".cyan(), "git hook".bold());
-    print!("> ");
-    io::stdout().flush().ok()?;
-
-    input.clear();
-    io::stdin().read_line(&mut input).ok()?;
-
-    match input.trim() {
-        "1" => Some(HookTool::Prek),
-        "2" => Some(HookTool::PreCommit),
-        "3" => Some(HookTool::Git),
-        _ => {
-            eprintln!("{}: Invalid choice", "Error".red());
-            None
-        }
-    }
 }
 
 /// Check if a command is available in PATH
@@ -3566,8 +3556,28 @@ fn install_hooks(tool: &HookTool) -> Result<(), String> {
     }
 }
 
+/// Find the git repository root directory by searching upwards from current directory
+fn find_git_root() -> Option<PathBuf> {
+    use std::env;
+
+    let mut current_dir = env::current_dir().ok()?;
+
+    loop {
+        let git_dir = current_dir.join(".git");
+        if git_dir.exists() {
+            return Some(current_dir);
+        }
+
+        // Try to go up one directory
+        match current_dir.parent() {
+            Some(parent) => current_dir = parent.to_path_buf(),
+            None => return None, // Reached root directory without finding .git
+        }
+    }
+}
+
 /// Create hook configuration file based on the selected tool
-fn create_hook_config(tool: &HookTool, force: bool) -> Result<(), ExitCode> {
+fn create_hook_config(tool: &HookTool, hook_check_only: bool, hook_format_only: bool, force: bool) -> Result<(), ExitCode> {
     use colored::Colorize;
     use std::fs;
     #[cfg(unix)]
@@ -3586,15 +3596,25 @@ fn create_hook_config(tool: &HookTool, force: bool) -> Result<(), ExitCode> {
                 return Ok(());
             }
 
-            let content = r#"repos:
+            // Build hook command based on options
+            let hook_cmd = if hook_check_only {
+                "linthis -s -c -w"
+            } else if hook_format_only {
+                "linthis -s -f -w"
+            } else {
+                // Default: run both check and format, fail on warnings
+                "linthis -s -c -f -w"
+            };
+
+            let content = format!(r#"repos:
   - repo: local
     hooks:
       - id: linthis
         name: linthis
-        entry: linthis --staged --check-only
+        entry: {}
         language: system
         pass_filenames: false
-"#;
+"#, hook_cmd);
 
             match fs::write(&config_path, content) {
                 Ok(_) => {
@@ -3655,63 +3675,124 @@ fn create_hook_config(tool: &HookTool, force: bool) -> Result<(), ExitCode> {
             }
         }
         HookTool::Git => {
-            // Check if in a git repository
-            let git_hooks_dir = std::path::PathBuf::from(".git/hooks");
-            if !git_hooks_dir.exists() {
-                eprintln!(
-                    "{}: Not in a git repository, cannot create .git/hooks/pre-commit",
-                    "Error".red()
-                );
-                return Err(ExitCode::from(1));
-            }
+            // Find git repository root directory
+            let git_root = match find_git_root() {
+                Some(root) => root,
+                None => {
+                    eprintln!(
+                        "{}: Not in a git repository, cannot create .git/hooks/pre-commit",
+                        "Error".red()
+                    );
+                    return Err(ExitCode::from(1));
+                }
+            };
 
+            let git_hooks_dir = git_root.join(".git/hooks");
             let hook_path = git_hooks_dir.join("pre-commit");
 
-            if hook_path.exists() && !force {
-                eprintln!(
-                    "{}: {} already exists, skipping",
-                    "Warning".yellow(),
-                    hook_path.display()
-                );
-                return Ok(());
-            }
+            // Build hook command based on options
+            let linthis_hook_line = if hook_check_only {
+                "linthis -s -c -w"
+            } else if hook_format_only {
+                "linthis -s -f -w"
+            } else {
+                // Default: run both check and format, fail on warnings
+                "linthis -s -c -f -w"
+            };
 
-            let content = r#"#!/bin/sh
-linthis --staged --check-only
-"#;
-
-            match fs::write(&hook_path, content) {
-                Ok(_) => {
-                    // Make the hook executable
-                    #[cfg(unix)]
-                    {
-                        let mut perms = fs::metadata(&hook_path)
-                            .map_err(|e| {
-                                eprintln!("{}: Failed to get file metadata: {}", "Error".red(), e);
-                                ExitCode::from(2)
-                            })?
-                            .permissions();
-                        perms.set_mode(0o755);
-                        fs::set_permissions(&hook_path, perms).map_err(|e| {
-                            eprintln!("{}: Failed to set permissions: {}", "Error".red(), e);
-                            ExitCode::from(2)
-                        })?;
+            // Check if hook file already exists
+            if hook_path.exists() {
+                // Read existing content
+                let existing_content = match fs::read_to_string(&hook_path) {
+                    Ok(content) => content,
+                    Err(e) => {
+                        eprintln!(
+                            "{}: Failed to read existing hook file: {}",
+                            "Error".red(),
+                            e
+                        );
+                        return Err(ExitCode::from(2));
                     }
+                };
 
-                    println!("{} Created {}", "✓".green(), hook_path.display());
-                    println!("\nNext steps:");
-                    println!("  Make sure the hook is executable:");
-                    println!("    {}", "chmod +x .git/hooks/pre-commit".cyan());
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{}: Failed to create {}: {}",
-                        "Error".red(),
-                        hook_path.display(),
-                        e
+                // Check if linthis is already in the hook
+                if existing_content.contains(linthis_hook_line) {
+                    println!(
+                        "{}: linthis hook already exists in {}",
+                        "Info".cyan(),
+                        hook_path.display()
                     );
-                    Err(ExitCode::from(2))
+                    return Ok(());
+                }
+
+                // Append linthis to the existing hook
+                let mut new_content = existing_content.clone();
+                if !new_content.ends_with('\n') {
+                    new_content.push('\n');
+                }
+                new_content.push_str("\n# linthis hook\n");
+                new_content.push_str(linthis_hook_line);
+                new_content.push('\n');
+
+                match fs::write(&hook_path, new_content) {
+                    Ok(_) => {
+                        println!(
+                            "{} Added linthis to existing {}",
+                            "✓".green(),
+                            hook_path.display()
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{}: Failed to update {}: {}",
+                            "Error".red(),
+                            hook_path.display(),
+                            e
+                        );
+                        Err(ExitCode::from(2))
+                    }
+                }
+            } else {
+                // Create new hook file
+                let content = format!("#!/bin/sh\n{}\n", linthis_hook_line);
+
+                match fs::write(&hook_path, content) {
+                    Ok(_) => {
+                        // Make the hook executable
+                        #[cfg(unix)]
+                        {
+                            let mut perms = fs::metadata(&hook_path)
+                                .map_err(|e| {
+                                    eprintln!("{}: Failed to get file metadata: {}", "Error".red(), e);
+                                    ExitCode::from(2)
+                                })?
+                                .permissions();
+                            perms.set_mode(0o755);
+                            fs::set_permissions(&hook_path, perms).map_err(|e| {
+                                eprintln!("{}: Failed to set permissions: {}", "Error".red(), e);
+                                ExitCode::from(2)
+                            })?;
+                        }
+
+                        println!("{} Created {}", "✓".green(), hook_path.display());
+                        #[cfg(not(unix))]
+                        {
+                            println!("\nNext steps:");
+                            println!("  Make sure the hook is executable:");
+                            println!("    {}", "chmod +x .git/hooks/pre-commit".cyan());
+                        }
+                        Ok(())
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{}: Failed to create {}: {}",
+                            "Error".red(),
+                            hook_path.display(),
+                            e
+                        );
+                        Err(ExitCode::from(2))
+                    }
                 }
             }
         }
@@ -3964,8 +4045,8 @@ fn main() -> ExitCode {
     }
 
     // Handle init subcommand
-    if let Some(Commands::Init { global, hook, interactive, force }) = cli.command {
-        return handle_init_command(global, hook, interactive, force);
+    if let Some(Commands::Init { global, no_hook, hook_type, hook_check_only, hook_format_only, force }) = cli.command {
+        return handle_init_command(global, no_hook, hook_type, hook_check_only, hook_format_only, force);
     }
 
     // Perform self-update and auto-sync checks (before loading plugins)
@@ -4284,6 +4365,7 @@ fn main() -> ExitCode {
         verbose: cli.verbose,
         quiet: cli.quiet,
         plugins: loaded_plugins,
+        fail_on_warnings: cli.fail_on_warnings,
     };
 
     // Parse output format
