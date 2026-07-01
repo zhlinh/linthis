@@ -30,7 +30,7 @@ pub struct WalkerConfig {
 }
 
 /// Build a GlobSet from patterns.
-fn build_glob_set(patterns: &[String]) -> Option<GlobSet> {
+pub fn build_glob_set(patterns: &[String]) -> Option<GlobSet> {
     if patterns.is_empty() {
         return None;
     }
