@@ -205,12 +205,18 @@ impl RunResult {
 
     /// Calculate exit code based on results
     pub fn calculate_exit_code(&mut self) {
+        self.calculate_exit_code_with_warnings(false);
+    }
+
+    /// Calculate exit code based on results, with option to fail on warnings
+    pub fn calculate_exit_code_with_warnings(&mut self, fail_on_warnings: bool) {
         let has_errors = self.issues.iter().any(|i| i.severity == Severity::Error);
+        let has_warnings = self.issues.iter().any(|i| i.severity == Severity::Warning);
         let has_format_errors = self.format_results.iter().any(|r| r.error.is_some());
 
         if has_format_errors {
             self.exit_code = 2;
-        } else if has_errors {
+        } else if has_errors || (fail_on_warnings && has_warnings) {
             self.exit_code = 1;
         } else {
             self.exit_code = 0;
