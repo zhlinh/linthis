@@ -19,7 +19,7 @@
 use std::path::PathBuf;
 use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table};
 
-use super::{PluginError, Result};
+use super::{sanitize_git_url, PluginError, Result};
 
 /// Manages plugin configuration in .linthis/config.toml files
 pub struct PluginConfigManager {
@@ -86,6 +86,11 @@ impl PluginConfigManager {
     /// - Alias already exists in this configuration
     /// - Failed to read/write configuration file
     pub fn add_plugin(&self, alias: &str, url: &str, git_ref: Option<&str>) -> Result<()> {
+        // Guard against URLs polluted by a shell wrapper printing log lines to
+        // stdout (e.g. a corporate git proxy), so we never persist a broken URL.
+        let sanitized_url = sanitize_git_url(url);
+        let url = sanitized_url.as_str();
+
         let mut doc = self.read_config()?;
 
         // Ensure [plugin] table exists
