@@ -531,10 +531,21 @@ linthis security --severity high         # High+ only
 linthis security --format json           # JSON output
 ```
 
-**Inline ignore directives** (for secrets scanner):
+**Inline ignore directives** (apply to all SAST tools — secrets, opengrep, bandit, gosec, flawfinder):
+
+A directive suppresses findings on its own line, or — with `-next-line` — on the
+following line. Any comment style works (`#`, `//`, `/* */`).
+
+| Target | Suppresses |
+|--------|------------|
+| `security` | All security findings on the line |
+| `<tool>` | Findings from one tool: `secrets`, `opengrep`, `bandit`, `gosec`, `flawfinder` |
+| `<rule-id>` | One specific rule, e.g. `secrets/aws-access-key` or an opengrep check id |
 
 ```python
-KEY = "sk-real-key"  # linthis:ignore secrets
+KEY = "sk-real-key"        # linthis:ignore secrets
+exec(user_input)           # linthis:ignore security
+db.query(sql)              # linthis:ignore opengrep
 # linthis:ignore-next-line secrets/sk-prefix-key
 KEY = "sk-real-key"
 ```

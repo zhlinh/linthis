@@ -301,19 +301,12 @@ impl SecretsScanner {
 
         let mut findings = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        let mut next_line_directive: Option<String> = None;
 
+        // Inline `linthis:ignore` suppression is applied uniformly across all
+        // SAST tools by the aggregator (see `super::super::suppress`); the
+        // secrets scanner emits every match and lets that filter drop them.
         for (line_num, line) in lines.iter().enumerate() {
-            let effective_directive = resolve_effective_directive(line, &mut next_line_directive);
-
-            self.scan_line(
-                file_path,
-                ext,
-                line,
-                line_num,
-                &effective_directive,
-                &mut findings,
-            );
+            self.scan_line(file_path, ext, line, line_num, &mut findings);
         }
 
         findings
@@ -325,14 +318,9 @@ impl SecretsScanner {
         ext: &str,
         line: &str,
         line_num: usize,
-        effective_directive: &Option<String>,
         findings: &mut Vec<SastFinding>,
     ) {
         for pattern in &self.compiled {
-            if is_pattern_ignored(effective_directive, &pattern.id) {
-                continue;
-            }
-
             if let Some(m) = pattern.regex.find(line) {
                 let matched = m.as_str();
                 if is_placeholder_value(matched) {
@@ -370,43 +358,6 @@ fn is_binary_extension(ext: &str) -> bool {
             | "pdf"
             | "lock"
     )
-}
-
-/// Resolve the effective ignore directive for a line, consuming any pending
-/// next-line directive and merging it with the inline directive.
-fn resolve_effective_directive(
-    line: &str,
-    next_line_directive: &mut Option<String>,
-) -> Option<String> {
-    let ignore_directive = parse_ignore_directive(line);
-    let ignore_next = parse_ignore_next_line_directive(line);
-
-    let effective = if next_line_directive.is_some() {
-        let d = next_line_directive.take();
-        match (&d, &ignore_directive) {
-            (_, Some(inline)) if inline == "secrets" => Some("secrets".to_string()),
-            (Some(next), Some(_inline)) if next == "secrets" => Some("secrets".to_string()),
-            (_, Some(inline)) => Some(inline.clone()),
-            (d, None) => d.clone(),
-        }
-    } else {
-        ignore_directive
-    };
-
-    if ignore_next.is_some() {
-        *next_line_directive = ignore_next;
-    }
-
-    effective
-}
-
-/// Check whether a specific pattern is suppressed by the directive.
-fn is_pattern_ignored(directive: &Option<String>, pattern_id: &str) -> bool {
-    if let Some(ref d) = directive {
-        d == "secrets" || *d == pattern_id
-    } else {
-        false
-    }
 }
 
 /// Map a file extension to a language identifier.
@@ -636,62 +587,6 @@ fn is_placeholder_value(matched: &str) -> bool {
     }
 
     false
-}
-
-/// Parse inline ignore directive from a line.
-///
-/// Syntax: `# linthis:ignore <target>`
-///   - `# linthis:ignore secrets`                — ignore all secrets checks on this line
-///   - `# linthis:ignore secrets/sk-prefix-key`  — ignore specific rule on this line
-///   - `// linthis:ignore secrets`               — C-style comment
-///
-/// Returns the ignore target, or None if not found or no target specified.
-fn parse_ignore_directive(line: &str) -> Option<String> {
-    // Must be "linthis:ignore" NOT followed by "-next-line"
-    let marker = "linthis:ignore";
-    let pos = line.find(marker)?;
-
-    let after_marker = &line[pos + marker.len()..];
-    // Reject "linthis:ignore-next-line" — that's a different directive
-    if after_marker.starts_with("-next-line") {
-        return None;
-    }
-
-    extract_ignore_target(after_marker)
-}
-
-/// Parse ignore-next-line directive from a line.
-///
-/// Syntax: `# linthis:ignore-next-line <target>`
-///   - `# linthis:ignore-next-line secrets`                — ignore all secrets on next line
-///   - `# linthis:ignore-next-line secrets/sk-prefix-key`  — ignore specific rule on next line
-///
-/// Returns the ignore target, or None if not found.
-fn parse_ignore_next_line_directive(line: &str) -> Option<String> {
-    let marker = "linthis:ignore-next-line";
-    let pos = line.find(marker)?;
-    let after_marker = &line[pos + marker.len()..];
-    extract_ignore_target(after_marker)
-}
-
-/// Extract the target from text after a linthis:ignore marker.
-fn extract_ignore_target(after_marker: &str) -> Option<String> {
-    let trimmed = after_marker.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let target = trimmed
-        .split_whitespace()
-        .next()?
-        .trim_end_matches("*/")
-        .trim();
-
-    if target.is_empty() {
-        return None;
-    }
-
-    Some(target.to_string())
 }
 
 #[cfg(test)]

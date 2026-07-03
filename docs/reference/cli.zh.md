@@ -519,10 +519,20 @@ linthis security [OPTIONS] [PATH]
 | Gosec | Go | `go install github.com/securego/gosec/v2/cmd/gosec@latest` |
 | Flawfinder | C/C++ | `pip install flawfinder` |
 
-**行内忽略指令**（secrets 扫描器）：
+**行内忽略指令**（适用于所有 SAST 工具 —— secrets、opengrep、bandit、gosec、flawfinder）：
+
+指令豁免其所在行的发现；使用 `-next-line` 时豁免下一行。任意注释风格均可（`#`、`//`、`/* */`）。
+
+| 目标 | 豁免范围 |
+|------|----------|
+| `security` | 该行的**所有**安全发现 |
+| `<工具名>` | 单个工具的发现：`secrets`、`opengrep`、`bandit`、`gosec`、`flawfinder` |
+| `<规则 id>` | 单条规则，如 `secrets/aws-access-key` 或某个 opengrep check id |
 
 ```python
-KEY = "sk-real-key"  # linthis:ignore secrets
+KEY = "sk-real-key"        # linthis:ignore secrets
+exec(user_input)           # linthis:ignore security
+db.query(sql)              # linthis:ignore opengrep
 # linthis:ignore-next-line secrets/sk-prefix-key
 KEY = "sk-real-key"
 ```
