@@ -97,6 +97,24 @@ pub fn detect_install_method() -> InstallMethod {
     InstallMethod::Pip
 }
 
+/// Extract the tap name from a Homebrew "untrusted tap" upgrade error.
+///
+/// Homebrew's message reads: `... from untrusted tap zhlinh/linthis.` — this
+/// returns the `owner/name` tap token (e.g. `zhlinh/linthis`), or `None` if the
+/// error is not an untrusted-tap rejection.
+fn extract_untrusted_tap(stderr: &str) -> Option<String> {
+    let marker = "untrusted tap ";
+    let start = stderr.find(marker)? + marker.len();
+
+    let tap: String = stderr[start..]
+        .chars()
+        .take_while(|c| !c.is_whitespace() && *c != '.')
+        .collect();
+
+    // A real tap looks like "owner/name"; ignore anything else.
+    tap.contains('/').then_some(tap)
+}
+
 /// Configuration for self-update
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SelfUpdateConfig {
@@ -405,10 +423,46 @@ impl SelfUpdateManager {
 
         if output.status.success() {
             println!("✓ linthis upgraded successfully via {}", label);
+            return Ok(true);
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // Homebrew ≥5 refuses to load formulae from a non-official ("untrusted")
+        // tap when HOMEBREW_REQUIRE_TAP_TRUST is set, which blocks self-update.
+        // Trust the tap (the sanctioned fix) and retry the upgrade once.
+        if method == InstallMethod::Homebrew {
+            if let Some(tap) = extract_untrusted_tap(&stderr) {
+                return self.trust_tap_and_retry(&tap, &args, label);
+            }
+        }
+
+        eprintln!("✗ Failed to upgrade linthis via {}: {}", label, stderr);
+        Ok(false)
+    }
+
+    /// Trust a Homebrew tap that was rejected as untrusted, then retry the
+    /// upgrade command once. Falls back to a manual hint if trusting fails.
+    fn trust_tap_and_retry(&self, tap: &str, args: &[&str], label: &str) -> io::Result<bool> {
+        println!("⚠ Homebrew tap '{tap}' is not trusted; trusting it to enable upgrades...");
+
+        let trust = Command::new("brew").args(["trust", tap]).output()?;
+        if !trust.status.success() {
+            let stderr = String::from_utf8_lossy(&trust.stderr);
+            eprintln!("✗ Failed to trust tap '{}': {}", tap, stderr.trim());
+            eprintln!("  Trust it manually and re-run the upgrade: brew trust {tap}");
+            return Ok(false);
+        }
+
+        println!("✓ Trusted tap '{tap}'. Retrying upgrade...");
+
+        let output = Command::new("brew").args(args).output()?;
+        if output.status.success() {
+            println!("✓ linthis upgraded successfully via {label}");
             Ok(true)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("✗ Failed to upgrade linthis via {}: {}", label, stderr);
+            eprintln!("✗ Failed to upgrade linthis via {label} after trusting tap: {stderr}");
             Ok(false)
         }
     }
@@ -468,6 +522,26 @@ impl SelfUpdateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_tap_from_untrusted_tap_error() {
+        let stderr = "✔︎ JSON API packages.arm64_tahoe.jws.json\n\
+             Error: Refusing to load formula zhlinh/linthis/linthis from untrusted \
+             tap zhlinh/linthis.\n\
+             Run `brew trust --formula zhlinh/linthis/linthis` or `brew trust \
+             zhlinh/linthis` to trust it.";
+        assert_eq!(
+            extract_untrusted_tap(stderr),
+            Some("zhlinh/linthis".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_tap_ignores_unrelated_errors() {
+        assert_eq!(extract_untrusted_tap("Error: No available formula"), None);
+        // "untrusted tap" without a valid owner/name token yields nothing.
+        assert_eq!(extract_untrusted_tap("untrusted tap ."), None);
+    }
 
     #[test]
     fn test_self_update_config_default() {
