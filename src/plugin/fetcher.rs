@@ -20,7 +20,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::cache::{CachedPlugin, PluginCache};
-use super::{log_plugin_operation, PluginError, PluginSource, Result};
+use super::{log_plugin_operation, sanitize_git_url, PluginError, PluginSource, Result};
 
 /// Plugin fetcher handles Git operations
 #[derive(Debug)]
@@ -65,7 +65,7 @@ impl PluginFetcher {
         cache: &PluginCache,
         force_update: bool,
     ) -> Result<CachedPlugin> {
-        let url = source
+        let raw_url = source
             .url
             .as_ref()
             .ok_or_else(|| PluginError::CloneFailed {
@@ -73,8 +73,22 @@ impl PluginFetcher {
                 message: "No URL provided for plugin".to_string(),
             })?;
 
-        // Check if this is a local path
-        if source.is_local_path() {
+        // The stored/resolved URL may be polluted by an upstream shell wrapper
+        // that prints log lines to stdout before the real URL (e.g. a corporate
+        // git proxy emitting `[INFO] SSH 认证成功...`). Recover the clean URL so
+        // the cache path and git clone are not corrupted.
+        let url_owned = sanitize_git_url(raw_url);
+        if url_owned != *raw_url {
+            log_plugin_operation(
+                "sanitize",
+                &format!("recovered plugin URL from polluted input: {url_owned}"),
+                self.verbose,
+            );
+        }
+        let url = url_owned.as_str();
+
+        // Check if this is a local path (based on the sanitized URL)
+        if is_local_path(url) {
             return self.fetch_local(source, url);
         }
 
@@ -107,7 +121,7 @@ impl PluginFetcher {
         let now = Utc::now();
         let plugin = CachedPlugin {
             name: source.name.clone(),
-            url: url.clone(),
+            url: url.to_string(),
             git_ref: source.git_ref.clone(),
             commit_hash,
             cached_at: now,
@@ -370,10 +384,8 @@ impl PluginFetcher {
             .ok()?;
 
         if output.status.success() {
-            let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !hash.is_empty() {
-                return Some(hash);
-            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return extract_commit_hash(&stdout);
         }
         None
     }
@@ -414,11 +426,7 @@ impl PluginFetcher {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             // Format: "hash\trefs/heads/branch" or "hash\tHEAD"
-            if let Some(hash) = stdout.split_whitespace().next() {
-                if hash.len() >= 7 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
-                    return Some(hash.to_string());
-                }
-            }
+            return extract_commit_hash(&stdout);
         }
         None
     }
@@ -486,6 +494,50 @@ mod tests {
             "git@github.com:user/repo.git"
         );
     }
+
+    #[test]
+    fn extract_commit_hash_from_clean_ls_remote() {
+        let out = "1234567890abcdef1234567890abcdef12345678\tHEAD";
+        assert_eq!(
+            super::extract_commit_hash(out),
+            Some("1234567890abcdef1234567890abcdef12345678".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_commit_hash_skips_wrapper_log_noise() {
+        // A wrapped git prints an [INFO] line to stdout before the real output.
+        let out = "[INFO] SSH 认证成功，使用 SSH 拉取插件\n\
+                   1234567890abcdef1234567890abcdef12345678\trefs/heads/main";
+        assert_eq!(
+            super::extract_commit_hash(out),
+            Some("1234567890abcdef1234567890abcdef12345678".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_commit_hash_none_when_no_hash() {
+        assert_eq!(super::extract_commit_hash("[INFO] auth ok\nfatal: nope"), None);
+        assert_eq!(super::extract_commit_hash(""), None);
+    }
+}
+
+/// Whether a URL string refers to a local filesystem path.
+fn is_local_path(url: &str) -> bool {
+    url.starts_with('/') || url.starts_with("./") || url.starts_with("../")
+}
+
+/// Extract the first Git commit hash from command output.
+///
+/// A wrapped `git` (e.g. a corporate proxy) may print log lines such as
+/// `[INFO] SSH 认证成功...` to stdout alongside the real output, so scan all
+/// whitespace-delimited tokens for the first hex hash rather than assuming the
+/// first token is the hash. Returns the first hex token of length >= 7.
+fn extract_commit_hash(stdout: &str) -> Option<String> {
+    stdout
+        .split_whitespace()
+        .find(|tok| tok.len() >= 7 && tok.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(|hash| hash.to_string())
 }
 
 /// Convert an HTTPS git URL to SSH format.

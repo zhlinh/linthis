@@ -176,20 +176,8 @@ fn sanitize_plugin_input(raw: &str) -> (String, Option<String>) {
     if !trimmed.contains('\n') && !trimmed.contains('\r') {
         return (trimmed.to_string(), None);
     }
-    // Multi-line — try to recover the actual URL/name.
-    let lines: Vec<&str> = trimmed
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .collect();
-    let recovered = lines
-        .iter()
-        .rev()
-        .find(|l| l.contains("://") || l.starts_with("git@") || l.starts_with('/'))
-        .copied()
-        .or_else(|| lines.last().copied())
-        .unwrap_or(trimmed)
-        .to_string();
+    // Multi-line — recover the actual URL/name and warn.
+    let recovered = sanitize_git_url(raw);
     let warning = format!(
         "[plugin] sanitized multi-line input (kept last URL-like line). \
          If this surprises you, check whether your shell wraps `git` to \
@@ -197,6 +185,33 @@ fn sanitize_plugin_input(raw: &str) -> (String, Option<String>) {
         raw
     );
     (recovered, Some(warning))
+}
+
+/// Recover a clean Git URL (or local path) from a value that may have been
+/// polluted by an upstream shell wrapper printing log lines to stdout — e.g. a
+/// corporate git proxy emitting `[INFO] SSH 认证成功...` before the real URL.
+///
+/// Single-line input is returned trimmed. For multi-line input, the last
+/// URL-shaped line (`://`, `git@`, or an absolute path) is kept, falling back
+/// to the last non-empty line.
+pub(crate) fn sanitize_git_url(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if !trimmed.contains('\n') && !trimmed.contains('\r') {
+        return trimmed.to_string();
+    }
+    let lines: Vec<&str> = trimmed
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect();
+    lines
+        .iter()
+        .rev()
+        .find(|l| l.contains("://") || l.starts_with("git@") || l.starts_with('/'))
+        .copied()
+        .or_else(|| lines.last().copied())
+        .unwrap_or(trimmed)
+        .to_string()
 }
 
 impl From<crate::LintisError> for PluginError {
@@ -534,6 +549,42 @@ mod tests {
         let raw = "warning\nmy-plugin";
         let (out, _) = sanitize_plugin_input(raw);
         assert_eq!(out, "my-plugin");
+    }
+
+    // ==================== sanitize_git_url tests ====================
+
+    #[test]
+    fn sanitize_git_url_passthrough_on_clean_input() {
+        assert_eq!(
+            sanitize_git_url("git@github.com:acme/linthis-plugin.git"),
+            "git@github.com:acme/linthis-plugin.git"
+        );
+        assert_eq!(
+            sanitize_git_url("  https://github.com/u/r.git \n"),
+            "https://github.com/u/r.git"
+        );
+    }
+
+    #[test]
+    fn sanitize_git_url_recovers_from_info_log_prefix() {
+        // Exact shape from an internal git wrapper bug report.
+        let raw = "[INFO] SSH 认证成功，使用 SSH 拉取插件\n\
+                   git@github.com:acme/linthis-plugin.git";
+        assert_eq!(
+            sanitize_git_url(raw),
+            "git@github.com:acme/linthis-plugin.git"
+        );
+    }
+
+    #[test]
+    fn sanitize_git_url_recovers_local_path() {
+        let raw = "[INFO] using local plugin\n/opt/plugins/my-plugin";
+        assert_eq!(sanitize_git_url(raw), "/opt/plugins/my-plugin");
+    }
+
+    #[test]
+    fn sanitize_git_url_falls_back_to_last_nonempty_line() {
+        assert_eq!(sanitize_git_url("noise\n\nmy-plugin\n"), "my-plugin");
     }
 
     #[test]
