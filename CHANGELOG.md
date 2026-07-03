@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-07-03
+
+### Added
+
+- extend inline linthis:ignore to all SAST tools
+
+### Fixed
+
+- tolerate shell-wrapper log noise in URLs and git output
+- trust untrusted Homebrew tap and retry upgrade
+
 ## [0.26.0] - 2026-06-25
 
 ### Added
