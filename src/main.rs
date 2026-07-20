@@ -810,24 +810,54 @@ fn handle_init_flag() -> ExitCode {
     }
 }
 
-/// Resolve the `ToolInstallMode` from CLI flags and config.
+/// Parse a `LINTHIS_INSTALL_MODE` token into a `ToolInstallMode`.
+///
+/// Accepts `auto`, `prompt`, or `disabled` (case-insensitive, whitespace
+/// trimmed). Unknown or empty values return `None` so the caller falls through
+/// to config / default resolution.
+fn parse_install_mode_env(raw: &str) -> Option<ToolInstallMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(ToolInstallMode::Auto),
+        "prompt" => Some(ToolInstallMode::Prompt),
+        "disabled" => Some(ToolInstallMode::Disabled),
+        _ => None,
+    }
+}
+
+/// Resolve the `ToolInstallMode` from the `[tool_auto_install]` config section,
+/// falling back to `Prompt` when the section is absent.
+fn install_mode_from_config(runtime_config: &linthis::config::Config) -> ToolInstallMode {
+    match &runtime_config.tool_auto_install {
+        Some(cfg) if !cfg.enabled => ToolInstallMode::Disabled,
+        Some(cfg) => match cfg.mode.as_str() {
+            "auto" => ToolInstallMode::Auto,
+            "disabled" => ToolInstallMode::Disabled,
+            _ => ToolInstallMode::Prompt,
+        },
+        None => ToolInstallMode::Prompt,
+    }
+}
+
+/// Resolve the `ToolInstallMode` from CLI flags, the `LINTHIS_INSTALL_MODE`
+/// environment variable, and config.
+///
+/// Precedence (highest first):
+///  1. `--no-tool-auto-install` flag → `Disabled`
+///  2. `LINTHIS_INSTALL_MODE` env var (`auto` / `prompt` / `disabled`)
+///  3. `[tool_auto_install]` config section
+///  4. default → `Prompt`
 fn resolve_tool_install_mode(
     no_tool_auto_install: bool,
     runtime_config: &linthis::config::Config,
 ) -> ToolInstallMode {
     if no_tool_auto_install {
-        ToolInstallMode::Disabled
-    } else {
-        match &runtime_config.tool_auto_install {
-            Some(cfg) if !cfg.enabled => ToolInstallMode::Disabled,
-            Some(cfg) => match cfg.mode.as_str() {
-                "auto" => ToolInstallMode::Auto,
-                "disabled" => ToolInstallMode::Disabled,
-                _ => ToolInstallMode::Prompt,
-            },
-            None => ToolInstallMode::Prompt,
-        }
+        return ToolInstallMode::Disabled;
     }
+
+    std::env::var("LINTHIS_INSTALL_MODE")
+        .ok()
+        .and_then(|raw| parse_install_mode_env(&raw))
+        .unwrap_or_else(|| install_mode_from_config(runtime_config))
 }
 
 /// Resolve which checks to run from CLI flags and config.
@@ -2046,5 +2076,97 @@ mod skip_checks_tests {
     fn env_mixed_valid_and_invalid() {
         let out = with_env(Some("lin,foo"), || apply_skip_checks_env(base()));
         assert_eq!(out, vec!["security".to_string(), "complexity".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod install_mode_tests {
+    use super::{parse_install_mode_env, resolve_tool_install_mode};
+    use linthis::config::{Config, ToolAutoInstallConfig};
+    use linthis::ToolInstallMode;
+    use std::sync::Mutex;
+
+    // Env-var mutation is process-wide; serialize these tests.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_env<F: FnOnce() -> T, T>(value: Option<&str>, f: F) -> T {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("LINTHIS_INSTALL_MODE").ok();
+        match value {
+            Some(v) => std::env::set_var("LINTHIS_INSTALL_MODE", v),
+            None => std::env::remove_var("LINTHIS_INSTALL_MODE"),
+        }
+        let out = f();
+        match prev {
+            Some(v) => std::env::set_var("LINTHIS_INSTALL_MODE", v),
+            None => std::env::remove_var("LINTHIS_INSTALL_MODE"),
+        }
+        out
+    }
+
+    fn config_with_mode(mode: &str) -> Config {
+        Config {
+            tool_auto_install: Some(ToolAutoInstallConfig {
+                enabled: true,
+                mode: mode.to_string(),
+            }),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn parses_valid_tokens_case_insensitively() {
+        assert_eq!(parse_install_mode_env("auto"), Some(ToolInstallMode::Auto));
+        assert_eq!(
+            parse_install_mode_env("  PROMPT "),
+            Some(ToolInstallMode::Prompt)
+        );
+        assert_eq!(
+            parse_install_mode_env("Disabled"),
+            Some(ToolInstallMode::Disabled)
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_or_empty_tokens() {
+        assert_eq!(parse_install_mode_env(""), None);
+        assert_eq!(parse_install_mode_env("yes"), None);
+    }
+
+    #[test]
+    fn env_var_overrides_config() {
+        // Config says prompt, but the env var forces auto (the CI case).
+        let cfg = config_with_mode("prompt");
+        let out = with_env(Some("auto"), || resolve_tool_install_mode(false, &cfg));
+        assert_eq!(out, ToolInstallMode::Auto);
+    }
+
+    #[test]
+    fn no_install_flag_beats_env_var() {
+        // Explicit --no-tool-auto-install wins even over LINTHIS_INSTALL_MODE=auto.
+        let cfg = Config::default();
+        let out = with_env(Some("auto"), || resolve_tool_install_mode(true, &cfg));
+        assert_eq!(out, ToolInstallMode::Disabled);
+    }
+
+    #[test]
+    fn unknown_env_falls_through_to_config() {
+        let cfg = config_with_mode("disabled");
+        let out = with_env(Some("bogus"), || resolve_tool_install_mode(false, &cfg));
+        assert_eq!(out, ToolInstallMode::Disabled);
+    }
+
+    #[test]
+    fn unset_env_uses_config() {
+        let cfg = config_with_mode("auto");
+        let out = with_env(None, || resolve_tool_install_mode(false, &cfg));
+        assert_eq!(out, ToolInstallMode::Auto);
+    }
+
+    #[test]
+    fn unset_env_and_no_config_defaults_to_prompt() {
+        let cfg = Config::default();
+        let out = with_env(None, || resolve_tool_install_mode(false, &cfg));
+        assert_eq!(out, ToolInstallMode::Prompt);
     }
 }
