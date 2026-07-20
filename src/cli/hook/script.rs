@@ -476,10 +476,19 @@ pub(crate) fn shell_apply_agent_patch_by_mode() -> String {
 /// `HEAD~1..HEAD` if the stdin-provided remote SHA isn't locally reachable
 /// (which makes `git diff $_REMOTE_SHA..$_LOCAL_SHA` silently return nothing).
 pub(crate) fn build_pre_push_preamble() -> (String, &'static str) {
-    let preamble = "# For pre-push: save remote args, read stdin for push info\n\
+    // Head: remote args, then one-shot capture of the ref list into
+    // $_PREPUSH_STDIN so `body`'s parse loop AND the local-hook delegation
+    // (which runs the repo's own pre-push hook, e.g. git-lfs) can both replay
+    // it. Built with format! only so `{capture}` interpolates — `body` stays a
+    // plain literal below so shell `'@{u}'` braces are never seen by format!.
+    let head = format!(
+        "# For pre-push: save remote args, then capture the ref list\n\
          _REMOTE_NAME=\"$1\"\n\
          _REMOTE_URL=\"$2\"\n\
-         # Read push info from stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>\n\
+         {capture}",
+        capture = shell_capture_pre_push_stdin(),
+    );
+    let body = "# Read push info from the captured ref list: <local_ref> <local_sha> <remote_ref> <remote_sha>\n\
          _IS_TAG=0\n\
          _LOCAL_SHA=\"\"\n\
          _REMOTE_SHA=\"\"\n\
@@ -488,7 +497,9 @@ pub(crate) fn build_pre_push_preamble() -> (String, &'static str) {
          \x20 case \"$_LREF\" in refs/tags/*) _IS_TAG=1 ;; esac\n\
          \x20 _LOCAL_SHA=\"$_LSHA\"\n\
          \x20 _REMOTE_SHA=\"$_RSHA\"\n\
-         done\n\
+         done <<_PREPUSH_REFS_EOF_\n\
+         $_PREPUSH_STDIN\n\
+         _PREPUSH_REFS_EOF_\n\
          if [ \"$_IS_TAG\" = \"1\" ]; then\n\
          \x20 echo \"[linthis] Tag push detected — skipping pre-push check.\" >&2\n\
          \x20 exit 0\n\
@@ -534,12 +545,92 @@ pub(crate) fn build_pre_push_preamble() -> (String, &'static str) {
          $_PUSHED_FILES\n\
          _EOF_\n\
          \n";
+    // `body` is a plain literal value, so its shell braces (e.g. '@{u}') are
+    // never parsed as format! placeholders — only the "{head}{body}" template is.
+    let preamble = format!("{head}{body}");
     let full = format!(
         "{preamble}{worktree_setup}",
         preamble = preamble,
         worktree_setup = shell_pre_push_worktree_setup(),
     );
     (full, "\"$_REMOTE_NAME\" \"$_REMOTE_URL\"")
+}
+
+/// Shell snippet: capture the pre-push ref list from stdin into
+/// `_PREPUSH_STDIN`.
+///
+/// Git delivers pre-push refs on stdin and they can be read only once, so we
+/// slurp them here and every later consumer replays from the captured copy:
+///   - the repo's own pre-push hook ([`shell_run_local_pre_push_hook`] and the
+///     `--type git` delegation block), fed via `printf`/heredoc, and
+///   - the `--type git` preamble's own ref parse loop, fed via a heredoc.
+///
+/// This must run before anything else reads stdin.
+pub(crate) fn shell_capture_pre_push_stdin() -> String {
+    "# Capture the pre-push ref list from stdin ONCE (stdin is read-once); it's\n\
+     # replayed to the repo's own pre-push hook and to the parse loop below.\n\
+     _PREPUSH_STDIN=$(cat)\n"
+        .to_string()
+}
+
+/// Shell snippet: run the repository's OWN `.git/hooks/pre-push`, replaying the
+/// captured ref list on its stdin.
+///
+/// Why linthis owns this: the standard install points `core.hooksPath` at the
+/// global linthis hooks, and git then runs ONLY those — bypassing every repo's
+/// `.git/hooks/pre-push` entirely. Whatever a project installed there (git-lfs
+/// is the common case, but this is deliberately generic — it runs *whatever*
+/// hook is present, not any one tool) would silently never run. So linthis
+/// bridges to it and feeds it the ref list on stdin, which pre-push hooks read.
+/// A non-zero exit aborts the push, mirroring how git treats a failing hook.
+///
+/// Skips a local hook that itself invokes linthis (recursion guard — that case
+/// is the dedicated `exec` delegation path). No-op when no local hook exists
+/// (e.g. the repo never ran `git lfs install`). Requires `_PREPUSH_STDIN` to
+/// have been captured first via [`shell_capture_pre_push_stdin`].
+pub(crate) fn shell_run_local_pre_push_hook() -> String {
+    "# Bridge to the repo's own pre-push hook (git-lfs et al.): core.hooksPath\n\
+     # makes git skip .git/hooks/, so linthis invokes it and replays the\n\
+     # captured ref list on its stdin. Non-zero exit aborts the push.\n\
+     _LOCAL_PP=\"$(git rev-parse --git-dir 2>/dev/null)/hooks/pre-push\"\n\
+     if [ -f \"$_LOCAL_PP\" ] && [ -x \"$_LOCAL_PP\" ] \\\n\
+     \x20\x20\x20 && ! grep -qE '^[^#]*linthis' \"$_LOCAL_PP\" 2>/dev/null; then\n\
+     \x20 printf '%s\\n' \"$_PREPUSH_STDIN\" | \"$_LOCAL_PP\" \"$1\" \"$2\"\n\
+     \x20 _LOCAL_PP_EXIT=$?\n\
+     \x20 if [ \"$_LOCAL_PP_EXIT\" -ne 0 ]; then\n\
+     \x20\x20\x20 echo \"[linthis] local pre-push hook failed (exit $_LOCAL_PP_EXIT) — aborting push.\" >&2\n\
+     \x20\x20\x20 exit \"$_LOCAL_PP_EXIT\"\n\
+     \x20 fi\n\
+     fi\n"
+        .to_string()
+}
+
+/// Local-hook invocation forms for the `--type git` delegation block, per
+/// event. Pre-push must replay the captured ref list on the local hook's stdin
+/// (git delivers pre-push refs there and linthis already drained the real
+/// stdin capturing them); other events just forward `"$@"`.
+///
+/// Returns `(exec_form, call_form)`:
+///   - `exec_form` replaces the whole script with the local hook (used when the
+///     local hook itself calls linthis). Pre-push feeds stdin via a heredoc so
+///     `exec`'s process-replacement semantics are preserved.
+///   - `call_form` runs the local hook as a child (the common git-lfs path).
+fn local_hook_invocation(hook_event: &HookEvent) -> (String, String) {
+    if matches!(hook_event, HookEvent::PrePush) {
+        (
+            "exec \"$LOCAL_HOOK\" \"$_REMOTE_NAME\" \"$_REMOTE_URL\" <<_PP_EXEC_EOF_\n\
+             $_PREPUSH_STDIN\n\
+             _PP_EXEC_EOF_"
+                .to_string(),
+            "printf '%s\\n' \"$_PREPUSH_STDIN\" | \"$LOCAL_HOOK\" \"$_REMOTE_NAME\" \"$_REMOTE_URL\""
+                .to_string(),
+        )
+    } else {
+        (
+            "exec \"$LOCAL_HOOK\" \"$@\"".to_string(),
+            "\"$LOCAL_HOOK\" \"$@\"".to_string(),
+        )
+    }
 }
 
 /// Build the agent fix command for a given hook event.
@@ -1102,7 +1193,11 @@ pub(crate) fn build_global_hook_script_for_event(
     fix_provider: Option<&AgentFixProvider>,
 ) -> String {
     let linthis_cmd_var = build_linthis_cmd_var(hook_event, args);
-    let (pre_push_preamble, local_hook_orig_args) = resolve_event_preamble(hook_event);
+    let (pre_push_preamble, _local_hook_orig_args) = resolve_event_preamble(hook_event);
+    // Per-event local-hook invocation: pre-push replays the captured ref list
+    // on the local hook's stdin (git drained it into $_PREPUSH_STDIN); other
+    // events forward "$@".
+    let (local_hook_exec, local_hook_call) = local_hook_invocation(hook_event);
     let (fix_block, fix_block_direct, review_block, timer_block) =
         resolve_global_hook_blocks(hook_event, fix_provider);
     let event_name = hook_event.hook_filename();
@@ -1130,6 +1225,20 @@ pub(crate) fn build_global_hook_script_for_event(
         (String::new(), String::new())
     };
 
+    // Locate + delegate to the repo's own hook is extracted so this function's
+    // cyclomatic complexity (counted over the embedded shell) stays in bounds.
+    let dispatch = shell_local_hook_dispatch(&LocalHookDispatchCtx {
+        event: event_name,
+        local_hook_exec: &local_hook_exec,
+        local_hook_call: &local_hook_call,
+        wt_enter: &wt_enter,
+        wt_leave: &wt_leave,
+        git_fix_handler: &git_fix_commit_mode_handler,
+        fix_local: &fix_block,
+        fix_direct: &fix_block_direct,
+        review: review_block,
+    });
+
     format!(
         "#!/bin/sh\n\
          # linthis-hook\n\
@@ -1141,7 +1250,39 @@ pub(crate) fn build_global_hook_script_for_event(
          \x20 _STASH_REF=$(git stash create 2>/dev/null)\n\
          fi\n\
          {pre_push_preamble}\
-         # Locate the local project hook (git-dir aware)\n\
+         {dispatch}",
+        timer = timer_block,
+        linthis = linthis_cmd_var,
+        fix_commit_mode = fix_commit_mode_section,
+        pre_push_preamble = pre_push_preamble,
+        dispatch = dispatch,
+    )
+}
+
+/// Substitutions for [`shell_local_hook_dispatch`].
+struct LocalHookDispatchCtx<'a> {
+    event: &'a str,
+    local_hook_exec: &'a str,
+    local_hook_call: &'a str,
+    wt_enter: &'a str,
+    wt_leave: &'a str,
+    git_fix_handler: &'a str,
+    fix_local: &'a str,
+    fix_direct: &'a str,
+    review: &'a str,
+}
+
+/// Shell block that locates the repo-local hook and dispatches: delegate to it
+/// (when it already calls linthis), run linthis then the local hook (feeding it
+/// stdin for pre-push via `{local_hook_call}`), or run linthis alone when no
+/// local hook exists.
+///
+/// Extracted from [`build_global_hook_script_for_event`] so that function's
+/// cyclomatic complexity (counted over the embedded shell control flow) stays
+/// under threshold.
+fn shell_local_hook_dispatch(ctx: &LocalHookDispatchCtx<'_>) -> String {
+    format!(
+        "# Locate the local project hook (git-dir aware)\n\
          GIT_DIR=\"$(git rev-parse --git-dir 2>/dev/null)\"\n\
          LOCAL_HOOK=\"\"\n\
          if [ -n \"$GIT_DIR\" ]; then\n\
@@ -1151,7 +1292,7 @@ pub(crate) fn build_global_hook_script_for_event(
          if [ -f \"$LOCAL_HOOK\" ] && [ -x \"$LOCAL_HOOK\" ]; then\n\
          \x20 if grep -qE '^[^#]*linthis' \"$LOCAL_HOOK\" 2>/dev/null; then\n\
          \x20\x20\x20 # Local hook already calls linthis — delegate entirely\n\
-         \x20\x20\x20 exec \"$LOCAL_HOOK\" {local_hook_orig_args}\n\
+         \x20\x20\x20 {local_hook_exec}\n\
          \x20 else\n\
          \x20\x20\x20 # Local hook exists but has no linthis — run linthis first, then delegate.\n\
          \x20\x20\x20 # _linthis_run_painted folds stderr into stdout and pipes through the\n\
@@ -1162,7 +1303,8 @@ pub(crate) fn build_global_hook_script_for_event(
          {wt_leave}\
          {git_fix_handler}\
          {fix_local}\
-         \x20\x20\x20 \"$LOCAL_HOOK\" {local_hook_orig_args}\n\
+         \x20\x20\x20 # Run the repo's own hook, replaying stdin for pre-push\n\
+         \x20\x20\x20 {local_hook_call}\n\
          \x20\x20\x20 LOCAL_EXIT=$?\n\
          {review}\
          \x20\x20\x20 [ $LINTHIS_EXIT -ne 0 ] && exit $LINTHIS_EXIT\n\
@@ -1179,18 +1321,15 @@ pub(crate) fn build_global_hook_script_for_event(
          {review}\
          \x20 exit $LINTHIS_EXIT\n\
          fi\n",
-        timer = timer_block,
-        linthis = linthis_cmd_var,
-        fix_commit_mode = fix_commit_mode_section,
-        pre_push_preamble = pre_push_preamble,
-        event = event_name,
-        local_hook_orig_args = local_hook_orig_args,
-        wt_enter = wt_enter,
-        wt_leave = wt_leave,
-        git_fix_handler = git_fix_commit_mode_handler,
-        fix_local = fix_block,
-        fix_direct = fix_block_direct,
-        review = review_block,
+        event = ctx.event,
+        local_hook_exec = ctx.local_hook_exec,
+        local_hook_call = ctx.local_hook_call,
+        wt_enter = ctx.wt_enter,
+        wt_leave = ctx.wt_leave,
+        git_fix_handler = ctx.git_fix_handler,
+        fix_local = ctx.fix_local,
+        fix_direct = ctx.fix_direct,
+        review = ctx.review,
     )
 }
 
@@ -1822,6 +1961,8 @@ pub(crate) fn build_git_with_agent_prepush_script(
         "#!/bin/sh\n\
          {timer}\
          {review_box}\
+         {capture}\
+         {local_hook}\
          {fast_path}\
          \n\
          # Read fix_commit_mode from config\n\
@@ -1909,6 +2050,8 @@ pub(crate) fn build_git_with_agent_prepush_script(
          exit $REVIEW_EXIT\n",
         timer = timer_fns,
         review_box = review_box,
+        capture = shell_capture_pre_push_stdin(),
+        local_hook = shell_run_local_pre_push_hook(),
         fast_path = fast_path,
         fix_commit_mode = fix_commit_mode_section,
         prepush_fix_commit_mode_handler = shell_prepush_fix_commit_mode_handler(linthis_cmd),
@@ -3378,6 +3521,135 @@ mod tests {
         // just re-print the same failure.
         assert!(block.contains("_AGENT_RAN"), "got: {block}");
         assert!(block.contains("Re-verifying"), "got: {block}");
+    }
+
+    #[test]
+    fn local_pre_push_hook_runner_is_generic_and_aborts_on_failure() {
+        let s = shell_run_local_pre_push_hook();
+        // Runs the repo's OWN pre-push hook — generic, not any one tool.
+        assert!(
+            s.contains("/hooks/pre-push") && s.contains("\"$_LOCAL_PP\""),
+            "must invoke the repo-local pre-push hook; got: {s}"
+        );
+        assert!(
+            !s.contains("git lfs"),
+            "runner must stay tool-agnostic (no hardcoded lfs); got: {s}"
+        );
+        // Replays the captured refs on the local hook's stdin.
+        assert!(
+            s.contains("printf '%s\\n' \"$_PREPUSH_STDIN\" | \"$_LOCAL_PP\""),
+            "got: {s}"
+        );
+        // Recursion guard: skip a local hook that itself calls linthis.
+        assert!(s.contains("grep -qE '^[^#]*linthis'"), "got: {s}");
+        // A failing local hook aborts the push.
+        assert!(s.contains("exit \"$_LOCAL_PP_EXIT\""), "got: {s}");
+    }
+
+    #[test]
+    fn pre_push_preamble_captures_stdin_and_replays_to_parse_loop() {
+        let (preamble, _args) = build_pre_push_preamble();
+        // Captures stdin once (no LFS in the preamble — the local hook runs in
+        // the delegation block).
+        assert!(preamble.contains("_PREPUSH_STDIN=$(cat)"), "got: {preamble}");
+        assert!(!preamble.contains("git lfs"), "got: {preamble}");
+        // The ref parse loop reads from the captured copy via heredoc, not raw
+        // stdin (already drained by the capture).
+        assert!(
+            preamble.contains("while read -r _LREF _LSHA _RREF _RSHA; do"),
+            "got: {preamble}"
+        );
+        assert!(
+            preamble.contains("done <<_PREPUSH_REFS_EOF_"),
+            "parse loop must replay captured refs; got: {preamble}"
+        );
+        // Capture must precede the parse loop.
+        let cap_at = preamble.find("_PREPUSH_STDIN=$(cat)").unwrap();
+        let loop_at = preamble.find("while read -r _LREF").unwrap();
+        assert!(cap_at < loop_at, "capture must precede the parse loop");
+    }
+
+    #[test]
+    fn git_type_delegation_replays_stdin_to_local_hook() {
+        use crate::cli::commands::HookEvent;
+        let s = build_global_hook_script_for_event(&HookEvent::PrePush, &None, None);
+        // The delegated local hook receives the captured ref list on stdin.
+        assert!(
+            s.contains("printf '%s\\n' \"$_PREPUSH_STDIN\" | \"$LOCAL_HOOK\""),
+            "pre-push must pipe captured refs into the local hook; got: {s}"
+        );
+        // The exec-delegation branch (local hook is linthis-based) preserves
+        // exec semantics while still feeding stdin via a heredoc.
+        assert!(
+            s.contains("exec \"$LOCAL_HOOK\" \"$_REMOTE_NAME\" \"$_REMOTE_URL\" <<_PP_EXEC_EOF_"),
+            "got: {s}"
+        );
+
+        // Non-pre-push events must NOT gain the pre-push stdin plumbing.
+        let pc = build_global_hook_script_for_event(&HookEvent::PreCommit, &None, None);
+        assert!(!pc.contains("_PREPUSH_STDIN"), "pre-commit must stay plain: {pc}");
+        assert!(pc.contains("\"$LOCAL_HOOK\" \"$@\""), "got: {pc}");
+    }
+
+    #[test]
+    fn pre_push_scripts_are_valid_posix_shell() {
+        use crate::cli::commands::HookEvent;
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        // The git-lfs capture rewrites the ref parse loop into a heredoc, which
+        // is exactly the kind of quoting/heredoc change that can silently
+        // produce unparseable shell. Gate both pre-push builders through
+        // `sh -n` (parse-only, no execution) so a malformed script fails here
+        // instead of at push time.
+        let scripts = [
+            build_global_hook_script_for_event(&HookEvent::PrePush, &None, None),
+            build_git_with_agent_prepush_script(
+                "linthis -c --hook-event=pre-push",
+                &AgentFixProvider::Codebuddy,
+                None,
+            ),
+        ];
+        for script in &scripts {
+            let mut child = Command::new("sh")
+                .arg("-n")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn sh -n");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(script.as_bytes())
+                .unwrap();
+            let out = child.wait_with_output().unwrap();
+            assert!(
+                out.status.success(),
+                "generated pre-push script failed `sh -n`:\n{}\n--- script ---\n{script}",
+                String::from_utf8_lossy(&out.stderr),
+            );
+        }
+    }
+
+    #[test]
+    fn git_with_agent_prepush_runs_local_hook_before_fast_path() {
+        let s = build_git_with_agent_prepush_script(
+            "linthis -c --hook-event=pre-push",
+            &AgentFixProvider::Codebuddy,
+            None,
+        );
+        // git-with-agent has no delegation block of its own, so it must run the
+        // repo's local pre-push hook explicitly (generic, no hardcoded lfs).
+        assert!(s.contains("_PREPUSH_STDIN=$(cat)"), "got: {s}");
+        assert!(s.contains("\"$_LOCAL_PP\""), "got: {s}");
+        assert!(!s.contains("git lfs"), "must stay tool-agnostic; got: {s}");
+        // The local hook must run before the fast-path sentinel can early-exit
+        // 0 — otherwise a fast-pathed push would skip the local hook entirely.
+        let hook_at = s.find("_LOCAL_PP=").expect("local hook present");
+        let fast_at = s.find("pre-push-sentinel").expect("fast-path present");
+        assert!(hook_at < fast_at, "local hook must precede the fast-path check");
     }
 
     #[test]
