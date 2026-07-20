@@ -605,6 +605,39 @@ pub(crate) fn shell_run_local_pre_push_hook() -> String {
         .to_string()
 }
 
+/// Shell snippet: run the repository's OWN `.git/hooks/pre-commit` (husky,
+/// pre-commit framework, any project gate).
+///
+/// Same rationale as [`shell_run_local_pre_push_hook`]: `core.hooksPath` makes
+/// git bypass `.git/hooks/`, and the `--type git-with-agent` pre-commit script
+/// has no delegation of its own, so linthis bridges to the local hook itself.
+///
+/// Unlike pre-push, git hands pre-commit NO ref list — its stdin is whatever
+/// git connected (typically /dev/null or the terminal). So we must NOT `cat`
+/// it (a blocking read would hang an interactive commit); the local hook simply
+/// inherits stdin as-is. Run this before anything that might consume stdin.
+/// A non-zero exit aborts the commit.
+///
+/// Skips a local hook that itself calls linthis (recursion guard). No-op when
+/// no local hook exists.
+pub(crate) fn shell_run_local_pre_commit_hook() -> String {
+    "# Bridge to the repo's own pre-commit hook (husky, pre-commit, etc.):\n\
+     # core.hooksPath makes git skip .git/hooks/, so linthis invokes it. Stdin\n\
+     # is inherited as-is (git gives pre-commit no ref list — do NOT `cat` it,\n\
+     # that would hang interactive commits). Non-zero exit aborts the commit.\n\
+     _LOCAL_PC=\"$(git rev-parse --git-dir 2>/dev/null)/hooks/pre-commit\"\n\
+     if [ -f \"$_LOCAL_PC\" ] && [ -x \"$_LOCAL_PC\" ] \\\n\
+     \x20\x20\x20 && ! grep -qE '^[^#]*linthis' \"$_LOCAL_PC\" 2>/dev/null; then\n\
+     \x20 \"$_LOCAL_PC\" \"$@\"\n\
+     \x20 _LOCAL_PC_EXIT=$?\n\
+     \x20 if [ \"$_LOCAL_PC_EXIT\" -ne 0 ]; then\n\
+     \x20\x20\x20 echo \"[linthis] local pre-commit hook failed (exit $_LOCAL_PC_EXIT) — aborting commit.\" >&2\n\
+     \x20\x20\x20 exit \"$_LOCAL_PC_EXIT\"\n\
+     \x20 fi\n\
+     fi\n"
+        .to_string()
+}
+
 /// Local-hook invocation forms for the `--type git` delegation block, per
 /// event. Pre-push must replay the captured ref list on the local hook's stdin
 /// (git delivers pre-push refs there and linthis already drained the real
@@ -2375,6 +2408,7 @@ fn build_git_with_agent_precommit_script(
     let error_msg = agent_fix_error_msg(hook_event);
     let parts = GitWithAgentPrecommitParts {
         timer: shell_timer_functions().to_string(),
+        local_hook: shell_run_local_pre_commit_hook(),
         worktree_fix: shell_sandbox_agent_fix(linthis_cmd, fix_provider, &agent_cmd, error_msg),
         fix_commit_mode: shell_read_fix_commit_mode("pre_commit"),
         linthis_check_only: linthis_cmd.replace("-c -f", "-c"),
@@ -2390,6 +2424,7 @@ fn build_git_with_agent_precommit_script(
 /// the template renderer. Keeps the shell template free of branching helpers.
 struct GitWithAgentPrecommitParts {
     timer: String,
+    local_hook: String,
     worktree_fix: String,
     fix_commit_mode: String,
     linthis_check_only: String,
@@ -2421,6 +2456,11 @@ fn render_precommit_template_header(parts: &GitWithAgentPrecommitParts) -> Strin
          \x20 exit 0\n\
          fi\n\
          \n\
+         # Bridge to the repo's own pre-commit hook FIRST, while stdin is still\n\
+         # intact and before linthis/the agent run — so it always executes and\n\
+         # can block the commit, exactly as it would without core.hooksPath.\n\
+         {local_hook}\
+         \n\
          # Read fix_commit_mode from config\n\
          {fix_commit_mode}\
          \n\
@@ -2450,6 +2490,7 @@ fn render_precommit_template_header(parts: &GitWithAgentPrecommitParts) -> Strin
          {worktree_fix}\
          fi\n",
         timer = parts.timer,
+        local_hook = parts.local_hook,
         fix_commit_mode = parts.fix_commit_mode,
         linthis_check_only = parts.linthis_check_only,
         linthis = parts.linthis,
@@ -3609,6 +3650,12 @@ mod tests {
                 &AgentFixProvider::Codebuddy,
                 None,
             ),
+            build_git_with_agent_hook_script(
+                "linthis -c -f --hook-event=pre-commit",
+                &AgentFixProvider::Codebuddy,
+                &HookEvent::PreCommit,
+                None,
+            ),
         ];
         for script in &scripts {
             let mut child = Command::new("sh")
@@ -3650,6 +3697,47 @@ mod tests {
         let hook_at = s.find("_LOCAL_PP=").expect("local hook present");
         let fast_at = s.find("pre-push-sentinel").expect("fast-path present");
         assert!(hook_at < fast_at, "local hook must precede the fast-path check");
+    }
+
+    #[test]
+    fn local_pre_commit_hook_runner_is_generic_and_never_blocks_on_stdin() {
+        let s = shell_run_local_pre_commit_hook();
+        // Runs the repo's own pre-commit hook — generic, not any one tool.
+        assert!(
+            s.contains("/hooks/pre-commit") && s.contains("\"$_LOCAL_PC\" \"$@\""),
+            "must invoke the repo-local pre-commit hook with \"$@\"; got: {s}"
+        );
+        // Crucially: no blocking stdin capture (git gives pre-commit no ref
+        // list; `cat` would hang an interactive commit).
+        assert!(
+            !s.contains("$(cat)") && !s.contains("_PREPUSH_STDIN"),
+            "pre-commit bridge must never drain stdin; got: {s}"
+        );
+        // Recursion guard + abort-on-failure.
+        assert!(s.contains("grep -qE '^[^#]*linthis'"), "got: {s}");
+        assert!(s.contains("exit \"$_LOCAL_PC_EXIT\""), "got: {s}");
+    }
+
+    #[test]
+    fn git_with_agent_precommit_runs_local_hook_before_linthis() {
+        let s = build_git_with_agent_hook_script(
+            "linthis -c -f --hook-event=pre-commit",
+            &AgentFixProvider::Codebuddy,
+            &HookEvent::PreCommit,
+            None,
+        );
+        // Bridges to the local pre-commit hook (previously it was shadowed).
+        assert!(s.contains("\"$_LOCAL_PC\""), "got: {s}");
+        assert!(!s.contains("$(cat)"), "must not block on stdin; got: {s}");
+        // Runs before linthis's own check so it always executes with stdin
+        // intact (and after the empty-commit guard, so empty commits skip it).
+        let hook_at = s.find("_LOCAL_PC=").expect("local hook present");
+        let lint_at = s
+            .find("_linthis_run_painted $LINTHIS_CMD")
+            .expect("linthis run present");
+        assert!(hook_at < lint_at, "local hook must precede linthis");
+        let guard_at = s.find("no staged files").expect("empty-commit guard present");
+        assert!(guard_at < hook_at, "empty-commit guard must precede local hook");
     }
 
     #[test]
