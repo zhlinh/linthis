@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-07-23
+
+### Fixed
+
+- bridge git-with-agent pre-commit to the repo's own hook
+- bridge global pre-push to the repo's own local hook
+- honor LINTHIS_INSTALL_MODE env var in install-mode resolution
+
 ## [0.26.1] - 2026-07-03
 
 ### Added
