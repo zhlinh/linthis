@@ -1137,14 +1137,46 @@ impl Config {
         }
     }
 
+    /// Warn that a config file exists but could not be parsed.
+    ///
+    /// A config that fails to deserialize is dropped and the built-in defaults
+    /// take over. Staying silent about that is dangerous: custom rules, check
+    /// selection and hook settings all stop applying while the run still
+    /// reports success. One bad value (e.g. `diffs = "5"` where a number is
+    /// expected) disables the whole file, so the path and reason must be shown.
+    fn warn_unparsable_config(path: &Path, err: &crate::LintisError) {
+        // `load_merged` reads each layer more than once (plugin pre-pass, then the
+        // real merge), so warn once per path per process.
+        static WARNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+            std::sync::OnceLock::new();
+        let warned = WARNED.get_or_init(Default::default);
+        if let Ok(mut seen) = warned.lock() {
+            if !seen.insert(path.to_path_buf()) {
+                return;
+            }
+        }
+
+        eprintln!(
+            "\x1b[33mWarning\x1b[0m: ignoring config {} ({}). \
+             Its settings are NOT applied — built-in defaults are used instead.",
+            path.display(),
+            err
+        );
+    }
+
     /// Load user-level configuration from ~/.linthis/config.toml
     pub fn load_user_config() -> Option<Self> {
         let home = crate::utils::home_dir()?;
         let config_path = home.join(".linthis").join("config.toml");
-        if config_path.exists() {
-            Self::load(&config_path).ok()
-        } else {
-            None
+        if !config_path.exists() {
+            return None;
+        }
+        match Self::load(&config_path) {
+            Ok(config) => Some(config),
+            Err(e) => {
+                Self::warn_unparsable_config(&config_path, &e);
+                None
+            }
         }
     }
 
@@ -1155,8 +1187,9 @@ impl Config {
         loop {
             let config_path = current.join(".linthis").join("config.toml");
             if config_path.exists() {
-                if let Ok(config) = Self::load(&config_path) {
-                    return Some(config);
+                match Self::load(&config_path) {
+                    Ok(config) => return Some(config),
+                    Err(e) => Self::warn_unparsable_config(&config_path, &e),
                 }
             }
 
@@ -1644,6 +1677,36 @@ fn get_toml_hint(err_str: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_bad_value_voids_the_whole_config_file() {
+        // Guards the failure mode `warn_unparsable_config` exists to surface:
+        // `diffs` is a usize, so a quoted "5" drops every other setting in the
+        // file — including `[[rules.custom]]`.
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[retention]\ndiffs = \"5\"\n\n\
+             [[rules.custom]]\ncode = \"custom/x\"\n\
+             pattern = \"x\"\nmessage = \"m\"\n",
+        )
+        .unwrap();
+
+        assert!(Config::load(&path).is_err());
+
+        // The same file with an integer parses and keeps the custom rule.
+        std::fs::write(
+            &path,
+            "[retention]\ndiffs = 5\n\n\
+             [[rules.custom]]\ncode = \"custom/x\"\n\
+             pattern = \"x\"\nmessage = \"m\"\n",
+        )
+        .unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.retention.diffs, 5);
+        assert!(config.rules.has_custom_rules());
+    }
 
     #[test]
     fn expand_fix_commit_mode_alias_accepts_short_and_full() {

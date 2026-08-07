@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - exclude `.linthis/`, VCS metadata, dependencies and build output from SAST file
   discovery, so `.linthis/secrets.toml` is no longer matched by its own patterns
+- warn instead of staying silent when a `config.toml` exists but fails to parse;
+  one bad value previously voided the whole file with no indication
 
 ## [0.27.0] - 2026-07-23
 
