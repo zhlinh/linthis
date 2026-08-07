@@ -40,6 +40,68 @@ pub use tools::{BanditScanner, FlawfinderScanner, GosecScanner, OpenGrepScanner,
 
 use crate::security::vulnerability::Severity;
 
+/// Directory names that are never worth scanning for source-level security issues.
+///
+/// Covers linthis' own working directory, VCS metadata, dependency trees, and
+/// build outputs. `.linthis/` matters most: scanner configuration lives there
+/// (`.linthis/secrets.toml`), and its own patterns would otherwise match
+/// themselves and report the config file as a finding.
+///
+/// Hidden directories are *not* skipped wholesale — `.github/workflows/*.yml`
+/// is a common place for leaked credentials and stays in scope.
+const SKIPPED_SCAN_DIRS: &[&str] = &[
+    // Linthis working directory (holds secrets.toml and other scanner config)
+    ".linthis",
+    // Version control
+    ".git",
+    ".hg",
+    ".svn",
+    // Dependencies
+    "node_modules",
+    "vendor",
+    "venv",
+    ".venv",
+    "__pycache__",
+    "Pods",
+    // Build outputs
+    "target",
+    "build",
+    "dist",
+    "out",
+    "DerivedData",
+    // IDE and editor
+    ".idea",
+    ".vscode",
+    ".vs",
+];
+
+/// Check whether a directory should be pruned from SAST file discovery.
+///
+/// Takes the directory's file name (not the full path) so it prunes at any depth.
+pub fn is_skipped_scan_dir(name: &str) -> bool {
+    SKIPPED_SCAN_DIRS.contains(&name)
+}
+
+/// Check whether a file sits inside a skipped directory at any depth.
+///
+/// Used for explicitly supplied file lists (`-i`, `-s`, `--since`), which never
+/// pass through directory discovery. Only parent components are considered, so a
+/// file merely *named* `target` or `build` is still scanned.
+pub fn is_in_skipped_scan_dir(path: &Path) -> bool {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        if components.peek().is_none() {
+            break; // final component is the file itself
+        }
+        if let std::path::Component::Normal(name) = component {
+            if name.to_str().is_some_and(is_skipped_scan_dir) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Info about a SAST tool that was needed but not installed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SastUnavailableTool {
@@ -200,6 +262,15 @@ impl SastAggregator {
         } else {
             (path.to_path_buf(), files.to_vec())
         };
+
+        // Explicit file lists bypass directory discovery, so filter here too.
+        // `linthis -s` after editing `.linthis/secrets.toml` would otherwise scan
+        // that config with the very patterns it defines. The lint channel already
+        // excludes `.linthis/**` for explicit `-i` inputs; this keeps SAST aligned.
+        let scan_files: Vec<PathBuf> = scan_files
+            .into_iter()
+            .filter(|f| !is_in_skipped_scan_dir(f))
+            .collect();
 
         // Detect languages from target files, then select relevant scanners.
         let detected_langs = detect_languages_from_files(&scan_files, &scan_dir);
@@ -383,5 +454,81 @@ mod tests {
         fs::write(&file, format!("K = \"{key}\"  # linthis:ignore opengrep\n")).unwrap();
 
         assert_eq!(aws_findings(temp.path(), &file), 1);
+    }
+
+    #[test]
+    fn skips_linthis_working_dir_and_build_output() {
+        assert!(is_skipped_scan_dir(".linthis"));
+        assert!(is_skipped_scan_dir(".git"));
+        assert!(is_skipped_scan_dir("node_modules"));
+        assert!(is_skipped_scan_dir("target"));
+    }
+
+    #[test]
+    fn keeps_hidden_dirs_that_can_hold_secrets() {
+        // Only a deny-list is pruned — hidden dirs in general stay in scope so
+        // CI workflow files are still scanned.
+        assert!(!is_skipped_scan_dir(".github"));
+        assert!(!is_skipped_scan_dir(".circleci"));
+        assert!(!is_skipped_scan_dir("src"));
+    }
+
+    #[test]
+    fn detects_files_nested_under_a_skipped_dir() {
+        assert!(is_in_skipped_scan_dir(Path::new(".linthis/secrets.toml")));
+        assert!(is_in_skipped_scan_dir(Path::new("a/b/target/x.rs")));
+        assert!(!is_in_skipped_scan_dir(Path::new("src/app.py")));
+        assert!(!is_in_skipped_scan_dir(Path::new(
+            ".github/workflows/ci.yml"
+        )));
+        // A file merely named like a skipped dir is still scanned.
+        assert!(!is_in_skipped_scan_dir(Path::new("src/target")));
+    }
+
+    #[test]
+    fn explicit_file_list_still_skips_config_dir() {
+        let temp = TempDir::new().unwrap();
+        // Split so this test source itself carries no matching key literal;
+        // the joined runtime value still triggers the secrets scanner.
+        let key = concat!("AKIA", "2K7BQ4RN5VXZ9WJ3");
+
+        let config_dir = temp.path().join(".linthis");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config = config_dir.join("secrets.toml");
+        fs::write(&config, format!("# sample: {key}\n")).unwrap();
+
+        // Naming the file explicitly (as `-s` / `-i` do) must not scan it.
+        assert_eq!(aws_findings(temp.path(), &config), 0);
+    }
+
+    #[test]
+    fn secrets_walker_does_not_scan_its_own_config_dir() {
+        let temp = TempDir::new().unwrap();
+        // Split so this test source itself carries no matching key literal;
+        // the joined runtime value still triggers the secrets scanner.
+        let key = concat!("AKIA", "2K7BQ4RN5VXZ9WJ3");
+
+        // A user secrets config, holding a literal that its own rules would match.
+        let config_dir = temp.path().join(".linthis");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("secrets.toml"),
+            format!("# sample: {key}\n"),
+        )
+        .unwrap();
+
+        // A real source file with the same literal.
+        fs::write(temp.path().join("app.py"), format!("K = \"{key}\"\n")).unwrap();
+
+        // Empty file list forces directory discovery via `walk_and_scan`.
+        let result = SastAggregator::new().scan(temp.path(), &[], &SastScanOptions::default());
+        let aws: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.rule_id == "secrets/aws-access-key")
+            .collect();
+
+        assert_eq!(aws.len(), 1, "expected only app.py to be reported");
+        assert!(aws[0].file_path.ends_with("app.py"));
     }
 }

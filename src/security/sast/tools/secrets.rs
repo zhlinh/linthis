@@ -22,6 +22,7 @@ use regex::Regex;
 use serde::Deserialize;
 
 use crate::security::sast::finding::SastFinding;
+use crate::security::sast::is_skipped_scan_dir;
 use crate::security::sast::scanner::{SastScanOptions, SastScanner};
 use crate::security::vulnerability::Severity;
 
@@ -478,26 +479,17 @@ impl SecretsScanner {
         for entry in walker.flatten() {
             let path = entry.path();
 
-            // Skip hidden dirs and common non-source dirs
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with('.')
-                    || matches!(
-                        name,
-                        "node_modules"
-                            | "vendor"
-                            | "target"
-                            | "__pycache__"
-                            | "dist"
-                            | "build"
-                            | ".git"
-                    )
-                {
-                    continue;
-                }
-            }
-
             if path.is_dir() {
-                self.walk_and_scan(&path, findings);
+                // Skip linthis' own config dir, VCS metadata, dependencies and build
+                // output. Shares one list with `collect_sast_target_files` so both
+                // discovery paths agree on what is in scope.
+                let skipped = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(is_skipped_scan_dir);
+                if !skipped {
+                    self.walk_and_scan(&path, findings);
+                }
             } else if path.is_file() {
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     findings.extend(self.scan_content(&path, &content));

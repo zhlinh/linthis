@@ -20,7 +20,9 @@ use std::path::Path;
 use linthis::cache::PerFileCache;
 use linthis::config::SecurityChecksConfig;
 use linthis::security::report::SecurityReportFormat;
-use linthis::security::sast::{format_sast_report, SastAggregator, SastResult, SastScanOptions};
+use linthis::security::sast::{
+    format_sast_report, is_skipped_scan_dir, SastAggregator, SastResult, SastScanOptions,
+};
 use linthis::security::{
     format_security_report, ScanOptions, ScanResult, SecurityScanner, Severity,
 };
@@ -272,6 +274,10 @@ fn print_sast_scanners(sast: &SastAggregator) {
 }
 
 /// Collect source files for SAST scanning from a directory.
+///
+/// Prunes linthis' own working directory, VCS metadata, dependency trees, and
+/// build outputs (see `is_skipped_scan_dir`). Without this, `.linthis/secrets.toml`
+/// is scanned by the very patterns it defines and reports itself as a finding.
 fn collect_sast_target_files(path: &Path) -> Vec<PathBuf> {
     if path.is_file() {
         return vec![path.to_path_buf()];
@@ -280,6 +286,14 @@ fn collect_sast_target_files(path: &Path) -> Vec<PathBuf> {
     walkdir::WalkDir::new(path)
         .max_depth(10)
         .into_iter()
+        .filter_entry(|e| {
+            // Depth 0 is the scan root itself and must not be pruned, or the walk
+            // yields nothing at all.
+            if e.depth() == 0 || !e.file_type().is_dir() {
+                return true;
+            }
+            !is_skipped_scan_dir(&e.file_name().to_string_lossy())
+        })
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .filter(|e| {
@@ -436,4 +450,62 @@ pub fn run_sast_scan(path: &Path, files: &[PathBuf], config: &SecurityChecksConf
         ..Default::default()
     };
     sast.scan(path, files, &sast_options)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn file_names(paths: &[PathBuf]) -> Vec<String> {
+        let mut names: Vec<String> = paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn collect_prunes_linthis_and_build_dirs() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        fs::create_dir_all(root.join(".linthis")).unwrap();
+        fs::write(root.join(".linthis/secrets.toml"), "id = \"x\"\n").unwrap();
+        fs::create_dir_all(root.join("target/debug")).unwrap();
+        fs::write(root.join("target/debug/meta.json"), "{}\n").unwrap();
+        fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        fs::write(root.join("node_modules/pkg/index.js"), "\n").unwrap();
+        fs::write(root.join("app.py"), "\n").unwrap();
+
+        assert_eq!(file_names(&collect_sast_target_files(root)), ["app.py"]);
+    }
+
+    #[test]
+    fn collect_keeps_ci_workflow_files() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        fs::create_dir_all(root.join(".github/workflows")).unwrap();
+        fs::write(root.join(".github/workflows/ci.yml"), "on: push\n").unwrap();
+
+        assert_eq!(file_names(&collect_sast_target_files(root)), ["ci.yml"]);
+    }
+
+    #[test]
+    fn collect_does_not_prune_the_scan_root_itself() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join(".linthis");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("secrets.toml"), "id = \"x\"\n").unwrap();
+
+        // Pruning depth 0 would make the walk yield nothing. `SastAggregator::scan`
+        // is what ultimately drops files under a skipped directory.
+        assert_eq!(
+            file_names(&collect_sast_target_files(&root)),
+            ["secrets.toml"]
+        );
+    }
 }

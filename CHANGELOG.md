@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- exclude `.linthis/`, VCS metadata, dependencies and build output from SAST file
+  discovery, so `.linthis/secrets.toml` is no longer matched by its own patterns
+
 ## [0.27.0] - 2026-07-23
 
 ### Fixed
