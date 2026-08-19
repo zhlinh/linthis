@@ -22,7 +22,8 @@ use cli::{
     handle_complexity_command, handle_config_command, handle_doctor_command, handle_fix_command,
     handle_format_command, handle_hook_command, handle_ignore_command, handle_init_command,
     handle_license_command, handle_plugin_command, handle_report_command, handle_review_command,
-    handle_security_command, handle_self_update_command, handle_shell_command, init_linter_configs,
+    handle_disable_command, handle_enable_command, handle_security_command,
+    handle_self_update_command, handle_shell_command, handle_status_command, init_linter_configs,
     perform_auto_sync, perform_self_update, print_fix_hint, run_benchmark, run_complexity_analysis,
     run_sast_scan, run_watch, strip_ansi_codes, Cli, Commands, ComplexityCommandOptions,
     FixCommandOptions, FormatCommandOptions, PathCollectionOptions, PathCollectionResult,
@@ -138,6 +139,9 @@ fn dispatch_utility(command: Commands) -> ExitCode {
             force,
             target_version,
         } => handle_self_update_command(check, force, target_version),
+        Commands::Disable { ttl, global } => handle_disable_command(ttl, global),
+        Commands::Enable { global } => handle_enable_command(global),
+        Commands::Status => handle_status_command(),
         _ => ExitCode::from(1),
     }
 }
