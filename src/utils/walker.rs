@@ -89,6 +89,23 @@ fn is_excluded(path: &Path, glob_set: &Option<GlobSet>) -> bool {
     false
 }
 
+/// Check if a directory is a git submodule checkout.
+///
+/// A submodule has `.git` as a *file* whose gitdir points into the
+/// superproject's `.git/modules/`; a normal repo root has a `.git` directory
+/// and a linked worktree points into `.git/worktrees/`, so neither matches.
+/// Submodule content belongs to another repository: staging a submodule
+/// pointer bump lists the submodule directory itself, and walking into it
+/// would lint/format code we must not touch.
+pub fn is_git_submodule(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join(".git"))
+        .map(|s| {
+            let s = s.trim_start().replace('\\', "/");
+            s.starts_with("gitdir:") && s.contains("/modules/")
+        })
+        .unwrap_or(false)
+}
+
 /// Check if a file matches the language filter.
 fn matches_language_filter(path: &Path, languages: &[Language]) -> bool {
     if languages.is_empty() {
@@ -136,7 +153,11 @@ pub fn walk_files(root: &Path, config: &WalkerConfig) -> Vec<PathBuf> {
         .into_iter()
         .filter_entry(|e| {
             // Skip excluded directories early
-            !is_excluded(e.path(), &glob_set)
+            if is_excluded(e.path(), &glob_set) {
+                return false;
+            }
+            // Never descend into submodules (depth 0 is the walk root itself)
+            !(e.depth() > 0 && e.file_type().is_dir() && is_git_submodule(e.path()))
         })
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
@@ -188,6 +209,11 @@ pub fn walk_paths(paths: &[PathBuf], config: &WalkerConfig) -> (Vec<PathBuf>, Ve
                 result.push(path.clone());
             }
         } else if path.is_dir() {
+            // A staged submodule pointer bump lists the submodule directory;
+            // silently skip it instead of linting the whole submodule.
+            if is_git_submodule(path) {
+                continue;
+            }
             let dir_files = walk_files(path, config);
             // Check each file for size
             for file in dir_files {
@@ -245,6 +271,41 @@ mod tests {
             &glob_set
         ));
         assert!(!is_excluded(Path::new("src/third_party.rs"), &glob_set));
+    }
+
+    #[test]
+    fn test_submodule_is_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+
+        let sub = root.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join(".git"), "gitdir: ../.git/modules/sub\n").unwrap();
+        std::fs::write(sub.join("lib.rs"), "fn lib() {}").unwrap();
+
+        // A linked worktree is NOT a submodule and must still be walked.
+        let wt = root.join("wt");
+        std::fs::create_dir(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: ../.git/worktrees/wt\n").unwrap();
+        std::fs::write(wt.join("wt.rs"), "fn wt() {}").unwrap();
+
+        assert!(is_git_submodule(&sub));
+        assert!(!is_git_submodule(&wt));
+
+        let config = WalkerConfig::default();
+        let names: Vec<String> = walk_files(root, &config)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert!(names.contains(&"main.rs".to_string()));
+        assert!(names.contains(&"wt.rs".to_string()));
+        assert!(!names.contains(&"lib.rs".to_string()));
+
+        // Explicit path (e.g. staged submodule bump, or `-i sub`) is skipped.
+        let (files, warnings) = walk_paths(&[sub.clone()], &config);
+        assert!(files.is_empty());
+        assert!(warnings.is_empty());
     }
 
     #[test]
