@@ -667,6 +667,51 @@ linthis doctor [OPTIONS]
 
 ---
 
+## disable / enable
+
+Turn linthis git hooks off and on. Manual runs (`linthis`, `linthis -s`) keep
+working either way — only hooks are skipped.
+
+```bash
+linthis disable [-t <TTL>] [-g]
+linthis enable  [-g]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-t, --ttl` | How long to stay disabled (default: until re-enabled) |
+| `-g, --global` | Every repository instead of only this project |
+
+| TTL | Meaning |
+|-----|---------|
+| `<N>pcs` | The next N git operations (one commit's whole hook chain = one) |
+| `today` | Until 23:59:59 local time |
+| `10s` `30m` `2h` `1d` `1w` | A duration — `m` is **minutes** |
+
+```bash
+linthis disable              # until `linthis enable`
+linthis disable -t 1pcs      # let the next commit through
+linthis disable -t 2h        # two hours
+linthis disable -g -t today  # every repo, rest of the day
+```
+
+A project disable also covers globally installed hooks running in that
+project; `-g` is only needed to stop every repository at once. State lives in
+`.linthis/state.toml` (or `~/.linthis/state.toml` for `-g`), and a global
+disable outranks a project enable.
+
+---
+
+## status
+
+Show enable state, installed hooks, active config/rule files and plugins.
+
+```bash
+linthis status
+```
+
+---
+
 ## Exit Codes
 
 | Code | Meaning |

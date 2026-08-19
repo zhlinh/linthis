@@ -644,6 +644,50 @@ linthis doctor [OPTIONS]
 
 ---
 
+## disable / enable
+
+停用 / 恢复 linthis 的 git hook。手动运行（`linthis`、`linthis -s`）不受影响，
+只有 hook 会被跳过。
+
+```bash
+linthis disable [-t <TTL>] [-g]
+linthis enable  [-g]
+```
+
+| 选项 | 描述 |
+|-----|------|
+| `-t, --ttl` | 停用多久（默认：直到手动 enable） |
+| `-g, --global` | 对所有仓库生效，而不只是当前项目 |
+
+| TTL | 含义 |
+|-----|------|
+| `<N>pcs` | 接下来 N 次 git 操作（一次提交的整条 hook 链算一次） |
+| `today` | 到当天 23:59:59 |
+| `10s` `30m` `2h` `1d` `1w` | 时长，`m` 是**分钟** |
+
+```bash
+linthis disable              # 直到 `linthis enable`
+linthis disable -t 1pcs      # 放过下一次提交
+linthis disable -t 2h        # 两小时
+linthis disable -g -t today  # 所有仓库，当天剩余时间
+```
+
+项目级 disable 同样能挡住装在全局的 hook（hook 读的是它正在运行的那个仓库的状态），
+`-g` 只在需要一次停掉所有仓库时才用。状态存在 `.linthis/state.toml`
+（`-g` 则是 `~/.linthis/state.toml`），全局停用优先于项目启用。
+
+---
+
+## status
+
+查看启用状态、hook 安装情况、生效的配置/规则文件与插件。
+
+```bash
+linthis status
+```
+
+---
+
 ## 退出码
 
 | 代码 | 含义 |

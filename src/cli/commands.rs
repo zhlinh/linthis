@@ -1132,6 +1132,45 @@ pub enum Commands {
         #[arg(short = 'v', long = "version", value_name = "VERSION")]
         target_version: Option<String>,
     },
+
+    /// Turn linthis git hooks off (manual runs keep working)
+    ///
+    /// Without --ttl the hooks stay off until `linthis enable`. The disable
+    /// applies to the current project by default, which also covers globally
+    /// installed hooks running in this repo; use --global to stop every repo.
+    ///
+    /// Example usage:
+    ///   linthis disable                 # until re-enabled
+    ///   linthis disable -t 1pcs         # next commit / push only
+    ///   linthis disable -t today        # until 23:59:59
+    ///   linthis disable -t 2h           # 10s / 30m / 2h / 1d / 1w (m = minutes)
+    ///   linthis disable -g -t 1d        # every repo, for a day
+    Disable {
+        /// How long to stay disabled: <N>pcs, today, or 10s/30m/2h/1d/1w
+        #[arg(short = 't', long, value_name = "TTL")]
+        ttl: Option<String>,
+
+        /// Disable every repository instead of only this project
+        #[arg(short = 'g', long)]
+        global: bool,
+    },
+
+    /// Turn linthis git hooks back on
+    ///
+    /// Example usage:
+    ///   linthis enable                  # this project
+    ///   linthis enable -g               # lift a global disable
+    Enable {
+        /// Re-enable every repository instead of only this project
+        #[arg(short = 'g', long)]
+        global: bool,
+    },
+
+    /// Show enable state, hook installs, config/rule files and plugins
+    ///
+    /// Example usage:
+    ///   linthis status
+    Status,
 }
 
 /// Backup subcommands

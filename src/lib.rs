@@ -140,6 +140,7 @@ pub mod review;
 pub mod rules;
 pub mod security;
 pub mod self_update;
+pub mod state;
 pub mod templates;
 pub mod tools;
 pub mod tui;

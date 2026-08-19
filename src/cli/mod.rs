@@ -33,6 +33,7 @@ mod review;
 mod runner;
 mod security;
 pub mod shell;
+mod status;
 mod watch;
 
 pub use backup::{create_backup, handle_backup_command};
@@ -59,4 +60,5 @@ pub use review::{handle_review_command, ReviewCommandOptions};
 pub use runner::{handle_self_update_command, perform_auto_sync, perform_self_update};
 pub use security::{handle_security_command, run_sast_scan, SecurityCommandParams};
 pub use shell::handle_shell_command;
+pub use status::{handle_disable_command, handle_enable_command, handle_status_command};
 pub use watch::run_watch;
