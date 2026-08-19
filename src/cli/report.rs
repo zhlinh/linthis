@@ -240,14 +240,36 @@ fn handle_show_report(
         return ExitCode::SUCCESS;
     }
 
+    // Formatter failures are not lint issues, but they are what blocks an
+    // exit_code 4 run — print them first so the report explains the block.
+    let format_errors: Vec<_> = result
+        .format_results
+        .iter()
+        .filter(|fr| fr.error.is_some())
+        .collect();
+    for fr in &format_errors {
+        println!(
+            "{} {}\n  {}",
+            "[format]".red().bold(),
+            fr.file_path.display(),
+            fr.error.as_deref().unwrap_or_default().red()
+        );
+    }
+
     // Human-readable output
     if display_issues.is_empty() {
-        println!(
-            "{} No issues found matching severity filter '{}'.",
-            "✓".green(),
-            severity
-        );
+        if format_errors.is_empty() {
+            println!(
+                "{} No issues found matching severity filter '{}'.",
+                "✓".green(),
+                severity
+            );
+        }
         return ExitCode::SUCCESS;
+    }
+
+    if !format_errors.is_empty() {
+        println!();
     }
 
     // Separate errors, warnings, info for numbered output

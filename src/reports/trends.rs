@@ -392,12 +392,36 @@ fn parse_unified_lint_section(unified: &serde_json::Value, result: &mut RunResul
         }
     }
 
+    // Formatter failures (what drives exit_code 4) are stored under `extra`.
+    // Without them a blocked run reloads as issue-free.
+    let format_errors = lint
+        .get("extra")
+        .and_then(|e| e.get("format_errors"))
+        .or_else(|| lint.get("format_errors"))
+        .and_then(|v| v.as_array());
+    for fe in format_errors.into_iter().flatten() {
+        let (Some(file), Some(err)) = (
+            fe.get("file").and_then(|v| v.as_str()),
+            fe.get("error").and_then(|v| v.as_str()),
+        ) else {
+            continue;
+        };
+        result
+            .format_results
+            .push(crate::utils::types::FormatResult::error(
+                PathBuf::from(file),
+                err.to_string(),
+            ));
+    }
+
     result.files_with_issues = lint
         .get("files_with_issues")
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize;
     result.files_formatted = lint
-        .get("files_formatted")
+        .get("extra")
+        .and_then(|e| e.get("files_formatted"))
+        .or_else(|| lint.get("files_formatted"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize;
 }
