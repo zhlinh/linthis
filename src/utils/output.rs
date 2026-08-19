@@ -531,10 +531,26 @@ fn build_lint_view(result: &RunResult) -> CheckResultView {
         })
         .collect();
 
+    // Formatter failures drive exit_code 4; without them a blocked run looks
+    // issue-free in the saved JSON.
+    let format_errors: Vec<serde_json::Value> = result
+        .format_results
+        .iter()
+        .filter_map(|fr| {
+            fr.error.as_ref().map(|e| {
+                serde_json::json!({
+                    "file": fr.file_path.to_string_lossy(),
+                    "error": e,
+                })
+            })
+        })
+        .collect();
+
     let extra = serde_json::json!({
         "files_formatted": result.files_formatted,
         "issues_before_format": result.issues_before_format,
         "issues_fixed": result.issues_fixed,
+        "format_errors": format_errors,
     });
 
     CheckResultView {
@@ -1064,26 +1080,61 @@ fn format_hook_issue_line(issue: &LintIssue, content_width: usize) -> String {
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
-    let location = format!("{}:{}", filename, issue.line);
+    // line 0 = whole-file issue (e.g. a formatter failure): no line suffix.
+    let location = if issue.line == 0 {
+        filename.to_string()
+    } else {
+        format!("{}:{}", filename, issue.line)
+    };
     let severity_char = match issue.severity {
         Severity::Error => "E",
         Severity::Warning => "W",
         Severity::Info => "I",
     };
     let location_max = (content_width / 3).clamp(10, 35);
-    let location_display = if location.len() > location_max {
-        format!("{}...", &location[..location_max.saturating_sub(3)])
-    } else {
-        location
-    };
+    let location_display = truncate_chars(&location, location_max);
     let msg_prefix_len = 4;
-    let max_msg_len = content_width.saturating_sub(msg_prefix_len + location_display.len());
-    let msg = if issue.message.len() > max_msg_len {
-        format!("{}...", &issue.message[..max_msg_len.saturating_sub(3)])
-    } else {
-        issue.message.clone()
-    };
+    let max_msg_len =
+        content_width.saturating_sub(msg_prefix_len + location_display.chars().count());
+    let msg = truncate_chars(&issue.message, max_msg_len);
     format!(" {} {} {}", severity_char, location_display, msg)
+}
+
+/// Truncate to `max` chars with an ellipsis, on char boundaries.
+/// Tool stderr (surfaced for formatter failures) may be non-ASCII, so byte
+/// slicing here would panic mid-hook.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let keep = max.saturating_sub(3);
+    format!("{}...", s.chars().take(keep).collect::<String>())
+}
+
+/// Formatter failures live in `format_results`, not `issues`, so the Blocked
+/// box never mentioned them — an exit_code 4 run rendered as "in 0 files".
+/// Surface them as display-only issues.
+fn format_error_issues(result: &RunResult) -> Vec<LintIssue> {
+    result
+        .format_results
+        .iter()
+        .filter_map(|fr| {
+            let err = fr.error.as_ref()?;
+            let first_line = err
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or(err.as_str());
+            Some(
+                LintIssue::new(
+                    fr.file_path.clone(),
+                    0,
+                    format!("[format] {}", first_line.trim()),
+                    Severity::Error,
+                )
+                .with_source("formatter".to_string()),
+            )
+        })
+        .collect()
 }
 
 /// Append the tip and skip hint sections for hook failure box.
@@ -1155,7 +1206,9 @@ pub fn format_result_hook_with_width(
         return format_hook_success_box(result, hook_type, &ctx);
     }
 
-    let shown_issues = filter_issues_by_exit_code(&result.issues, result.exit_code);
+    let format_errors = format_error_issues(result);
+    let mut shown_issues: Vec<&LintIssue> = format_errors.iter().collect();
+    shown_issues.extend(filter_issues_by_exit_code(&result.issues, result.exit_code));
 
     let hook_name = hook_display_name(hook_type);
     let mut output = String::new();
@@ -1187,7 +1240,10 @@ fn filter_issues_by_exit_code(issues: &[LintIssue], exit_code: i32) -> Vec<&Lint
         .iter()
         .filter(|i| match exit_code {
             2 => i.severity == Severity::Error || i.severity == Severity::Warning,
-            3 => true,
+            // 3 = info-only. 4 = format error: it short-circuits the fail_on
+            // threshold, so the surviving lint issues have no known cutoff —
+            // show them all rather than silently dropping warnings.
+            3 | 4 => true,
             _ => i.severity == Severity::Error,
         })
         .collect()
@@ -1235,13 +1291,30 @@ fn append_issue_summary(output: &mut String, issues: &[&LintIssue], ctx: &HookBo
     if info_count > 0 {
         parts.push(format!("{} info", info_count));
     }
+    let border = colored::Color::Red;
+    if parts.is_empty() {
+        // Blocked, but nothing displayable — never render a bare "in 0 files".
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line_bordered("Blocked, but no issue detail available.", 0, border)
+        ));
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line_bordered(
+                "  Run `linthis report show` for the full result.",
+                0,
+                border
+            )
+        ));
+        output.push_str(&format!("{}\n", ctx.pad_line_bordered("", 0, border)));
+        return;
+    }
     let summary = format!(
         "{} in {} file{}",
         parts.join(", "),
         files_with_issues,
         if files_with_issues == 1 { "" } else { "s" },
     );
-    let border = colored::Color::Red;
     output.push_str(&format!("{}\n", ctx.pad_line_bordered(&summary, 0, border)));
     output.push_str(&format!("{}\n", ctx.pad_line_bordered("", 0, border)));
 }
@@ -1483,11 +1556,7 @@ pub fn format_cmsg_result(passed: bool, first_line: &str) -> String {
         ));
         out.push_str(&tint("│                                        │\n"));
         out.push_str(&tint("│ Your message:                          │\n"));
-        let truncated = if first_line.chars().count() > 36 {
-            format!("{}...", &first_line.chars().take(33).collect::<String>())
-        } else {
-            first_line.to_string()
-        };
+        let truncated = truncate_chars(first_line, 36);
         let padding = 36usize.saturating_sub(truncated.chars().count());
         out.push_str(&tint(&format!(
             "│   {}{} │\n",
@@ -1638,6 +1707,53 @@ BEGIN { ESC = sprintf("\033"); RESET = ESC "[0m"; RESET_RE = ESC "\\[0m"; WHITE 
                  in:\n{stripped}"
             );
         }
+    }
+
+    /// Regression: a format-error run (exit_code 4) rendered "in 0 files"
+    /// with an empty issue list — formatter failures were never in `issues`,
+    /// and the exit_code 4 filter dropped every non-Error lint issue.
+    #[test]
+    fn hook_blocked_box_shows_format_errors_and_warnings() {
+        let result = RunResult {
+            issues: vec![LintIssue::new(
+                PathBuf::from("/a/b/MNANetComm.h"),
+                4034,
+                "Lines should be <= 120 characters long".to_string(),
+                Severity::Warning,
+            )],
+            format_results: vec![crate::utils::types::FormatResult::error(
+                PathBuf::from("/a/b/Broken.java"),
+                "clang-format failed: 未找到配置文件".to_string(),
+            )],
+            exit_code: 4,
+            ..Default::default()
+        };
+        let out = format_result_hook_with_width(&result, Some("pre-commit"), Some(110));
+        assert!(
+            !out.contains("in 0 files"),
+            "still shows 'in 0 files':\n{out}"
+        );
+        assert!(
+            out.contains("1 error, 1 warning in 2 files"),
+            "summary missing:\n{out}"
+        );
+        assert!(out.contains("Broken.java"), "format error missing:\n{out}");
+        assert!(out.contains("MNANetComm.h"), "lint warning missing:\n{out}");
+    }
+
+    /// Blocked with nothing to show must explain itself, not print "in 0 files".
+    #[test]
+    fn hook_blocked_box_without_issues_has_fallback() {
+        let result = RunResult {
+            exit_code: 1,
+            ..Default::default()
+        };
+        let out = format_result_hook_with_width(&result, Some("pre-commit"), Some(110));
+        assert!(
+            !out.contains("in 0 files"),
+            "still shows 'in 0 files':\n{out}"
+        );
+        assert!(out.contains("no issue detail available"), "{out}");
     }
 
     #[test]

@@ -1655,6 +1655,10 @@ fn process_lint_result(
         result.issues = filter.filter_issues(std::mem::take(&mut result.issues));
     }
 
+    // Recount: the lint pass counted before the merge above, so a run whose
+    // only issues came from security/complexity reported "in 0 files".
+    result.count_files_with_issues();
+
     let output = format_result_with_hook_type(&result, output_format, hook_type.as_deref());
 
     if (!cli.quiet || result.exit_code != 0) && !output.is_empty() {
