@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-08-20
+
+### Added
+
+- add enable/disable with TTL and a status overview
+
+### Fixed
+
+- ignore git submodules when collecting files
+- surface formatter failures in blocked hook box and report
+- warn when config.toml exists but fails to parse
+- exclude .linthis and build output from SAST scanning
+
 ### Fixed
 
 - exclude `.linthis/`, VCS metadata, dependencies and build output from SAST file
