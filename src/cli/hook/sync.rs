@@ -203,12 +203,33 @@ pub(crate) fn detect_and_migrate_existing_hooks(
             continue;
         }
 
+        // `hook add` appends a linthis line to a foreign hook, so the marker
+        // alone does not mean the file is ours. Rewriting one of those as a
+        // thin wrapper would throw away the rest of the user's script.
+        if is_old_format && !is_pure_linthis_hook(&content) {
+            report_untouched(name, global);
+            continue;
+        }
+
         if migrate_old_hook(&path, &content, name, event, global, project) {
             migrated += 1;
         }
     }
 
     migrated
+}
+
+/// Whether an old-format hook file is linthis's alone, i.e. nothing but a
+/// shebang and comments precede the `# linthis-hook` marker. A file with real
+/// commands before it is someone's script that linthis was appended to.
+fn is_pure_linthis_hook(content: &str) -> bool {
+    content
+        .lines()
+        .take_while(|l| !l.trim_start().starts_with("# linthis-hook"))
+        .all(|l| {
+            let t = l.trim();
+            t.is_empty() || t.starts_with('#')
+        })
 }
 
 /// Adopt a hook script that carries no linthis marker.
@@ -227,25 +248,44 @@ fn adopt_unmarked_hook(
     if !content.contains("linthis") {
         return false;
     }
-    if !global && hook_override_configured(event) {
+    if !global && hook_matches_configured_source(content, event) {
         save_installed_hook("local", project, event, &HookTool::Git, None, None);
         return true;
     }
+    report_untouched(name, global);
+    false
+}
+
+/// Explain why a hook was skipped and how to take it over.
+///
+/// Silence here reads as "sync did nothing"; the point is that the file is
+/// somebody else's and linthis will not rewrite it unless asked.
+fn report_untouched(name: &str, global: bool) {
+    let scope_flag = if global { " -g" } else { "" };
     println!(
         "  {} {} calls linthis but was not installed by linthis \u{2014} left untouched",
         "!".yellow(),
         name
     );
-    false
+    println!(
+        "    {} to replace it with linthis's own hook: {}",
+        "\u{2192}".dimmed(),
+        format!("linthis hook add --type git --event {name}{scope_flag} --force").cyan()
+    );
 }
 
-/// Whether a `[hook.*]` source is configured for this event, i.e. the hook
-/// script on disk is owned by config rather than hand-written.
-fn hook_override_configured(event: &HookEvent) -> bool {
-    matches!(
-        super::config::resolve_hook_override(&HookTool::Git, event),
-        Ok(Some(_))
-    )
+/// Whether the script on disk IS the configured `[hook.*]` source.
+///
+/// "A source is configured" is not enough: the config can be global, which
+/// would make every repository's hand-written pre-commit look owned by
+/// linthis and get overwritten on the next sync. Comparing content only
+/// claims files that were actually installed from that source; anything else
+/// is reported and left alone.
+fn hook_matches_configured_source(content: &str, event: &HookEvent) -> bool {
+    match super::config::resolve_hook_override(&HookTool::Git, event) {
+        Ok(Some(source)) => content.trim() == source.trim(),
+        _ => false,
+    }
 }
 
 /// Parse event string back to HookEvent enum.
@@ -739,6 +779,18 @@ pub fn handle_hook_sync_after_plugin_sync(global: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pure_hook_detection_protects_appended_scripts() {
+        // linthis's own old-format hook: shebang + comments, then the marker.
+        let ours = "#!/bin/sh\n# linthis-hook\nlinthis -c -f\n";
+        assert!(is_pure_linthis_hook(ours));
+
+        // `hook add` appended linthis to someone's script — rewriting this as
+        // a thin wrapper would delete their build step.
+        let theirs = "#!/bin/sh\nmake lint || exit 1\n\n# linthis-hook\nlinthis -c -f\n";
+        assert!(!is_pure_linthis_hook(theirs));
+    }
 
     #[test]
     fn parses_every_installed_event() {

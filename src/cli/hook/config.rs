@@ -364,7 +364,10 @@ fn create_git_hook_config(
 
     let linthis_hook_line = build_hook_command(hook_event, args);
 
-    if hook_path.exists() {
+    // Someone else's hook is appended to, not overwritten — unless --force,
+    // which the flag's own help promises ("Force overwrite existing hook") but
+    // this path used to ignore, leaving no way to replace a foreign hook.
+    if hook_path.exists() && !force {
         return append_linthis_to_existing_hook(&hook_path, &linthis_hook_line);
     }
 
