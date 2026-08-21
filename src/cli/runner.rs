@@ -74,6 +74,7 @@ pub fn perform_self_update(
         Ok(success) => {
             if success {
                 let _ = manager.update_last_check_time();
+                refresh_after_update();
             }
             success
         }
@@ -82,6 +83,115 @@ pub fn perform_self_update(
             false
         }
     }
+}
+
+/// Refresh plugins and hooks after the binary was replaced.
+///
+/// An upgrade that stops at the binary leaves plugin caches and hook scripts
+/// written by the old version in place — including pre-thin-wrapper hook
+/// formats that never reach the new logic at all.
+///
+/// Both scopes are covered: global (`-g`) and, when the cwd is a repository,
+/// the current project. Within a scope plugins go first, because a hook script
+/// can come from a plugin file; `linthis plugin sync` ends by re-syncing that
+/// same scope's hooks, so `hook sync` only runs when there are no plugins or
+/// when the plugin sync failed and the hooks would otherwise be left stale.
+///
+/// Everything runs as a subprocess so the NEW binary does the work. Failures
+/// are reported, never fatal: the upgrade itself already succeeded.
+fn refresh_after_update() {
+    use crate::cli::hook::has_installed_hooks;
+
+    // After an in-place replace, current_exe() can point at the deleted inode
+    // (Linux reports "<path> (deleted)"), so fall back to PATH.
+    let exe = std::env::current_exe()
+        .ok()
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| std::path::PathBuf::from("linthis"));
+
+    let project_root = linthis::utils::get_project_root();
+    let root = project_root.to_str().unwrap_or("");
+    let in_repo = linthis::utils::is_git_repo();
+
+    // (global, has_plugins, has_hooks) for every scope with something to do.
+    let work: Vec<(bool, bool, bool)> = [true, false]
+        .into_iter()
+        .filter(|global| *global || in_repo)
+        .map(|global| {
+            (
+                global,
+                scope_has_plugins(global),
+                has_installed_hooks(global, root),
+            )
+        })
+        .filter(|(_, plugins, hooks)| *plugins || *hooks)
+        .collect();
+
+    if work.is_empty() {
+        return;
+    }
+
+    println!();
+    println!("{} Refreshing plugins and hooks...", "→".cyan());
+    for (global, has_plugins, has_hooks) in work {
+        let g = if global { vec!["-g"] } else { Vec::new() };
+
+        // `plugin sync` re-syncs this scope's hooks as its last step.
+        let hooks_synced = if has_plugins {
+            let mut args = vec!["plugin", "sync"];
+            args.extend(&g);
+            run_refresh_step(&exe, &args)
+        } else {
+            false
+        };
+
+        if has_hooks && !hooks_synced {
+            let mut args = vec!["hook", "sync"];
+            args.extend(&g);
+            args.push("-y");
+            run_refresh_step(&exe, &args);
+        }
+    }
+}
+
+/// Run one refresh subcommand. Returns whether it succeeded.
+fn run_refresh_step(exe: &std::path::Path, args: &[&str]) -> bool {
+    match std::process::Command::new(exe).args(args).status() {
+        Ok(status) if status.success() => true,
+        Ok(status) => {
+            eprintln!(
+                "{}: `linthis {}` exited with {}",
+                "Warning".yellow(),
+                args.join(" "),
+                status
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!(
+                "{}: could not run `linthis {}`: {}",
+                "Warning".yellow(),
+                args.join(" "),
+                e
+            );
+            false
+        }
+    }
+}
+
+/// Whether a scope's config lists any plugins.
+fn scope_has_plugins(global: bool) -> bool {
+    use linthis::plugin::PluginConfigManager;
+
+    let manager = if global {
+        PluginConfigManager::global()
+    } else {
+        PluginConfigManager::project()
+    };
+    manager
+        .ok()
+        .and_then(|m| m.list_plugins().ok())
+        .is_some_and(|p| !p.is_empty())
 }
 
 /// Handle the `linthis update` / `linthis upgrade` subcommand.
@@ -132,6 +242,7 @@ fn handle_install_specific_version(
                 "linthis config set self_auto_update.mode disabled".cyan()
             );
             let _ = manager.update_last_check_time();
+            refresh_after_update();
             ExitCode::SUCCESS
         }
         Ok(false) => ExitCode::FAILURE,
@@ -197,6 +308,7 @@ fn handle_update_to_latest(
     match result {
         Ok(true) => {
             let _ = manager.update_last_check_time();
+            refresh_after_update();
             ExitCode::SUCCESS
         }
         Ok(false) => ExitCode::FAILURE,

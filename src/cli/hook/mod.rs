@@ -36,6 +36,31 @@ pub use agent::detect_agent_providers_lightweight;
 pub use cmsg::handle_commit_msg_check;
 pub use sync::{handle_hook_sync, handle_hook_sync_after_plugin_sync};
 
+/// Whether `~/.linthis/installed-hooks.toml` records hooks for a scope.
+///
+/// `linthis update` uses this to re-sync only the scopes that actually have
+/// hooks, instead of printing "nothing to sync" advice on every upgrade.
+pub fn has_installed_hooks(global: bool, project_root: &str) -> bool {
+    scope_has_hooks(
+        &metadata::load_installed_hooks().hooks,
+        global,
+        project_root,
+    )
+}
+
+/// Pure half of [`has_installed_hooks`], so the scope/project filter is
+/// testable without touching the real metadata file.
+fn scope_has_hooks(
+    hooks: &[metadata::InstalledHook],
+    global: bool,
+    project_root: &str,
+) -> bool {
+    let scope = if global { "global" } else { "local" };
+    hooks
+        .iter()
+        .any(|h| h.scope == scope && (global || h.project.is_empty() || h.project == project_root))
+}
+
 /// Handle hook subcommands
 pub fn handle_hook_command(action: HookCommands) -> ExitCode {
     match action {
@@ -271,6 +296,27 @@ fn write_hook_script(hook_path: &std::path::Path, content: &str) -> Result<(), E
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn has_installed_hooks_matches_scope_and_project() {
+        use super::metadata::InstalledHook;
+        let mk = |scope: &str, project: &str| InstalledHook {
+            scope: scope.into(),
+            project: project.into(),
+            event: "pre-commit".into(),
+            hook_type: "git".into(),
+            provider: String::new(),
+            skill_providers: Vec::new(),
+            provider_args: String::new(),
+        };
+        let hooks = vec![mk("global", ""), mk("local", "/a")];
+
+        assert!(scope_has_hooks(&hooks, true, ""));
+        assert!(scope_has_hooks(&hooks, false, "/a"));
+        // Another project must not trigger the update-time resync.
+        assert!(!scope_has_hooks(&hooks, false, "/b"));
+        assert!(!scope_has_hooks(&[], true, ""));
+    }
+
     use super::agent::{
         agent_event_skill_metadata, agent_skill_path, copy_dir_recursive,
         install_agent_plugin_from_dir, ALL_AGENT_PROVIDERS,
