@@ -353,7 +353,13 @@ fn create_git_hook_config(
 
     // Tier-1/2 override check
     if let Some(override_content) = resolve_hook_override(tool, hook_event)? {
-        return write_git_hook_override(&hook_path, &override_content, force);
+        write_git_hook_override(&hook_path, &override_content, force)?;
+        // Record it like any other install: without this the hook is invisible
+        // to `hook sync`, so a plugin-sourced script never gets refreshed when
+        // linthis or the plugin is upgraded.
+        let project = git_root.to_str().unwrap_or("").to_string();
+        save_installed_hook("local", &project, hook_event, &HookTool::Git, None, None);
+        return Ok(());
     }
 
     let linthis_hook_line = build_hook_command(hook_event, args);

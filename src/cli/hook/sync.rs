@@ -155,6 +155,7 @@ pub(crate) fn detect_and_migrate_existing_hooks(
         ("pre-commit", HookEvent::PreCommit),
         ("pre-push", HookEvent::PrePush),
         ("commit-msg", HookEvent::CommitMsg),
+        ("post-commit", HookEvent::PostCommit),
     ];
 
     let mut migrated = 0_usize;
@@ -184,6 +185,15 @@ pub(crate) fn detect_and_migrate_existing_hooks(
         let is_old_format = content.contains("# linthis-hook");
         let is_thin_wrapper = content.contains("linthis hook run");
         if !is_old_format && !is_thin_wrapper {
+            // No linthis marker. A hook installed from a configured
+            // `[hook.*]` source (plugin/marketplace/file) looks like this —
+            // it is a plain script that happens to call linthis. Record it so
+            // sync and `linthis update` can refresh it from that config, but
+            // never rewrite it here: the config is the source of truth, and a
+            // hand-written hook must survive untouched.
+            if adopt_unmarked_hook(&content, name, event, global, project) {
+                migrated += 1;
+            }
             continue;
         }
 
@@ -201,12 +211,52 @@ pub(crate) fn detect_and_migrate_existing_hooks(
     migrated
 }
 
+/// Adopt a hook script that carries no linthis marker.
+///
+/// Returns whether it was recorded. A hook installed from a configured
+/// `[hook.*]` source is a plain script that merely calls linthis, so it is
+/// recorded (never rewritten — the config stays the source of truth). Anything
+/// else is somebody's own script: report it and leave it alone.
+fn adopt_unmarked_hook(
+    content: &str,
+    name: &str,
+    event: &HookEvent,
+    global: bool,
+    project: &str,
+) -> bool {
+    if !content.contains("linthis") {
+        return false;
+    }
+    if !global && hook_override_configured(event) {
+        save_installed_hook("local", project, event, &HookTool::Git, None, None);
+        return true;
+    }
+    println!(
+        "  {} {} calls linthis but was not installed by linthis \u{2014} left untouched",
+        "!".yellow(),
+        name
+    );
+    false
+}
+
+/// Whether a `[hook.*]` source is configured for this event, i.e. the hook
+/// script on disk is owned by config rather than hand-written.
+fn hook_override_configured(event: &HookEvent) -> bool {
+    matches!(
+        super::config::resolve_hook_override(&HookTool::Git, event),
+        Ok(Some(_))
+    )
+}
+
 /// Parse event string back to HookEvent enum.
 fn parse_hook_event(s: &str) -> Option<HookEvent> {
     match s {
         "pre-commit" => Some(HookEvent::PreCommit),
         "pre-push" => Some(HookEvent::PrePush),
         "commit-msg" => Some(HookEvent::CommitMsg),
+        // `hook add` installs post-commit alongside pre-commit, so leaving it
+        // out here made every sync report it as an unknown event and skip it.
+        "post-commit" => Some(HookEvent::PostCommit),
         _ => None,
     }
 }
@@ -296,11 +346,18 @@ fn sync_thin_wrapper(
     } else {
         Some(&hook.provider_args)
     };
-    let thin_script = build_thin_wrapper_script(event, hook_type, provider_opt, global, pa_opt);
+    // A configured `[hook.*]` source (plugin / marketplace / file) is what
+    // `hook add` installed here, so re-materialize it instead of overwriting
+    // the user's chosen script with a thin wrapper. Local scope only: a global
+    // hook must not inherit the current project's config.
+    let script = match (global, super::config::resolve_hook_override(hook_type, event)) {
+        (false, Ok(Some(override_content))) => override_content,
+        _ => build_thin_wrapper_script(event, hook_type, provider_opt, global, pa_opt),
+    };
     if let Some(parent) = hook_file.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Err(code) = write_hook_script(&hook_file, &thin_script) {
+    if let Err(code) = write_hook_script(&hook_file, &script) {
         let _ = code;
         eprintln!("  {} Failed to write {}", "✗".red(), hook_file.display());
         return Err(());
@@ -448,7 +505,9 @@ fn sync_disk_scan_pass(
 }
 
 /// Handle empty metadata case: auto-detect and migrate existing hooks.
-fn handle_sync_no_metadata(global: bool, project_root: &std::path::Path) -> i32 {
+/// Adopt hooks already on disk into installed-hooks.toml.
+/// Returns how many were adopted (0 prints the "nothing to sync" advice).
+fn handle_sync_no_metadata(global: bool, project_root: &std::path::Path) -> usize {
     let hook_dir = if global {
         match global_hooks_dir() {
             Some(d) => d,
@@ -493,7 +552,7 @@ fn handle_sync_no_metadata(global: bool, project_root: &std::path::Path) -> i32 
             );
         }
     }
-    0
+    detected
 }
 
 /// Sync a single hook entry.
@@ -570,7 +629,13 @@ fn sync_single_hook(
 }
 
 /// Re-sync installed hooks for local project or global scope.
-pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
+pub fn handle_hook_sync(global: bool, yes: bool) -> i32 {
+    hook_sync_impl(global, yes, true)
+}
+
+/// `allow_adopt` guards a single retry: hooks found on disk are recorded in
+/// installed-hooks.toml, then the normal metadata-driven sync runs once more.
+fn hook_sync_impl(global: bool, _yes: bool, allow_adopt: bool) -> i32 {
     let hooks_file = load_installed_hooks();
     let target_scope = if global { "global" } else { "local" };
 
@@ -603,7 +668,14 @@ pub fn handle_hook_sync(global: bool, _yes: bool) -> i32 {
         .collect();
 
     if filtered.is_empty() {
-        return handle_sync_no_metadata(global, &project_root);
+        if !allow_adopt {
+            return 0;
+        }
+        let adopted = handle_sync_no_metadata(global, &project_root);
+        if adopted == 0 {
+            return 0;
+        }
+        return hook_sync_impl(global, _yes, false);
     }
 
     let grouped = group_hooks_by_type(&filtered);
@@ -661,5 +733,25 @@ pub fn handle_hook_sync_after_plugin_sync(global: bool) {
             "Warning".yellow(),
             code
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_every_installed_event() {
+        // installed-hooks.toml stores whatever `hook add` installed; an event
+        // missing here is skipped with an error on every sync.
+        for (raw, expected) in [
+            ("pre-commit", HookEvent::PreCommit),
+            ("pre-push", HookEvent::PrePush),
+            ("commit-msg", HookEvent::CommitMsg),
+            ("post-commit", HookEvent::PostCommit),
+        ] {
+            assert_eq!(parse_hook_event(raw), Some(expected), "raw={raw}");
+        }
+        assert_eq!(parse_hook_event("nope"), None);
     }
 }
