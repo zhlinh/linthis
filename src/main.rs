@@ -1889,6 +1889,24 @@ fn execute_run(
     }
 }
 
+/// Early exits that run before any lint work: a `linthis disable` in effect
+/// for this hook, then `--clear-cache`.
+fn handle_early_exits(cli: &Cli) -> Option<ExitCode> {
+    if hook_event_name(cli).is_some_and(|event| linthis::state::skip_hook(&event)) {
+        return Some(ExitCode::SUCCESS);
+    }
+    handle_clear_cache(cli)
+}
+
+/// The hook event this invocation is serving, if any. `--hook-event <e>` names
+/// it directly; a bare `-o hook` only says "some hook", which is treated as
+/// pre-commit for gating purposes.
+fn hook_event_name(cli: &Cli) -> Option<String> {
+    cli.hook_mode
+        .clone()
+        .or_else(|| (cli.output.eq_ignore_ascii_case("hook")).then(|| "pre-commit".to_string()))
+}
+
 fn main() -> ExitCode {
     env_logger::init();
 
@@ -1903,7 +1921,12 @@ fn main() -> ExitCode {
         return exit;
     }
 
-    if let Some(exit) = handle_clear_cache(&cli) {
+    // `linthis disable`: hooks that call this binary directly (plugin scripts,
+    // legacy embedded hooks) identify themselves with --hook-event / -o hook.
+    // Gate them here, before any backup or plugin work, so a disable applies
+    // whatever hook flavour is installed. Manual runs have no hook output
+    // format and are never gated.
+    if let Some(exit) = handle_early_exits(&cli) {
         return exit;
     }
 

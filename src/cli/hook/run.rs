@@ -152,25 +152,11 @@ fn build_hook_script_for_run(
 
 /// Report whether `linthis disable` is in effect for this hook.
 ///
-/// Installed hooks are thin wrappers around `linthis hook run`, so this one
-/// check covers every event in both project and global installs — including a
-/// project-scoped disable under a globally installed hook, since the state is
-/// read from the repository git is running in.
+/// Thin-wrapper hooks land here; plugin and legacy scripts that call
+/// `linthis --hook-event <event>` directly are gated in `main` instead. Both
+/// go through `state::skip_hook`.
 fn is_disabled(event: &HookEvent) -> bool {
-    let Some((scope, disabled)) = linthis::state::gate(matches!(event, HookEvent::PrePush)) else {
-        return false;
-    };
-    eprintln!(
-        "{}",
-        format!(
-            "\u{23ed}  linthis {} skipped \u{b7} disabled ({}) \u{b7} {}",
-            event.as_str(),
-            scope.as_str(),
-            disabled.describe()
-        )
-        .dimmed()
-    );
-    true
+    linthis::state::skip_hook(event.as_str())
 }
 
 pub(crate) fn handle_hook_run(

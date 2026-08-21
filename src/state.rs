@@ -25,6 +25,7 @@
 //!   [`consume`])
 
 use chrono::{DateTime, Duration, Local, NaiveTime};
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -339,6 +340,30 @@ pub fn gate(is_push: bool) -> Option<(Scope, Disabled)> {
     }
 }
 
+/// Gate a hook invocation: report whether hooks are disabled and, if so,
+/// print the skip notice on stderr.
+///
+/// Hooks reach linthis two ways — the thin `linthis hook run` wrapper, and
+/// plugin/legacy scripts that invoke `linthis --hook-event <event>` directly.
+/// Both call this, so a disable covers either flavour without reinstalling
+/// anything.
+pub fn skip_hook(event: &str) -> bool {
+    let Some((scope, disabled)) = gate(event == "pre-push") else {
+        return false;
+    };
+    eprintln!(
+        "{}",
+        format!(
+            "\u{23ed}  linthis {} skipped \u{b7} disabled ({}) \u{b7} {}",
+            event,
+            scope.as_str(),
+            disabled.describe()
+        )
+        .dimmed()
+    );
+    true
+}
+
 /// Disable linthis hooks in `scope`.
 pub fn disable(scope: Scope, ttl: &Ttl) -> Result<(), String> {
     save(
@@ -494,6 +519,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(decide(&timed, Some("bbb".into()), true), Next::Keep);
+    }
+
+    #[test]
+    fn skip_hook_is_a_noop_when_nothing_is_disabled() {
+        // No state file in a scratch cwd → hooks must run normally. Guards the
+        // gate against defaulting to "disabled" if the state file is missing.
+        assert!(!skip_hook("pre-commit"));
     }
 
     #[test]
