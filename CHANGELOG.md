@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-08-21
+
+### Added
+
+- refresh plugins and hooks after an upgrade
+
+### Fixed
+
+- never let sync overwrite a hook linthis does not own
+- let `hook sync` see and preserve config-owned hooks
+- honor `linthis disable` for hooks that call linthis directly
+
 ## [0.28.0] - 2026-08-20
 
 ### Added
