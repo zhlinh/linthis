@@ -16,6 +16,42 @@ const MAX_RETRIES: u32 = 3;
 const INITIAL_RETRY_DELAY_MS: u64 = 2000;
 
 /// Run AI review on a diff result.
+/// One-line description of what happened to a file, for the cross-file pass.
+fn describe_change(file: &FileDiff) -> String {
+    use crate::review::diff::DiffStatus;
+    let status = match file.status {
+        DiffStatus::Added => "Added",
+        DiffStatus::Modified => "Modified",
+        DiffStatus::Deleted => "Deleted",
+        DiffStatus::Renamed => "Renamed",
+    };
+    format!("{} (+{} -{})", status, file.additions, file.deletions)
+}
+
+/// Attach the issues that belong to one file.
+fn reviewed_file(file: &FileDiff, all_issues: &[ReviewIssue]) -> ReviewedFile {
+    use crate::review::diff::DiffStatus;
+
+    let status = match file.status {
+        DiffStatus::Added => FileStatus::Added,
+        DiffStatus::Modified => FileStatus::Modified,
+        DiffStatus::Deleted => FileStatus::Deleted,
+        DiffStatus::Renamed => FileStatus::Renamed {
+            from: PathBuf::from(file.old_path.clone().unwrap_or_default()),
+        },
+    };
+
+    ReviewedFile {
+        path: PathBuf::from(&file.path),
+        status,
+        issues: all_issues
+            .iter()
+            .filter(|i| i.file == std::path::Path::new(&file.path))
+            .cloned()
+            .collect(),
+    }
+}
+
 pub fn analyze(diff: &DiffResult, provider: &dyn AiProviderTrait) -> Result<ReviewResult, String> {
     if diff.files.is_empty() {
         return Ok(empty_review_result(diff));
@@ -29,35 +65,14 @@ pub fn analyze(diff: &DiffResult, provider: &dyn AiProviderTrait) -> Result<Revi
     let mut all_issues: Vec<ReviewIssue> = Vec::new();
     let mut file_summaries: Vec<(String, String)> = Vec::new();
 
-    // Review each chunk
     for chunk in &chunks {
         if chunk.is_empty() {
             continue;
         }
-
         let file_refs: Vec<&FileDiff> = chunk.to_vec();
-        let user_prompt = build_review_prompt(&file_refs);
-
-        let response = call_with_retry(provider, &user_prompt, &system_prompt)?;
-        let parsed = parse_review_response(&response)?;
-
-        // Collect file summaries for cross-file review
-        for file in chunk {
-            let summary = format!(
-                "{} (+{} -{})",
-                match file.status {
-                    crate::review::diff::DiffStatus::Added => "Added",
-                    crate::review::diff::DiffStatus::Modified => "Modified",
-                    crate::review::diff::DiffStatus::Deleted => "Deleted",
-                    crate::review::diff::DiffStatus::Renamed => "Renamed",
-                },
-                file.additions,
-                file.deletions
-            );
-            file_summaries.push((file.path.clone(), summary));
-        }
-
-        all_issues.extend(parsed);
+        let response = call_with_retry(provider, &build_review_prompt(&file_refs), &system_prompt)?;
+        all_issues.extend(parse_review_response(&response)?);
+        file_summaries.extend(chunk.iter().map(|f| (f.path.clone(), describe_change(f))));
     }
 
     // Cross-file summary review (only if multiple chunks)
@@ -74,45 +89,18 @@ pub fn analyze(diff: &DiffResult, provider: &dyn AiProviderTrait) -> Result<Revi
     // Determine assessment
     let assessment = determine_assessment(&all_issues);
 
-    // Count by severity
-    let critical_count = all_issues
-        .iter()
-        .filter(|i| i.severity == Severity::Critical)
-        .count();
-    let important_count = all_issues
-        .iter()
-        .filter(|i| i.severity == Severity::Important)
-        .count();
-    let minor_count = all_issues
-        .iter()
-        .filter(|i| i.severity == Severity::Minor)
-        .count();
+    let count_of = |severity| all_issues.iter().filter(|i| i.severity == severity).count();
+    let (critical_count, important_count, minor_count) = (
+        count_of(Severity::Critical),
+        count_of(Severity::Important),
+        count_of(Severity::Minor),
+    );
     let total_issues = all_issues.len();
 
-    // Build reviewed file list
     let files: Vec<ReviewedFile> = diff
         .files
         .iter()
-        .map(|f| {
-            let file_issues: Vec<ReviewIssue> = all_issues
-                .iter()
-                .filter(|i| i.file == std::path::Path::new(&f.path))
-                .cloned()
-                .collect();
-
-            ReviewedFile {
-                path: PathBuf::from(&f.path),
-                status: match f.status {
-                    crate::review::diff::DiffStatus::Added => FileStatus::Added,
-                    crate::review::diff::DiffStatus::Modified => FileStatus::Modified,
-                    crate::review::diff::DiffStatus::Deleted => FileStatus::Deleted,
-                    crate::review::diff::DiffStatus::Renamed => FileStatus::Renamed {
-                        from: PathBuf::from(f.old_path.clone().unwrap_or_default()),
-                    },
-                },
-                issues: file_issues,
-            }
-        })
+        .map(|f| reviewed_file(f, &all_issues))
         .collect();
 
     Ok(ReviewResult {

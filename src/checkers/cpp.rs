@@ -387,6 +387,32 @@ impl CppChecker {
     }
 
     /// Recursively search for compile_commands.json in build-like directories
+    /// Names that mark a build output directory at the top level.
+    const BUILD_DIR_PREFIXES: &'static [&'static str] = &["cmake", "build", "out"];
+    const BUILD_DIR_SUFFIXES: &'static [&'static str] = &["-build", "_build"];
+    /// Platform and configuration names that appear *inside* a build tree.
+    const BUILD_VARIANT_WORDS: &'static [&'static str] = &[
+        "android", "ios", "linux", "windows", "macos", "darwin", "arm", "x86", "x64", "static",
+        "shared", "debug", "release",
+    ];
+
+    /// Whether a directory is worth descending into when hunting for
+    /// `compile_commands.json`.
+    ///
+    /// Variant names only count below the top level: a repository's own `ios/`
+    /// source directory is not a build tree, but `build/ios/` is.
+    fn is_build_dir(name: &str, depth: usize) -> bool {
+        let name = name.to_lowercase();
+        Self::BUILD_DIR_PREFIXES
+            .iter()
+            .any(|p| name.starts_with(p))
+            || Self::BUILD_DIR_SUFFIXES.iter().any(|sfx| name.ends_with(sfx))
+            || (depth > 0
+                && Self::BUILD_VARIANT_WORDS
+                    .iter()
+                    .any(|w| name.contains(w)))
+    }
+
     fn find_compile_commands_recursive(
         dir: &Path,
         depth: usize,
@@ -396,52 +422,25 @@ impl CppChecker {
             return None;
         }
 
-        let entries = std::fs::read_dir(dir).ok()?;
-
-        for entry in entries.flatten() {
+        for entry in std::fs::read_dir(dir).ok()?.flatten() {
             let path = entry.path();
             if !path.is_dir() {
                 continue;
             }
 
-            let name = path.file_name().and_then(|n| n.to_str())?;
-            let name_lower = name.to_lowercase();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !Self::is_build_dir(name, depth) {
+                continue;
+            }
 
-            // Only recurse into build-related directories
-            let is_build_dir = name_lower.starts_with("cmake")
-                || name_lower.starts_with("build")
-                || name_lower.starts_with("out")
-                || name_lower.ends_with("-build")
-                || name_lower.ends_with("_build")
-                // Also allow platform/arch subdirectories inside build dirs
-                || (depth > 0
-                    && (name_lower.contains("android")
-                        || name_lower.contains("ios")
-                        || name_lower.contains("linux")
-                        || name_lower.contains("windows")
-                        || name_lower.contains("macos")
-                        || name_lower.contains("darwin")
-                        || name_lower.contains("arm")
-                        || name_lower.contains("x86")
-                        || name_lower.contains("x64")
-                        || name_lower.contains("static")
-                        || name_lower.contains("shared")
-                        || name_lower.contains("debug")
-                        || name_lower.contains("release")));
-
-            if is_build_dir {
-                // Check if compile_commands.json exists here
-                let compile_db = path.join("compile_commands.json");
-                if compile_db.exists() {
-                    return Some(path);
-                }
-
-                // Recurse deeper
-                if let Some(found) =
-                    Self::find_compile_commands_recursive(&path, depth + 1, max_depth)
-                {
-                    return Some(found);
-                }
+            if path.join("compile_commands.json").exists() {
+                return Some(path);
+            }
+            if let Some(found) = Self::find_compile_commands_recursive(&path, depth + 1, max_depth)
+            {
+                return Some(found);
             }
         }
         None
@@ -586,6 +585,45 @@ impl CppChecker {
         issues
     }
 
+    /// Directory names that mark third-party code we do not report on.
+    const VENDORED_DIRS: &'static [&'static str] = &[
+        "third_party",
+        "thirdparty",
+        "third-party",
+        "3rdparty",
+        "3rd_party",
+        "3rd-party",
+        "external",
+        "externals",
+        "vendor",
+        "node_modules",
+    ];
+
+    /// Whether a path lives in vendored third-party code.
+    fn is_vendored(path: &Path) -> bool {
+        let path = path.to_string_lossy();
+        Self::VENDORED_DIRS.iter().any(|dir| path.contains(dir))
+    }
+
+    /// Split `message [code]` into its two halves.
+    ///
+    /// `finder` picks which bracket starts the code — clang-tidy puts the
+    /// check name last, cpplint puts the category first and a confidence
+    /// score after it.
+    fn split_trailing_code(
+        text: &str,
+        finder: fn(&str) -> Option<usize>,
+    ) -> (String, Option<String>) {
+        let Some(bracket) = finder(text) else {
+            return (text.to_string(), None);
+        };
+        let message = text[..bracket].trim().to_string();
+        let code = text[bracket..].trim_matches(|c| c == '[' || c == ']');
+        // cpplint appends "] [3]"; keep only the category.
+        let code = code.split("] [").next().unwrap_or(code);
+        (message, Some(code.to_string()))
+    }
+
     fn parse_clang_tidy_line(line: &str, default_path: &Path) -> Option<LintIssue> {
         // clang-tidy format: file:line:col: warning/error: message [check-name]
         // Example: test.cpp:10:5: warning: use nullptr [modernize-use-nullptr]
@@ -599,21 +637,7 @@ impl CppChecker {
         }
 
         let file_path_parsed = std::path::PathBuf::from(parts[0]);
-
-        // Filter out issues from third_party and other excluded directories
-        // Check both the parsed path and individual components
-        let path_str = file_path_parsed.to_string_lossy();
-        if path_str.contains("third_party")
-            || path_str.contains("thirdparty")
-            || path_str.contains("third-party")
-            || path_str.contains("3rdparty")
-            || path_str.contains("3rd_party")
-            || path_str.contains("3rd-party")
-            || path_str.contains("external")
-            || path_str.contains("externals")
-            || path_str.contains("vendor")
-            || path_str.contains("node_modules")
-        {
+        if Self::is_vendored(&file_path_parsed) {
             return None;
         }
 
@@ -629,23 +653,16 @@ impl CppChecker {
             Severity::Warning
         };
 
-        // Extract message and check name
-        let (message, code) = if let Some(bracket_start) = message_part.rfind('[') {
-            let msg = message_part[..bracket_start].trim();
-            let check = message_part[bracket_start..]
-                .trim_matches(|c| c == '[' || c == ']')
-                .to_string();
-            (msg.to_string(), Some(check))
-        } else {
-            (message_part.to_string(), None)
-        };
+        // clang-tidy puts the check name in the last bracket.
+        let (message, code) = Self::split_trailing_code(message_part, |t| t.rfind('['));
 
-        // Filter out all clang-diagnostic-* errors: these are compiler diagnostics
-        // (missing headers, type errors, etc.) not actual code style/quality issues
-        if let Some(ref c) = code {
-            if c.starts_with("clang-diagnostic-") {
-                return None;
-            }
+        // clang-diagnostic-* are compiler diagnostics (missing headers, type
+        // errors), not code quality findings.
+        if code
+            .as_deref()
+            .is_some_and(|c| c.starts_with("clang-diagnostic-"))
+        {
+            return None;
         }
 
         let file_path = if file_path_parsed.exists() {
@@ -689,6 +706,42 @@ impl CppChecker {
         issues
     }
 
+    /// Whether the reported line sits inside a multi-line string literal.
+    ///
+    /// C/C++/ObjC continue a string with a trailing backslash, so a previous
+    /// line ending in one means we are still inside it. The rest are shapes
+    /// that only occur in embedded JS/SQL text, never in code at that spot.
+    fn inside_multiline_string(ctx: &crate::utils::LineWithContext) -> bool {
+        let continued = ctx.before.iter().any(|(_, line)| {
+            let trimmed = line.trim_end();
+            trimmed.ends_with('\\') || trimmed.ends_with("\\\"")
+        });
+
+        let line = ctx.line.trim_end();
+        continued
+            || line.ends_with('\\')
+            || line.contains(");\"")
+            || line.contains("();\"")
+            || line.contains("; \\")
+    }
+
+    /// Consume characters up to the `)` matching an already-consumed `(`.
+    fn skip_parenthesized(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+        let mut depth = 1usize;
+        for c in chars.by_ref() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn parse_cpplint_line(line: &str, default_path: &Path) -> Option<LintIssue> {
         // cpplint format: file:line: message [category] [confidence]
         // Example: test.cpp:10: Missing space after comma [whitespace/comma] [3]
@@ -714,16 +767,8 @@ impl CppChecker {
         let line_num = parts[1].trim().parse::<usize>().ok()?;
         let rest = parts[2].trim();
 
-        // Parse message and extract category
-        let (message, code) = if let Some(bracket_start) = rest.find('[') {
-            let msg = rest[..bracket_start].trim();
-            let category = rest[bracket_start..].trim_matches(|c| c == '[' || c == ']');
-            // Extract just the first bracketed category
-            let cat = category.split("] [").next().unwrap_or(category);
-            (msg.to_string(), Some(cat.to_string()))
-        } else {
-            (rest.to_string(), None)
-        };
+        // cpplint puts the category in the first bracket, confidence after it.
+        let (message, code) = Self::split_trailing_code(rest, |t| t.find('['));
 
         let severity = if message.to_lowercase().contains("error") {
             Severity::Error
@@ -740,32 +785,13 @@ impl CppChecker {
         // Read the source code line with context
         let ctx = crate::utils::read_file_line_with_context(&file_path, line_num, 1);
 
-        // Filter out whitespace issues that appear to be inside multi-line string literals
-        // Multi-line strings in C/C++/ObjC use line continuation with backslash
-        if let (Some(ref cat), Some(ref context)) = (&code, &ctx) {
-            if cat.starts_with("whitespace/") {
-                // Check if previous line ends with \ (line continuation in string)
-                let in_multiline_string = context.before.iter().any(|(_, line)| {
-                    let trimmed = line.trim_end();
-                    trimmed.ends_with('\\') || trimmed.ends_with("\\\"")
-                });
-
-                // Also check if this line looks like string content
-                // Common patterns for multi-line string endings in ObjC/C++:
-                // - ends with \  (line continuation)
-                // - contains );" (JS code ending inside string literal)
-                // - contains "; (semicolon inside string, common in embedded JS/SQL)
-                let line_trimmed = context.line.trim_end();
-                let looks_like_string_content = line_trimmed.ends_with('\\')
-                    || line_trimmed.contains(");\"")   // e.g., })();"
-                    || line_trimmed.contains("();\"")  // e.g., foo();"
-                    || line_trimmed.contains("; \\")   // e.g., return x; \
-                    ;
-
-                if in_multiline_string || looks_like_string_content {
-                    return None;
-                }
-            }
+        // Whitespace complaints about the inside of a multi-line string are
+        // about the string's content, not the code.
+        let is_whitespace_rule = code
+            .as_deref()
+            .is_some_and(|c| c.starts_with("whitespace/"));
+        if is_whitespace_rule && ctx.as_ref().is_some_and(Self::inside_multiline_string) {
+            return None;
         }
 
         let mut issue = LintIssue::new(file_path.clone(), line_num, message, severity)
@@ -845,22 +871,10 @@ impl CppChecker {
             match c {
                 '{' => break,
                 '(' => {
-                    // Skip argument type in parens, e.g. "(UITableView *)"
-                    // The word before '(' was already a selector keyword collected at ':'
+                    // An argument type, e.g. "(UITableView *)". The selector
+                    // keyword before it was already collected at ':'.
                     word.clear();
-                    let mut depth = 1usize;
-                    for inner in chars.by_ref() {
-                        match inner {
-                            '(' => depth += 1,
-                            ')' => {
-                                depth -= 1;
-                                if depth == 0 {
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    Self::skip_parenthesized(&mut chars);
                 }
                 ':' => {
                     // Current word is a selector component

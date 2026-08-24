@@ -20,6 +20,68 @@ use std::process::Command;
 /// C# checker using dotnet format with --verify-no-changes.
 pub struct CSharpChecker;
 
+/// One parsed `dotnet format` diagnostic.
+///
+/// Both output shapes — with and without a source position — carry the same
+/// fields; only where they sit in the capture groups differs.
+struct Diagnostic {
+    file: String,
+    line: usize,
+    column: Option<usize>,
+    severity: Severity,
+    code: String,
+    message: String,
+}
+
+impl Diagnostic {
+    /// `file(line,col): severity CODE: message`
+    fn positional(caps: &regex::Captures<'_>) -> Self {
+        Self {
+            file: group(caps, 1).to_string(),
+            line: group(caps, 2).parse().unwrap_or(1),
+            column: group(caps, 3).parse().ok(),
+            severity: severity_from(group(caps, 4)),
+            code: group(caps, 5).to_string(),
+            message: group(caps, 6).to_string(),
+        }
+    }
+
+    /// `file: severity CODE: message`
+    fn bare(caps: &regex::Captures<'_>) -> Self {
+        Self {
+            file: group(caps, 1).to_string(),
+            line: 1,
+            column: None,
+            severity: severity_from(group(caps, 2)),
+            code: group(caps, 3).to_string(),
+            message: group(caps, 4).to_string(),
+        }
+    }
+
+    fn into_issue(self, path: &Path) -> LintIssue {
+        let mut issue = LintIssue::new(path.to_path_buf(), self.line, self.message, self.severity)
+            .with_source("dotnet-format".to_string())
+            .with_code(self.code);
+        if let Some(col) = self.column {
+            issue = issue.with_column(col);
+        }
+        issue
+    }
+}
+
+fn group<'a>(caps: &regex::Captures<'a>, i: usize) -> &'a str {
+    caps.get(i).map(|m| m.as_str()).unwrap_or("")
+}
+
+/// dotnet omits the severity word for some diagnostics; those are warnings.
+fn severity_from(word: &str) -> Severity {
+    match word {
+        "error" => Severity::Error,
+        "info" => Severity::Info,
+        _ => Severity::Warning,
+    }
+}
+
 impl CSharpChecker {
     pub fn new() -> Self {
         Self
@@ -50,79 +112,30 @@ impl CSharpChecker {
     /// Parse dotnet format output.
     /// Format: FILE(LINE,COL): SEVERITY CODE: MESSAGE
     fn parse_dotnet_output(&self, output: &str, path: &Path) -> Vec<LintIssue> {
-        let mut issues = Vec::new();
-
-        // Regex to match dotnet format diagnostic output
-        // Example: Program.cs(10,5): warning IDE0005: Using directive is unnecessary
-        let re =
+        // Program.cs(10,5): warning IDE0005: Using directive is unnecessary
+        let with_position =
             Regex::new(r"^(.+?)\((\d+),(\d+)\):\s*(error|warning|info)?\s*([A-Z]+\d+):\s*(.+)$")
                 .unwrap();
-
-        // Alternative format without position
-        let re_simple =
+        // The same diagnostic without a position.
+        let without_position =
             Regex::new(r"^(.+?):\s*(error|warning|info)?\s*([A-Z]+\d+):\s*(.+)$").unwrap();
 
-        for line in output.lines() {
-            if let Some(caps) = re.captures(line) {
-                let file_path_str = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let line_num: usize = caps
-                    .get(2)
-                    .and_then(|m| m.as_str().parse().ok())
-                    .unwrap_or(1);
-                let col: usize = caps
-                    .get(3)
-                    .and_then(|m| m.as_str().parse().ok())
-                    .unwrap_or(1);
-                let severity_str = caps.get(4).map(|m| m.as_str()).unwrap_or("warning");
-                let code = caps.get(5).map(|m| m.as_str()).unwrap_or("");
-                let message = caps.get(6).map(|m| m.as_str()).unwrap_or("");
-
-                // Only include issues for the target file
-                let issue_path = Path::new(file_path_str);
-                if issue_path.file_name() != path.file_name() {
-                    continue;
-                }
-
-                let severity = match severity_str {
-                    "error" => Severity::Error,
-                    "warning" => Severity::Warning,
-                    _ => Severity::Info,
-                };
-
-                let issue =
-                    LintIssue::new(path.to_path_buf(), line_num, message.to_string(), severity)
-                        .with_source("dotnet-format".to_string())
-                        .with_code(code.to_string())
-                        .with_column(col);
-
-                issues.push(issue);
-            } else if let Some(caps) = re_simple.captures(line) {
-                let file_path_str = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let severity_str = caps.get(2).map(|m| m.as_str()).unwrap_or("warning");
-                let code = caps.get(3).map(|m| m.as_str()).unwrap_or("");
-                let message = caps.get(4).map(|m| m.as_str()).unwrap_or("");
-
-                // Only include issues for the target file
-                let issue_path = Path::new(file_path_str);
-                if issue_path.file_name() != path.file_name() {
-                    continue;
-                }
-
-                let severity = match severity_str {
-                    "error" => Severity::Error,
-                    "warning" => Severity::Warning,
-                    _ => Severity::Info,
-                };
-
-                let issue = LintIssue::new(path.to_path_buf(), 1, message.to_string(), severity)
-                    .with_source("dotnet-format".to_string())
-                    .with_code(code.to_string());
-
-                issues.push(issue);
-            }
-        }
-
-        issues
+        output
+            .lines()
+            .filter_map(|line| {
+                with_position
+                    .captures(line)
+                    .map(|caps| Diagnostic::positional(&caps))
+                    .or_else(|| {
+                        without_position
+                            .captures(line)
+                            .map(|caps| Diagnostic::bare(&caps))
+                    })
+            })
+            // dotnet reports the whole project; keep only the file we asked about.
+            .filter(|diag| Path::new(&diag.file).file_name() == path.file_name())
+            .map(|diag| diag.into_issue(path))
+            .collect()
     }
 }
 

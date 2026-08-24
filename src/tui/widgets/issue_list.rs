@@ -22,76 +22,67 @@ use crate::tui::app::{App, FocusedPanel};
 use crate::tui::ui::{border_style, severity_color, severity_symbol};
 
 /// Draw the issue list widget
+/// One issue as a list entry: severity + location, the message, and the rule
+/// code when there is one.
+fn issue_item(app: &App, issue: &crate::LintIssue, is_selected: bool, focused: bool) -> ListItem<'static> {
+    let highlighted = is_selected && focused;
+
+    let severity = Span::styled(
+        format!(" {} ", severity_symbol(issue.severity)),
+        Style::default()
+            .fg(severity_color(issue.severity))
+            .add_modifier(Modifier::BOLD),
+    );
+    let location_style = if highlighted {
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let location = Span::styled(
+        format!("{}:{}", app.display_path(&issue.file_path), issue.line),
+        location_style,
+    );
+
+    let msg_style = if highlighted {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    // Keep an entry to two lines' worth of message.
+    const MAX_MESSAGE: usize = 60;
+    let msg = if issue.message.len() > MAX_MESSAGE {
+        format!("{}...", &issue.message[..MAX_MESSAGE - 3])
+    } else {
+        issue.message.clone()
+    };
+
+    let mut lines = vec![
+        Line::from(vec![severity, location]),
+        Line::from(vec![Span::raw("    "), Span::styled(msg, msg_style)]),
+    ];
+    if let Some(code) = issue.code.as_ref() {
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(format!("[{}]", code), Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    let item_style = if highlighted {
+        Style::default().bg(Color::DarkGray)
+    } else {
+        Style::default()
+    };
+    ListItem::new(lines).style(item_style)
+}
+
 pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focused_panel == FocusedPanel::Issues;
-
     let issues = app.watch_state.issues();
 
-    // Create list items
     let items: Vec<ListItem> = issues
         .iter()
         .enumerate()
-        .map(|(i, issue)| {
-            let is_selected = i == app.issue_index;
-
-            // Severity indicator
-            let severity_style = Style::default()
-                .fg(severity_color(issue.severity))
-                .add_modifier(Modifier::BOLD);
-            let severity = Span::styled(
-                format!(" {} ", severity_symbol(issue.severity)),
-                severity_style,
-            );
-
-            // File location
-            let location = format!("{}:{}", app.display_path(&issue.file_path), issue.line);
-            let location_style = if is_selected && focused {
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            let location_span = Span::styled(location, location_style);
-
-            // First line: severity + location
-            let line1 = Line::from(vec![severity, location_span]);
-
-            // Second line: message (indented)
-            let msg_style = if is_selected && focused {
-                Style::default().fg(Color::White)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-
-            // Truncate message if too long
-            let msg = if issue.message.len() > 60 {
-                format!("{}...", &issue.message[..57])
-            } else {
-                issue.message.clone()
-            };
-            let line2 = Line::from(vec![Span::raw("    "), Span::styled(msg, msg_style)]);
-
-            // Rule code if present
-            let lines = if let Some(ref code) = issue.code {
-                let code_style = Style::default().fg(Color::DarkGray);
-                let line3 = Line::from(vec![
-                    Span::raw("    "),
-                    Span::styled(format!("[{}]", code), code_style),
-                ]);
-                vec![line1, line2, line3]
-            } else {
-                vec![line1, line2]
-            };
-
-            let item_style = if is_selected && focused {
-                Style::default().bg(Color::DarkGray)
-            } else {
-                Style::default()
-            };
-
-            ListItem::new(lines).style(item_style)
-        })
+        .map(|(i, issue)| issue_item(app, issue, i == app.issue_index, focused))
         .collect();
 
     // Title with counts
