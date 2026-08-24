@@ -96,8 +96,7 @@ impl TypeScriptComplexityAnalyzer {
                 continue;
             }
 
-            let opens = line.matches('{').count() as i32;
-            let closes = line.matches('}').count() as i32;
+            let (opens, closes) = super::count_code_braces(line);
 
             let control_keywords = [
                 "if ", "if(", "else", "switch", "for ", "for(", "while ", "do ", "catch",
@@ -229,8 +228,9 @@ impl LanguageComplexityAnalyzer for TypeScriptComplexityAnalyzer {
             }
 
             if in_function {
-                brace_count += line.matches('{').count() as i32;
-                brace_count -= line.matches('}').count() as i32;
+                let (opens, closes) = super::count_code_braces(line);
+                brace_count += opens;
+                brace_count -= closes;
 
                 if brace_count <= 0 && (line.contains('}') || trimmed.ends_with("};")) {
                     let end_line = i + 1;
@@ -275,63 +275,67 @@ impl LanguageComplexityAnalyzer for TypeScriptComplexityAnalyzer {
     }
 }
 
+/// Name of the function declared on this line, if any.
+///
+/// Three unrelated shapes share the line: an arrow assigned to a binding, a
+/// `function` declaration, and a class method. Each is its own detector so a
+/// change to one cannot disturb the others.
 fn detect_ts_function(line: &str) -> Option<String> {
     let line = line.trim();
+    ts_arrow_binding(line)
+        .or_else(|| ts_function_declaration(line))
+        .or_else(|| ts_class_method(line))
+}
 
-    // Arrow function: const foo = () => or const foo = async () =>
-    if (line.starts_with("const ") || line.starts_with("let ") || line.starts_with("var "))
-        && (line.contains("=>") || line.contains("= function"))
-    {
-        let parts: Vec<&str> = line.split(['=', ':']).collect();
-        if !parts.is_empty() {
-            let name = parts[0]
-                .trim()
-                .trim_start_matches("const ")
-                .trim_start_matches("let ")
-                .trim_start_matches("var ")
-                .trim_start_matches("export ");
-            if !name.is_empty() {
-                return Some(name.to_string());
-            }
-        }
+/// `const foo = () =>` / `let foo = function`
+fn ts_arrow_binding(line: &str) -> Option<String> {
+    let is_binding = ["const ", "let ", "var "].iter().any(|k| line.starts_with(k));
+    if !is_binding || !(line.contains("=>") || line.contains("= function")) {
+        return None;
     }
 
-    // Function declaration: function foo() or async function foo()
-    if line.contains("function ") {
-        let start = line.find("function ")? + 9;
-        let rest = &line[start..];
-        let end = rest.find(|c: char| c == '(' || c == '<' || c.is_whitespace())?;
-        let name = rest[..end].trim();
-        if !name.is_empty() {
-            return Some(name.to_string());
-        }
+    let name = line
+        .split(['=', ':'])
+        .next()?
+        .trim()
+        .trim_start_matches("const ")
+        .trim_start_matches("let ")
+        .trim_start_matches("var ")
+        .trim_start_matches("export ");
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// `function foo(` / `async function foo<`
+fn ts_function_declaration(line: &str) -> Option<String> {
+    let start = line.find("function ")? + "function ".len();
+    let rest = &line[start..];
+    let end = rest.find(|c: char| c == '(' || c == '<' || c.is_whitespace())?;
+    let name = rest[..end].trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// `methodName() {` inside a class, with any modifiers stripped.
+fn ts_class_method(line: &str) -> Option<String> {
+    if !line.contains('(') || !(line.ends_with('{') || line.ends_with(") {")) {
+        return None;
     }
 
-    // Class method: methodName() { or async methodName() {
-    if line.contains('(') && (line.ends_with('{') || line.ends_with(") {")) {
-        let clean = line
-            .trim_start_matches("public ")
-            .trim_start_matches("private ")
-            .trim_start_matches("protected ")
-            .trim_start_matches("static ")
-            .trim_start_matches("async ")
-            .trim_start_matches("override ");
-
-        if let Some(paren_pos) = clean.find('(') {
-            let name = clean[..paren_pos].trim();
-            if !name.is_empty()
-                && !name.contains(' ')
-                && name != "if"
-                && name != "for"
-                && name != "while"
-                && name != "switch"
-            {
-                return Some(name.to_string());
-            }
-        }
+    let mut clean = line;
+    for modifier in [
+        "public ",
+        "private ",
+        "protected ",
+        "static ",
+        "async ",
+        "override ",
+    ] {
+        clean = clean.trim_start_matches(modifier);
     }
 
-    None
+    let name = clean[..clean.find('(')?].trim();
+    // A control-flow keyword followed by `(` is not a method.
+    let is_keyword = matches!(name, "if" | "for" | "while" | "switch");
+    (!name.is_empty() && !name.contains(' ') && !is_keyword).then(|| name.to_string())
 }
 
 fn extract_class_name(line: &str) -> Option<String> {

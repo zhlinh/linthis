@@ -95,8 +95,7 @@ impl JavaComplexityAnalyzer {
                 continue;
             }
 
-            let opens = line.matches('{').count() as i32;
-            let closes = line.matches('}').count() as i32;
+            let (opens, closes) = super::count_code_braces(line);
 
             let control_keywords = [
                 "if ", "if(", "else", "switch", "for ", "for(", "while ", "do ", "catch", "try ",
@@ -180,21 +179,13 @@ impl LanguageComplexityAnalyzer for JavaComplexityAnalyzer {
             .iter()
             .filter(|line| {
                 let trimmed = line.trim();
-                !trimmed.is_empty()
-                    && !trimmed.starts_with("//")
-                    && !trimmed.starts_with("/*")
-                    && !trimmed.starts_with("*")
+                !trimmed.is_empty() && !is_comment_line(trimmed)
             })
             .count() as u32;
-
         file_metrics.metrics.comment_lines = lines
             .iter()
-            .filter(|line| {
-                let trimmed = line.trim();
-                trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*")
-            })
+            .filter(|line| is_comment_line(line.trim()))
             .count() as u32;
-
         file_metrics.imports = lines
             .iter()
             .filter(|line| line.trim().starts_with("import "))
@@ -234,8 +225,9 @@ impl LanguageComplexityAnalyzer for JavaComplexityAnalyzer {
             }
 
             if in_method {
-                brace_count += line.matches('{').count() as i32;
-                brace_count -= line.matches('}').count() as i32;
+                let (opens, closes) = super::count_code_braces(line);
+                brace_count += opens;
+                brace_count -= closes;
 
                 if brace_count <= 0 && line.contains('}') {
                     let end_line = i + 1;
@@ -253,8 +245,9 @@ impl LanguageComplexityAnalyzer for JavaComplexityAnalyzer {
                 }
             } else {
                 // Track class brace level when not in a method
-                brace_count += line.matches('{').count() as i32;
-                brace_count -= line.matches('}').count() as i32;
+                let (opens, closes) = super::count_code_braces(line);
+                brace_count += opens;
+                brace_count -= closes;
 
                 // Check if we exited the class
                 if brace_count < class_brace_level && current_class.is_some() {
@@ -287,64 +280,62 @@ impl LanguageComplexityAnalyzer for JavaComplexityAnalyzer {
     }
 }
 
+/// Whether a trimmed line is comment text — `//`, the start of a block
+/// comment, or its continuation.
+fn is_comment_line(trimmed: &str) -> bool {
+    trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*')
+}
+
+/// Name of the method declared on this line, if any.
 fn detect_java_method(line: &str) -> Option<String> {
     let line = line.trim();
 
-    // Skip field declarations, annotations, class declarations
-    if line.starts_with('@')
+    if is_not_a_method_line(line) {
+        return None;
+    }
+    // A method line has a parameter list, and either opens a body or ends the
+    // signature (abstract/interface methods wrap before the `{`).
+    if !line.contains('(') || (!line.contains('{') && !line.ends_with(')')) {
+        return None;
+    }
+
+    let clean = strip_java_modifiers(line);
+    let before_paren = clean[..clean.find('(')?].trim();
+
+    // `void run` → the name is last; a bare `Foo` is a constructor.
+    let name = before_paren.split_whitespace().last()?;
+    (!name.is_empty() && is_valid_method_name(name)).then(|| name.to_string())
+}
+
+/// Lines that can never declare a method: annotations, comments, and type
+/// declarations, plus fields and calls, which end in `;`.
+fn is_not_a_method_line(line: &str) -> bool {
+    const TYPE_KEYWORDS: &[&str] = &[" class ", " interface ", " enum "];
+    line.starts_with('@')
         || line.starts_with("//")
         || line.starts_with("/*")
-        || line.contains(" class ")
-        || line.contains(" interface ")
-        || line.contains(" enum ")
         || line.ends_with(';')
-    {
-        return None;
+        || TYPE_KEYWORDS.iter().any(|k| line.contains(k))
+}
+
+/// Drop the modifiers that can precede a return type.
+fn strip_java_modifiers(line: &str) -> String {
+    const MODIFIERS: &[&str] = &[
+        "public ",
+        "private ",
+        "protected ",
+        "static ",
+        "final ",
+        "abstract ",
+        "synchronized ",
+        "native ",
+        "@Override ",
+    ];
+    let mut clean = line.to_string();
+    for modifier in MODIFIERS {
+        clean = clean.replace(modifier, "");
     }
-
-    // Look for method pattern: modifiers? type name(
-    if !line.contains('(') || !line.contains('{') && !line.ends_with(')') {
-        return None;
-    }
-
-    // Remove modifiers
-    let clean = line
-        .replace("public ", "")
-        .replace("private ", "")
-        .replace("protected ", "")
-        .replace("static ", "")
-        .replace("final ", "")
-        .replace("abstract ", "")
-        .replace("synchronized ", "")
-        .replace("native ", "")
-        .replace("@Override ", "");
-
-    let clean = clean.trim();
-
-    // Find method name (word before opening paren)
-    if let Some(paren_pos) = clean.find('(') {
-        let before_paren = clean[..paren_pos].trim();
-        let parts: Vec<&str> = before_paren.split_whitespace().collect();
-
-        if parts.len() >= 2 {
-            // Last part is method name, second to last is return type
-            let name = parts.last()?;
-
-            // Skip constructors that look like class names (start with uppercase)
-            // but allow regular methods
-            if !name.is_empty() && is_valid_method_name(name) {
-                return Some(name.to_string());
-            }
-        } else if parts.len() == 1 {
-            // Could be a constructor
-            let name = parts[0];
-            if !name.is_empty() && is_valid_method_name(name) {
-                return Some(name.to_string());
-            }
-        }
-    }
-
-    None
+    clean.trim().to_string()
 }
 
 fn is_valid_method_name(name: &str) -> bool {

@@ -105,8 +105,7 @@ impl RustComplexityAnalyzer {
             }
 
             // Track nesting
-            let opens = line.matches('{').count() as i32;
-            let closes = line.matches('}').count() as i32;
+            let (opens, closes) = super::count_code_braces(line);
 
             // Control structures add complexity based on nesting
             let control_keywords = ["if ", "else", "match ", "for ", "while ", "loop "];
@@ -240,8 +239,9 @@ impl LanguageComplexityAnalyzer for RustComplexityAnalyzer {
             }
 
             if in_function {
-                brace_count += line.matches('{').count() as i32;
-                brace_count -= line.matches('}').count() as i32;
+                let (opens, closes) = super::count_code_braces(line);
+                brace_count += opens;
+                brace_count -= closes;
 
                 if brace_count <= 0 && line.contains('}') {
                     // Function ended

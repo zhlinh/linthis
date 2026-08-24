@@ -92,8 +92,7 @@ impl GoComplexityAnalyzer {
                 continue;
             }
 
-            let opens = line.matches('{').count() as i32;
-            let closes = line.matches('}').count() as i32;
+            let (opens, closes) = super::count_code_braces(line);
 
             let control_keywords = ["if ", "else", "switch ", "for ", "select ", "case "];
             for keyword in control_keywords {
@@ -219,8 +218,9 @@ impl LanguageComplexityAnalyzer for GoComplexityAnalyzer {
             }
 
             if in_function {
-                brace_count += line.matches('{').count() as i32;
-                brace_count -= line.matches('}').count() as i32;
+                let (opens, closes) = super::count_code_braces(line);
+                brace_count += opens;
+                brace_count -= closes;
 
                 if brace_count <= 0 && line.contains('}') {
                     let end_line = i + 1;
