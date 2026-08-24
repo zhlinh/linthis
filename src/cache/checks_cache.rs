@@ -24,6 +24,11 @@ use crate::security::sast::SastFinding;
 /// Per-file cache for checks (security, complexity).
 #[derive(Serialize, Deserialize, Default)]
 pub struct PerFileCache {
+    /// linthis version that produced these results. The content hash only
+    /// proves the input is unchanged; a fixed analyzer can report something
+    /// different for the same bytes, so another version's results are dropped.
+    #[serde(default)]
+    pub linthis_version: String,
     /// file_path → (content_hash, serialized results JSON)
     pub entries: HashMap<String, (u64, String)>,
 }
@@ -42,17 +47,41 @@ pub struct PartitionResult {
 
 impl PerFileCache {
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
+        let cache: Self = std::fs::read_to_string(path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+
+        if cache.linthis_version != env!("CARGO_PKG_VERSION") {
+            return Self::new();
+        }
+        cache
+    }
+
+    /// An empty cache stamped with the running version.
+    pub fn new() -> Self {
+        Self {
+            linthis_version: env!("CARGO_PKG_VERSION").to_string(),
+            entries: HashMap::new(),
+        }
     }
 
     pub fn save(&self, path: &Path) {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Ok(json) = serde_json::to_string(self) {
+        // Stamp on the way out, so a cache built from a default value is still
+        // labelled with the version that wrote it.
+        #[derive(Serialize)]
+        struct Stamped<'a> {
+            linthis_version: &'a str,
+            entries: &'a HashMap<String, (u64, String)>,
+        }
+        let stamped = Stamped {
+            linthis_version: env!("CARGO_PKG_VERSION"),
+            entries: &self.entries,
+        };
+        if let Ok(json) = serde_json::to_string(&stamped) {
             let _ = std::fs::write(path, json);
         }
     }
@@ -185,5 +214,30 @@ impl PerFileCache {
                 check_name, partition.cache_hits, partition.cache_misses
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_from_another_linthis_version_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checks.json");
+
+        let mut cache = PerFileCache::new();
+        cache.entries.insert("a.rs".into(), (42, "[]".into()));
+        cache.save(&path);
+        // Same version → the entry survives a round trip.
+        assert_eq!(PerFileCache::load(&path).entries.len(), 1);
+
+        // A cache written by an older binary must not be served: its results
+        // can be wrong in ways the content hash cannot detect.
+        let stale = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace(env!("CARGO_PKG_VERSION"), "0.0.1-old");
+        std::fs::write(&path, stale).unwrap();
+        assert!(PerFileCache::load(&path).entries.is_empty());
     }
 }

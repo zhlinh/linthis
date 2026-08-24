@@ -34,6 +34,14 @@ const CACHE_FILE: &str = "lint-cache.json";
 pub struct LintCache {
     /// Cache format version
     pub version: u32,
+    /// linthis version that produced these results.
+    ///
+    /// The content hash only proves the *input* is unchanged. A new binary can
+    /// legitimately report something different for the same bytes — a fixed
+    /// analyzer, a new rule — so results from another version are dropped
+    /// rather than served.
+    #[serde(default)]
+    pub linthis_version: String,
     /// Checker name -> (relative file path -> cache entry)
     pub entries: HashMap<String, HashMap<PathBuf, CacheEntry>>,
     /// Runtime statistics (not persisted)
@@ -46,6 +54,7 @@ impl LintCache {
     pub fn new() -> Self {
         Self {
             version: CACHE_VERSION,
+            linthis_version: env!("CARGO_PKG_VERSION").to_string(),
             entries: HashMap::new(),
             stats: CacheStats::new(),
         }
@@ -72,6 +81,14 @@ impl LintCache {
         // Check version compatibility
         if cache.version != CACHE_VERSION {
             log::info!("Cache version mismatch, creating new cache");
+            return Ok(Self::new());
+        }
+        if cache.linthis_version != env!("CARGO_PKG_VERSION") {
+            log::info!(
+                "Cache written by linthis {}, running {} — creating new cache",
+                cache.linthis_version,
+                env!("CARGO_PKG_VERSION")
+            );
             return Ok(Self::new());
         }
 
