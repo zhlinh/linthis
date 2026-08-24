@@ -66,9 +66,7 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
     use super::InteractiveError;
 
     let file_path = &issue.file_path;
-    let line_num = issue.line;
 
-    // Read file content
     let content = match fs::read_to_string(file_path) {
         Ok(c) => c,
         Err(e) => {
@@ -82,139 +80,31 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
 
     let lines: Vec<&str> = content.lines().collect();
 
-    // Validate line number
-    if line_num == 0 || line_num > lines.len() {
+    if issue.line == 0 || issue.line > lines.len() {
         return NolintResult::Error(InteractiveError::InvalidLineNumber {
-            line: line_num,
+            line: issue.line,
             total: lines.len(),
         });
     }
 
-    let line_idx = line_num - 1;
-    let current_line = lines[line_idx];
+    // The recorded line may have shifted since the check ran.
+    let line_idx = resolve_line_index(&lines, issue.line - 1, issue.code_line.as_deref());
 
-    // Debug: Print line information
-    eprintln!(
-        "[DEBUG] issue.line = {}, line_idx = {}, current_line = {:?}",
-        line_num, line_idx, current_line
-    );
-    eprintln!("[DEBUG] issue.code_line = {:?}", issue.code_line);
-
-    // Verify the line content matches what was recorded during check
-    // This handles cases where line numbers shift due to previous modifications
-    let actual_line_idx = if let Some(ref expected_code) = issue.code_line {
-        let expected_trimmed = expected_code.trim();
-        let current_trimmed = current_line.trim();
-
-        // Check if current line matches expected content
-        if current_trimmed == expected_trimmed {
-            eprintln!(
-                "[DEBUG] Line content matches expected, using line {}",
-                line_num
-            );
-            line_idx
-        } else {
-            // Line content doesn't match - file was modified or line numbers shifted
-            eprintln!("[DEBUG] Line content mismatch!");
-            eprintln!("[DEBUG]   Expected: {:?}", expected_trimmed);
-            eprintln!("[DEBUG]   Current:  {:?}", current_trimmed);
-            eprintln!("[DEBUG] Searching for matching content...");
-
-            // Search within a reasonable range (±10 lines)
-            let search_start = line_idx.saturating_sub(10);
-            let search_end = (line_idx + 11).min(lines.len());
-
-            let mut found_idx = None;
-            let mut best_match_score: i32 = 0;
-
-            for (i, line) in lines
-                .iter()
-                .enumerate()
-                .skip(search_start)
-                .take(search_end - search_start)
-            {
-                let line_trimmed = line.trim();
-
-                // Calculate base similarity score
-                let base_score: i32 = if line_trimmed == expected_trimmed {
-                    // Exact match is best
-                    1000
-                } else if line_trimmed.contains(expected_trimmed)
-                    || expected_trimmed.contains(line_trimmed)
-                {
-                    // Substring match
-                    500
-                } else {
-                    // Check common tokens
-                    let line_tokens: Vec<&str> = line_trimmed.split_whitespace().collect();
-                    let expected_tokens: Vec<&str> = expected_trimmed.split_whitespace().collect();
-                    let common_tokens = line_tokens
-                        .iter()
-                        .filter(|t| expected_tokens.contains(t))
-                        .count() as i32;
-                    common_tokens * 50
-                };
-
-                // Apply distance penalty (prefer lines closer to original position)
-                let distance = i.abs_diff(line_idx) as i32;
-                let score = base_score - (distance * 5);
-
-                // Only consider matches with good score (>= 400 for high confidence)
-                if score > best_match_score && score >= 400 {
-                    best_match_score = score;
-                    found_idx = Some(i);
-                    eprintln!("[DEBUG] Found match at line {}: base_score={}, distance={}, final_score={}, content={:?}",
-                             i + 1, base_score, distance, score, line);
-                }
-            }
-
-            if let Some(idx) = found_idx {
-                eprintln!(
-                    "[DEBUG] Using matched line {} instead of {}",
-                    idx + 1,
-                    line_num
-                );
-                idx
-            } else {
-                eprintln!(
-                    "[DEBUG] No good match found, using original line {}",
-                    line_num
-                );
-                line_idx
-            }
-        }
-    } else {
-        // No code_line recorded, use original line number
-        eprintln!(
-            "[DEBUG] No code_line recorded, using original line {}",
-            line_num
-        );
-        line_idx
-    };
-
-    let line_idx = actual_line_idx;
-    let current_line = lines[line_idx];
-
-    // Determine language and generate appropriate comment
     let lang = issue
         .language
         .unwrap_or_else(|| Language::from_path(file_path).unwrap_or(Language::Cpp));
-
     let source = issue.source.as_deref().unwrap_or("");
     let code = issue.code.as_deref().unwrap_or("");
 
-    // Check if already has a nolint comment
-    if has_nolint_comment(current_line, lang, source) {
+    if has_nolint_comment(lines[line_idx], lang, source) {
         return NolintResult::AlreadyIgnored;
     }
 
-    // Generate the new content based on language and insertion strategy
     let (new_content, diffs) = match generate_nolint_content(&lines, line_idx, lang, source, code) {
         Ok(c) => c,
         Err(e) => return NolintResult::Error(e),
     };
 
-    // Write back to file
     match fs::write(file_path, new_content) {
         Ok(_) => NolintResult::Success(diffs),
         Err(e) => NolintResult::Error(super::InteractiveError::FileOperation(format!(
@@ -225,43 +115,89 @@ pub fn add_nolint_comment(issue: &LintIssue) -> NolintResult {
     }
 }
 
+/// Find the line the issue actually refers to now.
+///
+/// Line numbers come from an earlier check run, so an edit since then can have
+/// moved the code. When the recorded text no longer matches, look for it
+/// within ±10 lines and take the best-scoring candidate; if nothing scores
+/// well enough, keep the original number rather than guess.
+fn resolve_line_index(lines: &[&str], line_idx: usize, expected: Option<&str>) -> usize {
+    let Some(expected) = expected.map(str::trim) else {
+        return line_idx;
+    };
+    if lines[line_idx].trim() == expected {
+        return line_idx;
+    }
+
+    const SEARCH_RADIUS: usize = 10;
+    /// Below this, a candidate is too weak to be worth moving to.
+    const MIN_SCORE: i32 = 400;
+
+    let start = line_idx.saturating_sub(SEARCH_RADIUS);
+    let end = (line_idx + SEARCH_RADIUS + 1).min(lines.len());
+
+    lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(offset, line)| (start + offset, line))
+        .filter_map(|(i, line)| {
+            let score = match_score(line.trim(), expected) - (i.abs_diff(line_idx) as i32 * 5);
+            (score >= MIN_SCORE).then_some((score, i))
+        })
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, i)| i)
+        .unwrap_or(line_idx)
+}
+
+/// How closely a candidate line resembles the recorded one: exact, substring,
+/// or shared-token overlap.
+fn match_score(candidate: &str, expected: &str) -> i32 {
+    if candidate == expected {
+        return 1000;
+    }
+    if candidate.contains(expected) || expected.contains(candidate) {
+        return 500;
+    }
+    let expected_tokens: Vec<&str> = expected.split_whitespace().collect();
+    let common = candidate
+        .split_whitespace()
+        .filter(|t| expected_tokens.contains(t))
+        .count() as i32;
+    common * 50
+}
+
 /// Check if a line already has a NOLINT-style comment
 fn has_nolint_comment(line: &str, lang: Language, _source: &str) -> bool {
-    let line_upper = line.to_uppercase();
+    let haystack = line.to_uppercase();
+    existing_markers(lang)
+        .iter()
+        .any(|m| haystack.contains(&m.to_uppercase()))
+}
 
+/// Markers that mean "this line is already suppressed" for a language.
+///
+/// Matching is case-insensitive, so `# NOQA` counts like `# noqa` — a linter
+/// accepts both, and a false negative here means adding a second, redundant
+/// comment.
+fn existing_markers(lang: Language) -> &'static [&'static str] {
     match lang {
-        Language::Cpp | Language::ObjectiveC => {
-            line_upper.contains("NOLINT") || line_upper.contains("NOLINTNEXTLINE")
-        }
-        Language::Python => line.contains("# noqa") || line.contains("# type: ignore"),
-        Language::Rust => {
-            // Rust uses attributes, check if line above has #[allow(...)]
-            // This is a simple check; the insertion logic handles the full case
-            false
-        }
-        Language::TypeScript | Language::JavaScript => {
-            line.contains("eslint-disable") || line.contains("@ts-ignore")
-        }
-        Language::Go => line.contains("//nolint") || line.contains("// nolint"),
-        Language::Java => {
-            line.contains("@SuppressWarnings")
-                || line_upper.contains("NOPMD")
-                || line_upper.contains("CHECKSTYLE")
-        }
-        // New languages - use generic ignore comment pattern
-        Language::Dart => line.contains("// ignore:") || line.contains("//ignore:"),
-        Language::Swift => line.contains("swiftlint:disable") || line.contains("// swiftlint:"),
-        Language::Kotlin => line.contains("@Suppress") || line_upper.contains("KTLINT-DISABLE"),
-        Language::Lua => line.contains("-- luacheck:") || line.contains("--luacheck:"),
-        Language::Shell => {
-            line.contains("# shellcheck disable") || line.contains("#shellcheck disable")
-        }
-        Language::Ruby => line.contains("# rubocop:disable") || line.contains("#rubocop:disable"),
-        Language::Php => line.contains("// phpcs:ignore") || line.contains("//phpcs:ignore"),
-        Language::Scala => line.contains("// scalafix:ok") || line.contains("//scalafix:ok"),
-        Language::CSharp => {
-            line.contains("#pragma warning disable") || line.contains("// ReSharper disable")
-        }
+        Language::Cpp | Language::ObjectiveC => &["NOLINT"],
+        Language::Python => &["# noqa", "# type: ignore"],
+        // Rust suppression is an attribute on the line above, which this
+        // single-line check cannot see; the insertion logic handles it.
+        Language::Rust => &[],
+        Language::TypeScript | Language::JavaScript => &["eslint-disable", "@ts-ignore"],
+        Language::Go => &["//nolint", "// nolint"],
+        Language::Java => &["@SuppressWarnings", "NOPMD", "CHECKSTYLE"],
+        Language::Dart => &["// ignore:", "//ignore:"],
+        Language::Swift => &["swiftlint:disable", "// swiftlint:"],
+        Language::Kotlin => &["@Suppress", "KTLINT-DISABLE"],
+        Language::Lua => &["-- luacheck:", "--luacheck:"],
+        Language::Shell => &["# shellcheck disable", "#shellcheck disable"],
+        Language::Ruby => &["# rubocop:disable", "#rubocop:disable"],
+        Language::Php => &["// phpcs:ignore", "//phpcs:ignore"],
+        Language::Scala => &["// scalafix:ok", "//scalafix:ok"],
+        Language::CSharp => &["#pragma warning disable", "// ReSharper disable"],
     }
 }
 
@@ -297,6 +233,68 @@ fn create_diff_with_context(
 }
 
 /// Generate new file content with the NOLINT comment inserted
+/// Where a suppression comment goes relative to the offending line.
+///
+/// The fifteen languages only ever do one of these three things; before this
+/// was an enum each language repeated the whole insert-and-diff loop.
+enum Placement {
+    /// Its own line above the target, at the target's indentation.
+    Above(String),
+    /// Appended to the target line. A blank line is left alone.
+    Append(String),
+    /// Appended, unless that would push the line past `MAX_LINE_LENGTH` — then
+    /// `fallback` goes above instead, which is a different comment form
+    /// (`NOLINTNEXTLINE`, `# fmt: skip`).
+    AppendOrAbove { inline: String, fallback: String },
+}
+
+/// Longest line we are willing to create by appending a comment.
+const MAX_LINE_LENGTH: usize = 100;
+
+impl Placement {
+    /// The comment as it would appear inline, which is also what we show the
+    /// user as "the way to ignore this".
+    fn comment(&self) -> &str {
+        match self {
+            Placement::Above(text) | Placement::Append(text) => text,
+            Placement::AppendOrAbove { inline, .. } => inline,
+        }
+    }
+}
+
+/// The suppression this language and linter understand, and where it goes.
+fn placement_for(lang: Language, source: &str, code: &str) -> Placement {
+    match lang {
+        Language::Cpp | Language::ObjectiveC => Placement::AppendOrAbove {
+            inline: generate_cpp_nolint(source, code),
+            fallback: generate_cpp_nolintnextline(source, code),
+        },
+        Language::Python => {
+            let noqa = generate_python_noqa(source, code);
+            Placement::AppendOrAbove {
+                fallback: format!("# fmt: skip - {}", noqa),
+                inline: noqa,
+            }
+        }
+        Language::Rust => Placement::Above(generate_rust_allow(code)),
+        Language::TypeScript | Language::JavaScript => {
+            Placement::Above(generate_eslint_disable(code))
+        }
+        Language::Go => Placement::Append(generate_go_nolint(code)),
+        Language::Java => Placement::Above(generate_java_suppress(source, code)),
+        Language::Dart => Placement::Above(generate_dart_ignore(code)),
+        Language::Swift => Placement::Above(generate_swift_disable(code)),
+        Language::Kotlin => Placement::Above(generate_kotlin_suppress(code)),
+        Language::Lua => Placement::Append(generate_lua_ignore(code)),
+        Language::Shell => Placement::Above(format!("# shellcheck disable={}", code)),
+        Language::Ruby => Placement::Append(generate_ruby_disable(code)),
+        Language::Php => Placement::Above(format!("// phpcs:ignore {}", code)),
+        Language::Scala => Placement::Append(generate_scala_ok(code)),
+        Language::CSharp => Placement::Above(format!("#pragma warning disable {}", code)),
+    }
+}
+
+/// Generate new file content with the NOLINT comment inserted
 fn generate_nolint_content(
     lines: &[&str],
     line_idx: usize,
@@ -307,393 +305,22 @@ fn generate_nolint_content(
     let mut result_lines: Vec<String> = Vec::with_capacity(lines.len() + 1);
     let mut diffs: Vec<LineDiff> = Vec::new();
 
-    // Get indentation of the target line
-    let target_line = lines[line_idx];
-    let indent = get_indentation(target_line);
+    let indent = get_indentation(lines[line_idx]);
+    let placement = placement_for(lang, source, code);
 
-    match lang {
-        Language::Cpp | Language::ObjectiveC => {
-            // C/C++/ObjC: Smart NOLINT insertion
-            // Use NOLINTNEXTLINE on previous line if adding NOLINT would exceed line length limit
-            const MAX_LINE_LENGTH: usize = 100;
-
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let nolint = generate_cpp_nolint(source, code);
-
-                    if line.trim().is_empty() {
-                        result_lines.push(line.to_string());
-                    } else {
-                        // Check if adding NOLINT at end would exceed line length
-                        let new_line_with_nolint = format!("{}  {}", line, nolint);
-
-                        if new_line_with_nolint.len() > MAX_LINE_LENGTH {
-                            // Use NOLINTNEXTLINE on previous line instead
-                            let nolintnextline = generate_cpp_nolintnextline(source, code);
-                            let prev_line = format!("{}{}", indent, nolintnextline);
-
-                            // Insert NOLINTNEXTLINE before the target line
-                            if !result_lines.is_empty() {
-                                // For inserted line, context_after should be the target line itself
-                                let context_before = if i > 0 {
-                                    lines.get(i - 1).map(|s| s.to_string())
-                                } else {
-                                    None
-                                };
-                                let context_after = Some(line.to_string()); // Target line
-
-                                diffs.push(LineDiff {
-                                    line_number: i + 1,
-                                    old_content: String::new(),
-                                    new_content: prev_line.clone(),
-                                    context_before,
-                                    context_after,
-                                });
-                            }
-                            result_lines.push(prev_line);
-                            result_lines.push(line.to_string());
-                        } else {
-                            // Append NOLINT to end of line (line is short enough)
-                            diffs.push(create_diff_with_context(
-                                lines,
-                                i,
-                                i + 1,
-                                line.to_string(),
-                                new_line_with_nolint.clone(),
-                            ));
-                            result_lines.push(new_line_with_nolint);
-                        }
-                    }
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
+    for (i, line) in lines.iter().enumerate() {
+        if i != line_idx {
+            result_lines.push(line.to_string());
+            continue;
         }
-        Language::Python => {
-            // Python: Smart noqa insertion
-            // Use comment on previous line if adding noqa would exceed line length limit
-            const MAX_LINE_LENGTH: usize = 100;
-
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let noqa = generate_python_noqa(source, code);
-
-                    if line.trim().is_empty() {
-                        result_lines.push(line.to_string());
-                    } else {
-                        // Check if adding noqa at end would exceed line length
-                        let new_line_with_noqa = format!("{}  {}", line, noqa);
-
-                        if new_line_with_noqa.len() > MAX_LINE_LENGTH {
-                            // Add comment on previous line instead
-                            let prev_line = format!("{}# fmt: skip - {}", indent, noqa);
-
-                            // Insert comment before the target line
-                            if !result_lines.is_empty() {
-                                // For inserted line, context_after should be the target line itself
-                                let context_before = if i > 0 {
-                                    lines.get(i - 1).map(|s| s.to_string())
-                                } else {
-                                    None
-                                };
-                                let context_after = Some(line.to_string()); // Target line
-
-                                diffs.push(LineDiff {
-                                    line_number: i + 1,
-                                    old_content: String::new(),
-                                    new_content: prev_line.clone(),
-                                    context_before,
-                                    context_after,
-                                });
-                            }
-                            result_lines.push(prev_line);
-                            result_lines.push(line.to_string());
-                        } else {
-                            // Append noqa to end of line (line is short enough)
-                            diffs.push(create_diff_with_context(
-                                lines,
-                                i,
-                                i + 1,
-                                line.to_string(),
-                                new_line_with_noqa.clone(),
-                            ));
-                            result_lines.push(new_line_with_noqa);
-                        }
-                    }
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Rust => {
-            // Rust: Add #[allow(...)] attribute on line above
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let allow = generate_rust_allow(code);
-                    let new_line = format!("{}{}", indent, allow);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::TypeScript | Language::JavaScript => {
-            // TS/JS: Add eslint-disable-next-line comment above
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let disable = generate_eslint_disable(code);
-                    let new_line = format!("{}{}", indent, disable);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Go => {
-            // Go: Add //nolint comment at end of line
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let nolint = generate_go_nolint(code);
-                    if line.trim().is_empty() {
-                        result_lines.push(line.to_string());
-                    } else {
-                        let new_line = format!("{} {}", line, nolint);
-                        diffs.push(create_diff_with_context(
-                            lines,
-                            i,
-                            i + 1,
-                            line.to_string(),
-                            new_line.clone(),
-                        ));
-                        result_lines.push(new_line);
-                    }
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Java => {
-            // Java: Add @SuppressWarnings or // NOPMD above
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let suppress = generate_java_suppress(source, code);
-                    let new_line = format!("{}{}", indent, suppress);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Dart => {
-            // Dart: Add // ignore: comment above
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let ignore = generate_dart_ignore(code);
-                    let new_line = format!("{}{}", indent, ignore);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Swift => {
-            // Swift: Add // swiftlint:disable:next comment above
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let disable = generate_swift_disable(code);
-                    let new_line = format!("{}{}", indent, disable);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Kotlin => {
-            // Kotlin: Add @Suppress annotation above
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let suppress = generate_kotlin_suppress(code);
-                    let new_line = format!("{}{}", indent, suppress);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Lua => {
-            // Lua: Add -- luacheck: ignore comment at end of line
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let ignore = generate_lua_ignore(code);
-                    if line.trim().is_empty() {
-                        result_lines.push(line.to_string());
-                    } else {
-                        let new_line = format!("{} {}", line, ignore);
-                        diffs.push(create_diff_with_context(
-                            lines,
-                            i,
-                            i + 1,
-                            line.to_string(),
-                            new_line.clone(),
-                        ));
-                        result_lines.push(new_line);
-                    }
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Shell => {
-            // Shell: Add # shellcheck disable=SCXXXX comment on previous line
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let new_line = format!("{}# shellcheck disable={}", indent, code);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Ruby => {
-            // Ruby: Add # rubocop:disable CopName comment at end of line
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let ignore = generate_ruby_disable(code);
-                    if line.trim().is_empty() {
-                        result_lines.push(line.to_string());
-                    } else {
-                        let new_line = format!("{} {}", line, ignore);
-                        diffs.push(create_diff_with_context(
-                            lines,
-                            i,
-                            i + 1,
-                            line.to_string(),
-                            new_line.clone(),
-                        ));
-                        result_lines.push(new_line);
-                    }
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Php => {
-            // PHP: Add // phpcs:ignore comment on previous line
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let new_line = format!("{}// phpcs:ignore {}", indent, code);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::Scala => {
-            // Scala: Add // scalafix:ok RuleName comment at end of line
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let ignore = generate_scala_ok(code);
-                    if line.trim().is_empty() {
-                        result_lines.push(line.to_string());
-                    } else {
-                        let new_line = format!("{} {}", line, ignore);
-                        diffs.push(create_diff_with_context(
-                            lines,
-                            i,
-                            i + 1,
-                            line.to_string(),
-                            new_line.clone(),
-                        ));
-                        result_lines.push(new_line);
-                    }
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
-        Language::CSharp => {
-            // C#: Add #pragma warning disable XXXX on previous line
-            for (i, line) in lines.iter().enumerate() {
-                if i == line_idx {
-                    let new_line = format!("{}#pragma warning disable {}", indent, code);
-                    diffs.push(create_diff_with_context(
-                        lines,
-                        i,
-                        i + 1,
-                        String::new(),
-                        new_line.clone(),
-                    ));
-                    result_lines.push(new_line);
-                    result_lines.push(line.to_string());
-                } else {
-                    result_lines.push(line.to_string());
-                }
-            }
-        }
+        insert_at_target(
+            &placement,
+            lines,
+            i,
+            indent,
+            &mut result_lines,
+            &mut diffs,
+        );
     }
 
     // Join with newlines, preserving original line ending style
@@ -704,6 +331,82 @@ fn generate_nolint_content(
     };
 
     Ok((result_lines.join(newline) + newline, diffs))
+}
+
+/// Emit the target line (and the comment) into `result_lines`, recording the
+/// diff for the interactive preview.
+fn insert_at_target(
+    placement: &Placement,
+    lines: &[&str],
+    i: usize,
+    indent: &str,
+    result_lines: &mut Vec<String>,
+    diffs: &mut Vec<LineDiff>,
+) {
+    let line = lines[i];
+
+    match placement {
+        Placement::Above(text) => {
+            let new_line = format!("{}{}", indent, text);
+            diffs.push(create_diff_with_context(
+                lines,
+                i,
+                i + 1,
+                String::new(),
+                new_line.clone(),
+            ));
+            result_lines.push(new_line);
+            result_lines.push(line.to_string());
+        }
+        Placement::Append(text) => {
+            if line.trim().is_empty() {
+                result_lines.push(line.to_string());
+                return;
+            }
+            let new_line = format!("{} {}", line, text);
+            diffs.push(create_diff_with_context(
+                lines,
+                i,
+                i + 1,
+                line.to_string(),
+                new_line.clone(),
+            ));
+            result_lines.push(new_line);
+        }
+        Placement::AppendOrAbove { inline, fallback } => {
+            if line.trim().is_empty() {
+                result_lines.push(line.to_string());
+                return;
+            }
+            let appended = format!("{}  {}", line, inline);
+            if appended.len() <= MAX_LINE_LENGTH {
+                diffs.push(create_diff_with_context(
+                    lines,
+                    i,
+                    i + 1,
+                    line.to_string(),
+                    appended.clone(),
+                ));
+                result_lines.push(appended);
+                return;
+            }
+
+            let above = format!("{}{}", indent, fallback);
+            // The inserted line has no "before" when it lands at the top of
+            // the file, and its "after" is the target line itself.
+            if !result_lines.is_empty() {
+                diffs.push(LineDiff {
+                    line_number: i + 1,
+                    old_content: String::new(),
+                    new_content: above.clone(),
+                    context_before: i.checked_sub(1).and_then(|p| lines.get(p)).map(|s| s.to_string()),
+                    context_after: Some(line.to_string()),
+                });
+            }
+            result_lines.push(above);
+            result_lines.push(line.to_string());
+        }
+    }
 }
 
 /// Get the leading whitespace (indentation) of a line
@@ -892,64 +595,99 @@ fn generate_scala_ok(code: &str) -> String {
 }
 
 /// Get a human-readable description of what NOLINT comment will be added
-pub fn describe_nolint_action(issue: &LintIssue) -> String {
+/// The comment that suppresses `issue` where it stands, e.g. `# noqa: E501`.
+///
+/// This is the raw comment only — no prose. Callers that show it as an action
+/// wrap it themselves (see [`describe_nolint_action`]); the ignore hints in
+/// lint output print it verbatim for the user to paste.
+pub fn suppression_comment(issue: &LintIssue) -> String {
     let lang = issue
         .language
         .unwrap_or_else(|| Language::from_path(&issue.file_path).unwrap_or(Language::Cpp));
-    let source = issue.source.as_deref().unwrap_or("");
-    let code = issue.code.as_deref().unwrap_or("");
 
-    match lang {
-        Language::Cpp | Language::ObjectiveC => {
-            format!("Add: {}", generate_cpp_nolint(source, code))
-        }
-        Language::Python => {
-            format!("Add: {}", generate_python_noqa(source, code))
-        }
-        Language::Rust => {
-            format!("Add: {}", generate_rust_allow(code))
-        }
-        Language::TypeScript | Language::JavaScript => {
-            format!("Add: {}", generate_eslint_disable(code))
-        }
-        Language::Go => {
-            format!("Add: {}", generate_go_nolint(code))
-        }
-        Language::Java => {
-            format!("Add: {}", generate_java_suppress(source, code))
-        }
-        Language::Dart => {
-            format!("Add: {}", generate_dart_ignore(code))
-        }
-        Language::Swift => {
-            format!("Add: {}", generate_swift_disable(code))
-        }
-        Language::Kotlin => {
-            format!("Add: {}", generate_kotlin_suppress(code))
-        }
-        Language::Lua => {
-            format!("Add: {}", generate_lua_ignore(code))
-        }
-        Language::Shell => {
-            format!("Add: # shellcheck disable={}", code)
-        }
-        Language::Ruby => {
-            format!("Add: {}", generate_ruby_disable(code))
-        }
-        Language::Php => {
-            format!("Add: // phpcs:ignore {}", code)
-        }
-        Language::Scala => {
-            format!("Add: {}", generate_scala_ok(code))
-        }
-        Language::CSharp => {
-            format!("Add: #pragma warning disable {}", code)
-        }
-    }
+    placement_for(
+        lang,
+        issue.source.as_deref().unwrap_or(""),
+        issue.code.as_deref().unwrap_or(""),
+    )
+    .comment()
+    .to_string()
+}
+
+/// Describe the nolint action for the interactive prompt.
+pub fn describe_nolint_action(issue: &LintIssue) -> String {
+    format!("Add: {}", suppression_comment(issue))
 }
 
 #[cfg(test)]
 mod tests {
+
+    // The three placements below used to be fifteen copies of the same loop.
+    // These pin the behaviour each copy had, so the shared loop cannot drift.
+
+    fn generate(lines: &[&str], idx: usize, lang: Language, source: &str, code: &str) -> String {
+        generate_nolint_content(lines, idx, lang, source, code)
+            .unwrap()
+            .0
+    }
+
+    #[test]
+    fn above_placement_inserts_an_indented_line() {
+        let out = generate(&["fn a() {", "    let x = 1;", "}"], 1, Language::Rust, "clippy", "foo");
+        assert_eq!(
+            out,
+            "fn a() {\n    #[allow(clippy::foo)]\n    let x = 1;\n}\n"
+        );
+    }
+
+    #[test]
+    fn append_placement_appends_and_skips_blank_lines() {
+        let out = generate(&["x := 1"], 0, Language::Go, "golangci-lint", "errcheck");
+        assert_eq!(out, "x := 1 //nolint:errcheck\n");
+
+        // A blank target line is left exactly as it was.
+        let blank = generate(&["", "y := 2"], 0, Language::Go, "golangci-lint", "errcheck");
+        assert_eq!(blank, "\ny := 2\n");
+    }
+
+    #[test]
+    fn append_or_above_falls_back_when_the_line_gets_too_long() {
+        let short = generate(&["x = 1"], 0, Language::Python, "ruff", "E501");
+        assert_eq!(short, "x = 1  # noqa: E501\n");
+
+        let long_line = format!("    x = \"{}\"", "a".repeat(90));
+        let out = generate(&[long_line.as_str()], 0, Language::Python, "ruff", "E501");
+        // Too long to append, so the comment goes above at the same indent.
+        assert_eq!(out, format!("    # fmt: skip - # noqa: E501\n{long_line}\n"));
+    }
+
+    #[test]
+    fn crlf_line_endings_survive() {
+        let out = generate(&["x := 1\r"], 0, Language::Go, "golangci-lint", "errcheck");
+        assert!(out.ends_with("\r\n"), "got {out:?}");
+    }
+
+    #[test]
+    fn resolve_line_index_follows_shifted_code() {
+        let lines = ["fn a() {", "    let x = 1;", "    let y = 2;", "}"];
+
+        // Recorded text still where it was recorded.
+        assert_eq!(resolve_line_index(&lines, 1, Some("let x = 1;")), 1);
+        // Recorded text moved down one line after an edit above it.
+        assert_eq!(resolve_line_index(&lines, 1, Some("let y = 2;")), 2);
+        // Nothing resembles it — stay put rather than guess.
+        assert_eq!(resolve_line_index(&lines, 1, Some("totally_unrelated()")), 1);
+        // No recorded text at all.
+        assert_eq!(resolve_line_index(&lines, 1, None), 1);
+    }
+
+    #[test]
+    fn existing_suppressions_are_detected_case_insensitively() {
+        assert!(has_nolint_comment("x = 1  # noqa: E501", Language::Python, ""));
+        assert!(has_nolint_comment("x = 1  # NOQA", Language::Python, ""));
+        assert!(has_nolint_comment("int x;  // NOLINT", Language::Cpp, ""));
+        assert!(!has_nolint_comment("x = 1", Language::Python, ""));
+    }
     use super::*;
     use crate::utils::types::Severity;
     use std::path::PathBuf;
