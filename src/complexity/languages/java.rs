@@ -179,12 +179,12 @@ impl LanguageComplexityAnalyzer for JavaComplexityAnalyzer {
             .iter()
             .filter(|line| {
                 let trimmed = line.trim();
-                !trimmed.is_empty() && !is_comment_line(trimmed)
+                !trimmed.is_empty() && !super::is_comment_line(trimmed)
             })
             .count() as u32;
         file_metrics.metrics.comment_lines = lines
             .iter()
-            .filter(|line| is_comment_line(line.trim()))
+            .filter(|line| super::is_comment_line(line.trim()))
             .count() as u32;
         file_metrics.imports = lines
             .iter()
@@ -278,12 +278,6 @@ impl LanguageComplexityAnalyzer for JavaComplexityAnalyzer {
 
         Ok(file_metrics)
     }
-}
-
-/// Whether a trimmed line is comment text — `//`, the start of a block
-/// comment, or its continuation.
-fn is_comment_line(trimmed: &str) -> bool {
-    trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*')
 }
 
 /// Name of the method declared on this line, if any.

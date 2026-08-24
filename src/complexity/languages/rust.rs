@@ -184,27 +184,7 @@ impl LanguageComplexityAnalyzer for RustComplexityAnalyzer {
         let mut file_metrics = FileMetrics::new(path.to_path_buf(), self.language());
         let lines: Vec<&str> = content.lines().collect();
 
-        // Count total lines
-        file_metrics.metrics.loc = lines.len() as u32;
-        file_metrics.metrics.sloc = lines
-            .iter()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty() && !trimmed.starts_with("//")
-            })
-            .count() as u32;
-
-        // Count comment lines
-        file_metrics.metrics.comment_lines = lines
-            .iter()
-            .filter(|line| line.trim().starts_with("//") || line.trim().starts_with("///"))
-            .count() as u32;
-
-        // Count imports
-        file_metrics.imports = lines
-            .iter()
-            .filter(|line| line.trim().starts_with("use "))
-            .count() as u32;
+        count_line_metrics(&lines, &mut file_metrics);
 
         // Find and analyze functions
         let mut in_function = false;
@@ -229,7 +209,7 @@ impl LanguageComplexityAnalyzer for RustComplexityAnalyzer {
             }
 
             // Detect function definitions
-            if !in_function {
+            if !in_function && !super::is_comment_line(trimmed) {
                 if let Some(name) = detect_rust_function(trimmed) {
                     in_function = true;
                     function_start = i + 1;
@@ -290,6 +270,26 @@ impl LanguageComplexityAnalyzer for RustComplexityAnalyzer {
 
         Ok(file_metrics)
     }
+}
+
+/// Fill in the whole-file counts: lines, code lines, comments, imports.
+fn count_line_metrics(lines: &[&str], file_metrics: &mut FileMetrics) {
+    file_metrics.metrics.loc = lines.len() as u32;
+    file_metrics.metrics.sloc = lines
+        .iter()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with("//")
+        })
+        .count() as u32;
+    file_metrics.metrics.comment_lines = lines
+        .iter()
+        .filter(|line| line.trim().starts_with("//"))
+        .count() as u32;
+    file_metrics.imports = lines
+        .iter()
+        .filter(|line| line.trim().starts_with("use "))
+        .count() as u32;
 }
 
 fn detect_rust_function(line: &str) -> Option<String> {

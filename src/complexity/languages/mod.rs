@@ -22,6 +22,21 @@ pub use python::PythonComplexityAnalyzer;
 pub use rust::RustComplexityAnalyzer;
 pub use typescript::TypeScriptComplexityAnalyzer;
 
+/// Whether a trimmed line is prose or a directive rather than the start of a
+/// function.
+///
+/// A detector that looks for a keyword anywhere on the line will happily read
+/// `// Helper function to format a document` as declaring a function called
+/// `to`, and then measure everything up to the next balanced brace as its
+/// body. `#` covers Python comments, C preprocessor lines and Rust attributes
+/// — none of which declare a function either.
+pub(crate) fn is_comment_line(trimmed: &str) -> bool {
+    trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed.starts_with('#')
+}
+
 /// Count the `{` and `}` on a line that actually open and close code blocks.
 ///
 /// Braces inside string literals, char literals and `//` comments do not.
@@ -101,6 +116,16 @@ fn is_char_literal(chars: &[char], i: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn comment_lines_never_declare_functions() {
+        // The line that made the TypeScript analyzer report a function `to`.
+        assert!(is_comment_line("// Helper function to format a document"));
+        assert!(is_comment_line("* @param filePath"));
+        assert!(is_comment_line("# def not_a_function():"));
+        assert!(is_comment_line("#[allow(dead_code)]"));
+        assert!(!is_comment_line("function format(x) {"));
+    }
 
     #[test]
     fn braces_in_strings_do_not_open_blocks() {

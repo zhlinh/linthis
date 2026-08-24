@@ -207,7 +207,7 @@ impl LanguageComplexityAnalyzer for GoComplexityAnalyzer {
             }
 
             // Detect function definitions
-            if !in_function {
+            if !in_function && !super::is_comment_line(trimmed) {
                 if let Some((name, receiver)) = detect_go_function(trimmed) {
                     in_function = true;
                     function_start = i + 1;

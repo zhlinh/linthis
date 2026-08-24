@@ -218,7 +218,7 @@ impl LanguageComplexityAnalyzer for TypeScriptComplexityAnalyzer {
             }
 
             // Detect function definitions
-            if !in_function {
+            if !in_function && !super::is_comment_line(trimmed) {
                 if let Some(name) = detect_ts_function(trimmed) {
                     in_function = true;
                     function_start = i + 1;
