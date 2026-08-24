@@ -113,96 +113,130 @@ pub fn collect_diff(base: &str, head: &str) -> Result<DiffResult, String> {
 }
 
 /// Parse unified diff output into structured FileDiff entries.
-pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
-    let mut files = Vec::new();
-    let mut current_file: Option<FileDiff> = None;
-    let mut current_hunk: Option<DiffHunk> = None;
-    let mut in_binary = false;
+/// Accumulates files and hunks while walking a diff line by line.
+///
+/// The flush-and-start dance used to be written out at every branch that
+/// needed it — three copies of "close the hunk, then close the file" — which
+/// is what made the parser hard to follow.
+#[derive(Default)]
+struct DiffAccumulator {
+    files: Vec<FileDiff>,
+    current_file: Option<FileDiff>,
+    current_hunk: Option<DiffHunk>,
+    in_binary: bool,
+}
 
-    for line in raw.lines() {
-        if line.starts_with("diff --git ") {
-            // Save previous hunk and file
-            if let Some(hunk) = current_hunk.take() {
-                if let Some(ref mut file) = current_file {
-                    file.hunks.push(hunk);
-                }
-            }
-            if let Some(file) = current_file.take() {
-                files.push(file);
-            }
-            in_binary = false;
-
-            // Parse file paths from "diff --git a/path b/path"
-            let parts: Vec<&str> = line.splitn(4, ' ').collect();
-            let path = if parts.len() >= 4 {
-                parts[3].strip_prefix("b/").unwrap_or(parts[3]).to_string()
-            } else {
-                "unknown".to_string()
-            };
-
-            current_file = Some(FileDiff {
-                path,
-                old_path: None,
-                status: DiffStatus::Modified,
-                hunks: Vec::new(),
-                additions: 0,
-                deletions: 0,
-                is_binary: false,
-            });
-        } else if line.starts_with("new file mode") {
-            if let Some(ref mut file) = current_file {
-                file.status = DiffStatus::Added;
-            }
-        } else if line.starts_with("deleted file mode") {
-            if let Some(ref mut file) = current_file {
-                file.status = DiffStatus::Deleted;
-            }
-        } else if line.starts_with("rename from ") {
-            if let Some(ref mut file) = current_file {
-                file.status = DiffStatus::Renamed;
-                file.old_path = Some(line.strip_prefix("rename from ").unwrap().to_string());
-            }
-        } else if line.starts_with("Binary files") {
-            in_binary = true;
-            if let Some(ref mut file) = current_file {
-                file.is_binary = true;
-            }
-        } else if line.starts_with("@@ ") && !in_binary {
-            // Save previous hunk
-            if let Some(hunk) = current_hunk.take() {
-                if let Some(ref mut file) = current_file {
-                    file.hunks.push(hunk);
-                }
-            }
-
-            // Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
-            let hunk = parse_hunk_header(line);
-            current_hunk = Some(hunk);
-        } else if let Some(ref mut hunk) = current_hunk {
-            hunk.content.push_str(line);
-            hunk.content.push('\n');
-
-            if let Some(ref mut file) = current_file {
-                if line.starts_with('+') && !line.starts_with("+++") {
-                    file.additions += 1;
-                } else if line.starts_with('-') && !line.starts_with("---") {
-                    file.deletions += 1;
-                }
-            }
-        }
-    }
-
-    // Save last hunk and file
-    if let Some(hunk) = current_hunk {
-        if let Some(ref mut file) = current_file {
+impl DiffAccumulator {
+    /// Close the open hunk, if any, onto the open file.
+    fn flush_hunk(&mut self) {
+        if let (Some(hunk), Some(file)) = (self.current_hunk.take(), self.current_file.as_mut()) {
             file.hunks.push(hunk);
         }
     }
-    if let Some(file) = current_file {
-        files.push(file);
+
+    /// Close the open file, if any.
+    fn flush_file(&mut self) {
+        if let Some(file) = self.current_file.take() {
+            self.files.push(file);
+        }
     }
 
-    files
+    /// `diff --git a/<path> b/<path>` — start a new file.
+    fn start_file(&mut self, line: &str) {
+        self.flush_hunk();
+        self.flush_file();
+        self.in_binary = false;
+
+        let parts: Vec<&str> = line.splitn(4, ' ').collect();
+        let path = parts
+            .get(3)
+            .map(|p| p.strip_prefix("b/").unwrap_or(p).to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        self.current_file = Some(FileDiff {
+            path,
+            old_path: None,
+            status: DiffStatus::Modified,
+            hunks: Vec::new(),
+            additions: 0,
+            deletions: 0,
+            is_binary: false,
+        });
+    }
+
+    fn set_status(&mut self, status: DiffStatus) {
+        if let Some(file) = self.current_file.as_mut() {
+            file.status = status;
+        }
+    }
+
+    fn set_renamed_from(&mut self, old_path: &str) {
+        if let Some(file) = self.current_file.as_mut() {
+            file.status = DiffStatus::Renamed;
+            file.old_path = Some(old_path.to_string());
+        }
+    }
+
+    fn mark_binary(&mut self) {
+        self.in_binary = true;
+        if let Some(file) = self.current_file.as_mut() {
+            file.is_binary = true;
+        }
+    }
+
+    fn start_hunk(&mut self, header: &str) {
+        self.flush_hunk();
+        self.current_hunk = Some(parse_hunk_header(header));
+    }
+
+    /// A body line: keep it, and count it if it is an addition or a deletion.
+    fn push_body(&mut self, line: &str) {
+        let Some(hunk) = self.current_hunk.as_mut() else {
+            return;
+        };
+        hunk.content.push_str(line);
+        hunk.content.push('\n');
+
+        let Some(file) = self.current_file.as_mut() else {
+            return;
+        };
+        // `+++`/`---` are the file headers, not changed lines.
+        if line.starts_with('+') && !line.starts_with("+++") {
+            file.additions += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            file.deletions += 1;
+        }
+    }
+
+    fn finish(mut self) -> Vec<FileDiff> {
+        self.flush_hunk();
+        self.flush_file();
+        self.files
+    }
+}
+
+pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
+    let mut acc = DiffAccumulator::default();
+
+    for line in raw.lines() {
+        if let Some(old_path) = line.strip_prefix("rename from ") {
+            acc.set_renamed_from(old_path);
+        } else if line.starts_with("diff --git ") {
+            acc.start_file(line);
+        } else if line.starts_with("new file mode") {
+            acc.set_status(DiffStatus::Added);
+        } else if line.starts_with("deleted file mode") {
+            acc.set_status(DiffStatus::Deleted);
+        } else if line.starts_with("Binary files") {
+            acc.mark_binary();
+        } else if line.starts_with("@@ ") && !acc.in_binary {
+            acc.start_hunk(line);
+        } else {
+            acc.push_body(line);
+        }
+    }
+
+    acc.finish()
 }
 
 fn parse_hunk_header(line: &str) -> DiffHunk {
