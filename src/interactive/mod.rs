@@ -53,5 +53,5 @@ pub type InteractiveResult<T> = std::result::Result<T, InteractiveError>;
 pub use ai_fix::{run_ai_fix_all, run_ai_fix_single, AiFixConfig, AiFixResult};
 pub use editor::open_in_editor;
 pub use menu::{run_interactive, InteractiveAction};
-pub use nolint::add_nolint_comment;
+pub use nolint::{add_nolint_comment, suppression_comment};
 pub use quickfix::{generate_quickfix, generate_quickfix_from_result, write_quickfix_file};

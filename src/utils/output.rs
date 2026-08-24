@@ -172,7 +172,23 @@ pub fn format_issue_human(issue: &LintIssue) -> String {
         output.push_str(&format!("\n  --> {}", suggestion.cyan()));
     }
 
+    if let Some(line) = ignore_hint_line(issue) {
+        output.push_str(&format!("\n  --> {}", line));
+    }
+
     output
+}
+
+/// One-line "how to silence this", pre-coloured, or `None` when the issue has
+/// no way to be ignored.
+fn ignore_hint_line(issue: &LintIssue) -> Option<String> {
+    let hint = issue.ignore.as_ref()?;
+    let parts: Vec<String> = [hint.cli.as_deref(), hint.comment.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(|p| p.yellow().to_string())
+        .collect();
+    (!parts.is_empty()).then(|| format!("{} {}", "ignore:".dimmed(), parts.join("   |   ")))
 }
 
 /// Format a single lint issue for GitHub Actions output.
@@ -503,6 +519,9 @@ struct IssueView {
     /// Function name (for complexity issues)
     #[serde(skip_serializing_if = "Option::is_none")]
     function: Option<String>,
+    /// How to ignore this issue, from the CLI and in the code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ignore: Option<crate::utils::ignore_hint::IgnoreHint>,
 }
 
 #[derive(serde::Serialize)]
@@ -528,6 +547,7 @@ fn build_lint_view(result: &RunResult) -> CheckResultView {
             code: i.code.clone(),
             suggestion: i.suggestion.clone(),
             function: None,
+            ignore: i.ignore.clone(),
         })
         .collect();
 
@@ -584,6 +604,16 @@ fn build_security_view(sast: &crate::security::sast::SastResult) -> CheckResultV
                 code: Some(f.rule_id.clone()),
                 suggestion: f.fix_suggestion.clone(),
                 function: None,
+                ignore: crate::utils::ignore_hint::hint_for(
+                    &LintIssue::new(
+                        f.file_path.clone(),
+                        f.line,
+                        f.message.clone(),
+                        Severity::Error,
+                    )
+                    .with_source(format!("security/{}", f.source))
+                    .with_code(f.rule_id.clone()),
+                ),
             }
         })
         .collect();
@@ -653,6 +683,16 @@ fn build_complexity_view(analysis: &crate::complexity::AnalysisResult) -> CheckR
                     code: None,
                     suggestion: Some("Consider refactoring into smaller functions".to_string()),
                     function: Some(func.name.clone()),
+                    ignore: crate::utils::ignore_hint::hint_for(
+                        &LintIssue::new(
+                            file.path.clone(),
+                            func.start_line as usize,
+                            String::new(),
+                            Severity::Info,
+                        )
+                        .with_source("linthis-complexity".to_string())
+                        .with_code("linthis-complexity".to_string()),
+                    ),
                 });
             }
         }
@@ -1137,6 +1177,74 @@ fn format_error_issues(result: &RunResult) -> Vec<LintIssue> {
         .collect()
 }
 
+/// List, once per rule, how to ignore the issues that blocked this hook.
+///
+/// The box is where a blocked commit is read, so the ways out belong in it —
+/// but grouped by rule, since a hundred issues are usually two or three rules.
+fn append_hook_ignore_section(
+    output: &mut String,
+    result: &RunResult,
+    ctx: &HookBoxContext,
+    border: colored::Color,
+) {
+    /// Rules listed before the rest are folded into a "N more" line.
+    const MAX_RULES: usize = 3;
+
+    let rules = collect_ignore_rules(&result.issues);
+    if rules.is_empty() {
+        return;
+    }
+
+    output.push_str(&format!(
+        "{}\n",
+        ctx.pad_line_bordered("To ignore (per rule):", 0, border)
+    ));
+    for (code, hint) in rules.iter().take(MAX_RULES) {
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line_bordered(&format!("  {:<20} {}", code, hint), 0, border)
+        ));
+    }
+    if rules.len() > MAX_RULES {
+        output.push_str(&format!(
+            "{}\n",
+            ctx.pad_line_bordered(
+                &format!("  \u{2026} {} more rule(s)", rules.len() - MAX_RULES),
+                0,
+                border
+            )
+        ));
+    }
+    output.push_str(&format!("{}\n", ctx.pad_line_bordered("", 0, border)));
+}
+
+/// Distinct (rule code, how-to-ignore) pairs, in first-seen order.
+fn collect_ignore_rules(issues: &[LintIssue]) -> Vec<(String, String)> {
+    let mut seen: Vec<(String, String)> = Vec::new();
+    for issue in issues {
+        let Some(hint) = issue.ignore.as_ref() else {
+            continue;
+        };
+        let code = issue.code.clone().unwrap_or_else(|| {
+            issue
+                .source
+                .clone()
+                .unwrap_or_else(|| "(uncoded)".to_string())
+        });
+        if seen.iter().any(|(c, _)| *c == code) {
+            continue;
+        }
+        let text = match (hint.cli.as_deref(), hint.comment.as_deref()) {
+            (Some(cli), Some(comment)) => format!("{cli}   |   {comment}"),
+            (Some(cli), None) => cli.to_string(),
+            (None, Some(comment)) => comment.to_string(),
+            (None, None) => continue,
+        };
+        seen.push((code, text));
+    }
+    seen
+}
+
 /// Append the tip and skip hint sections for hook failure box.
 /// Content rows use a red-tinted `│` so the side bars keep their blocked
 /// colour even when a downstream viewer (IDE VCS console) tints uncoloured
@@ -1148,6 +1256,9 @@ fn append_hook_tip_section(
     ctx: &HookBoxContext,
 ) {
     let border = colored::Color::Red;
+
+    append_hook_ignore_section(output, result, ctx, border);
+
     output.push_str(&format!(
         "{}\n",
         ctx.pad_line_bordered("Tip: To review and fix issues:", 0, border)
@@ -1591,6 +1702,46 @@ pub fn format_cmsg_result(passed: bool, first_line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn ignore_rules_are_listed_once_per_rule() {
+        use crate::utils::ignore_hint;
+
+        let mut issues: Vec<LintIssue> = ["E501", "E501", "F401"]
+            .iter()
+            .map(|code| {
+                let mut i = LintIssue::new(
+                    std::path::PathBuf::from("a.py"),
+                    1,
+                    "boom".into(),
+                    Severity::Error,
+                );
+                i.source = Some("ruff".into());
+                i.code = Some((*code).into());
+                i
+            })
+            .collect();
+        ignore_hint::attach(&mut issues);
+
+        let rules = collect_ignore_rules(&issues);
+        // Three issues, two rules: the box must not repeat E501.
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].0, "E501");
+        assert!(rules[0].1.contains("linthis ignore add"));
+        assert!(rules[0].1.contains("# noqa: E501"));
+        assert_eq!(rules[1].0, "F401");
+    }
+
+    #[test]
+    fn issues_without_hints_are_skipped() {
+        let issues = vec![LintIssue::new(
+            std::path::PathBuf::from("a.py"),
+            1,
+            "boom".into(),
+            Severity::Error,
+        )];
+        assert!(collect_ignore_rules(&issues).is_empty());
+    }
     use super::*;
     use std::path::PathBuf;
 

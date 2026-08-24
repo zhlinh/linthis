@@ -229,6 +229,7 @@ mod tests {
                 code_line: None,
                 context_before: Vec::new(),
                 context_after: Vec::new(),
+                ignore: None,
             });
         }
         app.update_results(&result);

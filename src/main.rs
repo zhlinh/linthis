@@ -1663,6 +1663,10 @@ fn process_lint_result(
     // only issues came from security/complexity reported "in 0 files".
     result.count_files_with_issues();
 
+    // Re-attach for the same reason: `run()` hinted the lint issues, but the
+    // security and complexity ones only joined the list above. Idempotent.
+    linthis::utils::ignore_hint::attach(&mut result.issues);
+
     let output = format_result_with_hook_type(&result, output_format, hook_type.as_deref());
 
     if (!cli.quiet || result.exit_code != 0) && !output.is_empty() {

@@ -784,6 +784,7 @@ fn try_auto_apply(
         code_line: None,
         context_before: vec![],
         context_after: vec![],
+        ignore: None,
     };
 
     if apply_suggestion(&issue, suggestion) {

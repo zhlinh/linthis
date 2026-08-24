@@ -370,6 +370,7 @@ mod tests {
             code_line: None,
             context_before: Vec::new(),
             context_after: Vec::new(),
+            ignore: None,
         };
         info.update_from_issues(vec![issue]);
         assert_eq!(info.status, FileStatus::HasIssues(1));
@@ -410,6 +411,7 @@ mod tests {
                 code_line: None,
                 context_before: Vec::new(),
                 context_after: Vec::new(),
+                ignore: None,
             },
             LintIssue {
                 file_path: PathBuf::from("test.rs"),
@@ -424,6 +426,7 @@ mod tests {
                 code_line: None,
                 context_before: Vec::new(),
                 context_after: Vec::new(),
+                ignore: None,
             },
         ];
 

@@ -10,6 +10,7 @@
 
 //! Utility modules for linthis.
 
+pub mod ignore_hint;
 pub mod language;
 pub mod linthisignore;
 pub mod output;

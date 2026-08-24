@@ -548,69 +548,66 @@ fn detect_language_from_path(path: &str) -> String {
 
 /// Categorize issue based on lint issue properties
 fn categorize_issue(issue: &LintIssue) -> IssueCategory {
-    // Try to categorize based on code patterns
-    let code_lower = issue.code.as_deref().unwrap_or("").to_lowercase();
-    let msg_lower = issue.message.to_lowercase();
+    let code = issue.code.as_deref().unwrap_or("").to_lowercase();
+    let message = issue.message.to_lowercase();
 
-    if code_lower.contains("security")
-        || code_lower.contains("vuln")
-        || msg_lower.contains("security")
-        || msg_lower.contains("vulnerability")
-        || msg_lower.contains("injection")
-        || msg_lower.contains("xss")
-    {
-        return IssueCategory::Security;
-    }
-
-    if code_lower.contains("perf")
-        || msg_lower.contains("performance")
-        || msg_lower.contains("slow")
-        || msg_lower.contains("optimize")
-    {
-        return IssueCategory::Performance;
-    }
-
-    if code_lower.contains("complex")
-        || msg_lower.contains("complexity")
-        || msg_lower.contains("cyclomatic")
-        || msg_lower.contains("cognitive")
-    {
-        return IssueCategory::Complexity;
-    }
-
-    if code_lower.contains("style")
-        || code_lower.contains("format")
-        || msg_lower.contains("naming")
-        || msg_lower.contains("indent")
-    {
-        return IssueCategory::Style;
-    }
-
-    if code_lower.contains("deprecated") || msg_lower.contains("deprecated") {
-        return IssueCategory::Deprecation;
-    }
-
-    if code_lower.contains("type")
-        || msg_lower.contains("type mismatch")
-        || msg_lower.contains("type error")
-    {
-        return IssueCategory::Type;
-    }
-
-    if code_lower.contains("doc")
-        || msg_lower.contains("documentation")
-        || msg_lower.contains("missing doc")
-    {
-        return IssueCategory::Documentation;
-    }
-
-    // Check severity for potential bugs
-    if issue.severity == Severity::Error {
-        return IssueCategory::Bug;
-    }
-
-    IssueCategory::General
+    CATEGORY_KEYWORDS
+        .iter()
+        .find(|(_, code_words, msg_words)| {
+            code_words.iter().any(|w| code.contains(w))
+                || msg_words.iter().any(|w| message.contains(w))
+        })
+        .map(|(category, _, _)| *category)
+        .unwrap_or({
+            // Nothing matched: an error is most likely a bug.
+            if issue.severity == Severity::Error {
+                IssueCategory::Bug
+            } else {
+                IssueCategory::General
+            }
+        })
 }
+
+/// Words that place an issue in a category, checked against the rule code and
+/// the message separately — the two use different vocabulary ("vuln" appears
+/// in codes, "vulnerability" in prose).
+///
+/// Order matters: the first match wins, so the more specific categories come
+/// before the general ones.
+type CategoryKeywords = (IssueCategory, &'static [&'static str], &'static [&'static str]);
+const CATEGORY_KEYWORDS: &[CategoryKeywords] = &[
+    (
+        IssueCategory::Security,
+        &["security", "vuln"],
+        &["security", "vulnerability", "injection", "xss"],
+    ),
+    (
+        IssueCategory::Performance,
+        &["perf"],
+        &["performance", "slow", "optimize"],
+    ),
+    (
+        IssueCategory::Complexity,
+        &["complex"],
+        &["complexity", "cyclomatic", "cognitive"],
+    ),
+    (
+        IssueCategory::Style,
+        &["style", "format"],
+        &["naming", "indent"],
+    ),
+    (IssueCategory::Deprecation, &["deprecated"], &["deprecated"]),
+    (
+        IssueCategory::Type,
+        &["type"],
+        &["type mismatch", "type error"],
+    ),
+    (
+        IssueCategory::Documentation,
+        &["doc"],
+        &["documentation", "missing doc"],
+    ),
+];
 
 /// Categorize from rule ID patterns
 fn categorize_from_rule_id(rule_id: &str) -> IssueCategory {
@@ -638,88 +635,73 @@ fn categorize_from_rule_id(rule_id: &str) -> IssueCategory {
 
 /// Parse AI response into fix suggestions
 fn parse_ai_response(response: &str, language: &str, line_number: usize) -> Vec<FixSuggestion> {
-    let mut suggestions = Vec::new();
+    // Unified diff is preferred: it says which lines to replace.
+    let mut suggestions = parse_unified_diff(response, language).unwrap_or_default();
 
-    // Try unified diff format first (preferred)
-    if let Some(diff_suggestions) = parse_unified_diff(response, language) {
-        suggestions.extend(diff_suggestions);
-    }
-
-    // Fall back to code blocks if no diff found
+    // Then fenced blocks, language-tagged first, plain ones as a fallback.
     if suggestions.is_empty() {
-        // Extract code blocks from the response
-        let code_block_pattern = format!("```{}\\s*\\n([\\s\\S]*?)\\n```", language);
-        let generic_block_pattern = r"```\s*\n([\s\S]*?)\n```";
-
-        // Try language-specific blocks first
-        if let Ok(re) = regex::Regex::new(&code_block_pattern) {
-            for cap in re.captures_iter(response) {
-                if let Some(code) = cap.get(1) {
-                    let code_str = code.as_str().trim();
-                    // Skip if it's a diff block we already tried to parse
-                    if !code_str.starts_with("@@") && !code_str.starts_with("---") {
-                        // Limit code block size - if AI returned too much, extract only relevant lines
-                        let limited_code = limit_code_block_size(code_str, 5);
-                        let line_count = limited_code.lines().count();
-                        let suggestion = FixSuggestion::new(
-                            limited_code,
-                            line_number,
-                            line_number + line_count.saturating_sub(1),
-                            language,
-                        );
-                        suggestions.push(suggestion);
-                    }
-                }
-            }
-        }
-
-        // If no language-specific blocks found, try generic blocks
-        if suggestions.is_empty() {
-            if let Ok(re) = regex::Regex::new(generic_block_pattern) {
-                for cap in re.captures_iter(response) {
-                    if let Some(code) = cap.get(1) {
-                        let code_str = code.as_str().trim();
-                        // Skip diff blocks and empty blocks
-                        if !code_str.is_empty()
-                            && !code_str.starts_with("@@")
-                            && !code_str.starts_with("---")
-                        {
-                            let limited_code = limit_code_block_size(code_str, 5);
-                            let line_count = limited_code.lines().count();
-                            let suggestion = FixSuggestion::new(
-                                limited_code,
-                                line_number,
-                                line_number + line_count.saturating_sub(1),
-                                language,
-                            );
-                            suggestions.push(suggestion);
-                        }
-                    }
-                }
-            }
-        }
+        let tagged = format!("```{}\\s*\\n([\\s\\S]*?)\\n```", language);
+        suggestions = extract_code_blocks(response, &tagged, language, line_number);
+    }
+    if suggestions.is_empty() {
+        suggestions = extract_code_blocks(
+            response,
+            r"```\s*\n([\s\S]*?)\n```",
+            language,
+            line_number,
+        );
     }
 
-    // If still no code blocks, treat the whole response as code if it looks like code
+    // Last resort: the whole reply, if it reads like code at all.
     if suggestions.is_empty() && looks_like_code(response) {
-        let suggestion = FixSuggestion::new(
+        suggestions.push(FixSuggestion::new(
             response.trim().to_string(),
             line_number,
             line_number,
             language,
-        );
-        suggestions.push(suggestion);
+        ));
     }
 
-    // Extract explanations if present
-    let explanation = extract_explanation(response);
-    if let Some(exp) = explanation {
+    if let Some(explanation) = extract_explanation(response) {
         for suggestion in &mut suggestions {
-            suggestion.explanation = Some(exp.clone());
+            suggestion.explanation = Some(explanation.clone());
         }
     }
 
     suggestions
+}
+
+/// Pull fenced code blocks matching `pattern` out of an AI reply.
+///
+/// Diff blocks are skipped: `parse_unified_diff` has already had its turn at
+/// them, and treating a diff as literal replacement code corrupts the file.
+fn extract_code_blocks(
+    response: &str,
+    pattern: &str,
+    language: &str,
+    line_number: usize,
+) -> Vec<FixSuggestion> {
+    let Ok(re) = regex::Regex::new(pattern) else {
+        return Vec::new();
+    };
+
+    re.captures_iter(response)
+        .filter_map(|cap| {
+            let code = cap.get(1)?.as_str().trim();
+            if code.is_empty() || code.starts_with("@@") || code.starts_with("---") {
+                return None;
+            }
+            // An over-eager model returns the whole file; keep it bounded.
+            let limited = limit_code_block_size(code, 5);
+            let line_count = limited.lines().count();
+            Some(FixSuggestion::new(
+                limited,
+                line_number,
+                line_number + line_count.saturating_sub(1),
+                language,
+            ))
+        })
+        .collect()
 }
 
 /// Parse unified diff format from AI response
@@ -752,72 +734,82 @@ fn parse_unified_diff(response: &str, language: &str) -> Option<Vec<FixSuggestio
     }
 }
 
-/// Parse a single diff hunk and extract the fix
-fn parse_diff_hunk(diff: &str, language: &str) -> Option<FixSuggestion> {
-    // Parse the @@ -start,count +start,count @@ header
-    let hunk_pattern = r"@@\s*-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s*@@";
-    let re = regex::Regex::new(hunk_pattern).ok()?;
+/// The `+`/`-` lines of a hunk, and how many context lines precede them.
+struct HunkChanges {
+    added: Vec<String>,
+    removed: Vec<String>,
+    first_change_offset: usize,
+}
 
+/// Parse `@@ -start,count +start,count @@` and return the old start line plus
+/// the body that follows the header.
+fn parse_hunk_header(diff: &str) -> Option<(usize, &str)> {
+    let re = regex::Regex::new(r"@@\s*-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s*@@").ok()?;
     let cap = re.captures(diff)?;
     let old_start: usize = cap.get(1)?.as_str().parse().ok()?;
-    let _old_count: usize = cap.get(2).map_or(1, |m| m.as_str().parse().unwrap_or(1));
-    let _new_start: usize = cap.get(3)?.as_str().parse().ok()?;
-    let _new_count: usize = cap.get(4).map_or(1, |m| m.as_str().parse().unwrap_or(1));
+    Some((old_start, &diff[cap.get(0)?.end()..]))
+}
 
-    // Find the position after the @@ line
-    let hunk_end = cap.get(0)?.end();
-    let diff_body = &diff[hunk_end..];
-
-    // Parse diff lines - only extract actual changes (+ and - lines)
-    // Skip context lines (lines starting with space) as they confuse the replacement
-    let mut added_lines: Vec<String> = Vec::new();
-    let mut removed_lines: Vec<String> = Vec::new();
-    let mut first_change_offset: Option<usize> = None;
+/// Split a hunk body into added and removed lines.
+///
+/// Context lines are counted, not collected: they are only needed to know how
+/// far into the hunk the first real change sits. `+++`/`---` file headers are
+/// not changes.
+fn split_hunk_changes(body: &str) -> HunkChanges {
+    let mut changes = HunkChanges {
+        added: Vec::new(),
+        removed: Vec::new(),
+        first_change_offset: 0,
+    };
     let mut context_before = 0;
+    let mut seen_change = false;
 
-    for line in diff_body.lines() {
-        if line.starts_with('+') && !line.starts_with("+++") {
-            // Added line - remove the '+' prefix
-            if first_change_offset.is_none() {
-                first_change_offset = Some(context_before);
-            }
-            added_lines.push(line[1..].to_string());
+    for line in body.lines() {
+        let target = if line.starts_with('+') && !line.starts_with("+++") {
+            Some(&mut changes.added)
         } else if line.starts_with('-') && !line.starts_with("---") {
-            // Removed line
-            if first_change_offset.is_none() {
-                first_change_offset = Some(context_before);
-            }
-            removed_lines.push(line[1..].to_string());
-        } else if line.starts_with(' ') {
-            // Context line - count them before first change
-            if first_change_offset.is_none() {
+            Some(&mut changes.removed)
+        } else {
+            if line.starts_with(' ') && !seen_change {
                 context_before += 1;
             }
-            // Don't add context lines to added_lines
+            None
+        };
+
+        if let Some(bucket) = target {
+            if !seen_change {
+                seen_change = true;
+                changes.first_change_offset = context_before;
+            }
+            bucket.push(line[1..].to_string());
         }
-        // Ignore other lines (@@, \, empty, etc.)
     }
 
-    if added_lines.is_empty() {
+    changes
+}
+
+/// Parse a single diff hunk and extract the fix
+fn parse_diff_hunk(diff: &str, language: &str) -> Option<FixSuggestion> {
+    let (old_start, body) = parse_hunk_header(diff)?;
+    let changes = split_hunk_changes(body);
+
+    if changes.added.is_empty() {
         return None;
     }
 
-    // Calculate actual start line (accounting for context before)
-    let actual_start = old_start + first_change_offset.unwrap_or(0);
-    let removed_count = removed_lines.len();
+    // Context lines before the first +/- shift where the replacement starts.
+    let actual_start = old_start + changes.first_change_offset;
+    let removed_count = changes.removed.len();
 
-    // Only use the added lines that correspond to the removed lines
-    // If AI returned way more lines than removed, it likely returned extra context
-    let fix_code = if removed_count > 0 && added_lines.len() > removed_count * 3 {
-        // AI returned too much content - try to extract just the relevant portion
-        // Take only the first N lines where N is reasonable based on removed count
-        let take_count = (removed_count * 2).max(3).min(added_lines.len());
-        added_lines[..take_count].join("\n")
+    // A model that returns far more added lines than it removed has pasted
+    // surrounding context along with the fix; keep a proportionate slice.
+    let fix_code = if removed_count > 0 && changes.added.len() > removed_count * 3 {
+        let take = (removed_count * 2).max(3).min(changes.added.len());
+        changes.added[..take].join("\n")
     } else {
-        added_lines.join("\n")
+        changes.added.join("\n")
     };
 
-    // End line is based on how many lines were actually removed
     let end_line = if removed_count > 0 {
         actual_start + removed_count - 1
     } else {
@@ -1071,6 +1063,7 @@ Note: Added underscore prefix.
             code_line: None,
             context_before: Vec::new(),
             context_after: Vec::new(),
+            ignore: None,
         };
 
         assert_eq!(categorize_issue(&issue), IssueCategory::Security);
@@ -1078,6 +1071,53 @@ Note: Added underscore prefix.
         issue.message = "High cyclomatic complexity".to_string();
         issue.code = Some("COMPLEX001".to_string());
         assert_eq!(categorize_issue(&issue), IssueCategory::Complexity);
+    }
+
+    #[test]
+    fn categorize_falls_through_to_severity() {
+        // Nothing in the table matches, so severity decides.
+        let mut issue = LintIssue::new(
+            PathBuf::from("t.rs"),
+            1,
+            "something odd happened".into(),
+            Severity::Error,
+        );
+        assert_eq!(categorize_issue(&issue), IssueCategory::Bug);
+
+        issue.severity = Severity::Warning;
+        assert_eq!(categorize_issue(&issue), IssueCategory::General);
+    }
+
+    #[test]
+    fn categorize_checks_code_and_message_separately() {
+        // "vuln" is code vocabulary, "vulnerability" is prose — either alone
+        // must be enough.
+        let by_code = LintIssue::new(PathBuf::from("t.rs"), 1, "bad thing".into(), Severity::Warning)
+            .with_code("VULN-3".into());
+        assert_eq!(categorize_issue(&by_code), IssueCategory::Security);
+
+        let by_message = LintIssue::new(
+            PathBuf::from("t.rs"),
+            1,
+            "possible xss here".into(),
+            Severity::Warning,
+        );
+        assert_eq!(categorize_issue(&by_message), IssueCategory::Security);
+    }
+
+    #[test]
+    fn code_block_extraction_skips_diffs_and_blanks() {
+        let response = "```rust\n@@ -1 +1 @@\n```\n```rust\nlet x = 1;\n```";
+        let blocks = extract_code_blocks(
+            response,
+            "```rust\\s*\\n([\\s\\S]*?)\\n```",
+            "rust",
+            7,
+        );
+        // The diff block is parse_unified_diff's job, not a literal replacement.
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].code, "let x = 1;");
+        assert_eq!(blocks[0].start_line, 7);
     }
 
     #[test]

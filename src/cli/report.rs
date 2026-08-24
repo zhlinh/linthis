@@ -51,6 +51,14 @@ pub fn handle_report_command(action: ReportCommands) -> ExitCode {
 
 /// Load RunResult from source specification
 fn load_result_from_source(source: &str) -> Option<RunResult> {
+    let mut result = load_result_inner(source)?;
+    // Results saved before ignore hints existed carry none; recompute rather
+    // than showing a report with the hints missing.
+    linthis::utils::ignore_hint::attach(&mut result.issues);
+    Some(result)
+}
+
+fn load_result_inner(source: &str) -> Option<RunResult> {
     let project_root = get_project_root();
 
     match source {

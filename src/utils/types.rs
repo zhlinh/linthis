@@ -62,6 +62,10 @@ pub struct LintIssue {
     /// Context lines after the issue line (line_number, content)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_after: Vec<(usize, String)>,
+    /// How to ignore this issue — filled in once the run is finalized, so
+    /// terminal output and the JSON result show the same thing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore: Option<crate::utils::ignore_hint::IgnoreHint>,
 }
 
 impl LintIssue {
@@ -79,6 +83,7 @@ impl LintIssue {
             code_line: None,
             context_before: Vec::new(),
             context_after: Vec::new(),
+            ignore: None,
         }
     }
 

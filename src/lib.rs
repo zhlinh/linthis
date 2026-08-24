@@ -1707,6 +1707,10 @@ pub fn run(options: &RunOptions) -> Result<RunResult> {
     apply_rule_filter(&rule_filter, &mut result, options.verbose);
 
     // Finalize
+    // Attach ignore hints once, here: this is where every issue has been
+    // collected and filtered, so terminal output, the hook box and the JSON
+    // result all read the same hints instead of each deriving their own.
+    utils::ignore_hint::attach(&mut result.issues);
     result.count_files_with_issues();
     result.calculate_exit_code();
     result.duration_ms = start.elapsed().as_millis() as u64;

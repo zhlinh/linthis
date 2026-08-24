@@ -358,6 +358,7 @@ mod tests {
             code_line: None,
             context_before: Vec::new(),
             context_after: Vec::new(),
+            ignore: None,
         });
         result.issues.push(LintIssue {
             file_path: PathBuf::from("test.rs"),
@@ -372,6 +373,7 @@ mod tests {
             code_line: None,
             context_before: Vec::new(),
             context_after: Vec::new(),
+            ignore: None,
         });
         app.update_results(&result);
 
