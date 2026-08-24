@@ -358,7 +358,10 @@ impl RunResult {
             let high_threshold = cx.thresholds.cyclomatic.high;
             for file in &cx.files {
                 for func in &file.functions {
-                    if func.metrics.cyclomatic > threshold {
+                    if crate::complexity::reportable_cyclomatic(
+                        &func.metrics,
+                        threshold,
+                    ) {
                         let severity = if func.metrics.cyclomatic > high_threshold {
                             Severity::Error
                         } else if func.metrics.cyclomatic > warning_threshold {

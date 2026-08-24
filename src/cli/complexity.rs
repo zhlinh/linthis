@@ -296,32 +296,10 @@ fn save_complexity_result(result: &AnalysisResult, verbose: bool) {
 
 /// Calculate exit code based on complexity thresholds and FailOn level.
 fn compute_complexity_exit_code(result: &AnalysisResult) -> ExitCode {
-    let cx_errors = result
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| func.metrics.cyclomatic > result.thresholds.cyclomatic.high)
-        .count();
-    let cx_warns = result
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| {
-            func.metrics.cyclomatic > result.thresholds.cyclomatic.warning
-                && func.metrics.cyclomatic <= result.thresholds.cyclomatic.high
-        })
-        .count();
-    let cx_infos = result
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| {
-            func.metrics.cyclomatic > result.thresholds.cyclomatic.good
-                && func.metrics.cyclomatic <= result.thresholds.cyclomatic.warning
-        })
-        .count();
+    let counts =
+        linthis::complexity::count_cyclomatic(&result.files, &result.thresholds.cyclomatic);
     let fail_on = linthis::config::FailOn::default();
-    let code = fail_on.exit_code(cx_errors, cx_warns, cx_infos);
+    let code = fail_on.exit_code(counts.errors, counts.warnings, counts.infos);
     ExitCode::from(code as u8)
 }
 

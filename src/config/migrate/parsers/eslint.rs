@@ -177,36 +177,48 @@ fn extract_config_from_value(value: &serde_json::Value) -> Result<ESLintConfig, 
     Ok(config)
 }
 
+/// An eslint rule value: `"warn"`, `2`, or `["error", {...}]`.
 fn parse_rule_value(value: &serde_json::Value) -> RuleValue {
     match value {
-        serde_json::Value::String(s) => match s.as_str() {
-            "off" => RuleValue::Off,
-            "warn" => RuleValue::Warn,
-            "error" => RuleValue::Error,
-            _ => RuleValue::Off,
-        },
-        serde_json::Value::Number(n) => match n.as_u64() {
-            Some(0) => RuleValue::Off,
-            Some(1) => RuleValue::Warn,
-            Some(2) => RuleValue::Error,
-            _ => RuleValue::Off,
-        },
-        serde_json::Value::Array(arr) if !arr.is_empty() => {
-            let level = parse_rule_value(&arr[0]);
-            let level_str = match &level {
-                RuleValue::Off => "off",
-                RuleValue::Warn => "warn",
-                RuleValue::Error => "error",
-                _ => "off",
-            };
-            if arr.len() > 1 {
-                RuleValue::WithOptions(level_str.to_string(), arr[1..].to_vec())
-            } else {
-                level
-            }
-        }
+        serde_json::Value::String(s) => level_from_name(s),
+        serde_json::Value::Number(n) => level_from_number(n),
+        serde_json::Value::Array(arr) if !arr.is_empty() => level_with_options(arr),
         _ => RuleValue::Off,
     }
+}
+
+/// `"off"` / `"warn"` / `"error"`; anything else is off.
+fn level_from_name(name: &str) -> RuleValue {
+    match name {
+        "warn" => RuleValue::Warn,
+        "error" => RuleValue::Error,
+        _ => RuleValue::Off,
+    }
+}
+
+/// eslint's numeric levels: 0 off, 1 warn, 2 error.
+fn level_from_number(n: &serde_json::Number) -> RuleValue {
+    match n.as_u64() {
+        Some(1) => RuleValue::Warn,
+        Some(2) => RuleValue::Error,
+        _ => RuleValue::Off,
+    }
+}
+
+/// `[level, ...options]` — the first element is the level, the rest configure
+/// the rule.
+fn level_with_options(arr: &[serde_json::Value]) -> RuleValue {
+    let level = parse_rule_value(&arr[0]);
+    if arr.len() == 1 {
+        return level;
+    }
+
+    let name = match level {
+        RuleValue::Warn => "warn",
+        RuleValue::Error => "error",
+        _ => "off",
+    };
+    RuleValue::WithOptions(name.to_string(), arr[1..].to_vec())
 }
 
 // Helper functions for JS parsing

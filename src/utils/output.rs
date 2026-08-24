@@ -655,7 +655,7 @@ fn build_complexity_view(analysis: &crate::complexity::AnalysisResult) -> CheckR
 
     for file in &analysis.files {
         for func in &file.functions {
-            if func.metrics.cyclomatic > threshold {
+            if crate::complexity::reportable_cyclomatic(&func.metrics, threshold) {
                 let severity = if func.metrics.cyclomatic > high_threshold {
                     "error"
                 } else if func.metrics.cyclomatic > warning_threshold {

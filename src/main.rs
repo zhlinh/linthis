@@ -1121,30 +1121,9 @@ fn apply_complexity_exit_code(
     complexity_config: &linthis::config::ComplexityChecksConfig,
 ) {
     let cx_fail_on = complexity_config.fail_on.clone().unwrap_or_default();
-    let cx_high = analysis.thresholds.cyclomatic.high;
-    let cx_warning = analysis.thresholds.cyclomatic.warning;
-    let cx_threshold = analysis.thresholds.cyclomatic.good;
-    let cx_errors = analysis
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| func.metrics.cyclomatic > cx_high)
-        .count();
-    let cx_warns = analysis
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high)
-        .count();
-    let cx_infos = analysis
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| {
-            func.metrics.cyclomatic > cx_threshold && func.metrics.cyclomatic <= cx_warning
-        })
-        .count();
-    let cx_exit = cx_fail_on.exit_code(cx_errors, cx_warns, cx_infos);
+    let counts =
+        linthis::complexity::count_cyclomatic(&analysis.files, &analysis.thresholds.cyclomatic);
+    let cx_exit = cx_fail_on.exit_code(counts.errors, counts.warnings, counts.infos);
     result.exit_code = std::cmp::max(result.exit_code, cx_exit);
 }
 
@@ -1403,27 +1382,8 @@ fn print_complexity_summary(result: &linthis::utils::types::RunResult) {
         eprintln!("  complexity: {}", "\u{2713}".green());
         return;
     };
-    let cx_high = cx.thresholds.cyclomatic.high;
-    let cx_warning = cx.thresholds.cyclomatic.warning;
-    let cx_good = cx.thresholds.cyclomatic.good;
-    let cx_errors = cx
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| func.metrics.cyclomatic > cx_high)
-        .count();
-    let cx_warns = cx
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| func.metrics.cyclomatic > cx_warning && func.metrics.cyclomatic <= cx_high)
-        .count();
-    let cx_infos = cx
-        .files
-        .iter()
-        .flat_map(|f| &f.functions)
-        .filter(|func| func.metrics.cyclomatic > cx_good && func.metrics.cyclomatic <= cx_warning)
-        .count();
+    let counts = linthis::complexity::count_cyclomatic(&cx.files, &cx.thresholds.cyclomatic);
+    let (cx_errors, cx_warns, cx_infos) = (counts.errors, counts.warnings, counts.infos);
     if cx_errors > 0 || cx_warns > 0 || cx_infos > 0 {
         let mut parts = Vec::new();
         if cx_errors > 0 {

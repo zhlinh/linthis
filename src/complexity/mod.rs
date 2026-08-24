@@ -41,6 +41,9 @@ pub mod report;
 mod thresholds;
 
 pub use analyzer::{AnalysisOptions, AnalysisResult, ComplexityAnalyzer};
-pub use metrics::{ComplexityMetrics, FileMetrics, FunctionMetrics, MetricLevel};
+pub use metrics::{
+    count_cyclomatic, reportable_cyclomatic, ComplexityMetrics, CyclomaticCounts, FileMetrics,
+    FunctionMetrics, MetricLevel,
+};
 pub use report::{format_complexity_report, ComplexityReportFormat};
 pub use thresholds::{ThresholdConfig, Thresholds};
