@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-08-24
+
+### Added
+
+- stop reporting flat dispatch as too complex
+- tell the reader how to ignore each issue
+
+### Fixed
+
+- do not read function declarations out of comments
+- drop results written by a different linthis version
+- stop counting braces inside strings and comments
+
+### Changed
+
+- split activate, and format the languages we can format
+- split the remaining functions over the complexity threshold
+- give the diff parser an accumulator
+- collapse the duplicated per-language branches
+
 ## [0.28.1] - 2026-08-21
 
 ### Added
