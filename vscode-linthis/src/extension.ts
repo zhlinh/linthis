@@ -155,55 +155,56 @@ async function formatDocument(
     }
     return true;
   } catch (error: any) {
-    // execSync throws on non-zero exit code
-    const stdout = error.stdout || '';
-    const stderr = error.stderr || '';
-    const exitCode = error.status || 0;
-
-    outputChannel.appendLine(`[error] Format exit code: ${exitCode}`);
-    if (stdout) outputChannel.appendLine(`[error] stdout: ${stdout}`);
-    if (stderr) outputChannel.appendLine(`[error] stderr: ${stderr}`);
-
-    // Check if the error is due to syntax errors
-    const output = stdout + stderr;
-    if (showMessages) {
-      if (output.includes('formatting errors') || output.includes('syntax error')) {
-        vscode.window.showErrorMessage(
-          'Linthis: Cannot format file with syntax errors. Fix syntax errors first.'
-        );
-      } else if (exitCode !== 0) {
-        vscode.window.showErrorMessage(
-          `Linthis: Format failed (exit code ${exitCode}). Check Output panel for details.`
-        );
-      } else {
-        const errorMsg = error.message || String(error);
-        outputChannel.appendLine(`[error] Format failed: ${errorMsg}`);
-        vscode.window.showErrorMessage(`Linthis: Format failed. Check Output panel for details.`);
-      }
-    }
+    // execSync throws on a non-zero exit code.
+    reportFormatFailure(error, outputChannel, showMessages);
     return false;
   }
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  // Create output channel immediately for logging
-  const outputChannel = vscode.window.createOutputChannel('Linthis');
-  outputChannel.appendLine('[info] Linthis extension activating...');
-  outputChannel.show(true); // Show output channel to help with debugging
+/// Log a failed format run and, when the user asked for it, say why.
+///
+/// A syntax error is worth naming: linthis cannot format a file it cannot
+/// parse, and telling the user that is more useful than an exit code.
+function reportFormatFailure(
+  error: any,
+  outputChannel: vscode.OutputChannel,
+  showMessages: boolean
+): void {
+  const stdout = error.stdout || '';
+  const stderr = error.stderr || '';
+  const exitCode = error.status || 0;
 
-  try {
-    const config = vscode.workspace.getConfiguration('linthis');
-    outputChannel.appendLine('[info] Configuration loaded');
+  outputChannel.appendLine(`[error] Format exit code: ${exitCode}`);
+  if (stdout) outputChannel.appendLine(`[error] stdout: ${stdout}`);
+  if (stderr) outputChannel.appendLine(`[error] stderr: ${stderr}`);
 
-    if (!config.get<boolean>('enable', true)) {
-      outputChannel.appendLine('[info] Extension is disabled via linthis.enable setting');
-      return;
-    }
+  if (!showMessages) {
+    return;
+  }
 
-    outputChannel.appendLine('[info] Registering commands...');
+  const output = stdout + stderr;
+  if (output.includes('formatting errors') || output.includes('syntax error')) {
+    vscode.window.showErrorMessage(
+      'Linthis: Cannot format file with syntax errors. Fix syntax errors first.'
+    );
+  } else if (exitCode !== 0) {
+    vscode.window.showErrorMessage(
+      `Linthis: Format failed (exit code ${exitCode}). Check Output panel for details.`
+    );
+  } else {
+    outputChannel.appendLine(`[error] Format failed: ${error.message || String(error)}`);
+    vscode.window.showErrorMessage(`Linthis: Format failed. Check Output panel for details.`);
+  }
+}
 
-    // Register commands first (so they're available even if LSP fails)
-    context.subscriptions.push(
+/// Register the palette commands. Done before the language server starts, so
+/// they still work if it fails to launch.
+function registerCommands(
+  context: vscode.ExtensionContext,
+  config: vscode.WorkspaceConfiguration,
+  outputChannel: vscode.OutputChannel
+): void {
+  context.subscriptions.push(
     vscode.commands.registerCommand('linthis.lint', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
@@ -277,7 +278,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // Register format on save (always register, but check config each time)
+}
+
+/// Format a file when it is saved, if `linthis.formatOnSave` is on.
+function registerFormatOnSave(
+  context: vscode.ExtensionContext,
+  outputChannel: vscode.OutputChannel
+): void {
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (document) => {
       const filePath = document.uri.fsPath;
@@ -294,13 +301,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
 
       // Only format supported file types
-      const supportedLanguages = [
-        'rust', 'python', 'typescript', 'javascript',
-        'typescriptreact', 'javascriptreact', 'go', 'java',
-        'cpp', 'c', 'objective-c', 'swift', 'kotlin',
-      ];
-
-      if (!supportedLanguages.includes(document.languageId)) {
+      if (!SUPPORTED_LANGUAGES.includes(document.languageId)) {
         return;
       }
 
@@ -318,7 +319,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // Register lint on open
+}
+
+/// Ask the language server for diagnostics when a file is opened.
+function registerLintOnOpen(
+  context: vscode.ExtensionContext,
+  outputChannel: vscode.OutputChannel
+): void {
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(async (document) => {
       // Check if lint on open is enabled
@@ -356,7 +363,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // Log initial state
+}
+
+/// Record which of the on-save / on-open behaviours are active.
+function logInitialState(
+  config: vscode.WorkspaceConfiguration,
+  outputChannel: vscode.OutputChannel
+): void {
   if (config.get<boolean>('formatOnSave', false)) {
     outputChannel.appendLine('[info] Format on save is enabled');
   }
@@ -371,7 +384,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     outputChannel.appendLine('[info] Lint on open is disabled');
   }
 
-  // Watch for configuration changes
+}
+
+/// React to `linthis.formatOnSave` being switched on, offering to format the
+/// files already open.
+function registerConfigWatcher(
+  context: vscode.ExtensionContext,
+  outputChannel: vscode.OutputChannel
+): void {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(async (event) => {
       if (event.affectsConfiguration('linthis.formatOnSave')) {
@@ -390,14 +410,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
           if (action === 'Format All') {
             // Format all open text documents
-            const supportedLanguages = [
-              'rust', 'python', 'typescript', 'javascript',
-              'typescriptreact', 'javascriptreact', 'go', 'java',
-              'cpp', 'c', 'objective-c', 'swift', 'kotlin',
-            ];
-
             const documentsToFormat = vscode.workspace.textDocuments.filter(doc =>
-              supportedLanguages.includes(doc.languageId) &&
+              SUPPORTED_LANGUAGES.includes(doc.languageId) &&
               doc.uri.scheme === 'file' // Only format real files, not settings
             );
 
@@ -421,6 +435,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     })
   );
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // Create output channel immediately for logging
+  const outputChannel = vscode.window.createOutputChannel('Linthis');
+  outputChannel.appendLine('[info] Linthis extension activating...');
+  outputChannel.show(true); // Show output channel to help with debugging
+
+  try {
+    const config = vscode.workspace.getConfiguration('linthis');
+    outputChannel.appendLine('[info] Configuration loaded');
+
+    if (!config.get<boolean>('enable', true)) {
+      outputChannel.appendLine('[info] Extension is disabled via linthis.enable setting');
+      return;
+    }
+
+    outputChannel.appendLine('[info] Registering commands...');
+
+    registerCommands(context, config, outputChannel);
+    registerFormatOnSave(context, outputChannel);
+    registerLintOnOpen(context, outputChannel);
+    logInitialState(config, outputChannel);
+    registerConfigWatcher(context, outputChannel);
 
     outputChannel.appendLine('[info] Starting language client...');
 
