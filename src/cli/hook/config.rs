@@ -373,7 +373,12 @@ fn create_git_hook_config(
 
     let block = super::block::build_block(hook_event, &HookTool::Git, None, false, None);
     if force {
-        write_hook_script(&hook_path, &super::block::upsert_block(None, &block))?;
+        // --force replaces the file, the only way to evict a hook linthis did
+        // not write.
+        let super::block::Upsert::Merged(fresh) = super::block::upsert_block(None, &block) else {
+            unreachable!("an empty file has nothing hand-written in it")
+        };
+        write_hook_script(&hook_path, &fresh)?;
     } else {
         super::write_hook_block(&hook_path, &block)?;
     }

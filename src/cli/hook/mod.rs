@@ -282,8 +282,31 @@ pub(crate) fn write_hook_block(
     block: &str,
 ) -> Result<(), ExitCode> {
     let existing = std::fs::read_to_string(hook_path).ok();
-    let merged = block::upsert_block(existing.as_deref(), block);
-    write_hook_script(hook_path, &merged)
+    match block::upsert_block(existing.as_deref(), block) {
+        block::Upsert::Merged(merged) => write_hook_script(hook_path, &merged),
+        block::Upsert::HandWritten => {
+            warn_hand_written_hook(hook_path);
+            Ok(())
+        }
+    }
+}
+
+/// Explain why a hook file was left untouched.
+///
+/// Deleting the invocation would leave the shell around it — an `if` whose
+/// body is gone, a variable reading the wrong exit code — and keeping it would
+/// run linthis twice, which for pre-push means the second run drains the refs
+/// the next hook needs.
+fn warn_hand_written_hook(hook_path: &std::path::Path) {
+    eprintln!(
+        "{}: {} runs linthis in code linthis did not write — left untouched",
+        "Warning".yellow(),
+        hook_path.display()
+    );
+    eprintln!(
+        "  {} delete that section, then re-run the install to get the managed block",
+        "→".dimmed()
+    );
 }
 
 /// Take linthis's block out of a hook file, removing the file only when

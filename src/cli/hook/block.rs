@@ -88,22 +88,39 @@ pub(crate) fn build_block(
     )
 }
 
+/// What `upsert_block` did, or why it refused.
+pub(crate) enum Upsert {
+    /// The file's new contents.
+    Merged(String),
+    /// The file calls linthis outside the markers, in code linthis did not
+    /// write. Rewriting it is the caller's business to raise with the user:
+    /// deleting the invocation would leave the surrounding shell behind, and
+    /// leaving it would run linthis twice.
+    HandWritten,
+}
+
 /// Put `block` into `existing`, keeping every line that is not linthis's.
 ///
-/// The block replaces a previous one, or the traces of an older linthis hook
-/// format; otherwise it goes right after the shebang, ahead of whatever else
-/// the file does.
-pub(crate) fn upsert_block(existing: Option<&str>, block: &str) -> String {
+/// The block replaces a previous one, or a hook linthis itself wrote in an
+/// older format; otherwise it goes right after the shebang, ahead of whatever
+/// else the file does. Hand-written invocations are never edited.
+pub(crate) fn upsert_block(existing: Option<&str>, block: &str) -> Upsert {
     let Some(existing) = existing.filter(|s| !s.trim().is_empty()) else {
-        return format!("{SHEBANG}\n{block}");
+        return Upsert::Merged(format!("{SHEBANG}\n{block}"));
     };
 
     if let Some(replaced) = replace_marked_block(existing, block) {
-        return replaced;
+        return Upsert::Merged(replaced);
     }
 
     let mut lines: Vec<&str> = existing.lines().collect();
-    strip_legacy_linthis(&mut lines);
+    if is_linthis_only(&lines) {
+        // A file linthis wrote and owns: replace it outright.
+        return Upsert::Merged(format!("{SHEBANG}\n{block}"));
+    }
+    if lines.iter().any(|l| invokes_linthis(l)) {
+        return Upsert::HandWritten;
+    }
 
     let insert_at = usize::from(lines.first().is_some_and(|l| l.starts_with("#!")));
     let mut out: Vec<String> = lines[..insert_at].iter().map(|l| l.to_string()).collect();
@@ -111,11 +128,35 @@ pub(crate) fn upsert_block(existing: Option<&str>, block: &str) -> String {
         out.push(SHEBANG.to_string());
     }
     out.push(block.trim_end().to_string());
-    out.extend(lines[insert_at..].iter().map(|l| l.to_string()));
+    out.extend(lines.drain(insert_at..).map(|l| l.to_string()));
 
     let mut text = out.join("\n");
     text.push('\n');
-    text
+    Upsert::Merged(text)
+}
+
+/// Whether every meaningful line is one linthis wrote: the shebang, comments,
+/// and its own invocation. Such a file can be replaced wholesale.
+fn is_linthis_only(lines: &[&str]) -> bool {
+    let mut saw_invocation = false;
+    for line in lines {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("#!") || t.starts_with('#') {
+            continue;
+        }
+        if invokes_linthis(line) {
+            saw_invocation = true;
+            continue;
+        }
+        return false;
+    }
+    saw_invocation
+}
+
+/// Whether a line runs linthis as a hook.
+fn invokes_linthis(line: &str) -> bool {
+    let t = line.trim();
+    t.contains("linthis hook run") || t.contains("--hook-event")
 }
 
 /// Remove linthis's block. `None` when nothing but a shebang would remain, so
@@ -129,7 +170,10 @@ pub(crate) fn remove_block(existing: &str) -> Option<String> {
         (Some(start), Some(end)) if end >= start => {
             lines.drain(start..=end);
         }
-        _ => strip_legacy_linthis(&mut lines),
+        // A file linthis wrote entirely can go; anything else keeps its own
+        // code, including a hand-written invocation we must not edit.
+        _ if is_linthis_only(&lines) => return None,
+        _ => {}
     }
 
     let has_content = lines
@@ -159,7 +203,8 @@ pub(crate) fn has_foreign_content(content: &str) -> bool {
         (Some(start), Some(end)) if end >= start => {
             lines.drain(start..=end);
         }
-        _ => strip_legacy_linthis(&mut lines),
+        _ if is_linthis_only(&lines) => return false,
+        _ => {}
     }
     lines
         .iter()
@@ -184,16 +229,6 @@ fn replace_marked_block(existing: &str, block: &str) -> Option<String> {
     Some(text)
 }
 
-/// Drop the lines an older linthis wrote: the bare `# linthis-hook` marker and
-/// any line that invokes the binary as a hook.
-fn strip_legacy_linthis(lines: &mut Vec<&str>) {
-    lines.retain(|line| {
-        let t = line.trim();
-        !(t.starts_with("# linthis-hook")
-            || t.contains("linthis hook run")
-            || t.contains("--hook-event"))
-    });
-}
 
 #[cfg(test)]
 mod tests {
@@ -203,10 +238,45 @@ mod tests {
         build_block(&HookEvent::PrePush, &HookTool::Git, None, true, None)
     }
 
+    fn merged(existing: Option<&str>) -> String {
+        match upsert_block(existing, &block()) {
+            Upsert::Merged(text) => text,
+            Upsert::HandWritten => panic!("expected a merge, got a refusal"),
+        }
+    }
+
+    /// A chain somebody wrote by hand, of the shape people actually produce
+    /// when linthis and Git LFS collide.
+    const HAND_WRITTEN: &str = "#!/bin/sh\n\
+        # pre-push: run linthis, then Git LFS.\n\
+        if command -v linthis >/dev/null 2>&1; then\n\
+        \x20 linthis hook run --event pre-push --type git --global \"$@\"\n\
+        \x20 LT_EXIT=$?\n\
+        \x20 if [ \"$LT_EXIT\" -ne 0 ]; then\n\
+        \x20\x20\x20 exit \"$LT_EXIT\"\n\
+        \x20 fi\n\
+        fi\n\
+        git lfs pre-push \"$@\"\n";
+
+    #[test]
+    fn a_hand_written_chain_is_never_edited() {
+        // Removing just the invocation would leave `LT_EXIT=$?` reading the
+        // exit code of `command -v`, inside an `if` that no longer does
+        // anything — which is what an earlier version of this did.
+        assert!(matches!(
+            upsert_block(Some(HAND_WRITTEN), &block()),
+            Upsert::HandWritten
+        ));
+        // Uninstall leaves it alone for the same reason.
+        assert_eq!(remove_block(HAND_WRITTEN).as_deref(), Some(HAND_WRITTEN));
+    }
+
     #[test]
     fn a_foreign_hook_survives_installation() {
         let lfs = "#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || exit 2\ngit lfs pre-push \"$@\"\n";
-        let out = upsert_block(Some(lfs), &block());
+        let Upsert::Merged(out) = upsert_block(Some(lfs), &block()) else {
+            panic!("a foreign hook with no linthis call must merge")
+        };
 
         assert!(out.contains("git lfs pre-push"), "LFS hook was dropped:\n{out}");
         assert!(out.contains(BLOCK_START));
@@ -217,8 +287,8 @@ mod tests {
 
     #[test]
     fn syncing_twice_does_not_stack_blocks() {
-        let once = upsert_block(Some("#!/bin/sh\ngit lfs pre-push \"$@\"\n"), &block());
-        let twice = upsert_block(Some(&once), &block());
+        let once = merged(Some("#!/bin/sh\ngit lfs pre-push \"$@\"\n"));
+        let twice = merged(Some(&once));
         assert_eq!(once, twice);
         assert_eq!(twice.matches(BLOCK_START).count(), 1);
     }
@@ -226,7 +296,7 @@ mod tests {
     #[test]
     fn an_old_wrapper_is_replaced_not_appended() {
         let legacy = "#!/bin/sh\nexec linthis hook run --event pre-push --type git --global \"$@\"\n";
-        let out = upsert_block(Some(legacy), &block());
+        let out = merged(Some(legacy));
         assert_eq!(out.matches("linthis hook run").count(), 1);
         assert!(!out.contains("exec linthis"));
     }
@@ -250,7 +320,7 @@ mod tests {
 
     #[test]
     fn uninstall_keeps_the_other_tool() {
-        let both = upsert_block(Some("#!/bin/sh\ngit lfs pre-push \"$@\"\n"), &block());
+        let both = merged(Some("#!/bin/sh\ngit lfs pre-push \"$@\"\n"));
         let left = remove_block(&both).expect("LFS hook must remain");
         assert!(left.contains("git lfs pre-push"));
         assert!(!left.contains("linthis"));
@@ -258,17 +328,17 @@ mod tests {
 
     #[test]
     fn uninstall_removes_a_linthis_only_hook() {
-        let only = upsert_block(None, &block());
+        let only = merged(None);
         assert!(remove_block(&only).is_none());
     }
 
     #[test]
     fn foreign_content_is_recognized() {
-        let both = upsert_block(Some("#!/bin/sh\ngit lfs pre-push \"$@\"\n"), &block());
+        let both = merged(Some("#!/bin/sh\ngit lfs pre-push \"$@\"\n"));
         assert!(has_foreign_content(&both));
         assert!(has_block(&both));
 
-        let only = upsert_block(None, &block());
+        let only = merged(None);
         assert!(!has_foreign_content(&only));
     }
 }

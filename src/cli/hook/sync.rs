@@ -107,7 +107,15 @@ fn migrate_old_hook(
     };
     let provider_opt = detect_provider_from_old_hook(content);
     let block = super::block::build_block(event, &hook_type, provider_opt, global, None);
-    let migrated = super::block::upsert_block(Some(content), &block);
+    let super::block::Upsert::Merged(migrated) = super::block::upsert_block(Some(content), &block)
+    else {
+        eprintln!(
+            "  {} {} runs linthis in hand-written code — left untouched",
+            "!".yellow(),
+            name
+        );
+        return false;
+    };
 
     if let Err(e) = std::fs::write(path, &migrated) {
         eprintln!("  {} Failed to migrate {}: {}", "✗".red(), name, e);
