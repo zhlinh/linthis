@@ -15,7 +15,6 @@ use std::path::PathBuf;
 
 use super::agent::{agent_skill_path, agent_stop_hook_settings_path, install_agent_skill};
 use super::metadata::{load_installed_hooks, save_installed_hook, InstalledHook};
-use super::script::build_thin_wrapper_script;
 use super::{find_git_root, global_hooks_dir, write_hook_script};
 use crate::cli::commands::{AgentProvider, HookEvent, HookTool};
 
@@ -107,9 +106,10 @@ fn migrate_old_hook(
         HookTool::Git
     };
     let provider_opt = detect_provider_from_old_hook(content);
-    let thin = build_thin_wrapper_script(event, &hook_type, provider_opt, global, None);
+    let block = super::block::build_block(event, &hook_type, provider_opt, global, None);
+    let migrated = super::block::upsert_block(Some(content), &block);
 
-    if let Err(e) = std::fs::write(path, &thin) {
+    if let Err(e) = std::fs::write(path, &migrated) {
         eprintln!("  {} Failed to migrate {}: {}", "✗".red(), name, e);
         return false;
     }
@@ -386,18 +386,29 @@ fn sync_thin_wrapper(
     } else {
         Some(&hook.provider_args)
     };
-    // A configured `[hook.*]` source (plugin / marketplace / file) is what
-    // `hook add` installed here, so re-materialize it instead of overwriting
-    // the user's chosen script with a thin wrapper. Local scope only: a global
-    // hook must not inherit the current project's config.
-    let script = match (global, super::config::resolve_hook_override(hook_type, event)) {
-        (false, Ok(Some(override_content))) => override_content,
-        _ => build_thin_wrapper_script(event, hook_type, provider_opt, global, pa_opt),
-    };
     if let Some(parent) = hook_file.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Err(code) = write_hook_script(&hook_file, &script) {
+
+    // A configured `[hook.*]` source (plugin / marketplace / file) is what
+    // `hook add` installed here, so re-materialize it wholesale instead of
+    // replacing the user's chosen script. Local scope only: a global hook must
+    // not inherit the current project's config.
+    if let (false, Ok(Some(override_content))) =
+        (global, super::config::resolve_hook_override(hook_type, event))
+    {
+        if let Err(code) = write_hook_script(&hook_file, &override_content) {
+            let _ = code;
+            eprintln!("  {} Failed to write {}", "✗".red(), hook_file.display());
+            return Err(());
+        }
+        return Ok(());
+    }
+
+    // Otherwise rewrite only our block, so another tool's hook in the same
+    // file survives the sync.
+    let block = super::block::build_block(event, hook_type, provider_opt, global, pa_opt);
+    if let Err(code) = super::write_hook_block(&hook_file, &block) {
         let _ = code;
         eprintln!("  {} Failed to write {}", "✗".red(), hook_file.display());
         return Err(());

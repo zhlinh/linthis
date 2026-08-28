@@ -14,7 +14,7 @@ use colored::Colorize;
 use std::process::ExitCode;
 
 use super::metadata::save_installed_hook;
-use super::script::{build_hook_command, build_thin_wrapper_script, hook_action};
+use super::script::{build_hook_command, hook_action};
 use super::{find_git_root, is_command_available, write_hook_script};
 use crate::cli::commands::{HookEvent, HookTool};
 
@@ -319,7 +319,7 @@ fn create_git_hook_config(
     tool: &HookTool,
     hook_event: &HookEvent,
     force: bool,
-    args: &Option<String>,
+    _args: &Option<String>,
 ) -> Result<(), ExitCode> {
     use std::fs;
 
@@ -362,20 +362,30 @@ fn create_git_hook_config(
         return Ok(());
     }
 
-    let linthis_hook_line = build_hook_command(hook_event, args);
+    // Merge into whatever is already there: another tool's hook keeps working,
+    // and re-installing just refreshes our block. `--force` replaces the file
+    // outright, which is the only way to evict a hook linthis did not write.
+    let existing = std::fs::read_to_string(&hook_path).ok();
+    let chained = !force
+        && existing
+            .as_deref()
+            .is_some_and(super::block::has_foreign_content);
 
-    // Someone else's hook is appended to, not overwritten — unless --force,
-    // which the flag's own help promises ("Force overwrite existing hook") but
-    // this path used to ignore, leaving no way to replace a foreign hook.
-    if hook_path.exists() && !force {
-        return append_linthis_to_existing_hook(&hook_path, &linthis_hook_line);
+    let block = super::block::build_block(hook_event, &HookTool::Git, None, false, None);
+    if force {
+        write_hook_script(&hook_path, &super::block::upsert_block(None, &block))?;
+    } else {
+        super::write_hook_block(&hook_path, &block)?;
     }
 
-    // Create new hook file as thin wrapper
-    let content = build_thin_wrapper_script(hook_event, &HookTool::Git, None, false, None);
-    write_hook_script(&hook_path, &content)?;
-
     println!("{} Created {} [project]", "✓".green(), hook_path.display());
+    warn_if_hooks_path_overrides(&hook_path);
+    if chained {
+        println!(
+            "  {} Chained: linthis runs before the hook that was already here",
+            "→".dimmed()
+        );
+    }
     println!(
         "  {} Thin wrapper: hook logic auto-updates with linthis",
         "→".dimmed()
@@ -392,6 +402,40 @@ fn create_git_hook_config(
     let project = git_root.to_str().unwrap_or("").to_string();
     save_installed_hook("local", &project, hook_event, &HookTool::Git, None, None);
     Ok(())
+}
+
+/// Warn when `core.hooksPath` means git will never look at `.git/hooks`.
+///
+/// A project hook written there is silently dead, which is confusing enough on
+/// its own — and it is how a global hook ends up being the only one that runs.
+fn warn_if_hooks_path_overrides(hook_path: &std::path::Path) {
+    let configured = std::process::Command::new("git")
+        .args(["config", "core.hooksPath"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let Some(configured) = configured else {
+        return;
+    };
+    // The hook we just wrote is under .git/hooks; if that is where git looks,
+    // there is nothing to warn about.
+    if hook_path.parent().is_some_and(|p| p.ends_with(&configured)) {
+        return;
+    }
+
+    eprintln!(
+        "{}: core.hooksPath is set to {}, so git ignores .git/hooks entirely",
+        "Warning".yellow(),
+        configured.cyan()
+    );
+    eprintln!(
+        "  {} this hook will not run. Install into that directory instead: {}",
+        "→".dimmed(),
+        "linthis hook add -g".cyan()
+    );
 }
 
 /// Write an override hook script, optionally appending to existing content.
@@ -420,55 +464,6 @@ fn write_git_hook_override(
     Ok(())
 }
 
-/// Append linthis to an existing hook file, or report if already present.
-fn append_linthis_to_existing_hook(
-    hook_path: &std::path::Path,
-    linthis_hook_line: &str,
-) -> Result<(), ExitCode> {
-    let existing_content = std::fs::read_to_string(hook_path).map_err(|e| {
-        eprintln!(
-            "{}: Failed to read existing hook file: {}",
-            "Error".red(),
-            e
-        );
-        ExitCode::from(2)
-    })?;
-
-    if existing_content.contains(linthis_hook_line) || existing_content.contains("linthis hook run")
-    {
-        println!(
-            "{}: linthis hook already exists in {}",
-            "Info".cyan(),
-            hook_path.display()
-        );
-        return Ok(());
-    }
-
-    let mut new_content = existing_content;
-    if !new_content.ends_with('\n') {
-        new_content.push('\n');
-    }
-    new_content.push_str("\n# linthis-hook\n");
-    new_content.push_str(linthis_hook_line);
-    new_content.push('\n');
-
-    std::fs::write(hook_path, new_content).map_err(|e| {
-        eprintln!(
-            "{}: Failed to update {}: {}",
-            "Error".red(),
-            hook_path.display(),
-            e
-        );
-        ExitCode::from(2)
-    })?;
-    println!(
-        "{} Added linthis to existing {} {} [project]",
-        "✓".green(),
-        hook_path.display(),
-        "(appended)".dimmed()
-    );
-    Ok(())
-}
 
 pub(crate) fn create_hook_config(
     tool: &HookTool,

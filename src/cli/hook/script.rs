@@ -10,42 +10,8 @@
 
 //! Script generation for git hooks (thin wrappers, global scripts, agent fix blocks).
 
-use crate::cli::commands::{AgentFixProvider, HookEvent, HookTool};
+use crate::cli::commands::{AgentFixProvider, HookEvent};
 
-/// Build a thin wrapper script that delegates to `linthis hook run` at runtime.
-///
-/// The wrapper is 3 lines:
-/// ```sh
-/// #!/bin/sh
-/// exec linthis hook run --event <event> --type <type> [--provider <p>] [--global] "$@"
-/// ```
-/// This means hook logic always comes from the installed linthis binary,
-/// so upgrading linthis automatically updates hook behaviour without reinstallation.
-pub(crate) fn build_thin_wrapper_script(
-    event: &HookEvent,
-    hook_type: &HookTool,
-    provider: Option<&str>,
-    global: bool,
-    provider_args: Option<&str>,
-) -> String {
-    let provider_arg = provider
-        .filter(|p| !p.is_empty())
-        .map(|p| format!(" --provider {p}"))
-        .unwrap_or_default();
-    let provider_args_arg = provider_args
-        .filter(|a| !a.is_empty())
-        .map(|a| format!(" --provider-args '{}'", a.replace('\'', "'\\''")))
-        .unwrap_or_default();
-    let global_arg = if global { " --global" } else { "" };
-    format!(
-        "#!/bin/sh\nexec linthis hook run --event {} --type {}{}{}{} \"$@\"\n",
-        event.as_str(),
-        hook_type.as_str(),
-        provider_arg,
-        provider_args_arg,
-        global_arg,
-    )
-}
 
 /// Shell snippet that sets up a temporary git worktree for the initial
 /// pre-push lint check, so linthis sees the content being pushed (HEAD) and

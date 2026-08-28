@@ -23,7 +23,6 @@ use crate::cli::commands::{HookEvent, HookTool};
 ///
 /// If no linthis hooks remain in that directory, also unsets `core.hooksPath`.
 fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: bool) -> ExitCode {
-    use std::fs;
     use std::io::{self, Write};
 
     let hooks_dir = match global_hooks_dir() {
@@ -67,7 +66,9 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
             }
         }
 
-        match fs::remove_file(&hook_path) {
+        // Deleting the file would take another tool's hook with it — Git LFS
+        // shares these names — so only our block goes.
+        match super::remove_hook_block(&hook_path) {
             Ok(_) => {
                 println!(
                     "{} Removed global {} hook",
@@ -112,18 +113,15 @@ fn handle_global_hook_uninstall(hook_event: Option<HookEvent>, all: bool, yes: b
     ExitCode::SUCCESS
 }
 
-/// Remove only linthis lines from a hook file, keeping other content.
+/// Remove linthis's block from a hook file, keeping other content.
+///
+/// Dropping every line that mentions linthis would leave the block's `if` and
+/// `fi` behind and break the hook for whoever else is in the file.
 fn remove_linthis_lines_from_hook(
     hook_path: &std::path::Path,
-    existing_content: &str,
+    _existing_content: &str,
 ) -> Result<(), ExitCode> {
-    let new_content: String = existing_content
-        .lines()
-        .filter(|line| !line.contains("linthis") && !line.contains("# linthis-hook"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    if let Err(e) = std::fs::write(hook_path, new_content + "\n") {
+    if let Err(e) = super::remove_hook_block(hook_path) {
         eprintln!("{}: Failed to update hook: {}", "Error".red(), e);
         return Err(ExitCode::from(2));
     }

@@ -14,6 +14,7 @@
 //! git pre-commit hooks for linthis integration.
 
 mod agent;
+mod block;
 mod cmsg;
 mod config;
 mod install;
@@ -271,6 +272,38 @@ fn is_linthis_hook_file(hook_path: &std::path::Path) -> bool {
 }
 
 /// Write a hook script to disk and make it executable.
+/// Write linthis's block into a hook file, preserving anything else in it.
+///
+/// Hook names are shared — Git LFS installs `pre-push`, `post-commit`,
+/// `post-checkout` and `post-merge` — and replacing one of those stops large
+/// files from uploading without saying so. Only the marked block is ours.
+pub(crate) fn write_hook_block(
+    hook_path: &std::path::Path,
+    block: &str,
+) -> Result<(), ExitCode> {
+    let existing = std::fs::read_to_string(hook_path).ok();
+    let merged = block::upsert_block(existing.as_deref(), block);
+    write_hook_script(hook_path, &merged)
+}
+
+/// Take linthis's block out of a hook file, removing the file only when
+/// nothing else was in it.
+pub(crate) fn remove_hook_block(hook_path: &std::path::Path) -> std::io::Result<bool> {
+    let Ok(existing) = std::fs::read_to_string(hook_path) else {
+        return Ok(false);
+    };
+    match block::remove_block(&existing) {
+        Some(rest) => {
+            std::fs::write(hook_path, rest)?;
+            Ok(true)
+        }
+        None => {
+            std::fs::remove_file(hook_path)?;
+            Ok(true)
+        }
+    }
+}
+
 fn write_hook_script(hook_path: &std::path::Path, content: &str) -> Result<(), ExitCode> {
     use std::fs;
     if let Err(e) = fs::write(hook_path, content) {

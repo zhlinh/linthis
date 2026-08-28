@@ -21,11 +21,11 @@ use super::metadata::{
     apply_yes_fallback, deduplicate_hook_events, deduplicate_hook_types, save_installed_hook,
 };
 use super::script::{
-    agent_fix_bin, build_thin_wrapper_script, merge_model_into_provider_args,
+    agent_fix_bin, merge_model_into_provider_args,
     parse_provider_with_model, resolve_agent_fix_provider, shell_agent_availability_check,
     shell_timer_functions,
 };
-use super::{find_git_root, global_hooks_dir, write_hook_script};
+use super::{find_git_root, global_hooks_dir};
 use crate::cli::commands::{AgentFixProvider, AgentProvider, HookEvent, HookTool};
 
 /// Type alias for a named constructor table used in interactive prompts.
@@ -649,7 +649,7 @@ pub(crate) fn check_existing_global_hook(
         if existing.trim().is_empty() {
             return Ok(()); // Empty file — treat as not installed
         }
-        if existing.contains("# linthis-hook") || existing.contains("linthis hook run") {
+        if super::block::has_block(&existing) {
             println!(
                 "{}: Global {} hook already installed at {}",
                 "Info".cyan(),
@@ -658,12 +658,18 @@ pub(crate) fn check_existing_global_hook(
             );
             return Err(ExitCode::SUCCESS);
         }
-        eprintln!(
-            "{}: {} already exists (not by linthis). Use --force to overwrite.",
-            "Warning".yellow(),
-            hook_path.display()
-        );
-        return Err(ExitCode::from(1));
+        // Another tool owns this file — Git LFS installs pre-push,
+        // post-commit, post-checkout and post-merge. Installing alongside it
+        // costs nothing, so say what is happening and carry on rather than
+        // demanding --force and then destroying its hook.
+        if super::block::has_foreign_content(&existing) {
+            println!(
+                "{}: {} already has another tool's hook; linthis will run before it",
+                "Info".cyan(),
+                hook_path.display()
+            );
+        }
+        return Ok(());
     }
     Ok(())
 }
@@ -785,7 +791,7 @@ pub(crate) fn handle_global_hook_install(
     let effective_hook_type = hook_type.clone().unwrap_or(HookTool::Git);
     let provider_cow = fix_provider.as_ref().map(|p| p.as_str());
     let provider_str = provider_cow.as_deref();
-    let content = build_thin_wrapper_script(
+    let block = super::block::build_block(
         hook_event,
         &effective_hook_type,
         provider_str,
@@ -794,7 +800,7 @@ pub(crate) fn handle_global_hook_install(
     );
     let _ = args; // args are embedded in binary logic at run time
 
-    if let Err(code) = write_hook_script(&hook_path, &content) {
+    if let Err(code) = super::write_hook_block(&hook_path, &block) {
         return code;
     }
 
@@ -873,7 +879,7 @@ fn handle_git_with_agent_install(
     }
 
     let provider_name = fix_provider.as_str();
-    let content = build_thin_wrapper_script(
+    let block = super::block::build_block(
         hook_event,
         &HookTool::GitWithAgent,
         Some(provider_name.as_ref()),
@@ -892,7 +898,7 @@ fn handle_git_with_agent_install(
         }
     }
 
-    if let Err(code) = write_hook_script(&hook_path, &content) {
+    if let Err(code) = super::write_hook_block(&hook_path, &block) {
         return code;
     }
 
