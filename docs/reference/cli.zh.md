@@ -673,8 +673,10 @@ linthis disable -g -t today  # 所有仓库，当天剩余时间
 ```
 
 项目级 disable 同样能挡住装在全局的 hook（hook 读的是它正在运行的那个仓库的状态），
-`-g` 只在需要一次停掉所有仓库时才用。状态存在 `.linthis/state.toml`
-（`-g` 则是 `~/.linthis/state.toml`），全局停用优先于项目启用。
+`-g` 只在需要一次停掉所有仓库时才用。全局停用优先于项目启用。
+
+状态不落在仓库里，而是存到 `~/.linthis/projects/<项目>/`（`-g` 则是
+`~/.linthis/state.toml`）——你个人有没有关掉 linthis，不该出现在同事的 `git status` 里。
 
 ---
 

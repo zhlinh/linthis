@@ -696,9 +696,12 @@ linthis disable -g -t today  # every repo, rest of the day
 ```
 
 A project disable also covers globally installed hooks running in that
-project; `-g` is only needed to stop every repository at once. State lives in
-`.linthis/state.toml` (or `~/.linthis/state.toml` for `-g`), and a global
+project; `-g` is only needed to stop every repository at once. A global
 disable outranks a project enable.
+
+State is kept outside the repository, under `~/.linthis/projects/<project>/`
+(or `~/.linthis/state.toml` for `-g`): whether you personally have linthis
+switched off is not a change your colleagues should see in `git status`.
 
 ---
 

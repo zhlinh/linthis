@@ -192,22 +192,59 @@ fn humanize(d: Duration) -> String {
 /// unknown (global scope only).
 pub fn state_path(scope: Scope) -> Option<PathBuf> {
     match scope {
-        Scope::Project => Some(
-            crate::utils::get_effective_project_root()
-                .join(".linthis")
-                .join(STATE_FILE),
-        ),
+        // Under ~/.linthis, keyed by project, not inside the repository.
+        // Whether *you* have linthis switched off is not something your
+        // colleagues should find in `git status`, let alone review.
+        Scope::Project => Some(crate::utils::get_global_project_dir().join(STATE_FILE)),
         Scope::Global => crate::utils::home_dir().map(|h| h.join(".linthis").join(STATE_FILE)),
     }
+}
+
+/// Where project state used to live, inside the repository.
+fn legacy_state_path() -> PathBuf {
+    crate::utils::get_effective_project_root()
+        .join(".linthis")
+        .join(STATE_FILE)
+}
+
+/// Move a disable written by an older linthis out of the repository.
+///
+/// Returns the state it found, if any. The old file is deleted either way, and
+/// its directory too when nothing else was in it — leaving `.linthis/` behind
+/// is what put an untracked directory in people's repositories.
+fn migrate_legacy_state() -> Option<State> {
+    let legacy = legacy_state_path();
+    let text = std::fs::read_to_string(&legacy).ok()?;
+    let state: State = toml::from_str(&text).ok()?;
+
+    let _ = std::fs::remove_file(&legacy);
+    if let Some(dir) = legacy.parent() {
+        // Only if it is now empty: `.linthis/` also holds config and rules.
+        if dir.read_dir().is_ok_and(|mut d| d.next().is_none()) {
+            let _ = std::fs::remove_dir(dir);
+        }
+    }
+
+    (state.disabled.is_some()).then_some(state)
 }
 
 /// Read a state file. A missing or malformed file reads as "no state" —
 /// linthis must never break because its own scratch file got mangled.
 pub fn load(scope: Scope) -> State {
-    state_path(scope)
+    let current: Option<State> = state_path(scope)
         .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or_default()
+        .and_then(|s| toml::from_str(&s).ok());
+
+    if let Some(state) = current {
+        return state;
+    }
+    if scope == Scope::Project {
+        if let Some(migrated) = migrate_legacy_state() {
+            let _ = save(scope, &migrated);
+            return migrated;
+        }
+    }
+    State::default()
 }
 
 /// Write a state file, creating `.linthis/` if needed. Removes the file
@@ -526,6 +563,19 @@ mod tests {
         // No state file in a scratch cwd → hooks must run normally. Guards the
         // gate against defaulting to "disabled" if the state file is missing.
         assert!(!skip_hook("pre-commit"));
+    }
+
+    #[test]
+    fn project_state_lives_outside_the_repository() {
+        let path = state_path(Scope::Project).expect("project scope always resolves");
+        // A personal switch must not show up in `git status`, so it belongs
+        // under ~/.linthis/projects/<slug>/, not in the working tree.
+        assert!(
+            path.to_string_lossy().contains(".linthis/projects/"),
+            "unexpected location: {}",
+            path.display()
+        );
+        assert_ne!(path, legacy_state_path());
     }
 
     #[test]
