@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.3] - 2026-08-28
+
+### Fixed
+
+- keep a project's enable state out of the repository
+- leave hand-written hooks alone instead of gutting them
+- share hook files instead of taking them over
+
 ## [0.28.2] - 2026-08-24
 
 ### Added
