@@ -187,14 +187,39 @@ jobs:
       - name: Prepare release body
         id: release_body
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
           cat << EOF > release_body.md
           ## Installation
 
+          ### Method 1: Install via PyPI (Recommended)
+
           \`\`\`bash
-          pip install linthis==$VERSION
-          # or
-          pip install --upgrade linthis
+          # Using uv (recommended)
+          pip install uv
+          uv tool install linthis
+
+          # Using pip
+          pip install linthis
+          \`\`\`
+
+          ### Method 2: Install via Homebrew (Recommended for macOS/Linux users)
+
+          \`\`\`bash
+          brew tap zhlinh/linthis
+          brew install linthis
+          \`\`\`
+
+          ### Method 3: Install via Cargo (Recommended for Rust users)
+
+          \`\`\`bash
+          cargo install linthis
+          \`\`\`
+
+          ### Method 4: Build from Source
+
+          \`\`\`bash
+          git clone https://github.com/zhlinh/linthis.git
+          cd linthis
+          cargo build --release
           \`\`\`
 
           ## Quick Start
