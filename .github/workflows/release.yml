@@ -222,6 +222,14 @@ jobs:
           cargo build --release
           \`\`\`
 
+          ## Update
+
+          Already installed? linthis detects how it was installed and upgrades itself:
+
+          \`\`\`bash
+          linthis update
+          \`\`\`
+
           ## Quick Start
 
           \`\`\`bash
