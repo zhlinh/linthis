@@ -18,7 +18,7 @@ Multi-language linter and formatter extension for Visual Studio Code.
 | TypeScript | ESLint | Prettier |
 | JavaScript | ESLint | Prettier |
 | Go | golangci-lint | gofmt |
-| Java | checkstyle | google-java-format |
+| Java | checkstyle | clang-format |
 | C++ | clang-tidy | clang-format |
 | Swift | SwiftLint | swift-format |
 | Kotlin | Detekt | ktlint |

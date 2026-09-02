@@ -1039,7 +1039,7 @@ fn get_formatter_tool_name(lang: Language) -> &'static str {
         Language::Python => "ruff",
         Language::Go => "gofmt",
         Language::TypeScript | Language::JavaScript => "prettier",
-        Language::Java => "google-java-format",
+        Language::Java => "clang-format",
         Language::Cpp | Language::ObjectiveC => "clang-format",
         Language::Dart => "dart-format",
         Language::Swift => "swift-format",

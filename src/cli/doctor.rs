@@ -269,8 +269,8 @@ fn get_formatter_info(lang: Language) -> ToolInfoEntry {
             version_arg: "--version",
         },
         Language::Java => ToolInfoEntry {
-            name: "google-java-format",
-            cmd: "google-java-format",
+            name: "clang-format",
+            cmd: "clang-format",
             version_arg: "--version",
         },
         Language::Cpp | Language::ObjectiveC => ToolInfoEntry {
@@ -465,9 +465,9 @@ fn get_formatter_install_hint(lang: Language) -> String {
         Language::Go => "Included with Go installation".to_string(),
         Language::TypeScript | Language::JavaScript => "npm install -g prettier".to_string(),
         Language::Java => platform_hint(
-            "brew install google-java-format",
-            None,
-            "https://github.com/google/google-java-format/releases",
+            "brew install clang-format",
+            Some("https://releases.llvm.org/download.html"),
+            "apt install clang-format",
         ),
         Language::Cpp | Language::ObjectiveC => platform_hint(
             "brew install clang-format",

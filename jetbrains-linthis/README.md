@@ -18,7 +18,7 @@ Multi-language linter and formatter plugin for JetBrains IDEs (IntelliJ IDEA, Py
 | Python                | ruff          | ruff/black         |
 | TypeScript/JavaScript | ESLint        | Prettier           |
 | Go                    | golangci-lint | gofmt              |
-| Java                  | checkstyle    | google-java-format |
+| Java                  | checkstyle    | clang-format       |
 | C/C++                 | clang-tidy    | clang-format       |
 | Objective-C           | clang-tidy    | clang-format       |
 | Swift                 | SwiftLint     | swift-format       |

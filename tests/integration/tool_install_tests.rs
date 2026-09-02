@@ -213,12 +213,22 @@ fn lang_subdir(lang: Language) -> &'static str {
 /// End-to-end: for every tool supported on the current platform, ensure it
 /// ends up on PATH after `linthis -i <fixture>` runs with LINTHIS_INSTALL_MODE=auto.
 ///
+/// linthis only auto-installs when the language has *no* usable tool, so for
+/// languages with a fallback (Go falls back to `go vet`, C++ to clang-tidy,
+/// C# to the SDK's built-in `dotnet format`) nothing gets installed. Those
+/// entries still need their install commands exercised, so the test runs them
+/// directly when linthis leaves the binary missing.
+///
+/// Every failure is collected and reported at the end — one CI run tells us
+/// about every broken install route, not just the first.
+///
 /// Gated behind `#[ignore]` so developers don't trigger real installs locally.
 /// CI invokes with `cargo test -- --include-ignored`.
 #[test]
 #[ignore]
 fn auto_install_lint_cycle() {
     let linthis = linthis_bin();
+    let mut failures: Vec<String> = Vec::new();
 
     for spec in TOOL_INSTALLS {
         if !spec.platforms.iter().any(|p| p.os == Os::current()) {
@@ -247,19 +257,53 @@ fn auto_install_lint_cycle() {
 
         // linthis is expected to exit non-zero on fixtures with findings; just
         // verify the process actually ran (not a spawn failure).
-        assert!(
-            status.code().is_some() || cfg!(target_os = "windows"),
-            "linthis did not exit normally for tool {} (status={:?})",
-            spec.tool,
-            status,
-        );
+        if status.code().is_none() && !cfg!(target_os = "windows") {
+            failures.push(format!(
+                "{}: linthis did not exit normally (status={:?})",
+                spec.tool, status,
+            ));
+            continue;
+        }
 
-        assert!(
-            which(bin_name).is_some(),
-            "{} (binary={}) not found on PATH after auto-install (language={:?})",
-            spec.tool,
-            bin_name,
-            spec.language,
-        );
+        // Still missing → a fallback tool covered the language, so linthis had
+        // no reason to install. Run the table's own commands to keep the route
+        // under test.
+        if which(bin_name).is_none() {
+            eprintln!(
+                "fallback-covered: {} — running its install commands directly",
+                spec.tool,
+            );
+            run_install_cmds(spec.language, spec.role);
+        }
+
+        if which(bin_name).is_none() {
+            failures.push(format!(
+                "{} (binary={}, language={:?}) not on PATH after auto-install",
+                spec.tool, bin_name, spec.language,
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} tool(s) failed to install on {:?}:\n  {}",
+        failures.len(),
+        Os::current(),
+        failures.join("\n  "),
+    );
+}
+
+/// Run the table's install candidates for (lang, role) until one succeeds.
+fn run_install_cmds(lang: Language, role: ToolRole) {
+    for cmd in resolve_install_cmds(lang, role) {
+        eprintln!("  $ {}", cmd.join(" "));
+        let ok = Command::new(&cmd[0])
+            .args(&cmd[1..])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return;
+        }
     }
 }

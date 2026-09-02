@@ -758,7 +758,7 @@ default = ["alice", "bob"]
 | TypeScript  | eslint                        | prettier           |
 | JavaScript  | eslint                        | prettier           |
 | Go          | golangci-lint                 | gofmt              |
-| Java        | checkstyle                    | google-java-format |
+| Java        | checkstyle                    | clang-format       |
 | C           | clang-tidy, cppcheck          | clang-format       |
 | C++         | clang-tidy, cpplint, cppcheck | clang-format       |
 | Objective-C | clang-tidy                    | clang-format       |

@@ -19,7 +19,14 @@ powershell -Command "irm https://astral.sh/uv/install.ps1 | iex"
 python -m pip install --user pipx
 python -m pipx ensurepath || true
 
-# coursier
+# coursier + luarocks (neither is in TOOL_INSTALLS; they are install vehicles)
 scoop install coursier || true
+scoop install luarocks || true
+
+# Bin dirs for the tools linthis installs during the test step.
+echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+echo "$APPDATA/Composer/vendor/bin" >> "$GITHUB_PATH"
+echo "$LOCALAPPDATA/Coursier/data/bin" >> "$GITHUB_PATH"
+echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
 
 echo "--- windows bootstrap complete ---"

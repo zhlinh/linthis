@@ -57,6 +57,35 @@ pub struct ToolInstallSpec {
     pub hint: &'static str,
 }
 
+const CLANG_FORMAT_HINT: &str =
+    "Install: brew install clang-format (macOS) / apt install clang-format / choco install llvm";
+
+/// clang-format install routes, shared by the C++ and Java formatter entries.
+static CLANG_FORMAT_PLATFORMS: &[PlatformCmds] = &[
+    PlatformCmds {
+        os: Os::MacOs,
+        cmds: &[
+            &["brew", "install", "clang-format"],
+            &["brew", "install", "llvm"],
+        ],
+    },
+    PlatformCmds {
+        os: Os::Linux,
+        cmds: &[
+            &["sudo", "apt-get", "install", "-y", "clang-format"],
+            &["sudo", "dnf", "install", "-y", "clang-tools-extra"],
+            &["sudo", "pacman", "-S", "--noconfirm", "clang"],
+        ],
+    },
+    PlatformCmds {
+        os: Os::Windows,
+        cmds: &[
+            &["choco", "install", "llvm"],
+            &["scoop", "install", "llvm"],
+        ],
+    },
+];
+
 pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
     // ─────────────── Python ───────────────
     // ruff is both checker and formatter; register once per role.
@@ -384,31 +413,8 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
         tool: "clang-format",
         language: Language::Cpp,
         role: ToolRole::Formatter,
-        platforms: &[
-            PlatformCmds {
-                os: Os::MacOs,
-                cmds: &[
-                    &["brew", "install", "clang-format"],
-                    &["brew", "install", "llvm"],
-                ],
-            },
-            PlatformCmds {
-                os: Os::Linux,
-                cmds: &[
-                    &["sudo", "apt-get", "install", "-y", "clang-format"],
-                    &["sudo", "dnf", "install", "-y", "clang-tools-extra"],
-                    &["sudo", "pacman", "-S", "--noconfirm", "clang"],
-                ],
-            },
-            PlatformCmds {
-                os: Os::Windows,
-                cmds: &[
-                    &["choco", "install", "llvm"],
-                    &["scoop", "install", "llvm"],
-                ],
-            },
-        ],
-        hint: "Install: brew install clang-format (macOS) / apt install clang-format / choco install llvm",
+        platforms: CLANG_FORMAT_PLATFORMS,
+        hint: CLANG_FORMAT_HINT,
     },
 
     // ─────────────── Java ───────────────
@@ -432,20 +438,14 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
         ],
         hint: "Install: brew install checkstyle (macOS) / apt install checkstyle / choco install checkstyle",
     },
+    // JavaFormatter shells out to clang-format with Google style — not
+    // google-java-format — so the install route is the C++ one.
     ToolInstallSpec {
-        tool: "google-java-format",
+        tool: "clang-format",
         language: Language::Java,
         role: ToolRole::Formatter,
-        platforms: &[
-            PlatformCmds {
-                os: Os::MacOs,
-                cmds: &[&["brew", "install", "google-java-format"]],
-            },
-            // Linux / Windows: no stable package-manager route; user must
-            // download the jar. We expose an empty platform list to signal
-            // "not auto-installable here"; hint directs them to the release page.
-        ],
-        hint: "Install: brew install google-java-format (macOS) / download jar from https://github.com/google/google-java-format/releases",
+        platforms: CLANG_FORMAT_PLATFORMS,
+        hint: CLANG_FORMAT_HINT,
     },
 
     // ─────────────── Shell ───────────────
@@ -517,14 +517,20 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
             },
             PlatformCmds {
                 os: Os::Linux,
-                cmds: &[&["luarocks", "install", "luacheck"]],
+                cmds: &[
+                    &["luarocks", "install", "luacheck"],
+                    &["luarocks", "install", "--local", "luacheck"],
+                ],
             },
             PlatformCmds {
                 os: Os::Windows,
-                cmds: &[&["luarocks", "install", "luacheck"]],
+                cmds: &[
+                    &["luarocks", "install", "luacheck"],
+                    &["luarocks", "install", "--local", "luacheck"],
+                ],
             },
         ],
-        hint: "Install: brew install luacheck (macOS) / luarocks install luacheck",
+        hint: "Install: brew install luacheck (macOS) / luarocks install luacheck (add --local if you lack root)",
     },
     ToolInstallSpec {
         tool: "stylua",
@@ -659,18 +665,27 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
         platforms: &[
             PlatformCmds {
                 os: Os::MacOs,
-                cmds: &[&["gem", "install", "rubocop"]],
+                cmds: &[
+                    &["gem", "install", "rubocop"],
+                    &["gem", "install", "--user-install", "rubocop"],
+                ],
             },
             PlatformCmds {
                 os: Os::Linux,
-                cmds: &[&["gem", "install", "rubocop"]],
+                cmds: &[
+                    &["gem", "install", "rubocop"],
+                    &["gem", "install", "--user-install", "rubocop"],
+                ],
             },
             PlatformCmds {
                 os: Os::Windows,
-                cmds: &[&["gem", "install", "rubocop"]],
+                cmds: &[
+                    &["gem", "install", "rubocop"],
+                    &["gem", "install", "--user-install", "rubocop"],
+                ],
             },
         ],
-        hint: "Install: gem install rubocop (requires Ruby)",
+        hint: "Install: gem install rubocop (add --user-install if you lack root)",
     },
     ToolInstallSpec {
         tool: "rubocop",
@@ -679,18 +694,27 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
         platforms: &[
             PlatformCmds {
                 os: Os::MacOs,
-                cmds: &[&["gem", "install", "rubocop"]],
+                cmds: &[
+                    &["gem", "install", "rubocop"],
+                    &["gem", "install", "--user-install", "rubocop"],
+                ],
             },
             PlatformCmds {
                 os: Os::Linux,
-                cmds: &[&["gem", "install", "rubocop"]],
+                cmds: &[
+                    &["gem", "install", "rubocop"],
+                    &["gem", "install", "--user-install", "rubocop"],
+                ],
             },
             PlatformCmds {
                 os: Os::Windows,
-                cmds: &[&["gem", "install", "rubocop"]],
+                cmds: &[
+                    &["gem", "install", "rubocop"],
+                    &["gem", "install", "--user-install", "rubocop"],
+                ],
             },
         ],
-        hint: "Install: gem install rubocop (requires Ruby)",
+        hint: "Install: gem install rubocop (add --user-install if you lack root)",
     },
 
     // ─────────────── PHP ───────────────
@@ -924,7 +948,6 @@ mod tests {
             "cpplint",
             "clang-format",
             "checkstyle",
-            "google-java-format",
             "shellcheck",
             "shfmt",
             "luacheck",

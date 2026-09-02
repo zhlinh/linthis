@@ -46,4 +46,13 @@ echo "$HOME/.dotnet" >> "$GITHUB_PATH"
 echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
 rm dotnet-install.sh
 
+# Bin dirs for the tools linthis installs during the test step. GITHUB_PATH
+# applies to later steps, so exporting them here is enough — the tools do not
+# have to exist yet.
+echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
+echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+echo "$HOME/.local/share/coursier/bin" >> "$GITHUB_PATH"
+echo "$(composer config -g home 2>/dev/null || echo "$HOME/.config/composer")/vendor/bin" >> "$GITHUB_PATH"
+echo "$(ruby -e 'puts Gem.user_dir')/bin" >> "$GITHUB_PATH"
+
 echo "--- linux bootstrap complete ---"

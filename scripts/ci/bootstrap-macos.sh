@@ -15,7 +15,11 @@ brew update || true
 brew install --quiet uv pipx composer luarocks coursier dotnet@8 || true
 pipx ensurepath || true
 
-# Make dotnet-format install target discoverable.
+# Bin dirs for the tools linthis installs during the test step.
 echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
+echo "$HOME/Library/Application Support/Coursier/bin" >> "$GITHUB_PATH"
+echo "$(composer config -g home 2>/dev/null || echo "$HOME/.composer")/vendor/bin" >> "$GITHUB_PATH"
+echo "$(ruby -e 'puts Gem.user_dir')/bin" >> "$GITHUB_PATH"
 
 echo "--- macos bootstrap complete ---"

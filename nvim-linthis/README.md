@@ -255,7 +255,7 @@ vim.keymap.set("n", "<leader>lr", "<cmd>LinthisRestart<cr>", { desc = "Restart l
 | Python | ruff | ruff/black |
 | TypeScript/JavaScript | eslint | prettier |
 | Go | golangci-lint | gofmt |
-| Java | checkstyle | google-java-format |
+| Java | checkstyle | clang-format |
 | C/C++ | clang-tidy | clang-format |
 | Swift | swiftlint | swift-format |
 | Kotlin | detekt | ktlint |
