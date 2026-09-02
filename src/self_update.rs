@@ -446,11 +446,17 @@ impl SelfUpdateManager {
     fn trust_tap_and_retry(&self, tap: &str, args: &[&str], label: &str) -> io::Result<bool> {
         println!("⚠ Homebrew tap '{tap}' is not trusted; trusting it to enable upgrades...");
 
-        let trust = Command::new("brew").args(["trust", tap]).output()?;
+        // `brew trust` needs to be told what kind of thing to trust: given a
+        // bare target it prints its usage and exits 1. What has to be trusted
+        // is the formula, `<tap>/linthis`.
+        let formula = format!("{tap}/{}", env!("CARGO_PKG_NAME"));
+        let trust = Command::new("brew")
+            .args(["trust", "--formula", &formula])
+            .output()?;
         if !trust.status.success() {
             let stderr = String::from_utf8_lossy(&trust.stderr);
             eprintln!("✗ Failed to trust tap '{}': {}", tap, stderr.trim());
-            eprintln!("  Trust it manually and re-run the upgrade: brew trust {tap}");
+            eprintln!("  Trust it manually and re-run the upgrade: brew trust --formula {formula}");
             return Ok(false);
         }
 
@@ -521,6 +527,22 @@ impl SelfUpdateManager {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn trust_target_is_the_formula_not_the_tap() {
+        // `brew trust <target>` with no --tap/--formula/--cask prints its
+        // usage and exits 1, so the kind matters. What Homebrew records for a
+        // tapped formula is the three-part name.
+        let tap = extract_untrusted_tap(
+            "Error: Refusing to load formula from untrusted tap zhlinh/linthis.",
+        )
+        .expect("the tap is named in the error");
+        assert_eq!(tap, "zhlinh/linthis");
+        assert_eq!(
+            format!("{tap}/{}", env!("CARGO_PKG_NAME")),
+            "zhlinh/linthis/linthis"
+        );
+    }
     use super::*;
 
     #[test]
