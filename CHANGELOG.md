@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.4] - 2026-09-02
+
+### Fixed
+
+- name the Java formatter linthis actually runs
+
+### Documentation
+
+- tell Homebrew users to trust the tap's formula
+- point upgraders at `linthis update`
+- list every way to install in the release notes
+
 ## [0.28.3] - 2026-08-28
 
 ### Fixed
