@@ -171,6 +171,16 @@ static UNAVAILABLE_TOOLS: Mutex<Option<Vec<utils::types::UnavailableTool>>> = Mu
 /// Track tools where auto-install was attempted but failed
 static AUTO_INSTALL_FAILED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// `--no-plugin`: set once from the CLI so every entry point honours it,
+/// including the subcommands that build their own `RunOptions`.
+static PLUGINS_DISABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Turn the installed-plugin config fallback off for this process.
+pub fn set_plugins_disabled(disabled: bool) {
+    PLUGINS_DISABLED.store(disabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 use cache::LintCache;
 use checkers::{
     Checker, CppChecker, DartChecker, GoChecker, JavaChecker, KotlinChecker, LuaChecker,
@@ -1292,13 +1302,23 @@ fn check_file_with_cache(
 }
 
 /// Format a single file. Returns the format result if available.
-fn format_single_file(file: &Path, lang: Language, verbose: bool) -> Option<FormatResult> {
+fn format_single_file(
+    file: &Path,
+    lang: Language,
+    verbose: bool,
+    config_resolver: Option<&ConfigResolver>,
+) -> Option<FormatResult> {
     let formatter = get_formatter(lang)?;
     if !formatter.is_available() {
         warn_missing_tool("formatter", lang, false);
         return None;
     }
-    match formatter.format(file) {
+    // Config from an installed plugin, used only when the project has none.
+    // Keyed on the canonical tool name — `formatter.name()` is a display label
+    // that can read "clang-format + cpplint-fix".
+    let plugin_config = config_resolver
+        .and_then(|r| r.get_plugin_config(lang.name(), get_formatter_tool_name(lang)));
+    match formatter.format_with_config(file, plugin_config.as_deref()) {
         Ok(fr) => Some(fr),
         Err(e) => {
             if verbose {
@@ -1438,7 +1458,12 @@ fn run_both_format_step(
                     count,
                 );
             }
-            let fr = format_single_file(file, *lang, options.verbose);
+            let fr = format_single_file(
+                file,
+                *lang,
+                options.verbose,
+                options.config_resolver.as_deref(),
+            );
             ((*file).clone(), fr)
         })
         .collect();
@@ -1583,7 +1608,12 @@ fn run_format_only_mode(
             if options.verbose {
                 eprintln!("Processing: {} ({})", file.display(), lang.name());
             }
-            format_single_file(file, *lang, options.verbose)
+            format_single_file(
+                file,
+                *lang,
+                options.verbose,
+                options.config_resolver.as_deref(),
+            )
         })
         .collect();
 
@@ -1659,6 +1689,29 @@ fn finalize_cache(
 /// Main entry point for running linthis.
 pub fn run(options: &RunOptions) -> Result<RunResult> {
     use utils::types::RunModeKind;
+
+    // Callers that did not resolve plugin configs themselves (`linthis format`,
+    // `fix`, `watch`, the LSP server) still get them, so a globally installed
+    // plugin applies everywhere instead of only on the main lint path. The
+    // main path always passes a resolver — empty when `--no-plugin` is set —
+    // so this never overrides an explicit opt-out.
+    let with_plugins;
+    let options = if options.config_resolver.is_none()
+        && !PLUGINS_DISABLED.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        let resolver = config::resolver::from_installed_plugins(&utils::get_project_root());
+        if resolver.is_empty() {
+            options
+        } else {
+            with_plugins = RunOptions {
+                config_resolver: Some(std::sync::Arc::new(resolver)),
+                ..options.clone()
+            };
+            &with_plugins
+        }
+    } else {
+        options
+    };
 
     let start = Instant::now();
     let mut result = RunResult::new();

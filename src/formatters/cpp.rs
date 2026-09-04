@@ -286,11 +286,19 @@ impl CppFormatter {
     }
 
     /// Run clang-format on a file, returning an error FormatResult if it fails
-    fn run_clang_format(&self, path: &Path, language: &str) -> Result<Option<FormatResult>> {
+    fn run_clang_format(
+        &self,
+        path: &Path,
+        language: &str,
+        plugin_config: Option<&Path>,
+    ) -> Result<Option<FormatResult>> {
         let mut cmd = Command::new("clang-format");
         cmd.arg("-i");
 
-        if let Some(config_path) = Self::find_clang_format_config(path, language) {
+        // Project config first, then the plugin's, then clang-format's default.
+        let config = Self::find_clang_format_config(path, language)
+            .or_else(|| plugin_config.map(Path::to_path_buf));
+        if let Some(config_path) = config {
             cmd.arg(format!("-style=file:{}", config_path.display()));
         } else {
             cmd.arg("-style=Google");
@@ -379,6 +387,14 @@ impl Formatter for CppFormatter {
     }
 
     fn format(&self, path: &Path) -> Result<FormatResult> {
+        self.format_with_config(path, None)
+    }
+
+    fn format_with_config(
+        &self,
+        path: &Path,
+        plugin_config: Option<&Path>,
+    ) -> Result<FormatResult> {
         // Detect language from file extension
         let language = Self::detect_language(path);
 
@@ -395,7 +411,7 @@ impl Formatter for CppFormatter {
         self.run_pre_format_fixers(path, language);
 
         // Run clang-format (-i modifies in place)
-        let format_result = self.run_clang_format(path, language)?;
+        let format_result = self.run_clang_format(path, language, plugin_config)?;
         if let Some(err_result) = format_result {
             return Ok(err_result);
         }

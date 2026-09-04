@@ -1802,11 +1802,10 @@ fn build_run_options(
         quiet: cli.quiet,
         plugins: loaded_plugins,
         no_cache: cli.no_cache,
-        config_resolver: if config_resolver.is_empty() {
-            None
-        } else {
-            Some(Arc::new(config_resolver))
-        },
+        // Always present, even when empty: `None` means "caller did not
+        // resolve plugins", which makes linthis::run fall back to the
+        // installed ones — the opposite of what --no-plugin asks for.
+        config_resolver: Some(Arc::new(config_resolver)),
         tool_install_mode,
         hook_event: cli.hook_mode.clone(),
     }
@@ -1880,6 +1879,10 @@ fn main() -> ExitCode {
     }
     let matches = cmd.get_matches();
     let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+
+    // Global flag: record it before any subcommand dispatch, since format/fix/
+    // watch build their own RunOptions and never see `cli`.
+    linthis::set_plugins_disabled(cli.no_plugin);
 
     if let Some(exit) = handle_subcommands(&mut cli) {
         return exit;

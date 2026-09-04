@@ -34,6 +34,17 @@ pub trait Formatter: Send + Sync {
     /// A FormatResult indicating whether the file was changed.
     fn format(&self, path: &Path) -> Result<FormatResult>;
 
+    /// Format a file, with a config resolved from an installed plugin.
+    ///
+    /// The plugin config is a *fallback*: a config the project itself carries
+    /// still wins, so a repo with its own `.clang-format` is never overridden
+    /// by a globally installed plugin. Formatters that take no config file
+    /// keep the default and just format.
+    fn format_with_config(&self, path: &Path, plugin_config: Option<&Path>) -> Result<FormatResult> {
+        let _ = plugin_config;
+        self.format(path)
+    }
+
     /// Check if formatting would change the file (dry run).
     ///
     /// # Arguments

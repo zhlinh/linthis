@@ -297,6 +297,61 @@ fn get_config_names(lang: &str, tool: &str) -> Vec<&'static str> {
 }
 
 /// Builder for creating a ConfigResolver with configs from multiple sources
+/// Build a resolver from the plugins installed in `.linthis/config.toml` and
+/// `~/.linthis/config.toml`, reading each config straight out of the plugin
+/// cache.
+///
+/// This is what lets a globally installed plugin apply to every project
+/// without its files being copied into any of them: nothing is materialised,
+/// so a `linthis plugin sync` that updates the cache is picked up on the next
+/// run. Project plugins win outright — if the project declares any, the global
+/// ones are not consulted, matching the main lint path.
+pub fn from_installed_plugins(project_dir: &Path) -> ConfigResolver {
+    use crate::config::Config;
+    use crate::plugin::loader::PluginLoader;
+
+    let project = Config::load_project_config(project_dir)
+        .map(|c| c.get_plugin_sources())
+        .unwrap_or_default();
+
+    let (sources, source_kind) = if project.is_empty() {
+        let global = Config::load_user_config()
+            .map(|c| c.get_plugin_sources())
+            .unwrap_or_default();
+        (global, ConfigSource::GlobalPlugin)
+    } else {
+        (project, ConfigSource::ProjectPlugin)
+    };
+
+    let mut resolver = ConfigResolver::new();
+    if sources.is_empty() {
+        return resolver;
+    }
+
+    let loader = match PluginLoader::new() {
+        Ok(l) => l,
+        Err(_) => return resolver,
+    };
+
+    for source in sources {
+        let plugin_name = source.name.clone();
+        // Cache-only: never block a lint run on the network.
+        if let Ok(configs) = loader.load_configs(&[source], false) {
+            for config in configs {
+                resolver.add_config(ResolvedConfig::new(
+                    config.language,
+                    config.tool,
+                    config.config_path,
+                    source_kind,
+                    plugin_name.clone(),
+                ));
+            }
+        }
+    }
+
+    resolver
+}
+
 #[derive(Debug, Default)]
 pub struct ConfigResolverBuilder {
     configs: Vec<ResolvedConfig>,

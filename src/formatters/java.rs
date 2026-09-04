@@ -71,6 +71,14 @@ impl Formatter for JavaFormatter {
     }
 
     fn format(&self, path: &Path) -> Result<FormatResult> {
+        self.format_with_config(path, None)
+    }
+
+    fn format_with_config(
+        &self,
+        path: &Path,
+        plugin_config: Option<&Path>,
+    ) -> Result<FormatResult> {
         // Read original content for comparison
         let original = fs::read_to_string(path).map_err(|e| {
             crate::LintisError::formatter(
@@ -84,11 +92,12 @@ impl Formatter for JavaFormatter {
         let mut cmd = Command::new("clang-format");
         cmd.arg("-i"); // In-place formatting
 
-        // Try to find clang-format config
-        if let Some(config_path) = Self::find_clang_format_config(path) {
+        // Project config first, then the plugin's, then clang-format's default.
+        let config = Self::find_clang_format_config(path)
+            .or_else(|| plugin_config.map(Path::to_path_buf));
+        if let Some(config_path) = config {
             cmd.arg(format!("--style=file:{}", config_path.display()));
         } else {
-            // Fall back to Google style if no config found
             cmd.arg("--style=Google");
         }
 
