@@ -41,6 +41,13 @@ pub struct ComplexityCommandOptions {
 
 /// Handle the complexity analysis command
 pub fn handle_complexity_command(options: ComplexityCommandOptions) -> ExitCode {
+    // Same settings the check gets when it runs inside `linthis -i`, plugin
+    // contributions included.
+    let config = linthis::config::Config::load_for_cwd()
+        .checks
+        .complexity
+        .unwrap_or_default();
+
     let target_files = match resolve_target_files(&options) {
         Ok(files) => files,
         Err(code) => return code,
@@ -59,7 +66,7 @@ pub fn handle_complexity_command(options: ComplexityCommandOptions) -> ExitCode 
     };
 
     update_cache_after_analysis(&result);
-    apply_thresholds(&mut result, &options);
+    apply_thresholds(&mut result, &options, &config);
 
     let format = options
         .format
@@ -73,7 +80,7 @@ pub fn handle_complexity_command(options: ComplexityCommandOptions) -> ExitCode 
 
     save_complexity_result(&result, options.verbose);
 
-    compute_complexity_exit_code(&result)
+    compute_complexity_exit_code(&result, &config)
 }
 
 /// Resolve target files from --staged, --modified, or default path.
@@ -215,12 +222,29 @@ fn update_cache_after_analysis(result: &AnalysisResult) {
 }
 
 /// Apply threshold preset and custom overrides.
-fn apply_thresholds(result: &mut AnalysisResult, options: &ComplexityCommandOptions) {
+/// Preset < configured `[checks.complexity]` < explicit `--threshold`.
+fn apply_thresholds(
+    result: &mut AnalysisResult,
+    options: &ComplexityCommandOptions,
+    config: &ComplexityChecksConfig,
+) {
     result.thresholds = match options.preset.as_str() {
         "strict" => Thresholds::strict(),
         "lenient" => Thresholds::lenient(),
         _ => Thresholds::default(),
     };
+
+    if let Some(t) = config.threshold {
+        result.thresholds.cyclomatic.good = t;
+        result.thresholds.cyclomatic.warning = t + 10;
+        result.thresholds.cyclomatic.high = t + 20;
+    }
+    if let Some(w) = config.warning_threshold {
+        result.thresholds.cyclomatic.warning = w;
+    }
+    if let Some(e) = config.error_threshold {
+        result.thresholds.cyclomatic.high = e;
+    }
 
     if let Some(threshold) = options.threshold {
         result.thresholds.cyclomatic.good = threshold;
@@ -295,10 +319,13 @@ fn save_complexity_result(result: &AnalysisResult, verbose: bool) {
 }
 
 /// Calculate exit code based on complexity thresholds and FailOn level.
-fn compute_complexity_exit_code(result: &AnalysisResult) -> ExitCode {
+fn compute_complexity_exit_code(
+    result: &AnalysisResult,
+    config: &ComplexityChecksConfig,
+) -> ExitCode {
     let counts =
         linthis::complexity::count_cyclomatic(&result.files, &result.thresholds.cyclomatic);
-    let fail_on = linthis::config::FailOn::default();
+    let fail_on = config.fail_on.clone().unwrap_or_default();
     let code = fail_on.exit_code(counts.errors, counts.warnings, counts.infos);
     ExitCode::from(code as u8)
 }

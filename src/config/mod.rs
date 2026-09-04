@@ -208,6 +208,17 @@ pub enum FailOn {
     None,
 }
 
+impl std::fmt::Display for FailOn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            FailOn::Error => "error",
+            FailOn::Warning => "warning",
+            FailOn::Info => "info",
+            FailOn::None => "none",
+        })
+    }
+}
+
 impl FailOn {
     /// Calculate exit code for given error/warning/info counts.
     ///
@@ -1051,6 +1062,192 @@ pub struct CppLanguageConfig {
     pub rules: Option<RulesConfig>,
 }
 
+
+/// Every merge below follows the same rule: a value that differs from the
+/// built-in default came from the file being merged in, so it wins.
+/// Collections extend rather than replace.
+impl PerformanceConfig {
+    fn merge(&mut self, other: Self) {
+        let d = Self::default();
+        if other.large_file_threshold != d.large_file_threshold {
+            self.large_file_threshold = other.large_file_threshold;
+        }
+        if other.skip_large_files != d.skip_large_files {
+            self.skip_large_files = other.skip_large_files;
+        }
+        if other.cache_max_age_days != d.cache_max_age_days {
+            self.cache_max_age_days = other.cache_max_age_days;
+        }
+    }
+}
+
+impl CmsgConfig {
+    fn merge(&mut self, other: Self) {
+        let d = Self::default();
+        if other.commit_msg_pattern != d.commit_msg_pattern {
+            self.commit_msg_pattern = other.commit_msg_pattern;
+        }
+        if other.require_ticket != d.require_ticket {
+            self.require_ticket = other.require_ticket;
+        }
+        if other.ticket_pattern.is_some() {
+            self.ticket_pattern = other.ticket_pattern;
+        }
+    }
+}
+
+impl AiConfig {
+    fn merge(&mut self, other: Self) {
+        if other.provider.is_some() {
+            self.provider = other.provider;
+        }
+        if other.model.is_some() {
+            self.model = other.model;
+        }
+        if other.max_tokens.is_some() {
+            self.max_tokens = other.max_tokens;
+        }
+        if other.temperature.is_some() {
+            self.temperature = other.temperature;
+        }
+        if other.timeout_secs.is_some() {
+            self.timeout_secs = other.timeout_secs;
+        }
+        self.custom_providers.extend(other.custom_providers);
+    }
+}
+
+impl ReviewerConfig {
+    fn merge(&mut self, other: Self) {
+        if !other.default.is_empty() {
+            self.default = other.default;
+        }
+    }
+}
+
+impl ReviewConfig {
+    fn merge(&mut self, other: Self) {
+        let d = Self::default();
+        if other.enabled != d.enabled {
+            self.enabled = other.enabled;
+        }
+        if other.auto_fix != d.auto_fix {
+            self.auto_fix = other.auto_fix;
+        }
+        if other.auto_fix_mode != d.auto_fix_mode {
+            self.auto_fix_mode = other.auto_fix_mode;
+        }
+        if other.provider.is_some() {
+            self.provider = other.provider;
+        }
+        if other.retention_days != d.retention_days {
+            self.retention_days = other.retention_days;
+        }
+        self.platforms.extend(other.platforms);
+        self.reviewers.merge(other.reviewers);
+        if !other.notifications.is_empty() {
+            self.notifications = other.notifications;
+        }
+    }
+}
+
+impl RetentionConfig {
+    fn merge(&mut self, other: Self) {
+        let d = Self::default();
+        if other.results != d.results {
+            self.results = other.results;
+        }
+        if other.backups != d.backups {
+            self.backups = other.backups;
+        }
+        if other.reviews != d.reviews {
+            self.reviews = other.reviews;
+        }
+        if other.cache_days != d.cache_days {
+            self.cache_days = other.cache_days;
+        }
+        if other.diffs != d.diffs {
+            self.diffs = other.diffs;
+        }
+    }
+}
+
+impl LintChecksConfig {
+    fn merge(&mut self, other: Self) {
+        if other.fail_on.is_some() {
+            self.fail_on = other.fail_on;
+        }
+    }
+}
+
+impl SecurityChecksConfig {
+    fn merge(&mut self, other: Self) {
+        if other.scan_type.is_some() {
+            self.scan_type = other.scan_type;
+        }
+        if other.fail_on.is_some() {
+            self.fail_on = other.fail_on;
+        }
+        if other.sast_config.is_some() {
+            self.sast_config = other.sast_config;
+        }
+    }
+}
+
+impl ComplexityChecksConfig {
+    fn merge(&mut self, other: Self) {
+        if other.threshold.is_some() {
+            self.threshold = other.threshold;
+        }
+        if other.warning_threshold.is_some() {
+            self.warning_threshold = other.warning_threshold;
+        }
+        if other.error_threshold.is_some() {
+            self.error_threshold = other.error_threshold;
+        }
+        if other.fail_on.is_some() {
+            self.fail_on = other.fail_on;
+        }
+    }
+}
+
+impl ChecksConfig {
+    fn merge(&mut self, other: Self) {
+        if other.run != default_checks() {
+            self.run = other.run;
+        }
+        merge_section(&mut self.lint, other.lint);
+        merge_section(&mut self.security, other.security);
+        merge_section(&mut self.complexity, other.complexity);
+    }
+}
+
+/// Merge an optional section: present on both sides means field-by-field.
+fn merge_section<T: SectionMerge>(slot: &mut Option<T>, other: Option<T>) {
+    match (slot.as_mut(), other) {
+        (Some(existing), Some(other)) => existing.merge_from(other),
+        (None, other @ Some(_)) => *slot = other,
+        (_, None) => {}
+    }
+}
+
+/// Lets `merge_section` call the inherent `merge` of each section type.
+trait SectionMerge {
+    fn merge_from(&mut self, other: Self);
+}
+
+macro_rules! impl_section_merge {
+    ($($t:ty),+ $(,)?) => {
+        $(impl SectionMerge for $t {
+            fn merge_from(&mut self, other: Self) {
+                self.merge(other);
+            }
+        })+
+    };
+}
+
+impl_section_merge!(LintChecksConfig, SecurityChecksConfig, ComplexityChecksConfig);
+
 impl LanguageOverrides {
     /// Merge another LanguageOverrides into this one
     pub fn merge(&mut self, other: LanguageOverrides) {
@@ -1203,60 +1400,100 @@ impl Config {
 
     /// Merge another configuration into this one.
     /// Values from `other` override values in `self`.
+    ///
+    /// `other` is destructured exhaustively on purpose: adding a field to
+    /// `Config` then becomes a compile error here instead of a section that
+    /// silently stops applying. `[checks]`, `[cmsg]`, `[review]`,
+    /// `[retention]`, `[ai]`, `[performance]` and the auto-update toggles were
+    /// all dropped this way — set in a project config or contributed by a
+    /// plugin, and never seen by anything downstream of `load_merged`.
     pub fn merge(&mut self, other: Config) {
+        let Config {
+            languages,
+            includes,
+            excludes,
+            max_complexity,
+            preset,
+            verbose,
+            source,
+            language_overrides,
+            plugins,
+            plugin_auto_sync,
+            self_auto_update,
+            tool_auto_install,
+            performance,
+            hook,
+            cmsg,
+            rules,
+            ai,
+            review,
+            retention,
+            checks,
+        } = other;
+
         // Merge languages
-        if !other.languages.is_empty() {
-            self.languages = other.languages;
+        if !languages.is_empty() {
+            self.languages = languages;
         }
 
-        // Merge include patterns (append, don't replace)
-        self.includes.extend(other.includes);
-
-        // Merge exclude patterns (append, don't replace)
-        self.excludes.extend(other.excludes);
+        // Merge include/exclude patterns (append, don't replace)
+        self.includes.extend(includes);
+        self.excludes.extend(excludes);
 
         // Override scalar values
-        if other.max_complexity.is_some() {
-            self.max_complexity = other.max_complexity;
+        if max_complexity.is_some() {
+            self.max_complexity = max_complexity;
         }
-        if other.preset.is_some() {
-            self.preset = other.preset;
+        if preset.is_some() {
+            self.preset = preset;
         }
-        if other.verbose.is_some() {
-            self.verbose = other.verbose;
+        if verbose.is_some() {
+            self.verbose = verbose;
         }
-        if other.source.is_some() {
-            self.source = other.source;
+        if source.is_some() {
+            self.source = source;
+        }
+        if plugins.is_some() {
+            self.plugins = plugins;
+        }
+        if plugin_auto_sync.is_some() {
+            self.plugin_auto_sync = plugin_auto_sync;
+        }
+        if self_auto_update.is_some() {
+            self.self_auto_update = self_auto_update;
+        }
+        if tool_auto_install.is_some() {
+            self.tool_auto_install = tool_auto_install;
         }
 
-        // Merge language overrides
-        self.language_overrides.merge(other.language_overrides);
-
-        if other.plugins.is_some() {
-            self.plugins = other.plugins;
-        }
-
-        // Merge rules configuration
-        self.rules.merge(other.rules);
+        // Merge nested sections
+        self.language_overrides.merge(language_overrides);
+        self.rules.merge(rules);
+        self.performance.merge(performance);
+        self.cmsg.merge(cmsg);
+        self.ai.merge(ai);
+        self.review.merge(review);
+        self.retention.merge(retention);
+        self.checks.merge(checks);
 
         // Merge hook configuration (other's entries override self's on conflict)
-        if !other.hook.marketplaces.is_empty() {
-            self.hook.marketplaces.extend(other.hook.marketplaces);
+        if !hook.marketplaces.is_empty() {
+            self.hook.marketplaces.extend(hook.marketplaces);
         }
-        if !other.hook.git.is_empty() {
-            self.hook.git.extend(other.hook.git);
+        if !hook.git.is_empty() {
+            self.hook.git.extend(hook.git);
         }
-        if !other.hook.git_with_agent.is_empty() {
-            self.hook.git_with_agent.extend(other.hook.git_with_agent);
+        if !hook.git_with_agent.is_empty() {
+            self.hook.git_with_agent.extend(hook.git_with_agent);
         }
-        if !other.hook.prek.is_empty() {
-            self.hook.prek.extend(other.hook.prek);
+        if !hook.prek.is_empty() {
+            self.hook.prek.extend(hook.prek);
         }
-        if !other.hook.prek_with_agent.is_empty() {
-            self.hook.prek_with_agent.extend(other.hook.prek_with_agent);
+        if !hook.prek_with_agent.is_empty() {
+            self.hook.prek_with_agent.extend(hook.prek_with_agent);
         }
         // Merge agent plugins: per-provider maps
-        for (provider, plugins) in other.hook.agent.plugins {
+        for (provider, plugins) in hook.agent.plugins {
             self.hook
                 .agent
                 .plugins
@@ -1264,16 +1501,16 @@ impl Config {
                 .or_default()
                 .extend(plugins);
         }
-        if other.hook.timeout != default_hook_timeout() {
-            self.hook.timeout = other.hook.timeout;
+        if hook.timeout != default_hook_timeout() {
+            self.hook.timeout = hook.timeout;
         }
 
         // Merge per-event fix_commit_mode
-        if other.hook.pre_commit.fix_commit_mode != default_fix_commit_mode_one_commit() {
-            self.hook.pre_commit.fix_commit_mode = other.hook.pre_commit.fix_commit_mode;
+        if hook.pre_commit.fix_commit_mode != default_fix_commit_mode_one_commit() {
+            self.hook.pre_commit.fix_commit_mode = hook.pre_commit.fix_commit_mode;
         }
-        if other.hook.pre_push.fix_commit_mode != default_fix_commit_mode_one_commit() {
-            self.hook.pre_push.fix_commit_mode = other.hook.pre_push.fix_commit_mode;
+        if hook.pre_push.fix_commit_mode != default_fix_commit_mode_one_commit() {
+            self.hook.pre_push.fix_commit_mode = hook.pre_push.fix_commit_mode;
         }
     }
 
@@ -1313,6 +1550,18 @@ impl Config {
         } else {
             None
         }
+    }
+
+    /// The config every entry point should use: the merged chain rooted at the
+    /// current project.
+    ///
+    /// Subcommands that assemble their own settings must come through here.
+    /// `linthis security` and `linthis complexity` used to start from built-in
+    /// defaults instead, so a setting in `.linthis/config.toml` — or one a
+    /// plugin contributed — applied when the check ran inside `linthis -i` but
+    /// was ignored when the same check was run standalone.
+    pub fn load_for_cwd() -> Self {
+        Self::load_merged(&crate::utils::get_project_root())
     }
 
     /// Load and merge configuration from all sources with proper precedence.
@@ -1676,6 +1925,50 @@ fn get_toml_hint(err_str: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_carries_every_section() {
+        // Each of these used to be dropped on the floor by merge, so a value
+        // set in a project config or contributed by a plugin never applied.
+        let mut base = Config::default();
+        let mut other = Config::default();
+        other.cmsg.commit_msg_pattern = "^ZZZ: ".to_string();
+        other.retention.results = 42;
+        other.performance.cache_max_age_days = 99;
+        other.ai.provider = Some("acme".to_string());
+        other.review.retention_days = 3;
+        other.checks.complexity = Some(ComplexityChecksConfig {
+            threshold: Some(3),
+            ..Default::default()
+        });
+
+        base.merge(other);
+
+        assert_eq!(base.cmsg.commit_msg_pattern, "^ZZZ: ");
+        assert_eq!(base.retention.results, 42);
+        assert_eq!(base.performance.cache_max_age_days, 99);
+        assert_eq!(base.ai.provider.as_deref(), Some("acme"));
+        assert_eq!(base.review.retention_days, 3);
+        assert_eq!(
+            base.checks.complexity.and_then(|c| c.threshold),
+            Some(3),
+            "checks section must survive the merge"
+        );
+    }
+
+    #[test]
+    fn merge_keeps_defaults_when_other_is_untouched() {
+        let mut base = Config::default();
+        base.cmsg.commit_msg_pattern = "^KEEP: ".to_string();
+        base.retention.results = 7;
+
+        base.merge(Config::default());
+
+        assert_eq!(base.cmsg.commit_msg_pattern, "^KEEP: ");
+        assert_eq!(base.retention.results, 7);
+    }
+
     use super::*;
 
     #[test]

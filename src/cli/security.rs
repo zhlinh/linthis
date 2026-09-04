@@ -57,9 +57,23 @@ pub fn handle_security_command(params: SecurityCommandParams) -> ExitCode {
         sast_config,
         verbose,
     } = params;
+    // Same settings the check gets when it runs inside `linthis -i`, plugin
+    // contributions included. CLI flags still win.
+    let config = linthis::config::Config::load_for_cwd()
+        .checks
+        .security
+        .unwrap_or_default();
+
     let report_format = SecurityReportFormat::from_str(&format);
+    let scan_type = if scan_type == "all" {
+        config.scan_type.clone().unwrap_or(scan_type)
+    } else {
+        scan_type
+    };
     let run_sca = scan_type == "all" || scan_type == "sca";
     let run_sast = scan_type == "all" || scan_type == "sast";
+    let sast_config = sast_config.or_else(|| config.sast_config.clone());
+    let fail_on = fail_on.or_else(|| config.fail_on.as_ref().map(|f| f.to_string()));
 
     if run_sca {
         let sca_exit = handle_sca(ScaParams {
@@ -81,7 +95,14 @@ pub fn handle_security_command(params: SecurityCommandParams) -> ExitCode {
     }
 
     if run_sast {
-        let sast_exit = handle_sast(&path, &severity, sast_config, report_format, verbose);
+        let sast_exit = handle_sast(
+            &path,
+            &severity,
+            sast_config,
+            report_format,
+            verbose,
+            &fail_on,
+        );
         if let Some(code) = sast_exit {
             return code;
         }
@@ -219,12 +240,25 @@ fn print_fix_suggestions(scanner: &SecurityScanner, path: &Path, result: &ScanRe
 }
 
 /// Run SAST scanning. Returns `Some(ExitCode)` for early return, `None` to continue.
+/// Parse a `fail_on` token; unknown values fall back to the default.
+fn parse_fail_on(raw: &str) -> Option<linthis::config::FailOn> {
+    use linthis::config::FailOn;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "error" => Some(FailOn::Error),
+        "warning" => Some(FailOn::Warning),
+        "info" => Some(FailOn::Info),
+        "none" => Some(FailOn::None),
+        _ => None,
+    }
+}
+
 fn handle_sast(
     path: &Path,
     severity: &Option<String>,
     sast_config: Option<PathBuf>,
     report_format: SecurityReportFormat,
     verbose: bool,
+    fail_on: &Option<String>,
 ) -> Option<ExitCode> {
     let sast = SastAggregator::with_config(sast_config.as_deref());
 
@@ -251,7 +285,7 @@ fn handle_sast(
         }
     }
 
-    let exit_code = compute_sast_exit_code(&result);
+    let exit_code = compute_sast_exit_code(&result, fail_on);
     if exit_code != 0 {
         return Some(ExitCode::from(exit_code as u8));
     }
@@ -406,7 +440,7 @@ fn rebuild_sast_counts(result: &mut SastResult) {
 }
 
 /// Compute exit code from SAST findings using unified FailOn.
-fn compute_sast_exit_code(result: &SastResult) -> i32 {
+fn compute_sast_exit_code(result: &SastResult, fail_on: &Option<String>) -> i32 {
     let sec_errors = result
         .findings
         .iter()
@@ -434,7 +468,10 @@ fn compute_sast_exit_code(result: &SastResult) -> i32 {
             )
         })
         .count();
-    let fail_on_level = linthis::config::FailOn::default();
+    let fail_on_level = fail_on
+        .as_deref()
+        .and_then(parse_fail_on)
+        .unwrap_or_default();
     fail_on_level.exit_code(sec_errors, sec_warnings, sec_infos)
 }
 

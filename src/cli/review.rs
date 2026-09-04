@@ -62,7 +62,7 @@ fn handle_review_status() -> ExitCode {
 }
 
 fn handle_review_clean() -> ExitCode {
-    let config = Config::load_merged(&std::env::current_dir().unwrap_or_default());
+    let config = Config::load_for_cwd();
     // Prefer retention.reviews (count-based); fall back to review.retention_days (days-based)
     let result = if config.retention.reviews > 0 {
         background::clean_artifacts_by_count(config.retention.reviews)
@@ -82,7 +82,7 @@ fn handle_review_clean() -> ExitCode {
 }
 
 fn handle_review_background(options: ReviewCommandOptions) -> ExitCode {
-    let config = Config::load_merged(&std::env::current_dir().unwrap_or_default());
+    let config = Config::load_for_cwd();
 
     // Build args for the foreground review (everything except --background)
     let mut args: Vec<String> = Vec::new();
@@ -153,7 +153,7 @@ struct ReviewContext {
 
 /// Execute review setup: detect base ref, collect diff, resolve AI provider.
 fn setup_review(options: &ReviewCommandOptions) -> Result<ReviewContext, ExitCode> {
-    let config = Config::load_merged(&std::env::current_dir().unwrap_or_default());
+    let config = Config::load_for_cwd();
 
     let base_ref = match diff::detect_base_ref(options.base.as_deref()) {
         Ok(b) => b,

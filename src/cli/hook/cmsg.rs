@@ -117,8 +117,7 @@ pub fn handle_commit_msg_check(
         return ExitCode::SUCCESS;
     }
 
-    let project_root = linthis::utils::get_project_root();
-    let config = Config::load_merged(&project_root);
+    let config = Config::load_for_cwd();
 
     let (commit_msg, is_file) = match read_commit_msg(msg_or_file) {
         Ok(r) => r,
