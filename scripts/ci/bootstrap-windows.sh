@@ -27,6 +27,8 @@ scoop install luarocks || true
 echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 echo "$APPDATA/Composer/vendor/bin" >> "$GITHUB_PATH"
 echo "$LOCALAPPDATA/Coursier/data/bin" >> "$GITHUB_PATH"
+echo "$HOME/scoop/apps/coursier/current/bin" >> "$GITHUB_PATH"
+echo "$HOME/scoop/shims" >> "$GITHUB_PATH"
 echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
 
 echo "--- windows bootstrap complete ---"

@@ -829,29 +829,6 @@ fn get_auto_install_commands(lang: Language, is_checker: bool) -> Vec<Vec<String
     resolve_install_cmds(lookup_lang, role)
 }
 
-/// Try to install a tool by running the given command.
-/// Returns Ok(()) on success, Err(message) on failure.
-fn try_install_tool(command: &[String]) -> std::result::Result<(), String> {
-    if command.is_empty() {
-        return Err("empty install command".to_string());
-    }
-    let output = std::process::Command::new(&command[0])
-        .args(&command[1..])
-        .output()
-        .map_err(|e| format!("failed to run `{}`: {}", command.join(" "), e))?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!(
-            "`{}` failed (exit {}): {}",
-            command.join(" "),
-            output.status.code().unwrap_or(-1),
-            stderr.trim()
-        ))
-    }
-}
 
 type InstalledTool = (Language, bool);
 type FailedTool = (Language, bool, String);
@@ -886,11 +863,27 @@ fn prompt_tool_install(lang: Language, tool_name: &str) -> bool {
 }
 
 /// Attempt to install a tool using candidate commands. Returns Ok on success, Err with last error.
-fn attempt_install(commands: &[Vec<String>]) -> std::result::Result<(), String> {
+///
+/// A command exiting 0 is not proof of an install: `pnpm add -g` can succeed
+/// while dropping the binary somewhere off PATH. Each candidate is therefore
+/// followed by `verify`, and a command that leaves the tool unrunnable falls
+/// through to the next one.
+fn attempt_install(
+    commands: &[Vec<String>],
+    verify: impl Fn() -> bool,
+) -> std::result::Result<(), String> {
+    use crate::tools::install::run_install_cmd;
+
     let mut last_err = String::new();
     for cmd in commands {
-        match try_install_tool(cmd) {
-            Ok(()) => return Ok(()),
+        match run_install_cmd(cmd) {
+            Ok(()) if verify() => return Ok(()),
+            Ok(()) => {
+                last_err = format!(
+                    "`{}` succeeded but the tool is still not runnable",
+                    cmd.join(" ")
+                )
+            }
             Err(e) => last_err = e,
         }
     }
@@ -902,6 +895,45 @@ fn should_skip_install(install_mode: &ToolInstallMode) -> bool {
     matches!(install_mode, ToolInstallMode::Disabled)
         || (matches!(install_mode, ToolInstallMode::Prompt)
             && !std::io::IsTerminal::is_terminal(&std::io::stdin()))
+}
+
+/// Install the (lang, role) tool when it is missing and the mode allows it.
+/// Returns `None` when no install was attempted.
+fn install_missing_tool(
+    lang: Language,
+    is_checker: bool,
+    install_mode: &ToolInstallMode,
+    quiet: bool,
+) -> Option<std::result::Result<(), String>> {
+    if is_tool_available(lang, is_checker) {
+        return None;
+    }
+
+    let commands = get_auto_install_commands(lang, is_checker);
+    if commands.is_empty() {
+        return None;
+    }
+
+    let tool_name = get_tool_name(lang, is_checker);
+    if matches!(install_mode, ToolInstallMode::Prompt) && !prompt_tool_install(lang, &tool_name) {
+        return None;
+    }
+
+    if !quiet {
+        eprint!("\r\x1b[K");
+        eprintln!(
+            "\x1b[36mInstalling\x1b[0m: {} (missing {} tool for {})",
+            tool_name,
+            if is_checker { "linter" } else { "formatter" },
+            lang.name()
+        );
+    }
+
+    let result = attempt_install(&commands, || is_tool_available(lang, is_checker));
+    if result.is_ok() && !quiet {
+        eprintln!("\x1b[32mInstalled\x1b[0m:  {}", tool_name);
+    }
+    Some(result)
 }
 
 /// Pre-flight: auto-install missing tools for detected languages.
@@ -931,42 +963,14 @@ fn pre_flight_install(
             if (is_checker && !check_checker) || (!is_checker && !check_formatter) {
                 continue;
             }
-            if !seen.insert((lang, is_checker)) || is_tool_available(lang, is_checker) {
+            if !seen.insert((lang, is_checker)) {
                 continue;
             }
 
-            let tool_name = get_tool_name(lang, is_checker);
-            let commands = get_auto_install_commands(lang, is_checker);
-            if commands.is_empty() {
-                continue;
-            }
-
-            if matches!(install_mode, ToolInstallMode::Prompt)
-                && !prompt_tool_install(lang, &tool_name)
-            {
-                continue;
-            }
-
-            if !quiet {
-                eprint!("\r\x1b[K");
-                eprintln!(
-                    "\x1b[36mInstalling\x1b[0m: {} (missing {} tool for {})",
-                    tool_name,
-                    if is_checker { "linter" } else { "formatter" },
-                    lang.name()
-                );
-            }
-
-            match attempt_install(&commands) {
-                Ok(()) => {
-                    if !quiet {
-                        eprintln!("\x1b[32mInstalled\x1b[0m:  {}", tool_name);
-                    }
-                    installed.push((lang, is_checker));
-                }
-                Err(last_err) => {
-                    failed.push((lang, is_checker, last_err));
-                }
+            match install_missing_tool(lang, is_checker, install_mode, quiet) {
+                Some(Ok(())) => installed.push((lang, is_checker)),
+                Some(Err(last_err)) => failed.push((lang, is_checker, last_err)),
+                None => {}
             }
         }
     }

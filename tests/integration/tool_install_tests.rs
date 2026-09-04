@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use linthis::tools::install::{
-    is_tool_supported_on_current_platform, resolve_install_cmds, supported_platforms, Os, ToolRole,
-    TOOL_INSTALLS,
+    is_tool_supported_on_current_platform, resolve_install_cmds, run_install_cmd,
+    supported_platforms, Os, ToolRole, TOOL_INSTALLS,
 };
 use linthis::Language;
 
@@ -273,7 +273,7 @@ fn auto_install_lint_cycle() {
                 "fallback-covered: {} — running its install commands directly",
                 spec.tool,
             );
-            run_install_cmds(spec.language, spec.role);
+            run_install_cmds(spec.language, spec.role, bin_name);
         }
 
         if which(bin_name).is_none() {
@@ -293,17 +293,19 @@ fn auto_install_lint_cycle() {
     );
 }
 
-/// Run the table's install candidates for (lang, role) until one succeeds.
-fn run_install_cmds(lang: Language, role: ToolRole) {
+/// Run the table's install candidates for (lang, role) until the binary shows
+/// up on PATH. A command exiting 0 is not enough — `pnpm add -g` can succeed
+/// and still leave nothing runnable.
+fn run_install_cmds(lang: Language, role: ToolRole, bin_name: &str) {
     for cmd in resolve_install_cmds(lang, role) {
-        eprintln!("  $ {}", cmd.join(" "));
-        let ok = Command::new(&cmd[0])
-            .args(&cmd[1..])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
-            return;
+        eprint!("  $ {}", cmd.join(" "));
+        match run_install_cmd(&cmd) {
+            Ok(()) if which(bin_name).is_some() => {
+                eprintln!(" — ok");
+                return;
+            }
+            Ok(()) => eprintln!(" — exited 0 but {} is still not on PATH", bin_name),
+            Err(e) => eprintln!(" — {}", e),
         }
     }
 }

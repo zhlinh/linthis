@@ -10,6 +10,7 @@
 //! returns an empty `Vec` in that case so callers can explicitly skip.
 
 use crate::Language;
+use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
@@ -431,12 +432,11 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
                 os: Os::Linux,
                 cmds: &[&["sudo", "apt-get", "install", "-y", "checkstyle"]],
             },
-            PlatformCmds {
-                os: Os::Windows,
-                cmds: &[&["choco", "install", "checkstyle"]],
-            },
+            // Windows: chocolatey's checkstyle package downloads from a dead
+            // SourceForge URL and no other package ships a `checkstyle`
+            // launcher, so there is no route to auto-install.
         ],
-        hint: "Install: brew install checkstyle (macOS) / apt install checkstyle / choco install checkstyle",
+        hint: "Install: brew install checkstyle (macOS) / apt install checkstyle / download the jar from https://github.com/checkstyle/checkstyle/releases",
     },
     // JavaFormatter shells out to clang-format with Google style — not
     // google-java-format — so the install route is the C++ one.
@@ -525,12 +525,13 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
             PlatformCmds {
                 os: Os::Windows,
                 cmds: &[
+                    &["scoop", "install", "luacheck"],
                     &["luarocks", "install", "luacheck"],
                     &["luarocks", "install", "--local", "luacheck"],
                 ],
             },
         ],
-        hint: "Install: brew install luacheck (macOS) / luarocks install luacheck (add --local if you lack root)",
+        hint: "Install: brew install luacheck (macOS) / scoop install luacheck (Windows) / luarocks install luacheck (add --local if you lack root)",
     },
     ToolInstallSpec {
         tool: "stylua",
@@ -768,20 +769,26 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
             PlatformCmds {
                 os: Os::MacOs,
                 cmds: &[
-                    &["brew", "install", "scalafix"],
                     &["cs", "install", "scalafix"],
+                    &["coursier", "install", "scalafix"],
                 ],
             },
             PlatformCmds {
                 os: Os::Linux,
-                cmds: &[&["cs", "install", "scalafix"]],
+                cmds: &[
+                    &["cs", "install", "scalafix"],
+                    &["coursier", "install", "scalafix"],
+                ],
             },
             PlatformCmds {
                 os: Os::Windows,
-                cmds: &[&["cs", "install", "scalafix"]],
+                cmds: &[
+                    &["cs", "install", "scalafix"],
+                    &["coursier", "install", "scalafix"],
+                ],
             },
         ],
-        hint: "Install: brew install scalafix (macOS) / cs install scalafix (requires coursier)",
+        hint: "Install: cs install scalafix (or `coursier install scalafix` — brew and scoop name the launcher `coursier`)",
     },
     ToolInstallSpec {
         tool: "scalafmt",
@@ -791,20 +798,26 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
             PlatformCmds {
                 os: Os::MacOs,
                 cmds: &[
-                    &["brew", "install", "scalafmt"],
                     &["cs", "install", "scalafmt"],
+                    &["coursier", "install", "scalafmt"],
                 ],
             },
             PlatformCmds {
                 os: Os::Linux,
-                cmds: &[&["cs", "install", "scalafmt"]],
+                cmds: &[
+                    &["cs", "install", "scalafmt"],
+                    &["coursier", "install", "scalafmt"],
+                ],
             },
             PlatformCmds {
                 os: Os::Windows,
-                cmds: &[&["cs", "install", "scalafmt"]],
+                cmds: &[
+                    &["cs", "install", "scalafmt"],
+                    &["coursier", "install", "scalafmt"],
+                ],
             },
         ],
-        hint: "Install: brew install scalafmt (macOS) / cs install scalafmt (requires coursier)",
+        hint: "Install: cs install scalafmt (or `coursier install scalafmt` — brew and scoop name the launcher `coursier`)",
     },
 
     // ─────────────── C# ───────────────
@@ -851,6 +864,44 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
 
     // Dart: no auto-install (SDK required). Explicitly absent from TOOL_INSTALLS.
 ];
+
+/// Run one install command, capturing its output.
+///
+/// On Windows most install vehicles (npm, yarn, pnpm, gem, composer, scoop,
+/// luarocks, coursier) are `.cmd`/`.bat` shims. CreateProcess only ever
+/// appends `.exe`, so spawning them directly fails with "not found" — route
+/// through `cmd /C` there so they resolve.
+pub fn run_install_cmd(command: &[String]) -> std::result::Result<(), String> {
+    if command.is_empty() {
+        return Err("empty install command".to_string());
+    }
+
+    let mut cmd = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.arg("/C").args(command);
+        c
+    } else {
+        let mut c = Command::new(&command[0]);
+        c.args(&command[1..]);
+        c
+    };
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to run `{}`: {}", command.join(" "), e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!(
+            "`{}` failed (exit {}): {}",
+            command.join(" "),
+            output.status.code().unwrap_or(-1),
+            stderr.trim()
+        ))
+    }
+}
 
 /// Find the spec for (lang, role); returns `None` if no entry.
 fn find_spec(lang: Language, role: ToolRole) -> Option<&'static ToolInstallSpec> {
@@ -913,6 +964,14 @@ mod tests {
     fn unsupported_language_resolves_to_empty_vec() {
         // Dart has no entry in TOOL_INSTALLS; lookup must be a miss.
         assert!(resolve_install_cmds(Language::Dart, ToolRole::Formatter).is_empty());
+    }
+
+    #[test]
+    fn run_install_cmd_reports_failure() {
+        assert!(run_install_cmd(&[]).is_err());
+        // Missing program: a spawn error on unix, exit 1 from `cmd /C` on Windows.
+        let bogus = vec!["linthis-no-such-installer".to_string(), "x".to_string()];
+        assert!(run_install_cmd(&bogus).is_err());
     }
 
     #[test]

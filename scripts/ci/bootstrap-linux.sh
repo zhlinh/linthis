@@ -32,11 +32,13 @@ echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 python3 -m pip install --user pipx
 python3 -m pipx ensurepath || true
 
-# coursier (for Scala tools)
+# coursier (for Scala tools). `cs setup` pulls a JVM and a pile of extras and
+# regularly fails on a release-asset download — non-fatal, `cs install` (all we
+# need) works off the launcher alone.
 curl -fLo cs https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux
 chmod +x cs
 sudo mv cs /usr/local/bin/cs
-cs setup --yes
+cs setup --yes || true
 
 # .NET SDK (for dotnet-format)
 curl -LsSf https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
