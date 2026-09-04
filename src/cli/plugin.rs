@@ -14,7 +14,7 @@
 //! initialization, listing, syncing, validation, and configuration.
 
 use colored::Colorize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use super::commands::PluginCommands;
@@ -999,7 +999,7 @@ fn handle_plugin_apply(
     if applied_count > 0 {
         println!("{} Applied {} config file(s)", "✓".green(), applied_count);
         println!(
-            "\n{}: Add these to .gitignore if you don't want to commit them",
+            "\n{}: Add .linthis/configs/ to .gitignore if you don't want to commit them",
             "Tip".cyan()
         );
     } else {
@@ -1009,7 +1009,8 @@ fn handle_plugin_apply(
     ExitCode::SUCCESS
 }
 
-/// Apply config files from plugins to the project root. Returns count of applied configs.
+/// Apply config files from plugins into .linthis/configs/<language>/.
+/// Returns count of applied configs.
 fn apply_plugin_configs(
     plugins: &[(String, String, Option<String>)],
     loader: &linthis::plugin::loader::PluginLoader,
@@ -1046,36 +1047,39 @@ fn apply_plugin_configs(
                 println!("\n{} Applying configs from '{}':", "→".cyan(), name);
                 for config in &configs {
                     if let Some(filename) = config.config_path.file_name() {
-                        let target = project_root.join(filename);
+                        // Configs land in .linthis/configs/<language>/, which is
+                        // where every checker and formatter looks them up. Writing
+                        // them flat into the project root made languages that share
+                        // a config filename (cpp and oc both ship .clang-format,
+                        // .clang-tidy and CPPLINT.cfg) collide, so Objective-C
+                        // silently got formatted with the C++ rules.
+                        let target = plugin_config_target(
+                            &project_root,
+                            &config.language,
+                            &filename.to_string_lossy(),
+                        );
+                        let target_dir = target.parent().unwrap_or(&project_root).to_path_buf();
+                        let label = format!(
+                            "{}/{}: .linthis/configs/{}/{}",
+                            config.language,
+                            config.tool,
+                            config.language,
+                            filename.to_string_lossy()
+                        );
+
                         if target.exists() {
-                            println!(
-                                "  {} {}/{}: {} (skipped, exists)",
-                                "⊘".yellow(),
-                                config.language,
-                                config.tool,
-                                filename.to_string_lossy()
-                            );
-                        } else {
-                            match std::fs::copy(&config.config_path, &target) {
-                                Ok(_) => {
-                                    println!(
-                                        "  {} {}/{}: {}",
-                                        "✓".green(),
-                                        config.language,
-                                        config.tool,
-                                        filename.to_string_lossy()
-                                    );
-                                    applied_count += 1;
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "  {} {}: {}",
-                                        "✗".red(),
-                                        filename.to_string_lossy(),
-                                        e
-                                    );
-                                }
+                            println!("  {} {} (skipped, exists)", "⊘".yellow(), label);
+                            continue;
+                        }
+
+                        let copied = std::fs::create_dir_all(&target_dir)
+                            .and_then(|()| std::fs::copy(&config.config_path, &target));
+                        match copied {
+                            Ok(_) => {
+                                println!("  {} {}", "✓".green(), label);
+                                applied_count += 1;
                             }
+                            Err(e) => eprintln!("  {} {}: {}", "✗".red(), label, e),
                         }
                     }
                 }
@@ -1110,5 +1114,32 @@ fn resolve_plugin_manager(global: bool) -> Result<linthis::plugin::PluginConfigM
             eprintln!("{}: {}", "Error".red(), e);
             Err(ExitCode::from(1))
         }
+    }
+}
+
+/// Where a plugin config lands in the project: `.linthis/configs/<language>/<file>`.
+/// Keeping the language in the path is what stops cpp and oc — which ship the
+/// same three filenames — from overwriting each other.
+fn plugin_config_target(project_root: &Path, language: &str, filename: &str) -> PathBuf {
+    project_root
+        .join(".linthis")
+        .join("configs")
+        .join(language)
+        .join(filename)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plugin_config_target;
+    use std::path::Path;
+
+    #[test]
+    fn cpp_and_oc_configs_do_not_collide() {
+        let root = Path::new("/proj");
+        let cpp = plugin_config_target(root, "cpp", ".clang-format");
+        let oc = plugin_config_target(root, "oc", ".clang-format");
+        assert_ne!(cpp, oc);
+        assert_eq!(cpp, Path::new("/proj/.linthis/configs/cpp/.clang-format"));
+        assert_eq!(oc, Path::new("/proj/.linthis/configs/oc/.clang-format"));
     }
 }
