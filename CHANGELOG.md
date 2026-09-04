@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.5] - 2026-09-04
+
+### Added
+
+- apply installed plugin configs without copying them per project
+
+### Fixed
+
+- stop merge from silently dropping whole config sections
+- apply plugin configs into .linthis/configs/<language>/
+- make auto-install work on Windows and repair dead routes
+
 ## [0.28.4] - 2026-09-02
 
 ### Fixed
