@@ -43,6 +43,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The Windows image's default Ruby records its headers under an MSYS-style
+      # `/C/...` path, which breaks every native gem build (rubocop -> prism).
+      # Re-provision Ruby via ruby/setup-ruby (RubyInstaller + DevKit). Pin a
+      # patch not present in the image's tool cache so it installs fresh rather
+      # than reusing the broken baked copy.
+      - name: Install Ruby (Windows native-gem build fix)
+        if: matrix.label == 'windows'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4.1'
+
       - name: Build linthis (release)
         run: cargo build --release
 

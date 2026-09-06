@@ -616,8 +616,15 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
             PlatformCmds {
                 os: Os::Windows,
                 cmds: &[
-                    &["scoop", "install", "ktlint"],
-                    &["choco", "install", "ktlint"],
+                    &[
+                        "sh",
+                        "-c",
+                        "mkdir -p $HOME/.local/bin && \
+                         curl -sSLo $HOME/.local/bin/ktlint.bat \
+                           https://github.com/ktlint/ktlint/releases/latest/download/ktlint.bat && \
+                         curl -sSLo $HOME/.local/bin/ktlint \
+                           https://github.com/ktlint/ktlint/releases/latest/download/ktlint",
+                    ],
                 ],
             },
         ],
@@ -650,8 +657,15 @@ pub static TOOL_INSTALLS: &[ToolInstallSpec] = &[
             PlatformCmds {
                 os: Os::Windows,
                 cmds: &[
-                    &["scoop", "install", "ktlint"],
-                    &["choco", "install", "ktlint"],
+                    &[
+                        "sh",
+                        "-c",
+                        "mkdir -p $HOME/.local/bin && \
+                         curl -sSLo $HOME/.local/bin/ktlint.bat \
+                           https://github.com/ktlint/ktlint/releases/latest/download/ktlint.bat && \
+                         curl -sSLo $HOME/.local/bin/ktlint \
+                           https://github.com/ktlint/ktlint/releases/latest/download/ktlint",
+                    ],
                 ],
             },
         ],
