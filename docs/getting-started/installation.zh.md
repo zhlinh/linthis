@@ -6,7 +6,7 @@
 
 ```bash
 brew tap zhlinh/linthis
-brew trust --formula zhlinh/linthis
+brew trust --formula zhlinh/linthis/linthis
 brew install linthis
 ```
 
