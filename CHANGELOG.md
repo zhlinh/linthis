@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.6] - 2026-09-09
+
+### Fixed
+
+- honour a linthis:ignore directive at the start of its line
+- repair remaining Windows tool-install failures
+
+### Documentation
+
+- fully-qualify the trust formula name
+
 ## [0.28.5] - 2026-09-04
 
 ### Added
