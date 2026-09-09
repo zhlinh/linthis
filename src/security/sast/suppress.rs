@@ -92,10 +92,15 @@ fn is_suppressed(finding: &SastFinding, lines: &[String]) -> bool {
         }
     }
 
-    // `-next-line` directive on the preceding line.
+    // Preceding line: the explicit `-next-line` form, or a bare directive
+    // sitting alone on a comment line. The latter has no code of its own to
+    // suppress, and putting the hint linthis prints on the line above the
+    // finding is what people reach for first, so read it as the next-line form.
     if let Some(prev_idx) = idx.checked_sub(1) {
         if let Some(prev) = lines.get(prev_idx) {
-            if let Some(target) = parse_ignore_next_line_directive(prev) {
+            let target = parse_ignore_next_line_directive(prev)
+                .or_else(|| is_directive_only_line(prev).then(|| parse_ignore_directive(prev))?);
+            if let Some(target) = target {
                 if target_matches(&target, finding) {
                     return true;
                 }
@@ -104,6 +109,27 @@ fn is_suppressed(finding: &SastFinding, lines: &[String]) -> bool {
     }
 
     false
+}
+
+/// Comment markers a directive-only line may open with, longest first so that
+/// `///` is not mistaken for `//` with a stray slash.
+const COMMENT_MARKERS: &[&str] = &[
+    "<!--", "///", "//", "/*", "--", "#", ";", "%", "*",
+];
+
+/// Is this line nothing but a comment holding a `linthis:ignore` directive?
+///
+/// Whitespace and one leading comment marker are stripped; anything else
+/// before the directive (i.e. actual code) makes it a same-line directive.
+fn is_directive_only_line(line: &str) -> bool {
+    let mut rest = line.trim_start();
+    for marker in COMMENT_MARKERS {
+        if let Some(stripped) = rest.strip_prefix(marker) {
+            rest = stripped.trim_start();
+            break;
+        }
+    }
+    rest.starts_with("linthis:ignore")
 }
 
 /// Check whether an ignore `target` applies to a finding.
@@ -191,6 +217,58 @@ mod tests {
             cwe_ids: Vec::new(),
             source: source.to_string(),
             language: "python".to_string(),
+        }
+    }
+
+    #[test]
+    fn bare_directive_alone_on_its_own_line_covers_the_next_line() {
+        // The hint linthis prints is `// linthis:ignore <rule>`; users put it
+        // on the line above the finding.
+        let lines: Vec<String> = [
+            "credentials {",
+            "    // linthis:ignore secrets/generic-password",
+            "    password = \"hunter2\"",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let f = finding("linthis-secrets", "secrets/generic-password", 3);
+        assert!(is_suppressed(&f, &lines));
+
+        // Still scoped to one rule.
+        let other = finding("linthis-secrets", "secrets/aws-access-key", 3);
+        assert!(!is_suppressed(&other, &lines));
+    }
+
+    #[test]
+    fn directive_trailing_real_code_stays_same_line_only() {
+        let lines: Vec<String> = [
+            "x = 1  // linthis:ignore security",
+            "password = \"hunter2\"",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        assert!(is_suppressed(&finding("linthis-secrets", "r", 1), &lines));
+        assert!(!is_suppressed(&finding("linthis-secrets", "r", 2), &lines));
+    }
+
+    #[test]
+    fn recognises_directive_only_lines_across_comment_styles() {
+        for line in [
+            "// linthis:ignore security",
+            "  # linthis:ignore security",
+            "/* linthis:ignore security */",
+            "-- linthis:ignore security",
+            " * linthis:ignore security",
+            "<!-- linthis:ignore security -->",
+        ] {
+            assert!(is_directive_only_line(line), "{line}");
+        }
+        for line in ["x = 1 // linthis:ignore security", "let y = 2;  # linthis:ignore x"] {
+            assert!(!is_directive_only_line(line), "{line}");
         }
     }
 

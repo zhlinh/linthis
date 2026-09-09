@@ -537,6 +537,15 @@ db.query(sql)              # linthis:ignore opengrep
 KEY = "sk-real-key"
 ```
 
+指令独占一行时作用于**下一行**——它自己那行没有代码可豁免。行太长时用这种写法：
+
+```kotlin
+credentials {
+    // linthis:ignore secrets/generic-password
+    password = "…"
+}
+```
+
 ---
 
 ## complexity

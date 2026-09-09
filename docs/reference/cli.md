@@ -550,6 +550,16 @@ db.query(sql)              # linthis:ignore opengrep
 KEY = "sk-real-key"
 ```
 
+A directive alone on its own line applies to the line below it — it has no code
+of its own to suppress. Use it to keep long lines readable:
+
+```kotlin
+credentials {
+    // linthis:ignore secrets/generic-password
+    password = "…"
+}
+```
+
 ---
 
 ## complexity
