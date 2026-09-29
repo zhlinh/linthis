@@ -42,13 +42,7 @@ impl GoComplexityAnalyzer {
         metrics.max_nesting = self.calculate_nesting(&func_content);
 
         metrics.loc = (end - start) as u32;
-        metrics.sloc = func_lines
-            .iter()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty() && !trimmed.starts_with("//")
-            })
-            .count() as u32;
+        metrics.sloc = super::count_lines(func_lines).source;
 
         // Count parameters
         if let Some(params_start) = func_content.find('(') {
@@ -85,14 +79,13 @@ impl GoComplexityAnalyzer {
         let mut complexity = 0;
         let mut nesting_level = 0;
 
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            if trimmed.starts_with("//") {
+        let lines: Vec<&str> = content.lines().collect();
+        for (line, scan) in lines.iter().zip(super::scan_lines(&lines)) {
+            if !scan.is_code() {
                 continue;
             }
-
-            let (opens, closes) = super::count_code_braces(line);
+            let trimmed = line.trim();
+            let (opens, closes) = (scan.opens, scan.closes);
 
             let control_keywords = ["if ", "else", "switch ", "for ", "select ", "case "];
             for keyword in control_keywords {
@@ -170,18 +163,9 @@ impl LanguageComplexityAnalyzer for GoComplexityAnalyzer {
         let lines: Vec<&str> = content.lines().collect();
 
         file_metrics.metrics.loc = lines.len() as u32;
-        file_metrics.metrics.sloc = lines
-            .iter()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty() && !trimmed.starts_with("//")
-            })
-            .count() as u32;
-
-        file_metrics.metrics.comment_lines = lines
-            .iter()
-            .filter(|line| line.trim().starts_with("//"))
-            .count() as u32;
+        let line_counts = super::count_lines(&lines);
+        file_metrics.metrics.sloc = line_counts.source;
+        file_metrics.metrics.comment_lines = line_counts.comment;
 
         file_metrics.imports = lines
             .iter()
@@ -197,8 +181,13 @@ impl LanguageComplexityAnalyzer for GoComplexityAnalyzer {
         let mut function_name = String::new();
         let mut receiver_type: Option<String> = None;
         let mut brace_count = 0;
+        let scans = super::scan_lines(&lines);
 
         for (i, line) in lines.iter().enumerate() {
+            let scan = scans[i];
+            if !scan.is_code() {
+                continue;
+            }
             let trimmed = line.trim();
 
             // Track structs
@@ -218,9 +207,8 @@ impl LanguageComplexityAnalyzer for GoComplexityAnalyzer {
             }
 
             if in_function {
-                let (opens, closes) = super::count_code_braces(line);
-                brace_count += opens;
-                brace_count -= closes;
+                brace_count += scan.opens;
+                brace_count -= scan.closes;
 
                 if brace_count <= 0 && line.contains('}') {
                     let end_line = i + 1;

@@ -357,42 +357,191 @@ mod reportable_tests {
     }
 }
 
-/// How many functions fall in each severity band, counting only what
-/// [`reportable_cyclomatic`] considers worth reporting.
-pub struct CyclomaticCounts {
+/// Severity band a complexity finding falls into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+/// One complexity finding on one function, ready to be rendered as an issue.
+pub struct FunctionIssue {
+    pub level: IssueLevel,
+    pub message: String,
+    pub suggestion: &'static str,
+}
+
+/// Band a value against a threshold config: above `high` is an error, above
+/// `warning` a warning, above `good` an info. Returns the level and the
+/// threshold that was actually crossed, so the message can name it.
+fn band(value: u32, thresholds: &crate::complexity::ThresholdConfig) -> Option<(IssueLevel, u32)> {
+    if value > thresholds.high {
+        Some((IssueLevel::Error, thresholds.high))
+    } else if value > thresholds.warning {
+        Some((IssueLevel::Warning, thresholds.warning))
+    } else if value > thresholds.good {
+        Some((IssueLevel::Info, thresholds.good))
+    } else {
+        None
+    }
+}
+
+/// Every complexity finding for one function.
+///
+/// The single source of truth for "is this an issue": both the rendered issue
+/// list and the exit-code tally go through here. They used to be separate code
+/// paths, which is how a function could be exempt from the issue list and still
+/// fail the build.
+pub fn function_issues(
+    func: &FunctionMetrics,
+    thresholds: &crate::complexity::Thresholds,
+) -> Vec<FunctionIssue> {
+    let mut issues = Vec::new();
+
+    if reportable_cyclomatic(&func.metrics, thresholds.cyclomatic.good) {
+        if let Some((level, crossed)) = band(func.metrics.cyclomatic, &thresholds.cyclomatic) {
+            issues.push(FunctionIssue {
+                level,
+                message: format!(
+                    "function `{}` cyclomatic complexity {} exceeds threshold {}",
+                    func.name, func.metrics.cyclomatic, crossed,
+                ),
+                suggestion: "Consider refactoring into smaller functions",
+            });
+        }
+    }
+
+    // Length is measured in `sloc` — blank and comment lines excluded — so
+    // documenting a function can never push it over the limit.
+    if let Some((level, crossed)) = band(func.metrics.sloc, &thresholds.function_length) {
+        issues.push(FunctionIssue {
+            level,
+            message: format!(
+                "function `{}` is {} source lines, exceeds threshold {}",
+                func.name, func.metrics.sloc, crossed,
+            ),
+            suggestion: "Consider splitting this function into smaller ones",
+        });
+    }
+
+    issues
+}
+
+/// How many findings fall in each severity band.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct IssueCounts {
     pub errors: usize,
     pub warnings: usize,
     pub infos: usize,
 }
 
-/// Tally reportable cyclomatic complexity across analyzed files.
-///
-/// Three callers used to inline this — two exit-code paths and the check
-/// summary — which is how a function could be exempt from the issue list and
-/// still fail the build.
-pub fn count_cyclomatic(
+impl IssueCounts {
+    pub fn total(&self) -> usize {
+        self.errors + self.warnings + self.infos
+    }
+}
+
+/// Tally every complexity finding across analyzed files.
+pub fn count_issues(
     files: &[FileMetrics],
-    thresholds: &crate::complexity::ThresholdConfig,
-) -> CyclomaticCounts {
-    let mut counts = CyclomaticCounts {
-        errors: 0,
-        warnings: 0,
-        infos: 0,
-    };
+    thresholds: &crate::complexity::Thresholds,
+) -> IssueCounts {
+    let mut counts = IssueCounts::default();
 
     for func in files.iter().flat_map(|f| &f.functions) {
-        if !reportable_cyclomatic(&func.metrics, thresholds.good) {
-            continue;
-        }
-        let c = func.metrics.cyclomatic;
-        if c > thresholds.high {
-            counts.errors += 1;
-        } else if c > thresholds.warning {
-            counts.warnings += 1;
-        } else {
-            counts.infos += 1;
+        for issue in function_issues(func, thresholds) {
+            match issue.level {
+                IssueLevel::Error => counts.errors += 1,
+                IssueLevel::Warning => counts.warnings += 1,
+                IssueLevel::Info => counts.infos += 1,
+            }
         }
     }
 
     counts
+}
+
+#[cfg(test)]
+mod issue_tests {
+    use super::*;
+    use crate::complexity::Thresholds;
+
+    fn func_with(name: &str, cyclomatic: u32, cognitive: u32, sloc: u32) -> FunctionMetrics {
+        let mut f = FunctionMetrics::new(name, 1, sloc.max(1));
+        f.metrics = ComplexityMetrics {
+            cyclomatic,
+            cognitive,
+            sloc,
+            ..Default::default()
+        };
+        f
+    }
+
+    #[test]
+    fn a_long_function_is_reported_against_the_default_400_450_500_bands() {
+        let t = Thresholds::default();
+        assert_eq!(t.function_length.good, 400);
+        assert_eq!(t.function_length.warning, 450);
+        assert_eq!(t.function_length.high, 500);
+
+        let level = |sloc| {
+            function_issues(&func_with("f", 1, 0, sloc), &t)
+                .first()
+                .map(|i| i.level)
+        };
+        assert_eq!(level(400), None, "at the threshold is not over it");
+        assert_eq!(level(401), Some(IssueLevel::Info));
+        assert_eq!(level(451), Some(IssueLevel::Warning));
+        assert_eq!(level(501), Some(IssueLevel::Error));
+    }
+
+    #[test]
+    fn length_is_measured_in_sloc_so_comments_and_blanks_never_trip_it() {
+        let t = Thresholds::default();
+        // A 900-line span whose code is only 300 lines: not an issue.
+        let mut f = func_with("documented", 1, 0, 300);
+        f.end_line = 900;
+        assert_eq!(f.lines(), 900);
+        assert!(function_issues(&f, &t).is_empty());
+    }
+
+    #[test]
+    fn both_metrics_can_fire_on_one_function() {
+        let t = Thresholds::default();
+        let issues = function_issues(&func_with("big", 40, 60, 600), &t);
+        assert_eq!(issues.len(), 2);
+        assert!(issues.iter().all(|i| i.level == IssueLevel::Error));
+    }
+
+    #[test]
+    fn a_flat_dispatch_table_is_still_exempt_from_the_cyclomatic_finding() {
+        let t = Thresholds::default();
+        // 21 one-line match arms: high cyclomatic, no cognitive load, short.
+        assert!(function_issues(&func_with("lookup", 21, 2, 25), &t).is_empty());
+    }
+
+    #[test]
+    fn the_tally_matches_the_issue_list() {
+        let t = Thresholds::default();
+        let mut file = FileMetrics::new(PathBuf::from("a.rs"), "rust");
+        file.functions = vec![
+            func_with("ok", 1, 0, 10),
+            func_with("longish", 1, 0, 420),
+            func_with("big", 40, 60, 600),
+        ];
+        let files = vec![file];
+
+        let counts = count_issues(&files, &t);
+        assert_eq!(counts.infos, 1);
+        assert_eq!(counts.errors, 2);
+        assert_eq!(counts.warnings, 0);
+
+        let listed: usize = files
+            .iter()
+            .flat_map(|f| &f.functions)
+            .map(|f| function_issues(f, &t).len())
+            .sum();
+        assert_eq!(listed, counts.total());
+    }
 }

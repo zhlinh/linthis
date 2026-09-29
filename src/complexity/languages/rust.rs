@@ -48,13 +48,7 @@ impl RustComplexityAnalyzer {
 
         // Line counts
         metrics.loc = (end - start) as u32;
-        metrics.sloc = func_lines
-            .iter()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty() && !trimmed.starts_with("//")
-            })
-            .count() as u32;
+        metrics.sloc = super::count_lines(func_lines).source;
 
         // Count parameters (simplified)
         if let Some(params_start) = func_content.find('(') {
@@ -96,16 +90,13 @@ impl RustComplexityAnalyzer {
         let mut complexity = 0;
         let mut nesting_level = 0;
 
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            // Skip comments
-            if trimmed.starts_with("//") {
+        let lines: Vec<&str> = content.lines().collect();
+        for (line, scan) in lines.iter().zip(super::scan_lines(&lines)) {
+            if !scan.is_code() {
                 continue;
             }
-
-            // Track nesting
-            let (opens, closes) = super::count_code_braces(line);
+            let trimmed = line.trim();
+            let (opens, closes) = (scan.opens, scan.closes);
 
             // Control structures add complexity based on nesting
             let control_keywords = ["if ", "else", "match ", "for ", "while ", "loop "];
@@ -137,24 +128,14 @@ impl RustComplexityAnalyzer {
         let mut max_nesting: u32 = 0;
         let mut current_nesting: u32 = 0;
 
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("//") {
+        let lines: Vec<&str> = content.lines().collect();
+        for scan in super::scan_lines(&lines) {
+            if !scan.is_code() {
                 continue;
             }
-
-            for ch in line.chars() {
-                match ch {
-                    '{' => {
-                        current_nesting += 1;
-                        max_nesting = max_nesting.max(current_nesting);
-                    }
-                    '}' => {
-                        current_nesting = current_nesting.saturating_sub(1);
-                    }
-                    _ => {}
-                }
-            }
+            current_nesting = current_nesting.saturating_add(scan.opens.max(0) as u32);
+            max_nesting = max_nesting.max(current_nesting);
+            current_nesting = current_nesting.saturating_sub(scan.closes.max(0) as u32);
         }
 
         max_nesting
@@ -192,8 +173,13 @@ impl LanguageComplexityAnalyzer for RustComplexityAnalyzer {
         let mut function_name = String::new();
         let mut brace_count = 0;
         let mut current_struct: Option<String> = None;
+        let scans = super::scan_lines(&lines);
 
         for (i, line) in lines.iter().enumerate() {
+            let scan = scans[i];
+            if !scan.is_code() {
+                continue;
+            }
             let trimmed = line.trim();
 
             // Track structs/impls
@@ -219,9 +205,8 @@ impl LanguageComplexityAnalyzer for RustComplexityAnalyzer {
             }
 
             if in_function {
-                let (opens, closes) = super::count_code_braces(line);
-                brace_count += opens;
-                brace_count -= closes;
+                brace_count += scan.opens;
+                brace_count -= scan.closes;
 
                 if brace_count <= 0 && line.contains('}') {
                     // Function ended
@@ -275,17 +260,9 @@ impl LanguageComplexityAnalyzer for RustComplexityAnalyzer {
 /// Fill in the whole-file counts: lines, code lines, comments, imports.
 fn count_line_metrics(lines: &[&str], file_metrics: &mut FileMetrics) {
     file_metrics.metrics.loc = lines.len() as u32;
-    file_metrics.metrics.sloc = lines
-        .iter()
-        .filter(|line| {
-            let trimmed = line.trim();
-            !trimmed.is_empty() && !trimmed.starts_with("//")
-        })
-        .count() as u32;
-    file_metrics.metrics.comment_lines = lines
-        .iter()
-        .filter(|line| line.trim().starts_with("//"))
-        .count() as u32;
+    let line_counts = super::count_lines(lines);
+    file_metrics.metrics.sloc = line_counts.source;
+    file_metrics.metrics.comment_lines = line_counts.comment;
     file_metrics.imports = lines
         .iter()
         .filter(|line| line.trim().starts_with("use "))
@@ -379,6 +356,25 @@ fn find_matching_bracket(s: &str, open: char, close: char) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_block_comment_is_not_source() {
+        // The Rust analyzer did not look for `/*` at all before: every line of
+        // a commented-out block counted toward the function's source lines.
+        let a = RustComplexityAnalyzer::new();
+        let src = concat!(
+            "fn f() {\n",
+            "    /*\n",
+            "    let dead = 1;\n",
+            "    let also_dead = 2;\n",
+            "    */\n",
+            "    let live = 3;\n",
+            "}\n",
+        );
+        let m = a.analyze_file(Path::new("a.rs"), src).unwrap();
+        assert_eq!(m.functions.len(), 1);
+        assert_eq!(m.functions[0].metrics.sloc, 3, "fn + let live + brace");
+    }
 
     #[test]
     fn test_rust_analyzer_creation() {

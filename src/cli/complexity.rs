@@ -234,24 +234,14 @@ fn apply_thresholds(
         _ => Thresholds::default(),
     };
 
-    if let Some(t) = config.threshold {
-        result.thresholds.cyclomatic.good = t;
-        result.thresholds.cyclomatic.warning = t + 10;
-        result.thresholds.cyclomatic.high = t + 20;
-    }
-    if let Some(w) = config.warning_threshold {
-        result.thresholds.cyclomatic.warning = w;
-    }
-    if let Some(e) = config.error_threshold {
-        result.thresholds.cyclomatic.high = e;
-    }
+    result.thresholds.apply_config(config);
 
     if let Some(threshold) = options.threshold {
         result.thresholds.cyclomatic.good = threshold;
         result.thresholds.cyclomatic.warning = threshold + 10;
         result.thresholds.cyclomatic.high = threshold + 20;
+        result.thresholds.cyclomatic.normalize();
     }
-    result.thresholds.cyclomatic.normalize();
 }
 
 /// Filter to high-complexity files and sort results.
@@ -323,8 +313,7 @@ fn compute_complexity_exit_code(
     result: &AnalysisResult,
     config: &ComplexityChecksConfig,
 ) -> ExitCode {
-    let counts =
-        linthis::complexity::count_cyclomatic(&result.files, &result.thresholds.cyclomatic);
+    let counts = linthis::complexity::count_issues(&result.files, &result.thresholds);
     let fail_on = config.fail_on.clone().unwrap_or_default();
     let code = fail_on.exit_code(counts.errors, counts.warnings, counts.infos);
     ExitCode::from(code as u8)
@@ -345,19 +334,7 @@ pub fn run_complexity_analysis(
     let mut result = analyzer.analyze(&options)?;
 
     // Apply threshold overrides from config
-    if let Some(t) = config.threshold {
-        result.thresholds.cyclomatic.good = t;
-        result.thresholds.cyclomatic.warning = t + 10;
-        result.thresholds.cyclomatic.high = t + 20;
-    }
-    if let Some(w) = config.warning_threshold {
-        result.thresholds.cyclomatic.warning = w;
-    }
-    if let Some(e) = config.error_threshold {
-        result.thresholds.cyclomatic.high = e;
-    }
-    // Normalize: ensure good <= warning <= high
-    result.thresholds.cyclomatic.normalize();
+    result.thresholds.apply_config(config);
 
     Ok(result)
 }

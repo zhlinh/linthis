@@ -42,16 +42,7 @@ impl TypeScriptComplexityAnalyzer {
         metrics.max_nesting = self.calculate_nesting(&func_content);
 
         metrics.loc = (end - start) as u32;
-        metrics.sloc = func_lines
-            .iter()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty()
-                    && !trimmed.starts_with("//")
-                    && !trimmed.starts_with("/*")
-                    && !trimmed.starts_with("*")
-            })
-            .count() as u32;
+        metrics.sloc = super::count_lines(func_lines).source;
 
         // Count parameters
         if let Some(params_start) = func_content.find('(') {
@@ -88,15 +79,13 @@ impl TypeScriptComplexityAnalyzer {
         let mut complexity = 0;
         let mut nesting_level = 0;
 
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            // Skip comments
-            if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*") {
+        let lines: Vec<&str> = content.lines().collect();
+        for (line, scan) in lines.iter().zip(super::scan_lines(&lines)) {
+            if !scan.is_code() {
                 continue;
             }
-
-            let (opens, closes) = super::count_code_braces(line);
+            let trimmed = line.trim();
+            let (opens, closes) = (scan.opens, scan.closes);
 
             let control_keywords = [
                 "if ", "if(", "else", "switch", "for ", "for(", "while ", "do ", "catch",
@@ -171,24 +160,9 @@ impl LanguageComplexityAnalyzer for TypeScriptComplexityAnalyzer {
         let lines: Vec<&str> = content.lines().collect();
 
         file_metrics.metrics.loc = lines.len() as u32;
-        file_metrics.metrics.sloc = lines
-            .iter()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty()
-                    && !trimmed.starts_with("//")
-                    && !trimmed.starts_with("/*")
-                    && !trimmed.starts_with("*")
-            })
-            .count() as u32;
-
-        file_metrics.metrics.comment_lines = lines
-            .iter()
-            .filter(|line| {
-                let trimmed = line.trim();
-                trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*")
-            })
-            .count() as u32;
+        let line_counts = super::count_lines(&lines);
+        file_metrics.metrics.sloc = line_counts.source;
+        file_metrics.metrics.comment_lines = line_counts.comment;
 
         file_metrics.imports = lines
             .iter()
@@ -205,8 +179,13 @@ impl LanguageComplexityAnalyzer for TypeScriptComplexityAnalyzer {
         let mut function_name = String::new();
         let mut brace_count = 0;
         let mut current_class: Option<String> = None;
+        let scans = super::scan_lines(&lines);
 
         for (i, line) in lines.iter().enumerate() {
+            let scan = scans[i];
+            if !scan.is_code() {
+                continue;
+            }
             let trimmed = line.trim();
 
             // Track classes
@@ -228,9 +207,8 @@ impl LanguageComplexityAnalyzer for TypeScriptComplexityAnalyzer {
             }
 
             if in_function {
-                let (opens, closes) = super::count_code_braces(line);
-                brace_count += opens;
-                brace_count -= closes;
+                brace_count += scan.opens;
+                brace_count -= scan.closes;
 
                 if brace_count <= 0 && (line.contains('}') || trimmed.ends_with("};")) {
                     let end_line = i + 1;
@@ -289,7 +267,9 @@ fn detect_ts_function(line: &str) -> Option<String> {
 
 /// `const foo = () =>` / `let foo = function`
 fn ts_arrow_binding(line: &str) -> Option<String> {
-    let is_binding = ["const ", "let ", "var "].iter().any(|k| line.starts_with(k));
+    let is_binding = ["const ", "let ", "var "]
+        .iter()
+        .any(|k| line.starts_with(k));
     if !is_binding || !(line.contains("=>") || line.contains("= function")) {
         return None;
     }

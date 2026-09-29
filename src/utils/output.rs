@@ -643,31 +643,15 @@ fn build_security_view(sast: &crate::security::sast::SastResult) -> CheckResultV
 ///
 /// Converts per-function metrics into issues (one issue per function exceeding threshold).
 fn build_complexity_view(analysis: &crate::complexity::AnalysisResult) -> CheckResultView {
-    let threshold = if analysis.thresholds.cyclomatic.good > 0 {
-        analysis.thresholds.cyclomatic.good
-    } else {
-        10
-    };
-    let warning_threshold = analysis.thresholds.cyclomatic.warning;
-    let high_threshold = analysis.thresholds.cyclomatic.high;
-
     let mut issues: Vec<IssueView> = Vec::new();
 
     for file in &analysis.files {
         for func in &file.functions {
-            if crate::complexity::reportable_cyclomatic(&func.metrics, threshold) {
-                let severity = if func.metrics.cyclomatic > high_threshold {
-                    "error"
-                } else if func.metrics.cyclomatic > warning_threshold {
-                    "warning"
-                } else {
-                    "info"
-                };
-
-                let exceeded_threshold = match severity {
-                    "error" => high_threshold,
-                    "warning" => warning_threshold,
-                    _ => threshold,
+            for finding in crate::complexity::function_issues(func, &analysis.thresholds) {
+                let severity = match finding.level {
+                    crate::complexity::IssueLevel::Error => "error",
+                    crate::complexity::IssueLevel::Warning => "warning",
+                    crate::complexity::IssueLevel::Info => "info",
                 };
                 issues.push(IssueView {
                     file: file.path.to_string_lossy().to_string(),
@@ -675,13 +659,10 @@ fn build_complexity_view(analysis: &crate::complexity::AnalysisResult) -> CheckR
                     column: None,
                     end_line: Some(func.end_line as usize),
                     severity: severity.to_string(),
-                    message: format!(
-                        "function `{}` cyclomatic complexity {} exceeds threshold {}",
-                        func.name, func.metrics.cyclomatic, exceeded_threshold,
-                    ),
+                    message: finding.message,
                     source: "linthis-complexity".to_string(),
                     code: None,
-                    suggestion: Some("Consider refactoring into smaller functions".to_string()),
+                    suggestion: Some(finding.suggestion.to_string()),
                     function: Some(func.name.clone()),
                     ignore: crate::utils::ignore_hint::hint_for(
                         &LintIssue::new(

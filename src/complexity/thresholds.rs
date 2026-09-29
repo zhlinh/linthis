@@ -48,7 +48,8 @@ pub struct Thresholds {
     pub cyclomatic: ThresholdConfig,
     /// Cognitive complexity thresholds
     pub cognitive: ThresholdConfig,
-    /// Function length thresholds (lines)
+    /// Function length thresholds, in source lines (blank and comment lines
+    /// excluded — the `sloc` metric, not the raw start..end span)
     pub function_length: ThresholdConfig,
     /// Nesting depth thresholds
     pub nesting_depth: ThresholdConfig,
@@ -72,9 +73,9 @@ impl Default for Thresholds {
                 high: 60,
             },
             function_length: ThresholdConfig {
-                good: 50,
-                warning: 100,
-                high: 200,
+                good: 400,
+                warning: 450,
+                high: 500,
             },
             nesting_depth: ThresholdConfig {
                 good: 4,
@@ -101,6 +102,44 @@ impl Thresholds {
         Self::default()
     }
 
+    /// Overlay a `[checks.complexity]` section onto these thresholds.
+    ///
+    /// Three call sites used to inline this — the cached-result path in
+    /// `run_complexity_check`, `apply_thresholds` and `run_complexity_analysis`
+    /// — so a new knob had to be wired up three times or it would silently work
+    /// in one entry point and not the others.
+    ///
+    /// Setting only the base threshold derives the other two, matching how the
+    /// defaults are spaced (cyclomatic +10/+20, function length +50/+100).
+    pub fn apply_config(&mut self, config: &crate::config::ComplexityChecksConfig) {
+        if let Some(t) = config.threshold {
+            self.cyclomatic.good = t;
+            self.cyclomatic.warning = t + 10;
+            self.cyclomatic.high = t + 20;
+        }
+        if let Some(w) = config.warning_threshold {
+            self.cyclomatic.warning = w;
+        }
+        if let Some(e) = config.error_threshold {
+            self.cyclomatic.high = e;
+        }
+
+        if let Some(t) = config.max_function_lines {
+            self.function_length.good = t;
+            self.function_length.warning = t + 50;
+            self.function_length.high = t + 100;
+        }
+        if let Some(w) = config.max_function_lines_warning {
+            self.function_length.warning = w;
+        }
+        if let Some(e) = config.max_function_lines_error {
+            self.function_length.high = e;
+        }
+
+        self.cyclomatic.normalize();
+        self.function_length.normalize();
+    }
+
     /// Create strict thresholds
     pub fn strict() -> Self {
         Self {
@@ -115,9 +154,9 @@ impl Thresholds {
                 high: 30,
             },
             function_length: ThresholdConfig {
-                good: 25,
-                warning: 50,
-                high: 100,
+                good: 200,
+                warning: 250,
+                high: 300,
             },
             nesting_depth: ThresholdConfig {
                 good: 3,
@@ -151,9 +190,9 @@ impl Thresholds {
                 high: 80,
             },
             function_length: ThresholdConfig {
-                good: 75,
-                warning: 150,
-                high: 300,
+                good: 600,
+                warning: 700,
+                high: 800,
             },
             nesting_depth: ThresholdConfig {
                 good: 5,

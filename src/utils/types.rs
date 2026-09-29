@@ -353,41 +353,23 @@ impl RunResult {
 
         // Merge complexity issues
         if let Some(ref cx) = self.complexity {
-            let threshold = cx.thresholds.cyclomatic.good;
-            let warning_threshold = cx.thresholds.cyclomatic.warning;
-            let high_threshold = cx.thresholds.cyclomatic.high;
             for file in &cx.files {
                 for func in &file.functions {
-                    if crate::complexity::reportable_cyclomatic(
-                        &func.metrics,
-                        threshold,
-                    ) {
-                        let severity = if func.metrics.cyclomatic > high_threshold {
-                            Severity::Error
-                        } else if func.metrics.cyclomatic > warning_threshold {
-                            Severity::Warning
-                        } else {
-                            Severity::Info
-                        };
-                        let exceeded_threshold = match severity {
-                            Severity::Error => high_threshold,
-                            Severity::Warning => warning_threshold,
-                            _ => threshold,
+                    for finding in crate::complexity::function_issues(func, &cx.thresholds) {
+                        let severity = match finding.level {
+                            crate::complexity::IssueLevel::Error => Severity::Error,
+                            crate::complexity::IssueLevel::Warning => Severity::Warning,
+                            crate::complexity::IssueLevel::Info => Severity::Info,
                         };
                         let mut issue = LintIssue::new(
                             file.path.clone(),
                             func.start_line as usize,
-                            format!(
-                                "[complexity] function `{}` cyclomatic complexity {} exceeds threshold {}",
-                                func.name, func.metrics.cyclomatic, exceeded_threshold,
-                            ),
+                            format!("[complexity] {}", finding.message),
                             severity,
                         );
                         issue = issue.with_source("linthis-complexity".to_string());
                         issue = issue.with_code("linthis-complexity".to_string());
-                        issue = issue.with_suggestion(
-                            "Consider refactoring into smaller functions".to_string(),
-                        );
+                        issue = issue.with_suggestion(finding.suggestion.to_string());
                         self.issues.push(issue);
                     }
                 }

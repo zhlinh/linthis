@@ -12,6 +12,7 @@
 
 use super::analyzer::AnalysisResult;
 use super::metrics::{FileMetrics, MetricLevel};
+use super::metrics::{FunctionIssue, IssueLevel};
 
 /// Report format options
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -54,32 +55,26 @@ pub fn format_complexity_report(result: &AnalysisResult, format: ComplexityRepor
 fn format_human(result: &AnalysisResult) -> String {
     let mut output = String::new();
 
-    let threshold = result.thresholds.cyclomatic.good;
-    let warning_threshold = result.thresholds.cyclomatic.warning;
-    let high_threshold = result.thresholds.cyclomatic.high;
+    let mut issues = collect_issues(result);
+    issues.sort_by_key(|(_, func, finding)| {
+        let rank = match finding.level {
+            IssueLevel::Error => 0,
+            IssueLevel::Warning => 1,
+            IssueLevel::Info => 2,
+        };
+        (
+            rank,
+            u32::MAX - func.metrics.cyclomatic,
+            u32::MAX - func.metrics.sloc,
+        )
+    });
 
-    let mut issues = collect_issues(result, threshold);
-    issues.sort_by(|a, b| b.1.metrics.cyclomatic.cmp(&a.1.metrics.cyclomatic));
-
-    format_human_header(
-        &mut output,
-        result,
-        &issues,
-        threshold,
-        warning_threshold,
-        high_threshold,
-    );
+    format_human_header(&mut output, result, &issues);
 
     if issues.is_empty() {
         output.push_str("  All functions within complexity threshold.\n");
     } else {
-        let counts = format_human_issues(
-            &mut output,
-            &issues,
-            threshold,
-            warning_threshold,
-            high_threshold,
-        );
+        let counts = format_human_issues(&mut output, &issues);
         format_human_summary(&mut output, result, &issues, &counts);
     }
 
@@ -93,31 +88,31 @@ fn format_human(result: &AnalysisResult) -> String {
     output
 }
 
-/// Collect all functions exceeding the threshold.
-fn collect_issues(
-    result: &AnalysisResult,
-    threshold: u32,
-) -> Vec<(&FileMetrics, &super::metrics::FunctionMetrics)> {
+/// Collect every complexity finding, via the same `function_issues` the check
+/// output and the exit-code tally use.
+fn collect_issues(result: &AnalysisResult) -> Vec<ReportedIssue<'_>> {
     let mut issues = Vec::new();
     for file in &result.files {
         for func in &file.functions {
-            if func.metrics.cyclomatic > threshold {
-                issues.push((file, func));
+            for finding in super::function_issues(func, &result.thresholds) {
+                issues.push((file, func, finding));
             }
         }
     }
     issues
 }
 
+/// One finding, paired with the file and function it was found in.
+type ReportedIssue<'a> = (
+    &'a FileMetrics,
+    &'a super::metrics::FunctionMetrics,
+    FunctionIssue,
+);
+
 /// Write the header lines (file/function counts and threshold info).
-fn format_human_header(
-    output: &mut String,
-    result: &AnalysisResult,
-    issues: &[(&FileMetrics, &super::metrics::FunctionMetrics)],
-    threshold: u32,
-    warning_threshold: u32,
-    high_threshold: u32,
-) {
+fn format_human_header(output: &mut String, result: &AnalysisResult, issues: &[ReportedIssue<'_>]) {
+    let cyclomatic = &result.thresholds.cyclomatic;
+    let length = &result.thresholds.function_length;
     output.push_str(&format!(
         "\nComplexity: {} file(s) analyzed, {} function(s), {} issue(s)\n",
         result.summary.total_files,
@@ -125,8 +120,12 @@ fn format_human_header(
         issues.len(),
     ));
     output.push_str(&format!(
-        "  Threshold: info > {}, warning > {}, error > {}\n\n",
-        threshold, warning_threshold, high_threshold,
+        "  Cyclomatic:      info > {}, warning > {}, error > {}\n",
+        cyclomatic.good, cyclomatic.warning, cyclomatic.high,
+    ));
+    output.push_str(&format!(
+        "  Function length: info > {}, warning > {}, error > {} source lines\n\n",
+        length.good, length.warning, length.high,
     ));
 }
 
@@ -139,13 +138,7 @@ struct IssueCounts {
 }
 
 /// Write each issue line and return severity counts.
-fn format_human_issues(
-    output: &mut String,
-    issues: &[(&FileMetrics, &super::metrics::FunctionMetrics)],
-    threshold: u32,
-    warning_threshold: u32,
-    high_threshold: u32,
-) -> IssueCounts {
+fn format_human_issues(output: &mut String, issues: &[ReportedIssue<'_>]) -> IssueCounts {
     let reset = "\x1b[0m";
     let mut counts = IssueCounts {
         errors: 0,
@@ -154,54 +147,41 @@ fn format_human_issues(
         files_with_issues: std::collections::HashSet::new(),
     };
 
-    for (i, (file, func)) in issues.iter().enumerate() {
-        let severity = if func.metrics.cyclomatic > high_threshold {
-            counts.errors += 1;
-            "error"
-        } else if func.metrics.cyclomatic > warning_threshold {
-            counts.warnings += 1;
-            "warning"
-        } else {
-            counts.infos += 1;
-            "info"
+    for (i, (file, func, finding)) in issues.iter().enumerate() {
+        let (color, label) = match finding.level {
+            IssueLevel::Error => {
+                counts.errors += 1;
+                ("\x1b[1;31m", "[ERROR]")
+            }
+            IssueLevel::Warning => {
+                counts.warnings += 1;
+                ("\x1b[33m", "[WARN]")
+            }
+            IssueLevel::Info => {
+                counts.infos += 1;
+                ("\x1b[36m", "[INFO]")
+            }
         };
         counts
             .files_with_issues
             .insert(file.path.to_string_lossy().to_string());
 
-        let color = match severity {
-            "error" => "\x1b[1;31m",
-            "warning" => "\x1b[33m",
-            _ => "\x1b[36m",
-        };
-        let severity_label = match severity {
-            "error" => "[ERROR]",
-            "warning" => "[WARN]",
-            _ => "[INFO]",
-        };
-
-        let exceeded_threshold = match severity {
-            "error" => high_threshold,
-            "warning" => warning_threshold,
-            _ => threshold,
-        };
         output.push_str(&format!(
-            "  {}. {}{}{} `{}` cyclomatic complexity {} exceeds threshold {}\n",
+            "  {}. {}{}{} {}\n",
             i + 1,
             color,
-            severity_label,
+            label,
             reset,
-            func.name,
-            func.metrics.cyclomatic,
-            exceeded_threshold,
+            finding.message,
         ));
         output.push_str(&format!(
-            "     {}:{}-{} (cognitive: {}, nesting: {})\n",
+            "     {}:{}-{} (cognitive: {}, nesting: {}, source lines: {})\n",
             file.path.display(),
             func.start_line,
             func.end_line,
             func.metrics.cognitive,
             func.metrics.max_nesting,
+            func.metrics.sloc,
         ));
     }
 
@@ -212,7 +192,7 @@ fn format_human_issues(
 fn format_human_summary(
     output: &mut String,
     result: &AnalysisResult,
-    issues: &[(&FileMetrics, &super::metrics::FunctionMetrics)],
+    issues: &[ReportedIssue<'_>],
     counts: &IssueCounts,
 ) {
     let duration_str = if result.duration_ms >= 1000 {
@@ -330,7 +310,7 @@ fn format_markdown(result: &AnalysisResult) -> String {
         .iter()
         .flat_map(|f| f.functions.iter().map(move |func| (f, func)))
         .collect();
-    all_functions.sort_by(|a, b| b.1.metrics.cyclomatic.cmp(&a.1.metrics.cyclomatic));
+    all_functions.sort_by_key(|(_, func)| std::cmp::Reverse(func.metrics.cyclomatic));
 
     output.push_str("## Top 20 Most Complex Functions\n\n");
     output.push_str("| Function | File | Lines | Cyclomatic | Cognitive |\n");
@@ -411,7 +391,7 @@ fn format_html(result: &AnalysisResult) -> String {
     output.push_str("    <tr><th>File</th><th>Language</th><th>Cyclomatic</th><th>Cognitive</th><th>Nesting</th><th>SLOC</th></tr>\n");
 
     let mut sorted_files: Vec<_> = result.files.iter().collect();
-    sorted_files.sort_by(|a, b| b.metrics.cyclomatic.cmp(&a.metrics.cyclomatic));
+    sorted_files.sort_by_key(|f| std::cmp::Reverse(f.metrics.cyclomatic));
 
     for file in sorted_files.iter().take(50) {
         let level_class = match file.metrics.overall_level() {
@@ -443,7 +423,7 @@ fn format_html(result: &AnalysisResult) -> String {
         .iter()
         .flat_map(|f| f.functions.iter().map(move |func| (f, func)))
         .collect();
-    all_functions.sort_by(|a, b| b.1.metrics.cyclomatic.cmp(&a.1.metrics.cyclomatic));
+    all_functions.sort_by_key(|(_, func)| std::cmp::Reverse(func.metrics.cyclomatic));
 
     for (file, func) in all_functions.iter().take(30) {
         let level_class = match func.metrics.overall_level() {

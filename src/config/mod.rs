@@ -335,6 +335,16 @@ pub struct ComplexityChecksConfig {
     /// Minimum severity to fail on (default: warning)
     #[serde(default)]
     pub fail_on: Option<FailOn>,
+    /// Function length threshold for info level, counted in source lines with
+    /// blank and comment lines excluded (default: 400)
+    #[serde(default)]
+    pub max_function_lines: Option<u32>,
+    /// Function length warning threshold (default: max_function_lines + 50)
+    #[serde(default)]
+    pub max_function_lines_warning: Option<u32>,
+    /// Function length error threshold (default: max_function_lines + 100)
+    #[serde(default)]
+    pub max_function_lines_error: Option<u32>,
 }
 
 /// Plugin configuration section
@@ -1207,6 +1217,15 @@ impl ComplexityChecksConfig {
         }
         if other.fail_on.is_some() {
             self.fail_on = other.fail_on;
+        }
+        if other.max_function_lines.is_some() {
+            self.max_function_lines = other.max_function_lines;
+        }
+        if other.max_function_lines_warning.is_some() {
+            self.max_function_lines_warning = other.max_function_lines_warning;
+        }
+        if other.max_function_lines_error.is_some() {
+            self.max_function_lines_error = other.max_function_lines_error;
         }
     }
 }

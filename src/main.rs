@@ -1095,18 +1095,7 @@ fn run_complexity_check(
         cached_result.files = cached_metrics;
         cached_result.calculate_summary();
 
-        if let Some(t) = complexity_config.threshold {
-            cached_result.thresholds.cyclomatic.good = t;
-            cached_result.thresholds.cyclomatic.warning = t + 10;
-            cached_result.thresholds.cyclomatic.high = t + 20;
-        }
-        if let Some(w) = complexity_config.warning_threshold {
-            cached_result.thresholds.cyclomatic.warning = w;
-        }
-        if let Some(e) = complexity_config.error_threshold {
-            cached_result.thresholds.cyclomatic.high = e;
-        }
-        cached_result.thresholds.cyclomatic.normalize();
+        cached_result.thresholds.apply_config(complexity_config);
 
         apply_complexity_exit_code(result, &cached_result, complexity_config);
         result.complexity = Some(cached_result);
@@ -1121,8 +1110,7 @@ fn apply_complexity_exit_code(
     complexity_config: &linthis::config::ComplexityChecksConfig,
 ) {
     let cx_fail_on = complexity_config.fail_on.clone().unwrap_or_default();
-    let counts =
-        linthis::complexity::count_cyclomatic(&analysis.files, &analysis.thresholds.cyclomatic);
+    let counts = linthis::complexity::count_issues(&analysis.files, &analysis.thresholds);
     let cx_exit = cx_fail_on.exit_code(counts.errors, counts.warnings, counts.infos);
     result.exit_code = std::cmp::max(result.exit_code, cx_exit);
 }
@@ -1382,7 +1370,7 @@ fn print_complexity_summary(result: &linthis::utils::types::RunResult) {
         eprintln!("  complexity: {}", "\u{2713}".green());
         return;
     };
-    let counts = linthis::complexity::count_cyclomatic(&cx.files, &cx.thresholds.cyclomatic);
+    let counts = linthis::complexity::count_issues(&cx.files, &cx.thresholds);
     let (cx_errors, cx_warns, cx_infos) = (counts.errors, counts.warnings, counts.infos);
     if cx_errors > 0 || cx_warns > 0 || cx_infos > 0 {
         let mut parts = Vec::new();

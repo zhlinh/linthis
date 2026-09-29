@@ -18,8 +18,8 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::languages::{
-    GoComplexityAnalyzer, JavaComplexityAnalyzer, PythonComplexityAnalyzer, RustComplexityAnalyzer,
-    TypeScriptComplexityAnalyzer,
+    GoComplexityAnalyzer, JavaComplexityAnalyzer, KotlinComplexityAnalyzer,
+    PythonComplexityAnalyzer, RustComplexityAnalyzer, TypeScriptComplexityAnalyzer,
 };
 use super::metrics::{FileMetrics, MetricLevel, SummaryStats};
 use super::thresholds::Thresholds;
@@ -131,7 +131,7 @@ impl AnalysisResult {
     /// Get files sorted by complexity (descending)
     pub fn files_by_complexity(&self) -> Vec<&FileMetrics> {
         let mut files: Vec<_> = self.files.iter().collect();
-        files.sort_by(|a, b| b.metrics.cyclomatic.cmp(&a.metrics.cyclomatic));
+        files.sort_by_key(|f| std::cmp::Reverse(f.metrics.cyclomatic));
         files
     }
 
@@ -242,6 +242,7 @@ impl ComplexityAnalyzer {
             Box::new(PythonComplexityAnalyzer::new()),
             Box::new(GoComplexityAnalyzer::new()),
             Box::new(JavaComplexityAnalyzer::new()),
+            Box::new(KotlinComplexityAnalyzer::new()),
         ];
 
         Self { analyzers }
