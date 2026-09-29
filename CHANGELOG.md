@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.7] - 2026-09-29
+
+### Added
+
+- add a function-length limit, and a Kotlin analyzer
+
+### Fixed
+
+- report the hooks directory git actually runs
+
 ## [0.28.6] - 2026-09-09
 
 ### Fixed
